@@ -1,0 +1,37 @@
+version: 2
+project_name: fav
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - main: ./cmd/fav
+    env: [CGO_ENABLED=0]
+    goos: [darwin, linux, windows]
+    goarch: [amd64, arm64]
+    ignore:
+      - goos: windows
+        goarch: arm64
+    flags: [-trimpath]
+    ldflags: ["-s -w -X main.version={{.Version}}"]
+
+archives:
+  - formats: [tar.gz]
+    name_template: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}"  # no version in the name so releases/latest/download/<name> works
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    files: [README.md, LICENSE]
+
+checksum:
+  name_template: checksums.txt
+
+changelog:
+  use: github
+  sort: asc
+  filters:
+    exclude: ["^docs", "^chore", "^test"]
+
+release:
+  draft: false

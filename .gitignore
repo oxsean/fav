@@ -1,0 +1,4 @@
+/fav
+*.test
+.DS_Store
+.idea/

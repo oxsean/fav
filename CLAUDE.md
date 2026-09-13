@@ -1,0 +1,42 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## What this is
+
+Fav Session Manager (binary `fav`) is a Go CLI + bubbletea TUI that indexes every Claude Code / Codex session on the machine, lets the user favorite sessions (via the `/fav` skill), filter/search them, and resume them in the right directory / Herdr workspace. The design of record (data model, query syntax, TUI keys, resume orchestration, config) is kept outside the repo in the owner's local notes — the path is in this project's memory; keep it current when behavior changes. `README.md` is the user-facing summary (`README.zh.md` is its Chinese translation; keep both in step). Code, comments, docs and commit messages are English; user-visible strings go through i18n with both `en` and `zh` texts. Commit subjects follow `type(scope): summary`.
+
+## Commands
+
+```bash
+go build ./... && go vet ./... && go test ./...      # the gate; also GOOS=windows go vet ./... (live_windows.go, lock_other.go)
+go build -o ~/.local/bin/fav ./cmd/fav               # "install" — the user runs the binary from there, reinstall after every change
+go test ./internal/ui/tui -run TestName -v           # single test
+FAV_DUMP=120x34 go test ./internal/ui/tui -run TestFrameLinesFillWidth -v   # print a real frame to eyeball layout
+fav install-skill                                    # re-link skills/fav/SKILL.md into ~/.claude and ~/.codex after editing it
+```
+
+Test data: tests use `t.TempDir()` + `FAV_HOME` / `CLAUDE_CONFIG_DIR` / `CODEX_HOME`; never point tests at `~/.agent/fav`. Manual TUI checks are done by driving `~/.local/bin/fav tui` in a Python pty (answer the `ESC]11;?` and `ESC[6n` queries or it renders nothing); `fav fzf` the same way, with `pyte` to read the screen.
+
+## Architecture
+
+Data flow: `internal/index` scans transcripts (`~/.claude/projects/*/*.jsonl`, `~/.codex/sessions/**/rollout-*.jsonl`) incrementally into `~/.agent/fav/sessions.jsonl`, then `Index.Attach(store, prev)` merges it with the favorites store: sessions already in the store get turns/last-activity/prompts attached; unknown sessions become `fav.Rec` with empty `ID`. Same object is reused across refreshes (the TUI keys probes, cursor and pin by pointer).
+
+- `internal/fav` — `Rec` (three orthogonal state fields: `favorited_at` nil = not favorite, `status` todo|doing|done default done, `archived_at`), `Store` (append-only JSONL, last line per id wins, `Deleted` tombstone; `Put`/`Compact` lock `records.jsonl.lock`, Compact reloads then atomically renames), `Query` (`Parse` + `Match`; no `status:` = open/unarchived, `active` = todo+doing, `archived`/`all`/`live`/`trash`; `All` false hides non-favorites; `Live` callback decides `status:live`), `trash.go` (session files moved under `trash/<provider>/<sid>-<ts>/`, `trash/manifest.jsonl` keeps origins + the record; `MoveToTrash`/`RestoreTrash`/`PurgeTrash`, rename with copy fallback).
+- `internal/index/move.go` — moving a project directory: `PlanMove` (sessions under the old cwd from the index + store, live ones listed separately) → `Apply` (originals to trash first, then `rewriteCwd` streams each transcript replacing only the `"cwd":"…"` field, Claude files land in `ClaudeProjectDir(newCwd)`, sidecar `<sid>/` dirs and a drained project dir's `memory/` follow, store records and `~/.claude.json` `projects` keys are rebased). `FindMissing` guesses where a vanished cwd went (same basename under known parents / sibling dirs, git remote must match).
+- `internal/capture` — detect the current session (Herdr pane → `CLAUDE_CODE_SESSION_ID` → Codex rollout lookup), build resume commands (`CommandSpec`; anything sent to Herdr goes through `ShellLine`, quoted), transcript reading: `Messages(path, before, n)` pages backward in 1MB chunks (`Page{Msgs, From, Done}`), text capped at 16KB with `TextFull` re-reading by offset, tool steps attached to the preceding message. `live.go`: who is running now from Claude `sessions/*.json`, Codex flock probes (`live_unix.go` / `live_windows.go`) and Herdr, merged by `MergeLive`.
+- `internal/herdr` — thin exec+JSON wrapper over the `herdr` CLI.
+- `internal/render` — FZF lines / preview / card text shared by both UIs; all width math via `go-runewidth` (CJK = 2 cols), icons default to ASCII, Nerd Font PUA codepoints are opt-in (`icons=nerd` / `FAV_ICONS=nerd`); never East Asian Ambiguous glyphs.
+- `internal/ui/tui` — bubbletea `Model`. Views: favorites / sessions / projects / live (Agents). `refresh()` rebuilds `rows` from `store.Query` + `unfav`, cursor follows the record pointer (or group name) and keeps its screen row; `pin` keeps a just-edited record visible until the cursor leaves. Right pane is driven by `probes[*Rec]` (checks + paged messages; `ensureOlder`/`ensureFull`/`load` guarded by `loading`; live sessions re-read the tail every 3 s via `refreshChat`→`stash`→`applyFresh`). Mouse: click zones are registered while rendering (`zone.go`), overlays are composited column-wise so every rendered line must be exactly terminal width. `Model.edit`/`editRec` is the only write path from the TUI (creates the record for unfavorited sessions, re-resolves by ID after a store reload). `status:trash` rows come from `trashRecs` (`trash.go`), not the store; `D` deletes with `ovConfirm`, `gone` hides deleted sessions until the index refresh drops them.
+- `internal/ui/fzf` — orchestrates `fav fzf-list`/`fav fzf-tab`/`fav fzf-pick` subcommands into one fzf session with three tabs (favorites / sessions / live); the current tab lives only in the fzf prompt (`FZF_PROMPT` reaches every child command); no business logic. Row keys are record ids or, for unfavorited sessions, session ids — `cmd/fav` `pick()` resolves both.
+- `internal/i18n` — every user-visible string is `i18n.T("<semantic.key>")` (`i18n.F` = Sprintf, `i18n.E` = Errorf); texts live in `locales/en.json` and `locales/zh.json` (embedded, flat key → text, keys `area.name` in lowercase). Lookup falls back zh → en → key. Language: `config.lang` or system (`LC_ALL`/`LC_MESSAGES`/`LANG`, Windows UI language). Whole sentences with `%s`/`%d` placeholders, never fragments joined in code. `coverage_test.go` fails on a key missing from either file, an orphan key, or placeholder mismatch — add both JSON entries with every new string.
+- `cmd/fav` — subcommands; `add` reads the `/fav` skill JSON from stdin (`skills/fav/SKILL.md` defines that contract, field `status`).
+
+## Conventions that are easy to get wrong
+
+- Comments: baseline is none. Keep only external formats, magic values, hard constraints (`⚠️ …`); no history/why paragraphs. Docs likewise describe only the current design.
+- Every TUI action needs a non-letter key equivalent (CJK input methods swallow letters); `;` `，` `？` `、` are accepted as `;` `,` `?` `\`.
+- Every text input (`textinput.Model`) must register a click zone that focuses it and puts the cursor at the clicked column via `placeCursor(ti, lead)` (`lead` = box border/padding columns before the text; the prompt is added inside). Every overlay button must be reachable by keyboard (`←`/`→`/`Tab` focus + Enter) and by click; a button drawn as primary must be what Enter does.
+- Rendering must never exceed terminal width (snapshot tests enforce it); use `fit`/`render.Pad`, not `len()`.
+- Scanner/transcript code must never read whole files: sessions reach hundreds of MB; read heads, tails, or by recorded offset.
+- Codex is detected via `~/.codex/thread-writer-locks/*.lock` flock probes and `session_meta` first lines; Claude via `~/.claude/sessions/<pid>.json` (`kind=bg` → `claude attach <jobId>`, never `--resume`).
