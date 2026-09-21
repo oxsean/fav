@@ -28,3 +28,11 @@ func TestShellLineQuotesTitle(t *testing.T) {
 		t.Errorf("shell 拆回来 %q，原 argv %q", lines, spec.Args)
 	}
 }
+
+func TestShellLineChangesDirectoryFirst(t *testing.T) {
+	spec := CommandSpec{Exec: "codex", Args: []string{"resume", "abc"}, Cwd: "/tmp/it's here"}
+	want := `cd '/tmp/it'\''s here' && codex resume abc`
+	if got := spec.ShellLine(); got != want {
+		t.Errorf("\ngot  %s\nwant %s", got, want)
+	}
+}

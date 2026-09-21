@@ -222,11 +222,7 @@ func cmdFzfPick(args []string) error {
 		if err != nil {
 			return err
 		}
-		line := plan.Spec.ShellLine()
-		if plan.Spec.Cwd != "" {
-			line = capture.ShellJoin([]string{"cd", plan.Spec.Cwd}) + " && " + line
-		}
-		return clipboard.WriteAll(line)
+		return clipboard.WriteAll(plan.Spec.ShellLine())
 	case "tags":
 		sel := fzfui.Pick(i18n.T("label.tags"), counted(tagCounts(s)), true)
 		if sel == nil {

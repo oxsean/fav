@@ -32,8 +32,14 @@ func (c CommandSpec) Argv() []string { return append([]string{c.Exec}, c.Args...
 // for display only, never executed
 func (c CommandSpec) Display() string { return ShellJoin(c.Argv()) }
 
-// ShellLine is the line typed into a shell (herdr pane run goes through a shell, not argv).
-func (c CommandSpec) ShellLine() string { return ShellJoin(c.Argv()) }
+// ShellLine is the line typed into a shell (herdr pane run goes through a shell, not argv); it cds first when Cwd is set.
+func (c CommandSpec) ShellLine() string {
+	line := ShellJoin(c.Argv())
+	if c.Cwd != "" {
+		line = ShellJoin([]string{"cd", c.Cwd}) + " && " + line
+	}
+	return line
+}
 
 func ShellJoin(argv []string) string {
 	parts := make([]string, len(argv))

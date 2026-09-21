@@ -713,11 +713,7 @@ func (m *Model) resumeCommand() string {
 	if p.Spec.Exec == "" {
 		return ""
 	}
-	line := p.Spec.ShellLine()
-	if p.Spec.Cwd != "" {
-		line = capture.ShellJoin([]string{"cd", p.Spec.Cwd}) + " && " + line
-	}
-	return line
+	return p.Spec.ShellLine()
 }
 
 func (m *Model) copyResume() {
