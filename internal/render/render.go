@@ -212,6 +212,7 @@ func Preview(r *fav.Rec, width int, now time.Time) string {
 	field(GlyphTerm+i18n.T("card.type"), r.WorkType)
 	field(GlyphBranch+i18n.T("card.branch"), r.GitBranch)
 	field(GlyphDir+i18n.T("card.directory"), shortenHome(r.Cwd))
+	field(GlyphSession+i18n.T("card.session"), r.SessionID)
 	if r.HerdrWorkspace != "" {
 		herdr := r.HerdrWorkspace
 		if r.HerdrTab != "" {

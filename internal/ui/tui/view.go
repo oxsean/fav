@@ -634,6 +634,7 @@ func (m *Model) fieldLines(r *fav.Rec, w int) []string {
 	add(render.GlyphTerm+i18n.T("card.type"), r.WorkType)
 	add(render.GlyphBranch+i18n.T("card.branch"), r.GitBranch)
 	add(render.GlyphDir+i18n.T("card.directory"), shortenHome(r.Cwd))
+	add(render.GlyphSession+i18n.T("card.session"), r.SessionID)
 	if r.Turns > 0 {
 		add(render.GlyphClock+i18n.T("card.turns_label"), i18n.F("card.turns_last_write", r.Turns, render.WhenFull(r.LastAt)))
 	}
