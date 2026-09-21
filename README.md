@@ -120,7 +120,7 @@ Four tabs, `Tab` / `1`–`4`:
 |---|---|
 | Favorites | `/fav`ed sessions, by last activity (`o` cycles the sort) |
 | Sessions | every session on the machine (fewer than 3 turns hidden by default, `turns:1` shows all) |
-| Projects | grouped by directory: `→` expands, `←` collapses, `→` again shows project info on the right (directory / session count / sources / recent sessions) |
+| Projects | grouped by directory: `→` expands, `←` collapses, `→` again shows project info on the right (directory / session count / sources / recent sessions); the group of the directory `fav` was started in opens by itself, scrolled to the top |
 | Agents | who is running now: waiting / working / idle for how long, refreshed every 3 s |
 
 A typical flow: `/` to search (`webapp oauth last:7d`) or `;` for the chip row to filter by project / tag / source / status / time;

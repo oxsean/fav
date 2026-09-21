@@ -3,6 +3,7 @@ package tui
 
 import (
 	"os"
+	"path/filepath"
 	"slices"
 	"sort"
 	"strconv"
@@ -81,6 +82,8 @@ type Model struct {
 	ovW, ovH   int
 	moved      bool            // arrow keys moved the selection while the search box had focus: Enter resumes instead of just leaving the box
 	open       map[string]bool // expanded groups in the projects view; absent = collapsed
+	startDir   string          // cwd at startup: its project group opens the first time the projects view shows it
+	autoOpened bool
 	detail     bool
 	ov         overlay
 	notice     string
@@ -148,6 +151,7 @@ func New(s *fav.Store, idx *index.Index, cfg fav.Config, initialQuery string) *M
 		w: 80, h: 24, now: time.Now(), chipFocus: -1, chat: newChatSearch(),
 		view: view(indexOf(views, cfg.DefaultView)), sortBy: sortBy(indexOf(sorts, cfg.Sort)), wheelStep: max(1, cfg.WheelStep),
 	}
+	m.startDir, _ = os.Getwd()
 	m.unfav = idx.Attach(s, nil)
 	m.recount()
 	m.refresh()
@@ -337,6 +341,53 @@ func (m *Model) refresh() {
 		}
 	}
 	m.clampCursor()
+	m.autoOpenProject()
+}
+
+// autoOpenProject: once, when the projects view first shows a group holding sessions of the start directory,
+// expand it, put the cursor on its header and scroll the header to the top of the list.
+func (m *Model) autoOpenProject() {
+	if m.autoOpened || m.view != viewProjects || m.startDir == "" {
+		return
+	}
+	best, n := "", 0
+	for g, recs := range m.groups {
+		c := 0
+		for _, r := range recs {
+			if sameTree(r.Cwd, m.startDir) {
+				c++
+			}
+		}
+		if c > n || c == n && c > 0 && g < best {
+			best, n = g, c
+		}
+	}
+	if best == "" {
+		return
+	}
+	m.autoOpened = true
+	m.open[best] = true
+	m.refresh()
+	for i, r := range m.rows {
+		if r.group == best {
+			total := 0
+			for _, h := range m.rowHeights() {
+				total += h
+			}
+			m.cursor, m.scroll = i, min(m.rowTop(i), max(0, total-m.listHeight()))
+			return
+		}
+	}
+}
+
+// sameTree: one path is the other or inside it.
+func sameTree(a, b string) bool {
+	if a == "" || b == "" {
+		return false
+	}
+	a, b = filepath.Clean(a), filepath.Clean(b)
+	sep := string(filepath.Separator)
+	return a == b || strings.HasPrefix(a, b+sep) || strings.HasPrefix(b, a+sep)
 }
 
 func (m *Model) when(r *fav.Rec) time.Time {
