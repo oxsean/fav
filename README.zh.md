@@ -210,7 +210,8 @@ cwd、分支、开始时间、人说话的轮数、标题、全部提示语（�
 TUI 不退出；否则 `cd` 到记录目录在当前终端 `exec`。路径或 workspace 对不上时报错列候选，不静默猜。
 
 **在跑的会话。** Claude 写 `~/.claude/sessions/<pid>.json`（busy / idle），Codex 开着的线程持有 `thread-writer-locks/*.lock`，
-Herdr 多知道 tab 和「等你」；三者非空字段叠加。
+Herdr 多知道 tab 和「等你」；三者非空字段叠加。Claude Code 上下文用完时会把对话交给一个后台工作进程、换一个 session id，原进程只当终端：
+fav 把这条链合成一个会话（轮数相加、用最新的 id 恢复、收藏跟着走），停车的原进程不算在跑。
 
 ## 数据
 

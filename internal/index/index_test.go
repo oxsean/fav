@@ -199,3 +199,41 @@ func TestAttachKeepsIdentity(t *testing.T) {
 		t.Fatalf("收藏后应挂上索引信息且能按提示语搜到：%d %+v", len(got), rec)
 	}
 }
+
+func TestClaudeContinuationChainIsOneSession(t *testing.T) {
+	claude, _ := setup(t)
+	dir := filepath.Join(claude, "projects", "-Users-me-work-webapp")
+	write(t, filepath.Join(dir, "old1.jsonl"), `{"type":"ai-title","aiTitle":"续接测试","sessionId":"old1"}`+"\n"+
+		claudeLines("第一段第一句", "第一段第二句", "第一段第三句")+
+		`{"type":"continued-in","timestamp":"2026-09-10T02:00:00Z","sessionId":"old1","continuedInSessionId":"new2"}`+"\n")
+	write(t, filepath.Join(dir, "new2.jsonl"), `{"type":"ai-title","aiTitle":"续接测试","sessionId":"new2"}`+"\n"+
+		strings.ReplaceAll(claudeLines("This session is being continued from a previous conversation", "第二段"), "01:00", "03:00"))
+	idx, err := OpenAt(filepath.Join(t.TempDir(), "sessions.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	idx, _ = idx.Refresh()
+	ss := idx.Sessions()
+	if len(ss) != 1 {
+		t.Fatalf("chain should be one session, got %d", len(ss))
+	}
+	s := ss[0]
+	if s.SessionID != "new2" || len(s.Aliases) != 1 || s.Aliases[0] != "old1" || s.Turns != 4 || filepath.Base(s.Path) != "new2.jsonl" {
+		t.Fatalf("got id=%s aliases=%v turns=%d path=%s", s.SessionID, s.Aliases, s.Turns, s.Path)
+	}
+
+	st, err := fav.OpenAt(filepath.Join(t.TempDir(), "records.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := &fav.Rec{ID: fav.NewID(), Provider: fav.ProviderClaude, SessionID: "old1", Title: "收藏在老 id 上", TranscriptPath: filepath.Join(dir, "old1.jsonl")}
+	if err := st.Put(r); err != nil {
+		t.Fatal(err)
+	}
+	if unfav := idx.Attach(st, nil); len(unfav) != 0 {
+		t.Fatalf("the favorited chain must not show up as unfavorited: %d", len(unfav))
+	}
+	if r.SessionID != "new2" || filepath.Base(r.TranscriptPath) != "new2.jsonl" || r.Turns != 4 { // the continuation summary is not a human turn
+		t.Fatalf("record should follow the chain: id=%s path=%s turns=%d", r.SessionID, r.TranscriptPath, r.Turns)
+	}
+}

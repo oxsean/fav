@@ -28,7 +28,10 @@ type liveTickMsg struct{}
 
 func (m *Model) pollLive() tea.Cmd {
 	prev := m.liveHerdr
-	return func() tea.Msg { return liveMsg{local: capture.LocalLive(), herdr: capture.HerdrLive(prev)} }
+	return func() tea.Msg {
+		local := capture.LocalLive()
+		return liveMsg{local: local, herdr: capture.HerdrLive(local, prev)}
+	}
 }
 
 func (m *Model) applyLive(msg liveMsg) {

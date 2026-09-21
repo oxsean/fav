@@ -36,12 +36,15 @@ type File struct {
 	Ver       int       `json:"ver,omitempty"`     // scanner logic version, distinct from scanVer forced rescans
 	First     string    `json:"first,omitempty"`   // first decent prompt, the title when there is none
 	Prompts   string    `json:"prompts,omitempty"` // concatenated prompts capped at promptsCap, search only
+	// Claude moved the conversation to this session id when the context ran out; the chain is one session (Sessions)
+	ContinuedIn string `json:"continued_in,omitempty"`
 }
 
 type Session struct {
 	Provider  string
-	SessionID string
-	Path      string // the earliest file: resume, pin and doctor use it
+	SessionID string   // Claude continuation chains: the newest id, the only one that resumes
+	Aliases   []string // older ids of the chain; store records may still carry one
+	Path      string   // the earliest file: resume, pin and doctor use it (a chain: the newest file)
 	Cwd       string
 	Branch    string
 	Title     string
@@ -78,7 +81,7 @@ func (s *Session) Rec() *fav.Rec {
 }
 
 const (
-	scanVer    = 2
+	scanVer    = 3
 	promptsCap = 8 * 1024 // max prompt bytes kept per file
 	promptCap  = 300      // max chars stored per prompt
 	titleMin   = 12       // prompts shorter than this are not titles
@@ -107,6 +110,7 @@ type line struct {
 	IsMeta      bool      `json:"isMeta"` // injected by Claude (skill expansion, caveats)
 	CustomTitle string    `json:"customTitle"`
 	AITitle     string    `json:"aiTitle"`
+	ContinuedIn string    `json:"continuedInSessionId"`
 	Message     struct {
 		Content json.RawMessage `json:"content"`
 	} `json:"message"`
@@ -153,7 +157,7 @@ func (l *line) userText() string {
 }
 
 // interesting is a cheap pre-filter before JSON parsing.
-var wanted = [][]byte{[]byte(`"type":"user"`), []byte(`"role":"user"`), []byte(`-title"`), []byte(`"session_meta"`)}
+var wanted = [][]byte{[]byte(`"type":"user"`), []byte(`"role":"user"`), []byte(`-title"`), []byte(`"session_meta"`), []byte(`"continued-in"`)}
 
 var replyClaude, replyText, replyCodex = []byte(`"type":"assistant"`), []byte(`"type":"text"`), []byte(`"type":"output_text"`)
 
@@ -235,6 +239,9 @@ func (f *File) take(l *line) {
 		if !f.Custom {
 			f.Title = l.AITitle
 		}
+		return
+	case "continued-in":
+		f.ContinuedIn = l.ContinuedIn
 		return
 	}
 	if l.Entrypoint != "" && l.Entrypoint != "cli" {
@@ -414,13 +421,39 @@ func (idx *Index) Sessions() []*Session {
 		}
 		return order[i].Path < order[j].Path
 	})
+	// a Claude continuation chain folds into its newest id: turns add up, the newest file is the transcript
+	next := map[string]string{}
+	for _, f := range idx.files {
+		if f.ContinuedIn != "" && f.Provider == fav.ProviderClaude {
+			next[f.SessionID] = f.ContinuedIn
+		}
+	}
+	newest := func(id string) string {
+		for i := 0; i < 16; i++ { // ponytail: 16 hops is far more than any real chain
+			n, ok := next[id]
+			if !ok || n == id {
+				break
+			}
+			id = n
+		}
+		return id
+	}
 	for _, f := range order {
-		k := f.Provider + ":" + f.SessionID
+		id := f.SessionID
+		if f.Provider == fav.ProviderClaude {
+			id = newest(id)
+		}
+		k := f.Provider + ":" + id
 		s := byKey[k]
 		if s == nil {
-			s = &Session{Provider: f.Provider, SessionID: f.SessionID, Path: f.Path, Cwd: f.Cwd,
+			s = &Session{Provider: f.Provider, SessionID: id, Path: f.Path, Cwd: f.Cwd,
 				StartedAt: f.StartedAt, First: f.First}
 			byKey[k] = s
+		}
+		if f.SessionID != id {
+			s.Aliases = append(s.Aliases, f.SessionID)
+		} else if f.Provider == fav.ProviderClaude {
+			s.Path = f.Path
 		}
 		s.Turns += f.Turns
 		s.Replies += f.Replies
@@ -515,7 +548,16 @@ func (idx *Index) Attach(store *fav.Store, prev []*fav.Rec) []*fav.Rec {
 	}
 	var out []*fav.Rec
 	for _, s := range idx.Sessions() {
-		if r := store.BySession(s.Provider, s.SessionID); r != nil {
+		r := store.BySession(s.Provider, s.SessionID)
+		for _, a := range s.Aliases {
+			if r != nil {
+				break
+			}
+			if r = store.BySession(s.Provider, a); r != nil { // the record follows the chain: only the newest id resumes
+				r.SessionID, r.TranscriptPath = s.SessionID, s.Path
+			}
+		}
+		if r != nil {
 			if r.TranscriptPath == "" { // favorited from the Agents page before the index saw it: fill in the file location
 				r.TranscriptPath, r.SessionStartedAt = s.Path, &s.StartedAt
 				if r.Cwd == "" {
@@ -525,7 +567,7 @@ func (idx *Index) Attach(store *fav.Store, prev []*fav.Rec) []*fav.Rec {
 			r.Attach(s.Turns, s.Turns+s.Replies, s.LastAt, s.Prompts)
 			continue
 		}
-		r := s.Rec()
+		r = s.Rec()
 		if p := keep[s.Key()]; p != nil {
 			*p = *r
 			r = p

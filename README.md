@@ -214,7 +214,9 @@ already in a Herdr tab → `herdr tab focus`; Claude background session → `cla
 the TUI stays open; otherwise `cd` to the recorded directory and `exec` in this terminal. A path or workspace that does not match is reported with candidates, never guessed.
 
 **Running sessions.** Claude writes `~/.claude/sessions/<pid>.json` (busy / idle), open Codex threads hold `thread-writer-locks/*.lock`,
-Herdr additionally knows the tab and "waiting for you"; non-empty fields are layered.
+Herdr additionally knows the tab and "waiting for you"; non-empty fields are layered. When Claude Code runs out of context it hands the conversation
+to a background worker under a new session id and parks the terminal process: fav folds that chain into one session (turns added, the newest id resumes,
+the favorite follows) and does not count the parked process as running.
 
 ## Data
 

@@ -24,19 +24,29 @@ type Live struct {
 }
 
 // LiveSessions merges Claude sessions/*.json, Codex thread locks and Herdr by session id; an unavailable source counts as empty.
-func LiveSessions() map[string]Live { return MergeLive(LocalLive(), HerdrLive(nil)) }
+func LiveSessions() map[string]Live {
+	local := LocalLive()
+	return MergeLive(local, HerdrLive(local, nil))
+}
 
 // prev is the previous result: unchanged status and seq keep their Since.
-func HerdrLive(prev map[string]Live) map[string]Live {
+// Herdr re-reads a pane's Claude session id only on a state change, so an id without a sessions/*.json is stale and dropped.
+func HerdrLive(local, prev map[string]Live) map[string]Live {
 	agents, err := herdr.Agents()
 	if err != nil {
 		return nil
 	}
 	now := time.Now()
+	_, tracked := os.Stat(filepath.Join(claudeDir(), "sessions"))
 	out := map[string]Live{}
 	for _, a := range agents {
 		if a.AgentSession == nil || a.AgentSession.Value == "" {
 			continue
+		}
+		if a.Agent == fav.ProviderClaude && tracked == nil {
+			if _, ok := local[a.AgentSession.Value]; !ok {
+				continue
+			}
 		}
 		l := Live{PaneID: a.PaneID, TabID: a.TabID, Status: a.AgentStatus, Seq: a.StateSeq, Since: now, Agent: a.Agent, Title: a.Title, Cwd: a.Cwd}
 		if p, ok := prev[a.AgentSession.Value]; ok && p.Status == l.Status && p.Seq == l.Seq {
@@ -65,8 +75,9 @@ func ClaudeLive() map[string]Live {
 			Status          string `json:"status"`
 			StatusUpdatedAt int64  `json:"statusUpdatedAt"`
 			JobID           string `json:"jobId"`
+			ParkedJobID     string `json:"parkedJobId"` // the conversation moved on to a background worker; this process is only the terminal
 		}
-		if json.Unmarshal(b, &s) != nil || s.SessionID == "" || !alive(s.PID) {
+		if json.Unmarshal(b, &s) != nil || s.SessionID == "" || s.ParkedJobID != "" || !alive(s.PID) {
 			continue
 		}
 		l := Live{Agent: fav.ProviderClaude, Title: s.Name, Cwd: s.Cwd, Since: time.UnixMilli(s.StatusUpdatedAt)}
