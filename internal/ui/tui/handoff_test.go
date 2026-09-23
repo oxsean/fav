@@ -33,6 +33,11 @@ func TestForkFromResumeDialog(t *testing.T) {
 	if v := ansi.Strip(m.View()); !strings.Contains(v, "b 分叉") || !strings.Contains(v, "s 交接") {
 		t.Fatalf("the resume dialog offers fork and handoff:\n%s", v)
 	}
+	m.View()
+	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'b'}})
+	if m.quitting {
+		t.Fatal("the first b only focuses the fork button")
+	}
 	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'b'}})
 	if !m.quitting || m.result.Start == nil || m.result.Resume != nil {
 		t.Fatalf("fork quits with a start command, not a resume: %+v", m.result)
@@ -54,6 +59,8 @@ func TestHandoffDialog(t *testing.T) {
 	r := m.current()
 	r.Cwd = t.TempDir()
 	m.askResume()
+	m.View()
+	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}})
 	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}})
 	var got handoffMsg
 	for msg := range drain(cmd) {
@@ -80,6 +87,10 @@ func TestHandoffDialog(t *testing.T) {
 		}
 	}
 
+	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'2'}})
+	if m.quitting {
+		t.Fatal("the first 2 only selects Codex")
+	}
 	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'2'}})
 	s := m.result.Start
 	if !m.quitting || s == nil || s.Exec != "codex" || len(s.Args) != 1 || !strings.Contains(s.Args[0], got.path) || s.Cwd != r.Cwd {

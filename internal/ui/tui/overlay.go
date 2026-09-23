@@ -4,6 +4,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/charmbracelet/bubbles/textarea"
@@ -66,6 +67,7 @@ type overlay struct {
 	providers []string   // handoff / new session: the CLIs a new session can start in, the default first
 	running   []*fav.Rec // new session: sessions already running in that directory
 	armed     string     // peek: the digit pressed once, sent on the second press
+	armedAt   time.Time
 
 	msg    capture.Message
 	lines  []string
@@ -192,9 +194,13 @@ func (m *Model) clickInput() {
 
 func (o *overlay) cancelLabel() string {
 	if o.back != nil {
-		return i18n.T("btn.back")
+		return keyed(keyOf(inConfirm, actClose), i18n.T("btn.back"))
 	}
-	return i18n.T("btn.cancel")
+	return keyed(keyOf(inConfirm, actClose), i18n.T("btn.cancel"))
+}
+
+func cancelBtn() btn {
+	return btn{keyed(keyName("esc"), i18n.T("btn.cancel")), false, (*Model).closeOverlay}
 }
 
 func (m *Model) pressFocused() bool {
@@ -576,10 +582,10 @@ func (m *Model) renderPicker() string {
 	}
 	body = append(body, "", faint.Render(hint), "")
 
-	bs := []btn{{i18n.T("btn.apply"), true, (*Model).applyPicker}, {i18n.T("btn.clear"), false, (*Model).clearPicker}, {i18n.T("btn.cancel"), false, (*Model).closeOverlay}}
+	bs := []btn{{keyed(keyName("enter"), i18n.T("btn.apply")), true, (*Model).applyPicker}, {keyed(keyName("backspace"), i18n.T("btn.clear")), false, (*Model).clearPicker}, cancelBtn()}
 	if m.ov.browse != nil {
 		// no primary button: Enter in the list descends, buttons need ← (or a click)
-		bs = []btn{{i18n.T("dir.btn_pick"), false, (*Model).pickDir}, {i18n.T("dir.btn_enter"), false, (*Model).descendDir}, {i18n.T("btn.cancel"), false, (*Model).closeOverlay}}
+		bs = []btn{{i18n.T("dir.btn_pick"), false, (*Model).pickDir}, {keyed(keyName("right"), i18n.T("dir.btn_enter")), false, (*Model).descendDir}, cancelBtn()}
 	}
 	body = append(body, m.buttons(len(body)+1, bs)...)
 	return ovRender(body, w)
@@ -620,64 +626,23 @@ type helpRow struct {
 
 type helpGroup struct {
 	title string
+	note  string
 	rows  []helpRow
 }
 
 func helpGroups() []helpGroup {
-	t := i18n.T
-	return []helpGroup{
-		{t("help.group.search"), []helpRow{
-			{[]string{"/  、"}, t("help.search")},
-			{[]string{"> 》"}, t("help.msg_search")},
-			{[]string{"\\  Ctrl+S"}, t("help.find")},
-			{[]string{"n / N"}, t("help.next_hit")},
-			{[]string{"→"}, t("help.all_hits")},
-			{[]string{"o  Ctrl+O"}, t("help.sort")},
-		}},
-		{t("help.group.read"), []helpRow{
-			{[]string{"j / k  ↑ ↓", "Ctrl+N / Ctrl+P"}, t("help.move")},
-			{[]string{"PgUp / PgDn", "Ctrl+B / Ctrl+F", "Ctrl+U / Ctrl+D", "g / G  Home / End"}, t("help.page")},
-			{[]string{"h / l  ← →"}, t("help.pane")},
-			{[]string{"J / K  Ctrl+J/K"}, t("help.chat_move")},
-			{[]string{t("help.key_enter_chat")}, t("help.enter_chat")},
-		}},
-		{t("help.group.resume"), []helpRow{
-			{[]string{"Enter / r"}, t("help.enter")},
-			{[]string{"Space  Ctrl+G"}, t("help.space")},
-			{[]string{t("help.key_t_resume")}, t("help.t_resume")},
-			{[]string{t("help.key_p_app")}, t("help.app")},
-			{[]string{t("help.key_y_resume")}, t("help.y_resume")},
-			{[]string{t("help.key_b_fork")}, t("help.fork")},
-			{[]string{t("help.key_s_handoff")}, t("help.handoff")},
-			{[]string{"w  Ctrl+W"}, t("help.new_session")},
-			{[]string{t("help.key_ide")}, t("help.ide")},
-			{[]string{"X"}, t("help.close_tab")},
-			{[]string{"Z"}, t("help.close_idle")},
-			{[]string{"v"}, t("help.peek")},
-			{[]string{".  。"}, t("help.handled")},
-			{[]string{"H"}, t("help.snooze")},
-		}},
-		{t("help.group.record"), []helpRow{
-			{[]string{"f / *"}, t("help.favorite")},
-			{[]string{"x / a", "Ctrl+X / Ctrl+A"}, t("help.done_archive")},
-			{[]string{"e  Ctrl+E"}, t("help.edit")},
-			{[]string{"M"}, t("help.move_project")},
-			{[]string{"D"}, t("help.delete")},
-		}},
-		{t("help.group.view"), []helpRow{
-			{[]string{"Tab / Shift+Tab", "1 2 3 4"}, t("help.tabs")},
-			{[]string{t("help.key_chip_row")}, t("help.chip_row")},
-			{[]string{"t / p / v / d"}, t("help.filters")},
-			{[]string{"s"}, t("help.status")},
-			{[]string{t("help.key_enter_group")}, t("help.enter_group")},
-			{[]string{"z  - / +"}, t("help.fold_all")},
-		}},
-		{t("help.group.other"), []helpRow{
-			{[]string{t("help.key_settings")}, t("help.settings")},
-			{[]string{"Esc"}, t("help.esc")},
-			{[]string{"q  Ctrl+C"}, t("help.quit")},
-		}},
+	var gs []helpGroup
+	for _, sec := range helpLayout() {
+		g := helpGroup{title: i18n.T(sec.title)}
+		if sec.note != "" {
+			g.note = i18n.T(sec.note)
+		}
+		for _, h := range sec.rows {
+			g.rows = append(g.rows, helpRow{helpKeys(h, helpKeyCap-2), i18n.T(h.desc)})
+		}
+		gs = append(gs, g)
 	}
+	return gs
 }
 
 // helpKeyCap: the key column never grows past this, so one long key cannot push every description to the right.
@@ -703,6 +668,11 @@ func (m *Model) renderHelp() string {
 			lines = append(lines, "")
 		}
 		lines = append(lines, boldSty.Foreground(cText).Render(g.title))
+		if g.note != "" {
+			for _, seg := range render.Wrap(g.note, textW-2) {
+				lines = append(lines, "  "+dimmed.Render(seg))
+			}
+		}
 		for _, r := range g.rows {
 			desc := render.Wrap(r.desc, textW-keyW-2)
 			for i := 0; i < max(len(r.keys), len(desc)); i++ {
@@ -724,7 +694,7 @@ func (m *Model) renderHelp() string {
 		i18n.T("help.note_move"),
 		i18n.T("help.note_delete"),
 		i18n.T("help.note_agents"),
-		i18n.T("help.note_ime"),
+		imeNote(),
 		i18n.T("help.note_mouse"),
 		i18n.T("help.note_drag"),
 	}
@@ -752,9 +722,9 @@ func (m *Model) renderHelp() string {
 		body = append(body, fit(lines[i], textW)+" "+bar[i-m.ov.cursor])
 	}
 	body = append(body, "")
-	label := i18n.T("btn.close")
+	label := keyed(keyName("esc"), i18n.T("btn.close"))
 	if len(lines) > room {
-		label = i18n.T("btn.close_scroll")
+		label = "j/k · PgUp/PgDn · " + i18n.T("btn.wheel") + " · " + label
 	}
 	body = append(body, m.buttons(len(body)+1, []btn{{label, true, (*Model).closeOverlay}})...)
 	return ovRender(body, w)
@@ -823,14 +793,15 @@ func (m *Model) renderResume() string {
 // is computed from them.
 func (m *Model) resumeGroups() []btnGroup {
 	p := m.ov.plan
-	project := btnGroup{label: i18n.T("resume.group.project"), bs: []btn{{"i IDE", false, (*Model).openIDE}, {"c VS Code", false, (*Model).openCode}, {"o " + fileManagerName(), false, (*Model).openFiles}}}
-	cancel := btn{i18n.T("btn.cancel"), false, (*Model).closeOverlay}
+	k := func(a act, text string) string { return keyed(keyOf(inResume, a), text) }
+	project := btnGroup{label: i18n.T("resume.group.project"), bs: []btn{{k(actIDE, "IDE"), false, (*Model).openIDE}, {k(actCode, "VS Code"), false, (*Model).openCode}, {k(actFiles, fileManagerName()), false, (*Model).openFiles}}}
+	cancel := cancelBtn()
 	if dirGone, tGone := m.broken(m.ov.rec); dirGone || tGone { // unrecoverable: move / delete instead of resume
-		move := i18n.T("resume.btn_move")
+		move := k(actMove, i18n.T("resume.btn_move"))
 		if dirGone && m.ov.rec.Repo != "" {
-			move = i18n.T("resume.btn_move_repo")
+			move = k(actMove, i18n.T("resume.btn_move_repo"))
 		}
-		gs := []btnGroup{{label: i18n.T("resume.group.repair"), bs: []btn{{move, dirGone, (*Model).askMove}, {i18n.T("resume.btn_delete"), !dirGone, (*Model).askDelete}}}}
+		gs := []btnGroup{{label: i18n.T("resume.group.repair"), bs: []btn{{move, dirGone, (*Model).askMove}, {k(actDelete, i18n.T("resume.btn_delete")), !dirGone, (*Model).askDelete}}}}
 		if !dirGone {
 			gs = append(gs, project)
 		}
@@ -838,6 +809,7 @@ func (m *Model) resumeGroups() []btnGroup {
 		// favorite / done / archive / edit; move and delete are already there
 		return append(gs, btnGroup{label: i18n.T("resume.group.record"), bs: m.recordBtns()[:4]})
 	}
+	enter := keyOf(inResume, actEnter)
 	primary := i18n.T("resume.btn_resume")
 	switch {
 	case p.Live.TabID != "":
@@ -845,17 +817,18 @@ func (m *Model) resumeGroups() []btnGroup {
 	case p.Live.BackgroundID != "":
 		primary = i18n.T("resume.btn_attach")
 	}
+	primary = keyed(enter, primary)
 	if m.ov.app {
-		primary = i18n.T("resume.btn_resume_r")
+		primary = k(actResume, i18n.T("resume.btn_resume"))
 	}
 	bs := []btn{
 		{primary, !m.ov.app, func(mm *Model) { mm.doResume(false) }},
-		{i18n.T("resume.btn_terminal"), false, func(mm *Model) { mm.doResume(true) }},
+		{k(actTerminal, i18n.T("resume.btn_terminal")), false, func(mm *Model) { mm.doResume(true) }},
 	}
 	if r := m.ov.rec; appReady(r) {
-		label := i18n.F("resume.btn_app", capture.AppName(r.Provider))
+		label := k(actApp, i18n.F("resume.btn_app", capture.AppName(r.Provider)))
 		if m.ov.app {
-			label = i18n.F("resume.btn_app_enter", capture.AppName(r.Provider))
+			label = keyed(enter, i18n.F("resume.btn_app", capture.AppName(r.Provider)))
 		}
 		app := btn{label, m.ov.app, (*Model).doApp}
 		if m.ov.app {
@@ -864,18 +837,72 @@ func (m *Model) resumeGroups() []btnGroup {
 			bs = append(bs, app)
 		}
 	}
-	if p.Live.PaneID != "" {
-		bs = append(bs, btn{i18n.T("resume.btn_peek"), false, func(mm *Model) { mm.askPeek(mm.ovRec()) }})
-	}
 	if m.resumeCommand() != "" {
-		bs = append(bs, btn{i18n.T("resume.btn_copy"), false, (*Model).copyResume})
+		bs = append(bs, btn{k(actCopy, i18n.T("resume.btn_copy")), false, (*Model).copyResume})
 	}
 	project.end = []btn{cancel}
-	return []btnGroup{
-		{label: i18n.T("resume.group.resume"), bs: bs},
-		{label: i18n.T("resume.group.new"), bs: []btn{{i18n.T("resume.btn_fork"), false, (*Model).doFork}, {i18n.T("resume.btn_handoff"), false, (*Model).doHandoff}, {i18n.T("resume.btn_new"), false, (*Model).askStartFromDialog}}},
+	gs := []btnGroup{{label: i18n.T("resume.group.resume"), bs: bs}}
+	if ag := m.agentBtns(); len(ag) > 0 {
+		gs = append(gs, btnGroup{label: i18n.T("resume.group.agent"), bs: ag})
+	}
+	return append(gs,
+		btnGroup{label: i18n.T("resume.group.new"), bs: []btn{{k(actFork, i18n.T("resume.btn_fork")), false, (*Model).doFork}, {k(actHandoff, i18n.T("resume.btn_handoff")), false, (*Model).doHandoff}, {k(actNew, i18n.T("resume.btn_new")), false, (*Model).askStartFromDialog}}},
 		project,
-		{label: i18n.T("resume.group.record"), bs: m.recordBtns()},
+		btnGroup{label: i18n.T("resume.group.record"), bs: m.recordBtns()},
+	)
+}
+
+// agentBtns: the running-session actions, so they are reachable where an IME eats letters.
+func (m *Model) agentBtns() []btn {
+	r := m.ov.rec
+	l, ok := m.liveOf(r)
+	if !ok {
+		return nil
+	}
+	k := func(a act, text string) string { return keyed(keyOf(inResume, a), i18n.T(text)) }
+	var bs []btn
+	if l.PaneID != "" {
+		bs = append(bs, btn{k(actPeek, "resume.btn_peek"), false, func(mm *Model) { mm.askPeek(mm.ovRec()) }})
+	}
+	if m.need(r.SessionID) != needNone {
+		bs = append(bs, btn{k(actHandled, "resume.btn_handled"), false, func(mm *Model) { mm.agentAction(actHandled) }})
+	}
+	bs = append(bs, btn{k(actSnooze, "resume.btn_snooze"), false, func(mm *Model) { mm.agentAction(actSnooze) }})
+	if l.TabID != "" {
+		bs = append(bs, btn{k(actCloseTab, "resume.btn_close_tab"), false, func(mm *Model) { mm.agentAction(actCloseTab) }})
+	}
+	return bs
+}
+
+// agentAction runs a running-session action from the dialog on the session under the cursor (the dialog's own).
+func (m *Model) agentAction(a act) {
+	if _, ok := m.liveOf(m.ov.rec); !ok {
+		return
+	}
+	m.closeOverlay()
+	switch a {
+	case actHandled:
+		m.handleAttn(false)
+	case actSnooze:
+		m.handleAttn(true)
+	case actCloseTab:
+		m.closeLive()
+	}
+}
+
+// focusKey: in the resume dialog a key whose meaning differs from the list only focuses its button; the same key again
+// (or Enter) presses it.
+func (m *Model) focusKey(a act) {
+	key := keyOf(inResume, a)
+	for i, b := range m.ov.btns {
+		if k, _, ok := labelKey(b.label); ok && k == key {
+			if m.ov.focus == i {
+				m.pressFocused()
+				return
+			}
+			m.ov.focus = i
+			return
+		}
 	}
 }
 
@@ -932,22 +959,22 @@ type appDoneMsg struct {
 // recordBtns: the letter-key actions also get buttons, reachable by Enter → ← → Enter when an IME eats letters.
 func (m *Model) recordBtns() []btn {
 	r := m.ov.rec
-	pick := func(cond bool, on, off string) string {
+	pick := func(a act, cond bool, on, off string) string {
 		if cond {
-			return i18n.T(on)
+			return keyed(keyOf(inResume, a), i18n.T(on))
 		}
-		return i18n.T(off)
+		return keyed(keyOf(inResume, a), i18n.T(off))
 	}
 	act := func(f func(*Model)) func(*Model) {
 		return func(mm *Model) { mm.closeOverlay(); f(mm) }
 	}
 	return []btn{
-		{pick(r != nil && r.Favorite(), "footer.unfavorite", "footer.favorite"), false, act((*Model).toggleFavorite)},
-		{pick(r != nil && r.Done(), "footer.undo_done", "footer.done"), false, act(func(mm *Model) { mm.toggleStatus(fav.StatusDone) })},
-		{pick(r != nil && r.Archived(), "footer.unarchive", "footer.archive"), false, act((*Model).toggleArchive)},
-		{i18n.T("footer.edit"), false, func(mm *Model) { mm.pending = mm.openEdit() }},
-		{i18n.T("footer.move"), false, (*Model).askMove},
-		{i18n.T("footer.delete"), false, (*Model).askDelete},
+		{pick(actFavorite, r != nil && r.Favorite(), "footer.unfavorite", "key.favorite"), false, act((*Model).toggleFavorite)},
+		{pick(actDone, r != nil && r.Done(), "footer.undo_done", "key.done"), false, act(func(mm *Model) { mm.toggleStatus(fav.StatusDone) })},
+		{pick(actArchive, r != nil && r.Archived(), "footer.unarchive", "key.archive"), false, act((*Model).toggleArchive)},
+		{keyed(keyOf(inResume, actEdit), i18n.T("key.edit")), false, func(mm *Model) { mm.pending = mm.openEdit() }},
+		{keyed(keyOf(inResume, actMove), i18n.T("footer.move")), false, (*Model).askMove},
+		{keyed(keyOf(inResume, actDelete), i18n.T("footer.delete")), false, (*Model).askDelete},
 	}
 }
 
@@ -975,9 +1002,9 @@ func (m *Model) copyResume() {
 
 func (m *Model) titleLines(inner, y0 int) []string {
 	if !m.ov.editing {
-		hint := dimmed.Render(i18n.T("resume.btn_edit_title"))
-		text := render.Truncate(m.ov.edit.Value(), inner-render.Width(i18n.T("resume.btn_edit_title"))-2)
-		line := text + strings.Repeat(" ", max(1, inner-render.Width(text)-render.Width(i18n.T("resume.btn_edit_title")))) + hint
+		label := keyed(keyOf(inResume, actTitle), i18n.T("resume.btn_edit_title"))
+		text := render.Truncate(m.ov.edit.Value(), inner-render.Width(label)-2)
+		line := text + strings.Repeat(" ", max(1, inner-render.Width(text)-render.Width(label))) + dimmed.Render(label)
 		m.mark(y0, ovPad, inner, (*Model).editTitle)
 		return []string{line}
 	}
@@ -1047,13 +1074,13 @@ func (m *Model) runPlan(r *fav.Rec, p capture.Plan, noHerdr bool) {
 	if _, ok := m.live[r.SessionID]; ok {
 		m.markSeen(r.SessionID, true) // switching to it is taking it in
 	}
-	if p.Live.TabID == "" && p.Ws == nil {
-		// resuming in this terminal execs over it: quit the TUI and let the caller do it
-		m.finish(Result{Resume: r, NoHerdr: noHerdr})
+	if c := p.Blocking(); c != nil && (p.Live.TabID == "" || noHerdr) { // focusing a tab touches no session file; checks do not apply
+		m.flash(i18n.T("resume.failed") + c.Text)
 		return
 	}
-	if c := p.Blocking(); c != nil && p.Live.TabID == "" { // focusing a tab touches no session file; checks do not apply
-		m.flash(i18n.T("resume.failed") + c.Text)
+	if p.Live.TabID == "" && p.Ws == nil || noHerdr {
+		// resuming in this terminal execs over it: quit the TUI and let the caller do it
+		m.finish(Result{Resume: r, NoHerdr: noHerdr})
 		return
 	}
 	m.ov = overlay{}

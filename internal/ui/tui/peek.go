@@ -16,8 +16,9 @@ import (
 )
 
 const (
-	peekLines = 80
-	peekEvery = time.Second
+	peekLines  = 80
+	peekEvery  = time.Second
+	peekArmFor = 5 * time.Second // a digit pressed once is forgotten after this
 )
 
 type peekMsg struct {
@@ -61,7 +62,14 @@ func (m *Model) applyPeek(msg peekMsg) tea.Cmd {
 	if msg.err != nil {
 		m.ov.hint = msg.err.Error()
 	} else {
-		m.ov.lines = strings.Split(strings.TrimRight(ansi.Strip(msg.text), "\n "), "\n")
+		lines := strings.Split(strings.TrimRight(ansi.Strip(msg.text), "\n "), "\n")
+		if strings.Join(lines, "\n") != strings.Join(m.ov.lines, "\n") {
+			m.ov.armed = "" // the question it was meant for may be gone
+		}
+		m.ov.lines = lines
+	}
+	if m.ov.armed != "" && time.Since(m.ov.armedAt) > peekArmFor {
+		m.ov.armed = ""
 	}
 	pane := msg.pane
 	return tea.Tick(peekEvery, func(time.Time) tea.Msg { return peekTickMsg{pane} })
@@ -81,7 +89,7 @@ func (m *Model) sendPeek() {
 // pressDigit answers a numbered question in the pane; the first press only arms it, the same digit again sends it.
 func (m *Model) pressDigit(d string) {
 	if m.ov.armed != d {
-		m.ov.armed = d
+		m.ov.armed, m.ov.armedAt = d, time.Now()
 		return
 	}
 	pane := m.ov.title
@@ -99,11 +107,17 @@ func (m *Model) peekSwitch() {
 	m.runPlan(r, p, false)
 }
 
+func (m *Model) focusReply() {
+	m.ov.armed = ""
+	m.ov.focus = -1
+	m.ov.edit.Focus()
+}
+
 func (m *Model) peekButtons() []btn {
 	return []btn{
-		{i18n.T("peek.btn_switch"), true, (*Model).peekSwitch},
-		{i18n.T("peek.btn_reply"), false, func(mm *Model) { mm.ov.edit.Focus() }},
-		{i18n.T("btn.close"), false, (*Model).closeOverlay},
+		{keyed(keyOf(inPeek, actEnter), i18n.T("peek.btn_switch")), true, (*Model).peekSwitch},
+		{keyed(keyOf(inPeek, actReply), i18n.T("peek.btn_reply")), false, (*Model).focusReply},
+		{keyed(keyOf(inPeek, actClose), i18n.T("btn.close")), false, (*Model).closeOverlay},
 	}
 }
 
@@ -163,27 +177,38 @@ func (m *Model) peekKey(msg tea.KeyMsg) tea.Cmd {
 		case tea.KeyEsc:
 			m.ov.edit.Blur()
 			return nil
+		case tea.KeyTab:
+			m.ov.edit.Blur()
+			m.ov.focus = 0
+			return nil
+		case tea.KeyShiftTab:
+			m.ov.edit.Blur()
+			m.ov.focus = len(m.ov.btns) - 1
+			return nil
 		}
 		var cmd tea.Cmd
 		m.ov.edit, cmd = m.ov.edit.Update(msg)
 		return cmd
 	}
-	switch k := msg.String(); k {
-	case "1", "2", "3":
+	switch k := msg.String(); keyAct(inPeek, k) {
+	case actAnswer:
 		m.pressDigit(k)
-	case "tab", ":", "：":
-		m.ov.armed = ""
-		m.ov.edit.Focus()
-	case "enter", " ":
+	case actReply:
+		m.focusReply()
+	case actTabNext:
+		m.peekTab(1)
+	case actTabPrev:
+		m.peekTab(-1)
+	case actEnter:
 		if m.pressFocused() {
 			return nil
 		}
 		m.peekSwitch()
-	case "left", "h", "shift+tab":
+	case actFocusPrev:
 		m.moveFocus(-1)
-	case "right", "l":
+	case actFocusNext:
 		m.moveFocus(1)
-	case "esc", "q":
+	case actClose:
 		if m.ov.armed != "" {
 			m.ov.armed = ""
 			return nil
@@ -191,4 +216,21 @@ func (m *Model) peekKey(msg tea.KeyMsg) tea.Cmd {
 		m.closeOverlay()
 	}
 	return nil
+}
+
+// peekTab: Tab walks the reply input, then each button, then back to the input.
+func (m *Model) peekTab(dir int) {
+	m.ov.armed = ""
+	n := len(m.ov.btns)
+	switch f := m.ov.focus + dir; {
+	case m.ov.focus < 0 && dir < 0:
+		m.ov.focus = n - 1
+	case m.ov.focus < 0:
+		m.ov.focus = 0
+	case f < 0 || f >= n:
+		m.ov.focus = -1
+		m.ov.edit.Focus()
+	default:
+		m.ov.focus = f
+	}
 }

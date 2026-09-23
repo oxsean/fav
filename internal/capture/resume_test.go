@@ -36,3 +36,21 @@ func TestShellLineChangesDirectoryFirst(t *testing.T) {
 		t.Errorf("\ngot  %s\nwant %s", got, want)
 	}
 }
+
+func TestPlanResumeBlocksASecondWriter(t *testing.T) {
+	r := &fav.Rec{Provider: fav.ProviderClaude, SessionID: "s1", Cwd: t.TempDir()}
+	p, _ := PlanResume(r, map[string]Live{"s1": {Status: "idle"}}, true)
+	blocked := false
+	for _, c := range p.Checks {
+		blocked = blocked || !c.OK && !c.Warn && (strings.Contains(c.Text, "another terminal") || strings.Contains(c.Text, "别的终端"))
+	}
+	if !blocked {
+		t.Fatalf("running elsewhere blocks resuming here: %+v", p.Checks)
+	}
+	p, _ = PlanResume(r, map[string]Live{"s1": {BackgroundID: "b1"}}, true)
+	for _, c := range p.Checks {
+		if strings.Contains(c.Text, "another terminal") || strings.Contains(c.Text, "别的终端") {
+			t.Fatal("a background session is attached, not resumed twice")
+		}
+	}
+}

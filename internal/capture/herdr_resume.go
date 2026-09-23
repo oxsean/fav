@@ -22,9 +22,13 @@ type Plan struct {
 // PlanResume: running in a Herdr tab → focus it; Claude background session → attach;
 // otherwise --resume, inside Herdr when it is up and a workspace is found, else in this terminal.
 func PlanResume(r *fav.Rec, live map[string]Live, noHerdr bool) (Plan, error) {
-	p := Plan{Live: live[r.SessionID], Checks: Checks(r)}
+	l, running := live[r.SessionID]
+	p := Plan{Live: l, Checks: Checks(r)}
 	if p.Live.TabID != "" && !noHerdr {
 		return p, nil
+	}
+	if running && p.Live.BackgroundID == "" { // a second resume would write the same session from two processes
+		p.Checks = append(p.Checks, Check{Text: i18n.T("resume.check.running_elsewhere")})
 	}
 	var err error
 	if p.Live.BackgroundID != "" {

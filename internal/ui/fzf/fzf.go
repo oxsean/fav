@@ -128,13 +128,14 @@ func Run(initialQuery string, start Tab) (string, error) {
 		"--bind", "f3,alt-3:" + tab("live"),
 		"--bind", "tab:" + tab("next"), // no --multi, so Tab is free
 		"--bind", "btab:" + tab("prev"),
-		// Ctrl-letter = the TUI's letter (acts on the current row), Alt-letter = filter pickers; fzf's own ctrl-p / ctrl-u / ctrl-d stay free
+		// Ctrl-letter = the TUI's letter (acts on the current row), Alt-letter = filter pickers and the toggles whose Ctrl key is taken
+		// (⚠️ Ctrl-A is Herdr's prefix, Ctrl-F pages); fzf's own ctrl-p / ctrl-u / ctrl-d stay free
 		"--bind", "alt-t:" + pick("tags"),
 		"--bind", "alt-p:" + pick("projects"),
 		"--bind", "alt-s,ctrl-s:" + pick("status"),
 		"--bind", "alt-d:" + pick("date"),
 		"--bind", "ctrl-x:" + act("fzf-pick toggledone {1}"),
-		"--bind", "ctrl-a:" + act("fzf-pick togglearchive {1}"),
+		"--bind", "alt-a:" + act("fzf-pick togglearchive {1}"),
 		"--bind", "alt-f:" + act("fzf-pick togglefav {1}"), // Ctrl-F pages in the TUI and moves the cursor in fzf
 		"--bind", "ctrl-e:execute(" + q + " edit {1})+" + reload,
 		"--bind", "ctrl-y:execute-silent(" + q + " fzf-pick copy {1})",

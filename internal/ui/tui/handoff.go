@@ -166,17 +166,16 @@ func (m *Model) editHandoff() tea.Cmd {
 }
 
 func (m *Model) handoffGroups() []btnGroup {
-	keys := map[string]string{fav.ProviderClaude: "1", fav.ProviderCodex: "2"}
 	var start []btn
 	for i, p := range m.ov.providers {
-		start = append(start, btn{keys[p] + " " + providerLabel(p), i == 0, func(mm *Model) { mm.startHandoff(p) }})
+		start = append(start, btn{keyed(keyOf(inHandoff, providerAct(p)), providerLabel(p)), i == 0, func(mm *Model) { mm.startHandoff(p) }})
 	}
 	return []btnGroup{
 		{label: i18n.T("handoff.group.start"), bs: start},
 		{label: i18n.T("handoff.group.pack"), bs: []btn{
-			{i18n.T("handoff.btn_edit"), false, func(mm *Model) { mm.pending = mm.editHandoff() }},
-			{i18n.T("handoff.btn_copy"), false, (*Model).copyHandoff},
-		}, end: []btn{{i18n.T("btn.cancel"), false, (*Model).closeOverlay}}},
+			{keyed(keyOf(inHandoff, actEdit), i18n.T("handoff.btn_edit")), false, func(mm *Model) { mm.pending = mm.editHandoff() }},
+			{keyed(keyOf(inHandoff, actCopy), i18n.T("handoff.btn_copy")), false, (*Model).copyHandoff},
+		}, end: []btn{cancelBtn()}},
 	}
 }
 
@@ -222,35 +221,33 @@ func (m *Model) renderHandoff() string {
 
 func (m *Model) handoffKey(msg tea.KeyMsg) tea.Cmd {
 	room := max(3, m.h-18)
-	switch msg.String() {
-	case "enter", " ":
+	switch a := keyAct(inHandoff, msg.String()); a {
+	case actEnter:
 		if m.pressFocused() {
 			return nil
 		}
 		if len(m.ov.providers) > 0 {
 			m.startHandoff(m.ov.providers[0])
 		}
-	case "1":
-		m.startHandoff(fav.ProviderClaude)
-	case "2":
-		m.startHandoff(fav.ProviderCodex)
-	case "e", "ctrl+e":
+	case actClaude, actCodex:
+		m.selectProvider(providerOf(a))
+	case actEdit:
 		return m.editHandoff()
-	case "y", "ctrl+y":
+	case actCopy:
 		m.copyHandoff()
-	case "j", "down", "ctrl+n":
+	case actDown:
 		m.ov.cursor++
-	case "k", "up", "ctrl+p":
+	case actUp:
 		m.ov.cursor--
-	case "pgdown", "ctrl+f":
+	case actPageDown:
 		m.ov.cursor += room
-	case "pgup", "ctrl+b":
+	case actPageUp:
 		m.ov.cursor -= room
-	case "left", "h", "shift+tab":
+	case actFocusPrev:
 		m.moveFocus(-1)
-	case "right", "l", "tab":
+	case actFocusNext:
 		m.moveFocus(1)
-	case "esc", "q":
+	case actClose:
 		m.closeOverlay()
 	}
 	return nil

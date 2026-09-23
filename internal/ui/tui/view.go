@@ -886,12 +886,21 @@ type footKey struct {
 // footGroup is a run of hints drawn together; groups are split by a bar.
 type footGroup []footKey
 
-func fk(key string, rank int) footKey { return footKey{text: i18n.T(key), rank: rank} }
+func fk(key, text string, rank int) footKey {
+	return footKey{text: keyed(key, i18n.T(text)), rank: rank}
+}
+
+var (
+	enterKey = keyName("enter")
+	escKey   = keyName("esc")
+	arrowsUD = keyName("up") + keyName("down")
+	arrowsLR = keyName("left") + " " + keyName("right")
+)
 
 // footer: the keys of what has focus, grouped (main action | search | record), with Tab / ? pinned to the right.
 func (m *Model) footer() string {
-	help := footGroup{fk("footer.help", 0)}
-	nav := footGroup{fk("footer.tab", 3), fk("footer.help", 0)}
+	help := footGroup{fk(keyOf(inList, actHelp), "footer.help", 0)}
+	nav := footGroup{fk(keyOf(inList, actNextView), "footer.tab", 3), fk(keyOf(inList, actHelp), "footer.help", 0)}
 	var left []footGroup
 	right := nav
 	switch {
@@ -904,56 +913,56 @@ func (m *Model) footer() string {
 	case m.typing:
 		switch {
 		case m.msgMode():
-			left = []footGroup{{fk("footer.enter_results", 0), fk("footer.select_record", 1)}}
+			left = []footGroup{{fk(enterKey, "footer.enter_results", 0), fk(arrowsUD, "footer.select_record", 1)}}
 		case m.moved && m.current() != nil && m.twoColumn():
-			left = []footGroup{{fk("footer.enter_actions", 0), fk("footer.select_record", 1)}}
+			left = []footGroup{{fk(enterKey, "footer.enter_actions", 0), fk(arrowsUD, "footer.select_record", 1)}}
 		case m.moved && m.current() != nil:
-			left = []footGroup{{fk("footer.enter_details", 0), fk("footer.select_record", 1)}}
+			left = []footGroup{{fk(enterKey, "footer.enter_details", 0), fk(arrowsUD, "footer.select_record", 1)}}
 		default: // Enter only ends typing, like Esc
-			left = []footGroup{{fk("footer.select_record", 1)}}
+			left = []footGroup{{fk(arrowsUD, "footer.select_record", 1)}}
 		}
-		left, right = append(left, footGroup{fk("footer.esc_typing", 0)}), nil
+		left, right = append(left, footGroup{fk(escKey, "footer.esc_typing", 0)}), nil
 	case m.chat.typing:
-		left, right = []footGroup{{fk("footer.enter_find", 0)}, {fk("footer.esc_cancel", 0)}}, nil
+		left, right = []footGroup{{fk(enterKey, "footer.enter_find", 0)}, {fk(escKey, "footer.esc_cancel", 0)}}, nil
 	case m.chipFocus >= 0:
-		left, right = []footGroup{{fk("footer.chip_switch", 0), fk("footer.chip_open", 0)}, {fk("footer.chip_back", 0)}}, nil
+		left, right = []footGroup{{fk(arrowsLR, "footer.chip_switch", 0), fk(enterKey, "footer.chip_open", 0)}, {fk(keyName("down")+"/"+escKey, "footer.chip_back", 0)}}, nil
 	case m.hitsOpen() && m.pane == paneList:
-		left = []footGroup{{fk("footer.select_hit", 1), fk("footer.full_text", 0)}, {fk("footer.hit_chat", 2), fk("footer.hit_back", 0)}}
+		left = []footGroup{{fk(arrowsUD, "footer.select_hit", 1), fk(enterKey, "footer.full_text", 0)}, {fk(keyName("right"), "footer.hit_chat", 2), fk(keyName("left"), "footer.hit_back", 0)}}
 		right = help
 	case m.projectFocus():
-		left = []footGroup{{fk("footer.select_session", 1), fk("footer.enter_jump", 0)}, {fk("footer.back_to_list", 0)}}
+		left = []footGroup{{fk(arrowsUD, "footer.select_session", 1), fk(enterKey, "footer.enter_jump", 0)}, {fk(keyName("left"), "footer.back_to_list", 0)}}
 		right = help
 	case m.pane == paneChat:
 		left = []footGroup{
-			{fk("footer.select_message", 3), fk("footer.full_text", 0), fk("footer.copy", 5)},
-			{fk("footer.find", 4), fk("footer.jump", 5)},
-			{fk("footer.back_to_list", 0)},
+			{fk(arrowsUD, "footer.select_message", 3), fk(enterKey, "footer.full_text", 0), fk(footKeyOf(inList, actCopy), "footer.copy", 5)},
+			{fk(footKeyOf(inList, actFind), "footer.find", 4), fk(keyOf(inList, actNextHit)+"/"+keyOf(inList, actPrevHit), "footer.jump", 5)},
+			{fk(keyName("left"), "footer.back_to_list", 0)},
 		}
 		right = help
 	case m.detail:
 		if m.inTrash() {
-			left = []footGroup{{fk("footer.restore", 0)}}
+			left = []footGroup{{fk(keyOf(inList, actDelete), "footer.restore", 0)}}
 		} else {
 			left = []footGroup{m.mainKeys(m.current()), {m.favKey(m.current())}}
 		}
-		right = footGroup{fk("footer.esc_back", 0), fk("footer.help", 0)}
+		right = footGroup{fk(escKey, "footer.esc_back", 0), fk(keyOf(inList, actHelp), "footer.help", 0)}
 	case m.inTrash() && m.current() != nil:
-		left = []footGroup{{fk("footer.restore", 0)}, {fk("footer.filter", 4), fk("footer.search", 0)}}
+		left = []footGroup{{fk(keyOf(inList, actDelete), "footer.restore", 0)}, {fk(keyOf(inList, actChips), "footer.filter", 4), fk(keyOf(inList, actSearch), "footer.search", 0)}}
 	case m.view == viewProjects && m.current() == nil:
 		expand := "footer.enter_collapse"
 		if m.cursor < len(m.rows) && m.rows[m.cursor].folded {
 			expand = "footer.enter_expand"
 		}
-		left = []footGroup{{fk(expand, 0), fk("footer.fold_all", 4)}, {fk("footer.new_session", 3), fk("footer.move_project", 4)}, {fk("footer.search", 0)}}
+		left = []footGroup{{fk(enterKey, expand, 0), fk(footKeyOf(inList, actFoldAll), "footer.fold_all", 4)}, {fk(footKeyOf(inList, actNew), "footer.new_session", 3), fk(keyOf(inList, actMove), "footer.move_project", 4)}, {fk(keyOf(inList, actSearch), "footer.search", 0)}}
 	case m.current() == nil:
 		left = []footGroup{m.searchKeys()}
 		if m.w < compactCols {
-			left, right = []footGroup{{fk("footer.search", 0)}}, help
+			left, right = []footGroup{{fk(keyOf(inList, actSearch), "footer.search", 0)}}, help
 		}
 	case m.w < compactCols:
-		left, right = []footGroup{{fk("footer.enter_details", 0)}, {fk("footer.search", 0)}}, help
+		left, right = []footGroup{{fk(enterKey, "footer.enter_details", 0)}, {fk(keyOf(inList, actSearch), "footer.search", 0)}}, help
 	case !m.twoColumn():
-		left = []footGroup{{fk("footer.enter_details", 0)}, m.searchKeys(), {m.favKey(m.current())}}
+		left = []footGroup{{fk(enterKey, "footer.enter_details", 0)}, m.searchKeys(), {m.favKey(m.current())}}
 	default:
 		left = []footGroup{m.mainKeys(m.current()), m.searchKeys(), {m.favKey(m.current())}}
 	}
@@ -966,36 +975,34 @@ func (m *Model) footer() string {
 
 // mainKeys: Enter opens the action dialog; Space presses its primary button (resume, switch, or the hits of a message search).
 func (m *Model) mainKeys(r *fav.Rec) footGroup {
-	g := footGroup{fk("footer.enter_actions", 0)}
+	g := footGroup{fk(enterKey, "footer.enter_actions", 0)}
 	switch {
 	case r == nil:
 	case m.msgMode():
-		g = append(g, fk("footer.all_hits", 2), fk("footer.jump", 4))
-	case m.view == viewLive:
-		g = append(g, fk("footer.space_switch", 2))
+		g = append(g, fk(keyName("right"), "footer.all_hits", 2), fk(keyOf(inList, actNextHit)+"/"+keyOf(inList, actPrevHit), "footer.jump", 4))
+	default:
+		if l, ok := m.liveOf(r); ok && l.TabID != "" {
+			g = append(g, fk(keyName(" "), "footer.space_switch", 2))
+		}
 		if l, ok := m.liveOf(r); ok && l.PaneID != "" {
-			g = append(g, fk("footer.peek", 3))
+			g = append(g, fk(keyOf(inList, actPeek), "footer.peek", 3))
 		}
 		if m.need(r.SessionID) != needNone {
-			g = append(g, fk("footer.handled", 3))
-		}
-	default:
-		if d, t := m.broken(r); !d && !t {
-			g = append(g, fk("footer.space_resume", 2))
+			g = append(g, fk(keyOf(inList, actHandled), "footer.handled", 3))
 		}
 	}
 	return g
 }
 
 func (m *Model) searchKeys() footGroup {
-	return footGroup{fk("footer.search", 0), fk("footer.msg_search", 5)}
+	return footGroup{fk(keyOf(inList, actSearch), "footer.search", 0), fk(keyOf(inList, actMsgSearch), "footer.msg_search", 5)}
 }
 
 func (m *Model) favKey(r *fav.Rec) footKey {
 	if r != nil && r.Favorite() {
-		return fk("footer.unfavorite", 4)
+		return fk(footKeyOf(inList, actFavorite), "footer.unfavorite", 4)
 	}
-	return fk("footer.favorite", 4)
+	return fk(footKeyOf(inList, actFavorite), "key.favorite", 4)
 }
 
 // footLine fits the groups into the width, dropping the highest-ranked hint (the later one on a tie) until they fit; right is

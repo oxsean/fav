@@ -41,7 +41,7 @@ a week later you find them by *what was done* and pick up in the right directory
                                           │   The middleware rewrites the cookie on   │
                                           │   every request, including /callback ...  │
                                           ╰───────────────────────────────────────────╯
- Enter actions  Space resume │ / search  > messages │ f unfavorite     Tab view  ? help
+ Enter actions │ / search  > messages │ f/* unfavorite                   Tab view  ? help
 ```
 
 ## The problem
@@ -71,7 +71,9 @@ plus a resume button that lands in the right place.
 - **Resume**: Herdr running → a new tab in its workspace; no Herdr → `exec` in this terminal; already running → focus that tab; background session → `claude attach`. Directory, transcript and branch are checked first.
 - **Desktop apps**: the resume dialog also opens the session in Claude's desktop app or ChatGPT's (Codex); a setting makes the app the default, or only for sessions started there — those cards say `Claude App` / `Codex App`. The button needs the session's working directory to exist and its transcript under the default `~/.claude/projects` / `~/.codex/sessions`, and appears only when the system routes `claude://` / `codex://` to that app (macOS, Windows, and Linux via xdg-mime).
 - **Fork and hand off**: the resume dialog's `b` forks the session (`claude --resume … --fork-session` / `codex fork`) — a new session with the same history, the original left as it was. `s` writes a handoff pack (summary, the latest five requests, the last reply, files it changed, `git status`; no tool output) under `~/.agent/fav/handoff/`, shows it for review or editing, then starts a new Claude or Codex session in the same directory whose first message is to read it. CLI: `fav resume --fork <id>`, `fav handoff <id> [--to claude|codex]`.
-- **New session here**: In Agents, `v` peeks at a Herdr agent's terminal (refreshed every second — permission questions show there, not in the transcript), `Tab` types a reply sent as its next prompt, and `1`–`3` pressed twice answer a numbered question. `Z` closes every Herdr tab quiet for 4 hours with nothing you have not seen (asks first, Cancel focused). `w` (`Ctrl+W`) on a Projects group header or any session opens a new Claude or Codex session in that directory — in a Herdr tab when a workspace is there — after listing what already runs there (↑↓ Enter goes to one of those instead).
+- **Peek and reply**: `` ` `` (`·` under an IME) on a session running in Herdr shows its terminal (refreshed every second — permission questions show there, not in the transcript), `:` types a reply sent as its next prompt, and `1`–`3` pressed twice answer a numbered question (forgotten when the screen changes or after 5 s).
+- **Close idle tabs**: in Agents, `Z` closes every Herdr tab quiet for 4 hours with nothing you have not seen (asks first, Cancel focused).
+- **New session here**: `w` (`Ctrl+W`) on a Projects group header or any session opens a new Claude or Codex session (`1` / `2` select, again or Enter starts) in that directory — in a Herdr tab when a workspace is there — after listing what already runs there (↑↓ Enter goes to one of those instead).
 - **Organise**: todo / doing / done / archived, edit titles and tags, group by project.
 - **Move and self-heal**: moving a project directory rewrites the sessions' cwd, the Claude project directory and `~/.claude.json`; sessions whose directory or transcript is gone get a `!`, the CLI fixes or clears them in bulk, deletes go to a trash you can restore from.
 - **Agents panel**: sessions running right now, merged from three sources (Claude `sessions/*.json`, Codex thread locks, Herdr); works without Herdr.
@@ -132,19 +134,19 @@ Four tabs, `Tab` / `1`–`4`:
 A typical flow: `/` to search (`webapp oauth last:7d`) or `;` for the chip row to filter by project / tag / source / status / time;
 `↑↓` to the session, the right pane shows its chat (`→` steps through messages, `Enter` opens one in full, `\` searches inside it);
 `Enter` opens the action dialog — `Enter` resumes, `t` forces this terminal, `y` copies the resume command, `p` opens it in the Claude / ChatGPT desktop app, `i` / `c` / `o` open the directory in the IDE / VS Code / Finder (Explorer, the file manager) — grouped in rows: resume, project, record.
-On a running session `Enter` focuses its tab; on a background session (`claude --bg`) it attaches. `Space` skips the dialog and resumes.
+On a running session `Enter` focuses its tab; on a background session (`claude --bg`) it attaches; one running in another terminal is not resumed a second time (both would write it). `Space` does one thing: it switches to a session already in a Herdr tab, otherwise it is `Enter` and only opens the dialog — whatever starts a process or a tab is confirmed there. Dialog keys whose meaning differs from the list (`t` `p` `b` `s` `i` `c` `o`) only focus their button; the same key again or `Enter` runs it. In every dialog `Tab` / `Shift+Tab` only move focus across fields and buttons. A running session gets a "Running" row: peek / handled / snooze / close tab.
 
 Organise: `f` / `*` favorite, `x` done, `a` archive, `e` edit title / tags / summary, `s` status filter (open / active / done / archived / all / trash).
 
-Moved a project directory: `M` on a group header in the Projects tab (`M` on a session moves only that one); in the directory picker `Enter` descends,
-`M` again selects; the confirmation lists from / to, how many sessions and files, and whether an open Claude / Codex needs a restart; `y` moves.
+Moved a project directory: `M` on a group header in the Projects tab (`M` on a session moves only that one); in the directory picker `Enter` / `→` descends,
+the first row ("this directory") or the "Move here" button selects; the confirmation lists from / to, how many sessions and files, and whether an open Claude / Codex needs a restart; `y` moves.
 Originals go to the trash first; a project with a running session is refused.
 
-Delete and trash: `D` moves the session files into `~/.agent/fav/trash/`; the "trash" status filter shows deleted chats, `D` restores; purged after 30 days by default.
+Delete and trash: `D`, confirmed with `y` (focus starts on Cancel), moves the session files into `~/.agent/fav/trash/`; the "trash" status filter shows deleted chats, `D` restores; purged after 30 days by default.
 A session whose directory or transcript is gone shows a dim red `!` after its title and its dialog offers only move / delete.
 
-CJK input methods swallow lowercase letters: favorite with `*`, `Ctrl+X` done / `Ctrl+A` archive / `Ctrl+E` edit / `Ctrl+Y` copy /
-`Ctrl+N/P` up and down / `Ctrl+G` resume; uppercase `D M X` pass through; every dialog action has a button. `?` lists all keys.
+CJK input methods swallow lowercase letters: favorite with `*`, `Ctrl+X` done / `Ctrl+E` edit / `Ctrl+Y` copy /
+`Ctrl+N/P` up and down / `Ctrl+G` same as `Space`; uppercase `D M X` pass through; every dialog action has a button. `?` lists all keys, grouped by where they work.
 
 Mouse on by default: click tabs, chips, cards, double-click to resume, click an input to place the cursor, wheel, overlay buttons; drag over text to copy it.
 `,` opens settings: time format, default tab / sort, short-session threshold, wheel step, icons, mouse, trash retention, IDE, language.
@@ -157,7 +159,7 @@ Type the query syntax straight into the prompt; filtering is still done by `fav`
 | Key | Action |
 |---|---|
 | `Enter` / `Alt+Enter` | resume (a new Herdr tab if Herdr is running; a running session is focused / attached) / resume in this terminal |
-| `Ctrl+X` / `Ctrl+A` / `Alt+F` | done ↔ reopen / archive ↔ unarchive / favorite ↔ unfavorite (toggles, like the TUI's `x` `a` `f`) |
+| `Ctrl+X` / `Alt+A` / `Alt+F` | done ↔ reopen / archive ↔ unarchive / favorite ↔ unfavorite (toggles, like the TUI's `x` `a` `f`) |
 | `Ctrl+E` / `Ctrl+Y` | edit in `$EDITOR` / copy the resume command |
 | `Alt+T` / `Alt+P` / `Alt+S` / `Alt+D` | tag / project / status / time pickers, written back into the query (`Ctrl+S` is status too) |
 | `Ctrl+L` / `Shift+↑↓` | reload / scroll the preview (the last 40 messages are at the bottom) |

@@ -545,9 +545,13 @@ func TestAppKeyIsP(t *testing.T) {
 	if !strings.Contains(ansi.Strip(m.View()), "p Claude App") {
 		t.Fatal("the app button is labelled p")
 	}
+	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("p")})
+	if !m.ov.active() || !strings.HasPrefix(m.ov.btns[m.ov.focus].label, "p ") {
+		t.Fatal("the first p focuses the app button")
+	}
 	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("p")})
 	if m.ov.active() || cmd == nil {
-		t.Fatal("p hands the session to the app")
+		t.Fatal("p again hands the session to the app")
 	}
 }
 
@@ -636,14 +640,14 @@ func TestTrashBlocksEveryAlias(t *testing.T) {
 	r.PinnedPath = transcript
 	m.store.Put(r)
 	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("D")})
-	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")})
 	m.search.SetValue("status:trash")
 	m.refresh()
 	if m.current() == nil {
 		t.Fatal("the deleted session is in the trash")
 	}
 	m.pane = paneChat
-	for _, k := range []tea.KeyMsg{{Type: tea.KeyRunes, Runes: []rune("*")}, {Type: tea.KeyCtrlX}, {Type: tea.KeyCtrlA}, {Type: tea.KeySpace, Runes: []rune(" ")}} {
+	for _, k := range []tea.KeyMsg{{Type: tea.KeyRunes, Runes: []rune("*")}, {Type: tea.KeyCtrlX}, {Type: tea.KeyRunes, Runes: []rune("a")}, {Type: tea.KeySpace, Runes: []rune(" ")}} {
 		m.Update(k)
 		if m.store.Get(r.ID) != nil || m.ov.active() || m.quitting {
 			t.Fatalf("in the trash %q is blocked like f, also from the right pane", k.String())
@@ -651,16 +655,23 @@ func TestTrashBlocksEveryAlias(t *testing.T) {
 	}
 }
 
-func TestSpacePressesTheAppButtonWhenItLeads(t *testing.T) {
+// Space never starts anything: it switches to a session already in a Herdr tab, otherwise it only opens the dialog.
+func TestSpaceOnlyOpensTheDialogOrSwitches(t *testing.T) {
 	m := sized(t, 140, 40)
 	capture.SetAppAvailable(fav.ProviderClaude, true)
 	r := m.current()
 	r.SessionID, r.Provider = "c5126b86-64bb-46a8-9a69-fc421c8f4f9a", fav.ProviderClaude
 	appFiles(t, r)
 	m.cfg.ResumeIn = fav.ResumeApp
-	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeySpace, Runes: []rune(" ")})
-	if m.quitting || cmd == nil || !strings.Contains(m.notice, "Claude") {
-		t.Fatalf("Space hands the session to the app, like Enter in the dialog: quitting=%v notice=%q", m.quitting, m.notice)
+	m.Update(tea.KeyMsg{Type: tea.KeySpace, Runes: []rune(" ")})
+	if m.quitting || m.ov.kind != ovResume || m.notice != "" {
+		t.Fatalf("Space opens the dialog, like Enter: quitting=%v kind=%d notice=%q", m.quitting, m.ov.kind, m.notice)
+	}
+	m.closeOverlay()
+	m.pane = paneChat
+	m.Update(tea.KeyMsg{Type: tea.KeySpace, Runes: []rune(" ")})
+	if m.ov.active() || m.quitting {
+		t.Fatal("in the chat Space pages, it does not open the dialog")
 	}
 }
 

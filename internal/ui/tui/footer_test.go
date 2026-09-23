@@ -232,6 +232,11 @@ func TestOpenInIDE(t *testing.T) {
 	m.Update(tea.KeyMsg{Type: tea.KeyEsc})
 	m.askResume()
 	m.ov.rec.Cwd = t.TempDir()
+	m.View()
+	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("i")})
+	if m.ov.focus < 0 || m.notice != "" {
+		t.Fatal("i only focuses the IDE button: its meaning differs from the list")
+	}
 	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("i")})
 	if !strings.Contains(m.notice, "没打开") || !strings.Contains(m.notice, "/no/such/ide") {
 		t.Fatalf("不存在的 IDE 应报错并留在框里：%q", m.notice)

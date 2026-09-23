@@ -41,9 +41,9 @@ func TestPeekAndReply(t *testing.T) {
 		}
 	}
 	key := func(s string) { _, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(s)}); run(cmd) }
-	key("v")
+	key("·")
 	if m.ov.kind != ovPeek {
-		t.Fatalf("v on a Herdr agent peeks: kind=%d", m.ov.kind)
+		t.Fatalf("` (· under an IME) on a Herdr agent peeks: kind=%d", m.ov.kind)
 	}
 	v := ansi.Strip(m.View())
 	if !strings.Contains(v, "Edit a.go?") || !strings.Contains(v, "1. Yes") {

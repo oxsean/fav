@@ -543,6 +543,11 @@ func TestStatusPickerAndTrash(t *testing.T) {
 	}
 	key("D")
 	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if m.ov.active() || m.store.Get(r.ID) == nil {
+		t.Fatal("删除确认的焦点在取消：Enter 不删")
+	}
+	key("D")
+	key("y")
 	if m.store.Get(r.ID) != nil {
 		t.Fatal("确认后记录应墓碑")
 	}
@@ -716,7 +721,13 @@ func TestMoveProjectFromTUI(t *testing.T) {
 	if m.ov.kind != ovPicker || m.ov.browse == nil || m.ov.filter.Value() != dst+string(filepath.Separator) || m.notice != "" {
 		t.Fatalf("确认框默认焦点在取消，Enter 应回到目录选择器：kind=%d %q notice=%q", m.ov.kind, m.ov.filter.Value(), m.notice)
 	}
-	key("M") // M inside the picker = move to the listed directory
+	key("M")
+	if m.ov.filter.Value() != dst+string(filepath.Separator)+"M" {
+		t.Fatalf("M types into the path: %q", m.ov.filter.Value())
+	}
+	m.ov.filter.SetValue(dst + string(filepath.Separator))
+	m.ov.cursor = 0
+	m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // the first row = this directory
 	key("y")
 	if m.ov.active() || !strings.Contains(m.notice, "已移动 2") {
 		t.Fatalf("y 应搬完：notice=%q", m.notice)

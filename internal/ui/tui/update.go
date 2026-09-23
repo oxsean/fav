@@ -295,36 +295,35 @@ func (m *Model) searchKey(msg tea.KeyMsg) tea.Cmd {
 	return cmd
 }
 
-// navKey: list navigation. ⚠️ Every action needs a non-letter key (letters never reach here under a CJK IME); 、？；， count as / ? ; , (a CJK input method types / as 、); ctrl+s stands in for \.
+// navKey: list navigation; keys come from the table in keys.go. ⚠️ Every action needs a non-letter key (letters never
+// reach here under a CJK IME).
 func (m *Model) navKey(msg tea.KeyMsg) tea.Cmd {
-	if m.inTrash() && m.current() != nil && m.chipFocus < 0 {
-		switch msg.String() {
-		case "f", "*", "x", "ctrl+x", "a", "ctrl+a", "e", "ctrl+e", "r", "X", "M", " ", "ctrl+g":
-			m.flash(i18n.T("trash.in_trash_hint"))
-			return nil
-		}
+	a := keyAct(inList, msg.String())
+	if m.inTrash() && m.current() != nil && m.chipFocus < 0 && trashBlocked(a) {
+		m.flash(i18n.T("trash.in_trash_hint"))
+		return nil
 	}
 	if m.hitsOpen() && m.pane == paneList && m.chipFocus < 0 {
-		if cmd, ok := m.hitKey(msg.String()); ok {
+		if cmd, ok := m.hitKey(a); ok {
 			return cmd
 		}
 	}
-	switch msg.String() {
-	case "\\", "ctrl+s":
+	switch a {
+	case actFind:
 		return m.startChatSearch()
-	case "n":
+	case actNextHit:
 		if m.hitsOpen() {
 			return m.selectHit(m.msg.hl.cur + 1)
 		}
 		return m.findHit(m.chat.cur + 1)
-	case "N":
+	case actPrevHit:
 		if m.hitsOpen() {
 			return m.selectHit(m.msg.hl.cur - 1)
 		}
 		m.jumpHit(m.chat.cur - 1)
-	case "q", "ctrl+c":
+	case actQuit:
 		m.quitting = true
-	case "esc":
+	case actBack:
 		// Esc backs out one level, never quits
 		switch {
 		case m.chipFocus >= 0:
@@ -339,11 +338,11 @@ func (m *Model) navKey(msg tea.KeyMsg) tea.Cmd {
 			m.search.SetValue("")
 			m.refresh()
 		}
-	case "/", "、": // a CJK input method turns / into 、
+	case actSearch:
 		m.focusSearch()
-	case ">", "》":
+	case actMsgSearch:
 		m.focusMsgSearch()
-	case "j", "down", "ctrl+n":
+	case actDown:
 		switch {
 		case m.projectFocus():
 			m.projCur++
@@ -352,7 +351,7 @@ func (m *Model) navKey(msg tea.KeyMsg) tea.Cmd {
 		default:
 			m.move(1)
 		}
-	case "k", "up", "ctrl+p":
+	case actUp:
 		switch {
 		case m.projectFocus():
 			m.projCur--
@@ -361,11 +360,11 @@ func (m *Model) navKey(msg tea.KeyMsg) tea.Cmd {
 		default:
 			m.move(-1)
 		}
-	case "J", "ctrl+j":
+	case actChatDown:
 		m.moveChat(1)
-	case "K", "ctrl+k":
+	case actChatUp:
 		m.moveChat(-1)
-	case "h", "left": // ← backs out: chip row → right pane → narrow detail → collapse group
+	case actLeft: // ← backs out: chip row → right pane → narrow detail → collapse group
 		switch {
 		case m.chipFocus >= 0:
 			m.moveChip(-1)
@@ -376,7 +375,7 @@ func (m *Model) navKey(msg tea.KeyMsg) tea.Cmd {
 		case m.view == viewProjects: // tree convention: ← collapses; on a child it goes to the header
 			m.foldGroup()
 		}
-	case "l", "right": // → goes in: expand group → right pane → full message
+	case actRight: // → goes in: expand group → right pane → full message
 		switch {
 		case m.chipFocus >= 0:
 			m.moveChip(1)
@@ -389,94 +388,90 @@ func (m *Model) navKey(msg tea.KeyMsg) tea.Cmd {
 		case m.chatVisible(): // → again on a group header focuses the right-pane session list
 			m.pane, m.projCur = paneChat, 0
 		}
-	case "y", "ctrl+y":
+	case actCopy:
 		if m.pane == paneChat {
 			m.copyMessage()
 		}
-	case "g", "home":
+	case actTop:
 		if m.pane == paneChat {
 			m.moveChat(-1 << 30)
 		} else {
 			m.cursor = 0
 			m.clampCursor()
 		}
-	case "G", "end":
+	case actBottom:
 		if m.pane == paneChat {
 			m.moveChat(1 << 30)
 		} else {
 			m.cursor = len(m.rows) - 1
 			m.clampCursor()
 		}
-	case "pgdown", "ctrl+f":
+	case actPageDown:
 		if m.pane == paneChat {
 			m.moveChat(5)
 		} else {
 			m.page(1)
 		}
-	case "pgup", "ctrl+b":
+	case actPageUp:
 		if m.pane == paneChat {
 			m.moveChat(-5)
 		} else {
 			m.page(-1)
 		}
-	case "ctrl+d":
+	case actHalfDown:
 		if m.pane == paneChat {
 			m.moveChat(3)
 		} else {
 			m.halfPage(1)
 		}
-	case "ctrl+u":
+	case actHalfUp:
 		if m.pane == paneChat {
 			m.moveChat(-3)
 		} else {
 			m.halfPage(-1)
 		}
-	case "tab":
+	case actNextView:
 		// switching views keeps the query
 		m.setView(m.nextView())
-	case "shift+tab":
+	case actPrevView:
 		m.setView(view((int(m.view) + viewCount - 1) % viewCount))
-	case "1", "2", "3", "4":
+	case actView:
 		m.setView(view(int(msg.String()[0] - '1')))
-	case ";", "；":
+	case actChips:
 		if m.chipFocus >= 0 {
 			m.chipFocus = -1
 		} else {
 			m.chipFocus = 0
 		}
-	case "f", "*": // *: non-letter, IME-safe
+	case actFavorite:
 		m.toggleFavorite()
-	case ".", "。":
+	case actHandled:
 		m.handleAttn(false)
-	case "H":
+	case actSnooze:
 		m.handleAttn(true)
-	case " ", "ctrl+g":
-		if m.current() == nil {
-			m.toggleGroup()
-		} else if m.twoColumn() || m.detail {
-			m.askResume()
-			if m.ov.kind != ovResume {
-				break
-			}
-			if d, t := m.broken(m.ov.rec); d || t {
-				break // the dialog stays: move or delete instead
-			}
-			if m.ov.app {
-				m.doApp()
-			} else {
-				m.doResume(false)
+	case actSpace: // switches to a session already in a Herdr tab; anything that would start a process goes through the dialog
+		if m.pane == paneChat && m.current() != nil {
+			m.moveChat(5)
+			return nil
+		}
+		if r := m.current(); r != nil {
+			if l, ok := m.live[r.SessionID]; ok && l.TabID != "" {
+				p, _ := capture.PlanResume(r, m.live, false)
+				m.runPlan(r, p, false)
+				return nil
 			}
 		}
-	case "z":
+		return m.navKey(tea.KeyMsg{Type: tea.KeyEnter})
+	case actFoldAll:
 		if m.view == viewProjects {
 			m.foldAll(nil)
 		}
-	case "-", "=", "+":
+	case actFold, actUnfold:
 		if m.view == viewProjects {
-			fold := msg.String() == "-"
+			fold := a == actFold
 			m.foldAll(&fold)
 		}
-	case "enter":
+	case actEnter:
 		if m.chipFocus >= 0 {
 			m.chipData()[m.chipFocus].open(m)
 			return nil
@@ -500,35 +495,33 @@ func (m *Model) navKey(msg tea.KeyMsg) tea.Cmd {
 			return nil
 		}
 		m.askResume()
-	case "X":
+	case actCloseTab:
 		m.closeLive()
-	case "Z":
+	case actCloseIdle:
 		if m.view == viewLive {
 			m.closeIdle()
 		}
-	case "r":
+	case actResume:
 		m.askResume()
-	case "t":
+	case actTags:
 		m.pickTags()
-	case "p":
+	case actProjects:
 		m.pickProjects()
-	case "w", "ctrl+w":
+	case actNew:
 		m.askStart()
-	case "v":
-		if m.view == viewLive {
-			m.askPeek(m.current())
-			return nil
-		}
+	case actProvider:
 		m.cycleProvider()
-	case "s":
+	case actPeek:
+		m.askPeek(m.current())
+	case actStatus:
 		m.pickStatus()
-	case "D":
+	case actDelete:
 		m.askDelete()
-	case "M":
+	case actMove:
 		m.askMove()
-	case "d":
+	case actDate:
 		m.pickDate()
-	case "o", "ctrl+o":
+	case actSort:
 		switch {
 		case m.msgMode():
 			m.msg.byTime, m.msg.toTop = !m.msg.byTime, true
@@ -542,15 +535,15 @@ func (m *Model) navKey(msg tea.KeyMsg) tea.Cmd {
 			m.sortBy = m.sortBy.next()
 		}
 		m.refresh()
-	case "a", "ctrl+a":
+	case actArchive:
 		m.toggleArchive()
-	case "x", "ctrl+x":
+	case actDone:
 		m.toggleStatus(fav.StatusDone)
-	case "e", "ctrl+e":
+	case actEdit:
 		return m.openEdit()
-	case "?", "？":
+	case actHelp:
 		m.ov = overlay{kind: ovHelp}
-	case ",", "，":
+	case actSettings:
 		m.openSettings()
 	}
 	return nil
@@ -648,8 +641,13 @@ func (m *Model) overlayKey(msg tea.KeyMsg) tea.Cmd {
 			m.ov.edit, cmd = m.ov.edit.Update(msg)
 			return cmd
 		}
-		switch msg.String() {
-		case "enter":
+		a := keyAct(inResume, msg.String())
+		if b := bindingOf(inResume, a); b != nil && b.tier == tierStart && a != actResume {
+			m.focusKey(a) // its meaning differs from the list: the first press only focuses the button
+			return nil
+		}
+		switch a {
+		case actEnter:
 			if m.pressFocused() {
 				return nil
 			}
@@ -666,54 +664,40 @@ func (m *Model) overlayKey(msg tea.KeyMsg) tea.Cmd {
 				return nil
 			}
 			m.doResume(false)
-		case "p":
-			if appReady(m.ov.rec) {
-				m.doApp()
-			}
-		case "r":
+		case actResume:
 			m.doResume(false)
-		case "left", "h", "shift+tab":
+		case actFocusPrev:
 			m.moveFocus(-1)
-		case "right", "l", "tab":
+		case actFocusNext:
 			m.moveFocus(1)
-		case "M":
+		case actMove:
 			m.askMove()
-		case "D":
+		case actDelete:
 			m.askDelete()
-		case "f", "*":
+		case actFavorite:
 			m.closeOverlay()
 			m.toggleFavorite()
-		case "x", "ctrl+x":
+		case actDone:
 			m.closeOverlay()
 			m.toggleStatus(fav.StatusDone)
-		case "a", "ctrl+a":
+		case actArchive:
 			m.closeOverlay()
 			m.toggleArchive()
-		case "t", "ctrl+t":
-			m.doResume(true)
-		case "y", "ctrl+y":
+		case actCopy:
 			m.copyResume()
-		case "i":
-			m.openIDE()
-		case "c":
-			m.openCode()
-		case "o":
-			m.openFiles()
-		case "e", "ctrl+e":
+		case actEdit:
 			m.pending = m.openEdit()
-		case "n":
+		case actTitle:
 			m.editTitle()
-		case "b":
-			m.doFork()
-		case "s":
-			m.doHandoff()
-		case "w", "ctrl+w":
+		case actNew:
 			m.askStartFromDialog()
-		case "v":
+		case actPeek:
 			if m.ov.plan.Live.PaneID != "" {
 				m.askPeek(m.ovRec())
 			}
-		case "esc", "q":
+		case actHandled, actSnooze, actCloseTab:
+			m.agentAction(a)
+		case actClose:
 			m.closeOverlay()
 		}
 		return nil
@@ -737,18 +721,16 @@ func (m *Model) overlayKey(msg tea.KeyMsg) tea.Cmd {
 	case "left", "shift+tab":
 		m.moveFocus(-1)
 		return nil
-	case "right", "tab":
+	case "right":
 		if m.ov.browse != nil {
 			m.descendDir()
 			return nil
 		}
 		m.moveFocus(1)
 		return nil
-	case "M":
-		if m.ov.browse != nil { // same as M outside: pressing it again selects the listed directory (a capital M in a path is typed lowercase)
-			m.pickDir()
-			return nil
-		}
+	case "tab":
+		m.moveFocus(1)
+		return nil
 	case "down", "ctrl+n":
 		if m.ov.cursor < len(m.ov.visible())-1 {
 			m.ov.cursor++

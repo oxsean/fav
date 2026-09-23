@@ -137,12 +137,11 @@ func (m *Model) switchRunning(i int) {
 }
 
 func (m *Model) startGroups() []btnGroup {
-	keys := map[string]string{fav.ProviderClaude: "1", fav.ProviderCodex: "2"}
 	var bs []btn
 	for i, p := range m.ov.providers {
-		bs = append(bs, btn{keys[p] + " " + providerLabel(p), i == 0 && m.ov.cursor < 0, func(mm *Model) { mm.startNew(p) }})
+		bs = append(bs, btn{keyed(keyOf(inStart, providerAct(p)), providerLabel(p)), i == 0 && m.ov.cursor < 0, func(mm *Model) { mm.startNew(p) }})
 	}
-	return []btnGroup{{label: i18n.T("start.group"), bs: bs, end: []btn{{i18n.T("btn.cancel"), false, (*Model).closeOverlay}}}}
+	return []btnGroup{{label: i18n.T("start.group"), bs: bs, end: []btn{cancelBtn()}}}
 }
 
 func (m *Model) renderStart() string {
@@ -192,8 +191,8 @@ func (m *Model) renderStart() string {
 }
 
 func (m *Model) startKey(msg tea.KeyMsg) tea.Cmd {
-	switch msg.String() {
-	case "enter", " ":
+	switch a := keyAct(inStart, msg.String()); a {
+	case actEnter:
 		if m.pressFocused() {
 			return nil
 		}
@@ -202,24 +201,54 @@ func (m *Model) startKey(msg tea.KeyMsg) tea.Cmd {
 		} else if len(m.ov.providers) > 0 {
 			m.startNew(m.ov.providers[0])
 		}
-	case "1":
-		m.startNew(fav.ProviderClaude)
-	case "2":
-		m.startNew(fav.ProviderCodex)
-	case "j", "down", "ctrl+n":
+	case actClaude, actCodex:
+		m.ov.cursor = -1
+		m.selectProvider(providerOf(a))
+	case actDown:
 		m.ov.cursor = min(m.ov.cursor+1, len(m.ov.running)-1)
 		m.ov.focus = -1
-	case "k", "up", "ctrl+p":
+	case actUp:
 		m.ov.cursor = max(m.ov.cursor-1, -1)
 		m.ov.focus = -1
-	case "left", "h", "shift+tab":
+	case actFocusPrev:
 		m.ov.cursor = -1
 		m.moveFocus(-1)
-	case "right", "l", "tab":
+	case actFocusNext:
 		m.ov.cursor = -1
 		m.moveFocus(1)
-	case "esc", "q":
+	case actClose:
 		m.closeOverlay()
 	}
 	return nil
+}
+
+func providerOf(a act) string {
+	if a == actCodex {
+		return fav.ProviderCodex
+	}
+	return fav.ProviderClaude
+}
+
+func providerAct(p string) act {
+	if p == fav.ProviderCodex {
+		return actCodex
+	}
+	return actClaude
+}
+
+// selectProvider (1 / 2 in the new-session and handoff dialogs) focuses that provider's button; the same digit again or
+// Enter starts it.
+func (m *Model) selectProvider(p string) {
+	for i, have := range m.ov.providers {
+		if have != p {
+			continue
+		}
+		if m.ov.focus == i {
+			m.pressFocused()
+			return
+		}
+		m.ov.focus = i
+		return
+	}
+	m.flash(providerLabel(p) + i18n.T("resume.check.not_installed"))
 }

@@ -193,27 +193,27 @@ func (m *Model) openHitMessage() tea.Cmd {
 }
 
 // hitKey handles the keys of an open hit list; false leaves the key to the list.
-func (m *Model) hitKey(key string) (tea.Cmd, bool) {
+func (m *Model) hitKey(a act) (tea.Cmd, bool) {
 	cur := m.msg.hl.cur
-	switch key {
-	case "j", "down", "ctrl+n", "n":
+	switch a {
+	case actDown, actNextHit:
 		return m.selectHit(cur + 1), true
-	case "k", "up", "ctrl+p", "N":
+	case actUp, actPrevHit:
 		return m.selectHit(cur - 1), true
-	case "pgdown", "ctrl+f":
+	case actPageDown:
 		return m.selectHit(cur + 5), true
-	case "pgup", "ctrl+b":
+	case actPageUp:
 		return m.selectHit(cur - 5), true
-	case "g", "home":
+	case actTop:
 		return m.selectHit(0), true
-	case "G", "end":
+	case actBottom:
 		return m.selectHit(len(m.msg.hl.items) - 1), true
-	case "enter":
+	case actEnter:
 		return m.openHitMessage(), true
-	case "l", "right":
+	case actRight:
 		m.pane = paneChat
 		return nil, true
-	case "h", "left", "esc":
+	case actLeft, actBack:
 		m.dropHits()
 		return nil, true
 	}

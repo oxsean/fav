@@ -42,20 +42,35 @@ func (m *Model) openEdit() tea.Cmd {
 	return textinput.Blink
 }
 
+// editButtons: the field index past the three inputs; Tab walks title, tags, summary, then each button.
+const editButtons = 3
+
 func (m *Model) focusField(i int) tea.Cmd {
-	m.ov.field = (i + 3) % 3
+	stops := editButtons + len(m.ov.btns)
+	i = (i + stops) % stops
 	m.ov.edit.Blur()
 	m.ov.edit2.Blur()
 	m.ov.area.Blur()
-	switch m.ov.field {
-	case 0:
+	m.ov.field, m.ov.focus = min(i, editButtons), -1
+	switch {
+	case i == 0:
 		m.ov.edit.Focus()
-	case 1:
+	case i == 1:
 		m.ov.edit2.Focus()
-	default:
+	case i == 2:
 		return m.ov.area.Focus()
+	default:
+		m.ov.focus = i - editButtons
+		return nil
 	}
 	return textinput.Blink
+}
+
+func (m *Model) editStop() int {
+	if m.ov.field == editButtons {
+		return editButtons + max(0, m.ov.focus)
+	}
+	return m.ov.field
 }
 
 func (m *Model) editDirty() bool {
@@ -85,16 +100,24 @@ func (m *Model) editKey(msg tea.KeyMsg) tea.Cmd {
 			return nil
 		}
 	case "tab":
-		return m.focusField(m.ov.field + 1)
+		return m.focusField(m.editStop() + 1)
 	case "shift+tab":
-		return m.focusField(m.ov.field - 1)
+		return m.focusField(m.editStop() - 1)
 	case "up", "down":
 		if m.ov.field != 2 {
 			if msg.String() == "up" {
-				return m.focusField(m.ov.field - 1)
+				return m.focusField(m.editStop() - 1)
 			}
-			return m.focusField(m.ov.field + 1)
+			return m.focusField(m.editStop() + 1)
 		}
+	case "left", "right":
+		if m.ov.field == editButtons {
+			m.moveFocus(map[string]int{"left": -1, "right": 1}[msg.String()])
+			return nil
+		}
+	}
+	if m.ov.field == editButtons {
+		return nil
 	}
 	var cmd tea.Cmd
 	switch m.ov.field {
@@ -157,8 +180,8 @@ func (m *Model) renderEdit() string {
 	field(i18n.T("label.tags"), m.ov.edit2.View(), 1)
 	field(i18n.T("card.summary"), m.ov.area.View(), 2)
 	body = append(body, m.buttons(len(body)+1, []btn{
-		{i18n.T("edit.btn_save"), true, (*Model).saveEdit},
-		{i18n.T("btn.cancel"), false, (*Model).closeOverlay},
+		{keyed(keyName("ctrl+s"), i18n.T("edit.btn_save")), true, (*Model).saveEdit},
+		cancelBtn(),
 	})...)
 	return ovRender(body, w)
 }

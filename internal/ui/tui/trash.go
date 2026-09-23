@@ -124,7 +124,7 @@ func (m *Model) askDelete() {
 	if d := m.cfg.TrashDays; d > 0 {
 		body = append(body, i18n.F("trash.confirm_purge", d))
 	}
-	m.ov = overlay{kind: ovConfirm, title: i18n.T("trash.title"), lines: body, focus: -1, okLabel: i18n.T("trash.btn_delete"),
+	m.ov = overlay{kind: ovConfirm, title: i18n.T("trash.title"), lines: body, focus: 1, okLabel: i18n.T("trash.btn_delete"),
 		confirm: func(m *Model) { m.deleteSession(r, files) }}
 }
 
@@ -185,8 +185,8 @@ func (m *Model) restoreTrash(r *fav.Rec) {
 }
 
 func (m *Model) confirmKey(key string) {
-	switch key {
-	case "enter":
+	switch keyAct(inConfirm, key) {
+	case actEnter:
 		if m.pressFocused() {
 			return
 		}
@@ -195,13 +195,13 @@ func (m *Model) confirmKey(key string) {
 			return
 		}
 		m.doConfirm()
-	case "y":
+	case actConfirm:
 		m.doConfirm()
-	case "left", "h", "shift+tab":
+	case actFocusPrev:
 		m.moveFocus(-1)
-	case "right", "l", "tab":
+	case actFocusNext:
 		m.moveFocus(1)
-	case "esc", "q", "n":
+	case actClose:
 		m.cancelConfirm()
 	}
 }
@@ -232,7 +232,7 @@ func (m *Model) renderConfirm() string {
 	}
 	body = append(body, "")
 	body = append(body, m.buttons(len(body)+1, []btn{
-		{m.ov.okLabel, true, (*Model).doConfirm},
+		{keyed(keyOf(inConfirm, actConfirm), m.ov.okLabel), m.ov.focus < 0, (*Model).doConfirm},
 		{m.ov.cancelLabel(), false, (*Model).cancelConfirm},
 	})...)
 	return ovRender(body, w)

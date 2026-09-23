@@ -171,17 +171,17 @@ func (m *Model) settingsKey(msg tea.KeyMsg) tea.Cmd {
 	switch msg.String() {
 	case "esc", "q", ",", "，":
 		m.closeOverlay()
-	case "up", "k", "ctrl+p":
+	case "up", "k", "ctrl+p", "shift+tab":
 		if m.ov.cursor > 0 {
 			m.ov.cursor--
 		}
-	case "down", "j", "ctrl+n":
+	case "down", "j", "ctrl+n", "tab":
 		if m.ov.cursor < len(settingsTable())-1 {
 			m.ov.cursor++
 		}
-	case "left", "h", "shift+tab":
+	case "left", "h":
 		return m.cycleSetting(m.ov.cursor, -1)
-	case "right", "l", "tab", "enter", " ":
+	case "right", "l", "enter", " ":
 		return m.cycleSetting(m.ov.cursor, 1)
 	}
 	return nil

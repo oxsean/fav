@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"os"
 	"slices"
 	"strings"
 	"testing"
@@ -48,6 +49,11 @@ func TestStartFromProjectShowsWhatRuns(t *testing.T) {
 	}
 	m.closeOverlay()
 	key("w")
+	m.View()
+	key("2")
+	if m.quitting {
+		t.Fatal("the first 2 only selects Codex")
+	}
 	key("2")
 	s := m.result.Start
 	if !m.quitting || s == nil || !slices.Equal(s.Argv(), []string{"codex"}) || s.Cwd != dir {
@@ -77,5 +83,41 @@ func TestCloseIdleTabs(t *testing.T) {
 	body := strings.Join(m.ov.lines, "\n")
 	if !strings.Contains(body, old.Title[:6]) || strings.Contains(body, fresh.Title[:6]) || strings.Contains(body, unseen.Title[:6]) {
 		t.Fatalf("only tabs quiet for hours with nothing unseen:\n%s", body)
+	}
+}
+
+func TestResumeRefusedWhileRunningElsewhere(t *testing.T) {
+	m := sized(t, 140, 40)
+	r := m.current()
+	r.Cwd = t.TempDir()
+	r.TranscriptPath = r.Cwd + "/s.jsonl"
+	os.WriteFile(r.TranscriptPath, []byte("{}\n"), 0o644)
+	m.live = map[string]capture.Live{r.SessionID: {Status: "idle"}} // another terminal, not Herdr
+	m.askResume()
+	v := ansi.Strip(m.View())
+	if !strings.Contains(v, "在别的终端里运行") || !strings.Contains(v, "在跑") || !strings.Contains(v, "H 暂缓") || strings.Contains(v, "X 关掉 tab") {
+		t.Fatalf("the check says why, and the running row has the actions that apply:\n%s", v)
+	}
+	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if m.quitting || !strings.Contains(m.notice, "别的终端") {
+		t.Fatalf("resuming a second copy is refused: quitting=%v notice=%q", m.quitting, m.notice)
+	}
+}
+
+func TestPeekForgetsTheArmedDigitWhenTheScreenChanges(t *testing.T) {
+	m := sized(t, 140, 40)
+	m.ov = overlay{kind: ovPeek, rec: m.current(), title: "p1", lines: []string{"1. Yes"}, armed: "1", armedAt: time.Now()}
+	m.applyPeek(peekMsg{pane: "p1", text: "1. Yes\n"})
+	if m.ov.armed != "1" {
+		t.Fatal("same screen: still armed")
+	}
+	m.applyPeek(peekMsg{pane: "p1", text: "Another question?\n1. Yes\n"})
+	if m.ov.armed != "" {
+		t.Fatal("a changed screen forgets the armed digit")
+	}
+	m.ov.armed, m.ov.armedAt = "2", time.Now().Add(-peekArmFor-time.Second)
+	m.applyPeek(peekMsg{pane: "p1", text: "Another question?\n1. Yes\n"})
+	if m.ov.armed != "" {
+		t.Fatal("an old armed digit expires")
 	}
 }

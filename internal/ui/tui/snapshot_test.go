@@ -190,6 +190,8 @@ func TestResumeDialogEditsTitle(t *testing.T) {
 	rec := m.ov.rec
 	old := rec.Title
 	rec.HerdrWorkspace, rec.Cwd = "", t.TempDir()
+	rec.TranscriptPath = filepath.Join(rec.Cwd, "s.jsonl")
+	os.WriteFile(rec.TranscriptPath, []byte("{}\n"), 0o644)
 	m.ov.plan, _ = capture.PlanResume(rec, nil, false)
 
 	m.View()
