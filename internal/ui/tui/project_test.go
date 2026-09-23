@@ -16,11 +16,9 @@ func TestAutoOpenProjectOfStartDir(t *testing.T) {
 	s := fixture(t)
 	dir := t.TempDir()
 	for _, r := range s.All() {
-		if r.Project == "webapp" {
-			r.Cwd = filepath.Join(dir, "webapp")
-			if err := s.Put(r); err != nil {
-				t.Fatal(err)
-			}
+		r.Cwd = filepath.Join(dir, r.Project)
+		if err := s.Put(r); err != nil {
+			t.Fatal(err)
 		}
 	}
 	m := New(s, noIndex(t), fav.DefaultConfig(), "")
@@ -109,7 +107,7 @@ func TestProjectBlockShowsThisWeeksFiles(t *testing.T) {
 	}
 	m.setView(viewProjects)
 	body := ansi.Strip(strings.Join(m.projectBlock(group, 0, 0, 70, 40), "\n"))
-	if !strings.Contains(body, "internal/page.go ×8") || !strings.Contains(body, "README.md ×2") {
+	if !strings.Contains(body, filepath.FromSlash("internal/page.go")+" ×8") || !strings.Contains(body, "README.md ×2") {
 		t.Fatalf("this week's most written files, summed over the group, relative to its directory:\n%s", body)
 	}
 	for i, l := range m.projectBlock(group, 0, 0, 70, 40) {

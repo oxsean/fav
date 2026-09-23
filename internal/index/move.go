@@ -58,8 +58,11 @@ type MoveReport struct {
 var claudeEnc = regexp.MustCompile(`[^A-Za-z0-9]`)
 
 func ClaudeProjectDir(cwd string) string {
-	return filepath.Join(claudeHome(), "projects", claudeEnc.ReplaceAllString(cwd, "-"))
+	return filepath.Join(claudeHome(), "projects", ClaudeProjectName(cwd))
 }
+
+// ClaudeProjectName is the directory name Claude Code gives a cwd under projects/.
+func ClaudeProjectName(cwd string) string { return claudeEnc.ReplaceAllString(cwd, "-") }
 
 // both sides Cleaned so forward slashes in records match on Windows
 func under(p, dir string) bool {

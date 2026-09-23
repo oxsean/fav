@@ -1,6 +1,7 @@
 package capture
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"slices"
@@ -10,6 +11,11 @@ import (
 
 	"github.com/oxsean/fav/internal/fav"
 )
+
+func jsonString(s string) string {
+	b, _ := json.Marshal(s)
+	return string(b)
+}
 
 func TestHandoffPack(t *testing.T) {
 	dir := t.TempDir()
@@ -21,7 +27,7 @@ func TestHandoffPack(t *testing.T) {
 		lines = append(lines, `{"type":"user","timestamp":"2026-09-22T10:0`+string(rune('0'+i))+`:00Z","message":{"role":"user","content":"要求`+q+`"}}`)
 	}
 	lines = append(lines,
-		`{"type":"assistant","timestamp":"2026-09-22T10:07:00Z","message":{"role":"assistant","content":[{"type":"text","text":"先改排序"},{"type":"tool_use","name":"Edit","input":{"file_path":"`+cwd+`/a.go","old_string":"x","new_string":"y"}},{"type":"tool_use","name":"Bash","input":{"command":"cat secret.env"}}]}}`,
+		`{"type":"assistant","timestamp":"2026-09-22T10:07:00Z","message":{"role":"assistant","content":[{"type":"text","text":"先改排序"},{"type":"tool_use","name":"Edit","input":{"file_path":`+jsonString(filepath.Join(cwd, "a.go"))+`,"old_string":"x","new_string":"y"}},{"type":"tool_use","name":"Bash","input":{"command":"cat secret.env"}}]}}`,
 		`{"type":"user","timestamp":"2026-09-22T10:07:01Z","message":{"role":"user","content":[{"type":"tool_result","content":"TOKEN=abc"}]}}`,
 		`{"type":"assistant","timestamp":"2026-09-22T10:08:00Z","message":{"role":"assistant","content":[{"type":"text","text":"改完了\n| a | b |\n下一步跑测试"},{"type":"tool_use","name":"Write","input":{"file_path":"/elsewhere/b.md","content":"z"}}]}}`,
 	)

@@ -12,6 +12,7 @@ import (
 )
 
 func TestMoveProject(t *testing.T) {
+	posixOnly(t)
 	claude, codex := setup(t)
 	t.Setenv("FAV_HOME", t.TempDir())
 	old, new := "/Users/me/work/webapp", "/Users/me/dev/webapp"
@@ -161,6 +162,7 @@ func TestMoveProject(t *testing.T) {
 
 // after undo the original is back at the same path with possibly identical size/mtime; RescanAfterRestore must force it
 func TestRescanAfterRestore(t *testing.T) {
+	posixOnly(t)
 	_, codex := setup(t)
 	t.Setenv("FAV_HOME", t.TempDir())
 	old, new := "/Users/me/work/p", "/Users/me/work/q" // same length: size unchanged by the rewrite
@@ -194,6 +196,7 @@ func TestRescanAfterRestore(t *testing.T) {
 }
 
 func TestPlanMoveSeesWorktreeSettings(t *testing.T) {
+	posixOnly(t)
 	claude, _ := setup(t)
 	t.Setenv("FAV_HOME", t.TempDir())
 	write(t, filepath.Join(claude, ".claude.json"), `{"projects":{"/Users/me/work/p/wt/feat":{}}}`)
@@ -206,6 +209,7 @@ func TestPlanMoveSeesWorktreeSettings(t *testing.T) {
 }
 
 func TestMoveSweepsEmptyProjectDir(t *testing.T) {
+	posixOnly(t)
 	claude, _ := setup(t)
 	t.Setenv("FAV_HOME", t.TempDir())
 	old, new := "/Users/me/work/p", "/Users/me/dev/p"
@@ -232,6 +236,7 @@ func TestMoveSweepsEmptyProjectDir(t *testing.T) {
 }
 
 func TestMoveRefusesDestinationConflictAndGitRootOnlyRecord(t *testing.T) {
+	posixOnly(t)
 	claude, _ := setup(t)
 	t.Setenv("FAV_HOME", t.TempDir())
 	old, new := "/Users/me/work/p", "/Users/me/dev/p"
@@ -265,6 +270,7 @@ func TestMoveRefusesDestinationConflictAndGitRootOnlyRecord(t *testing.T) {
 }
 
 func TestRestoreRefusedAfterUse(t *testing.T) {
+	posixOnly(t)
 	claude, _ := setup(t)
 	t.Setenv("FAV_HOME", t.TempDir())
 	old, new := "/Users/me/work/p", "/Users/me/dev/p"
@@ -290,6 +296,7 @@ func TestRestoreRefusedAfterUse(t *testing.T) {
 }
 
 func TestRestoreRetryAndPin(t *testing.T) {
+	posixOnly(t)
 	claude, codex := setup(t)
 	t.Setenv("FAV_HOME", t.TempDir())
 	old, new := "/Users/me/work/p", "/Users/me/dev/p"
@@ -353,6 +360,7 @@ func TestRestoreRetryAndPin(t *testing.T) {
 }
 
 func TestRestoreIdempotentAfterPartialFailure(t *testing.T) {
+	posixOnly(t)
 	_, codex := setup(t)
 	t.Setenv("FAV_HOME", t.TempDir())
 	old, new := "/Users/me/work/p", "/Users/me/dev/p"

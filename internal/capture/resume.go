@@ -4,7 +4,6 @@ import (
 	"errors"
 	"os"
 	"os/exec"
-	"strings"
 
 	"github.com/oxsean/fav/internal/fav"
 	"github.com/oxsean/fav/internal/i18n"
@@ -29,32 +28,14 @@ type CommandSpec struct {
 
 func (c CommandSpec) Argv() []string { return append([]string{c.Exec}, c.Args...) }
 
-// for display only, never executed
-func (c CommandSpec) Display() string { return ShellJoin(c.Argv()) }
+// Display is the command without the cd, quoted for the shell fav was started from; never executed.
+func (c CommandSpec) Display() string { return userShell().join(c.Argv()) }
 
-// ShellLine is the line typed into a shell (herdr pane run goes through a shell, not argv); it cds first when Cwd is set.
-func (c CommandSpec) ShellLine() string {
-	line := ShellJoin(c.Argv())
-	if c.Cwd != "" {
-		line = ShellJoin([]string{"cd", c.Cwd}) + " && " + line
-	}
-	return line
-}
+// TerminalLine is the line the user copies into the shell fav was started from; it cds first when Cwd is set.
+func (c CommandSpec) TerminalLine() string { return userShell().line(c) }
 
-func ShellJoin(argv []string) string {
-	parts := make([]string, len(argv))
-	for i, a := range argv {
-		parts[i] = shellQuote(a)
-	}
-	return strings.Join(parts, " ")
-}
-
-func shellQuote(s string) string {
-	if s != "" && !strings.ContainsAny(s, " \t\n'\"\\$`!*?[]{}()<>|&;#~") {
-		return s
-	}
-	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
-}
+// ShellLine is the line typed into a Herdr pane (herdr pane run goes through a POSIX shell, not argv).
+func (c CommandSpec) ShellLine() string { return posixShell.line(c) }
 
 // Claude keeps the original session id (no --fork-session).
 func BuildResume(r *fav.Rec) (CommandSpec, error) {

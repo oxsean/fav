@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -24,7 +25,7 @@ func fixture(t *testing.T) *fav.Store {
 	if err != nil {
 		t.Fatal(err)
 	}
-	base := time.Now()
+	base, cwd := time.Now(), t.TempDir()
 	seed := []struct {
 		title, project, provider string
 		tags                     []string
@@ -41,7 +42,7 @@ func fixture(t *testing.T) *fav.Store {
 			ID: fav.NewID(), Provider: x.provider, SessionID: fav.NewID(),
 			Title: x.title, Summary: "排查搜索接口游标分页重复返回同一条的问题。确认 region-specific toggle 未创建时后端回退到 embedded YAML default。",
 			Project: x.project, Tags: x.tags, Status: fav.StatusDone,
-			Cwd: "/tmp", GitBranch: "feature/cursor-pagination",
+			Cwd: cwd, GitBranch: "feature/cursor-pagination",
 			FavoritedAt: ptr(base.Add(-x.ago)),
 		}
 		if x.done {
@@ -676,7 +677,8 @@ func TestMoveProjectFromTUI(t *testing.T) {
 	pdir := index.ClaudeProjectDir(old)
 	os.MkdirAll(pdir, 0o755)
 	line := func(i int, cwd string) string {
-		return `{"type":"user","timestamp":"2026-09-10T01:00:0` + strconv.Itoa(i) + `Z","cwd":"` + cwd + `","message":{"content":"提示 ` + strconv.Itoa(i) + ` 做点什么事情"}}` + "\n"
+		q, _ := json.Marshal(cwd)
+		return `{"type":"user","timestamp":"2026-09-10T01:00:0` + strconv.Itoa(i) + `Z","cwd":` + string(q) + `,"message":{"content":"提示 ` + strconv.Itoa(i) + ` 做点什么事情"}}` + "\n"
 	}
 	os.WriteFile(filepath.Join(pdir, "s1.jsonl"), []byte(line(0, old)+line(1, old)+line(2, old)), 0o644)
 	os.WriteFile(filepath.Join(pdir, "s2.jsonl"), []byte(line(0, old)+line(1, old)+line(2, old)), 0o644)

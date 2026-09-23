@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -47,6 +48,13 @@ func claudeLines(prompts ...string) string {
 }
 
 var sprintf = fmt.Sprintf
+
+// posixOnly: the test's transcripts spell POSIX paths; internal/fixture covers the same behaviour with native paths.
+func posixOnly(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX path fixtures")
+	}
+}
 
 func setup(t *testing.T) (claude, codex string) {
 	t.Helper()
@@ -313,15 +321,25 @@ func TestCodexArchivedSessionsStayFound(t *testing.T) {
 }
 
 func TestAgentScratch(t *testing.T) {
-	for cwd, want := range map[string]bool{
-		"/private/tmp/claude-501/-Users-ozn-dev-fav-0a24/scratchpad": true,
-		"/private/var/folders/m7/xx/T/claude-review-2370e1":          true,
-		"/tmp/claude-501/x":      true,
-		"/private/tmp":           false, // a person's own scratch work stays listed
-		"/tmp/notes":             false,
-		"/Users/me/claude-tools": false,
-		"":                       false,
-	} {
+	tmp := os.TempDir()
+	cases := map[string]bool{
+		filepath.Join(tmp, "claude-501", "x", "scratchpad"): true,
+		filepath.Join(tmp, "notes"):                         false,
+		"":                                                  false,
+	}
+	if runtime.GOOS != "windows" {
+		for cwd, want := range map[string]bool{
+			"/private/tmp/claude-501/-Users-ozn-dev-fav-0a24/scratchpad": true,
+			"/private/var/folders/m7/xx/T/claude-review-2370e1":          true,
+			"/tmp/claude-501/x":      true,
+			"/private/tmp":           false, // a person's own scratch work stays listed
+			"/tmp/notes":             false,
+			"/Users/me/claude-tools": false,
+		} {
+			cases[cwd] = want
+		}
+	}
+	for cwd, want := range cases {
 		if got := AgentScratch(cwd); got != want {
 			t.Errorf("AgentScratch(%q) = %v", cwd, got)
 		}
@@ -329,6 +347,7 @@ func TestAgentScratch(t *testing.T) {
 }
 
 func TestScratchSessionsOnlyInAgents(t *testing.T) {
+	posixOnly(t)
 	claude, _ := setup(t)
 	line := `{"type":"user","timestamp":"2026-09-10T01:00:0%dZ","cwd":"%s","message":{"content":"第 %d 句比较长的提示语在这里"}}` + "\n"
 	body := func(cwd string) string {

@@ -1,8 +1,10 @@
 package main
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -53,7 +55,7 @@ func TestInstallHookKeepsTheRestAndUninstallRestores(t *testing.T) {
 	if strings.Index(got, `"env"`) > strings.Index(got, `"model"`) || strings.Index(got, `"hooks"`) > strings.Index(got, `"alwaysThinkingEnabled"`) {
 		t.Errorf("key order kept:\n%s", got)
 	}
-	if st, _ := os.Stat(path); st.Mode().Perm() != 0o600 {
+	if st, _ := os.Stat(path); runtime.GOOS != "windows" && st.Mode().Perm() != 0o600 {
 		t.Errorf("mode kept: %v", st.Mode())
 	}
 	if baks, _ := filepath.Glob(path + ".bak-*"); len(baks) != 1 {
@@ -93,7 +95,8 @@ func TestHookEventMarksWaitingUntilTheTranscriptMoves(t *testing.T) {
 	os.WriteFile(tr, []byte("{}\n"), 0o644)
 	feed := func(event string) {
 		r, w, _ := os.Pipe()
-		w.WriteString(`{"session_id":"s1","transcript_path":"` + tr + `","hook_event_name":"` + event + `"}`)
+		q, _ := json.Marshal(tr)
+		w.WriteString(`{"session_id":"s1","transcript_path":` + string(q) + `,"hook_event_name":"` + event + `"}`)
 		w.Close()
 		old := os.Stdin
 		os.Stdin = r

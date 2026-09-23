@@ -258,4 +258,6 @@ Chat text is kept only in the local `text/` copy for search, and nothing is uplo
 ```bash
 go build ./... && go vet ./... && go test ./...
 HERDR_LIVE=1 go test ./internal/herdr/   # against a real Herdr: create tab → run → clean up
+go run ./tools/fixture -o ~/fav-demo     # a synthetic machine (Claude + Codex sessions, favorites); ~/fav-demo/fav.sh tui runs fav on it
+scripts/test-hosts.sh ssh:host wsl:host:Debian win:host docker:host:ctr   # sync the working tree, build and test natively on each
 ```

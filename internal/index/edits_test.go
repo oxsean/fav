@@ -6,6 +6,7 @@ import (
 )
 
 func TestEditedFilesIndexed(t *testing.T) {
+	posixOnly(t)
 	claude, codex := setup(t)
 	edit := `{"type":"assistant","timestamp":"2026-09-10T01:00:05Z","cwd":"/Users/me/work/webapp","message":{"content":[{"type":"text","text":"改一下"},{"type":"tool_use","name":"Edit","input":{"file_path":"/Users/me/work/webapp/a.go","old_string":"x","new_string":"y"}},{"type":"tool_use","name":"Bash","input":{"command":"go test"}}]}}` + "\n"
 	write2 := `{"type":"assistant","timestamp":"2026-09-10T01:00:06Z","cwd":"/Users/me/work/webapp","message":{"content":[{"type":"tool_use","name":"Write","input":{"file_path":"/Users/me/work/webapp/a.go","content":"z"}},{"type":"tool_use","name":"NotebookEdit","input":{"notebook_path":"/Users/me/work/webapp/n.ipynb"}},{"type":"tool_use","name":"Write","input":{"file_path":"/private/tmp/claude-501/x/scratchpad/notes.md"}}]}}` + "\n"

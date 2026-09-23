@@ -983,7 +983,7 @@ func (m *Model) resumeCommand() string {
 	if p.Spec.Exec == "" {
 		return ""
 	}
-	return p.Spec.ShellLine()
+	return p.Spec.TerminalLine()
 }
 
 func (m *Model) copyResume() {

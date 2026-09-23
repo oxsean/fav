@@ -77,7 +77,7 @@ func gitWorktree(dir string) wtEntry {
 	if !ok || filepath.Base(common) != ".git" {
 		return wtEntry{}
 	}
-	if main := filepath.Dir(common); main != top {
+	if main := filepath.Dir(common); main != filepath.Clean(top) {
 		return wtEntry{Repo: main}
 	}
 	return wtEntry{Remote: capture.GitOut(dir, "remote", "get-url", "origin")}

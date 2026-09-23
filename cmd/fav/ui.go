@@ -269,7 +269,7 @@ func cmdFzfPick(args []string) error {
 		if err != nil {
 			return err
 		}
-		return clipboard.WriteAll(plan.Spec.ShellLine())
+		return clipboard.WriteAll(plan.Spec.TerminalLine())
 	case "tags":
 		sel := fzfui.Pick(i18n.T("label.tags"), counted(tagCounts(s)), true)
 		if sel == nil {

@@ -20,6 +20,9 @@ func TestShellLineQuotesTitle(t *testing.T) {
 	if got != want {
 		t.Errorf("\n得到 %s\n应为 %s", got, want)
 	}
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("no POSIX shell to split the line back")
+	}
 	out, err := exec.Command("sh", "-c", `for a in `+got[len("claude "):]+`; do printf '%s\n' "$a"; done`).Output()
 	if err != nil {
 		t.Fatal(err)

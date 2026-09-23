@@ -76,7 +76,7 @@ func TestWorktreeRepoOf(t *testing.T) {
 	w := worktrees{repo: {Remote: "git@example.com:me/kolab.git"}, "/gone/sub": {Repo: "/main"}}
 	cases := []struct{ cwd, wtRepo, remote, want string }{
 		{"/x", "/orig", "", "/orig"},
-		{"/src/app/.claude/worktrees/fix-1", "", "", "/src/app"},
+		{filepath.FromSlash("/src/app/.claude/worktrees/fix-1"), "", "", filepath.FromSlash("/src/app")},
 		{"/gone/sub", "", "", "/main"},
 		{filepath.Join(codex, "worktrees", "28e7", "kolab"), "", "git@example.com:me/kolab", repo},
 		{filepath.Join(codex, "worktrees", "28e7", "kolab"), "", "git@example.com:other/kolab.git", ""},

@@ -142,7 +142,7 @@ func TestResumeCommand(t *testing.T) {
 	m.askResume()
 	cmd := m.resumeCommand()
 	r := m.ov.rec
-	if !strings.HasPrefix(cmd, "cd "+r.Cwd+" && claude --resume "+r.SessionID) {
+	if i, j := strings.Index(cmd, r.Cwd), strings.Index(cmd, "claude --resume "+r.SessionID); i < 0 || j < i {
 		t.Fatalf("恢复命令不对：%q", cmd)
 	}
 }

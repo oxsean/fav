@@ -3,6 +3,7 @@ package tui
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -14,6 +15,9 @@ import (
 
 // fakeHerdr answers `agent read` with a permission question and logs every other call.
 func fakeHerdr(t *testing.T) (log string) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the fake herdr is a shell script")
+	}
 	bin := t.TempDir()
 	log = filepath.Join(bin, "calls")
 	script := "#!/bin/sh\nif [ \"$2\" = read ]; then printf 'Edit a.go?\\n❯ 1. Yes\\n  2. No\\n'; exit 0; fi\necho \"$@\" >> " + log + "\n"

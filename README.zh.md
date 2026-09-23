@@ -251,4 +251,6 @@ fav 把这条链合成一个会话（轮数相加、用最新的 id 恢复、收
 ```bash
 go build ./... && go vet ./... && go test ./...
 HERDR_LIVE=1 go test ./internal/herdr/   # 实跑 Herdr 建 tab → 执行 → 清理
+go run ./tools/fixture -o ~/fav-demo     # 造一台合成机器（Claude + Codex 会话、收藏）；~/fav-demo/fav.sh tui 在它上面跑 fav
+scripts/test-hosts.sh ssh:host wsl:host:Debian win:host docker:host:ctr   # 同步工作区，在各目标机本地编译并测试
 ```

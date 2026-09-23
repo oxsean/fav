@@ -1,0 +1,7 @@
+[tools]
+go = "1.27.1"
+
+# scripts/test-hosts.sh runs this on every target; claude and codex are installed for this task only
+[tasks.test-host]
+tools = { claude = "2.1.278", codex = "0.155.1" }
+run = "go run ./tools/test-host"
