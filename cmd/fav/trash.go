@@ -5,6 +5,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"maps"
 	"os"
 	"strings"
 	"time"
@@ -36,9 +37,7 @@ func cmdRm(args []string) error {
 		return err
 	}
 	live := capture.ClaudeLive()
-	for k, v := range capture.CodexLive() {
-		live[k] = v
-	}
+	maps.Copy(live, capture.CodexLive())
 	if _, ok := live[r.SessionID]; ok {
 		return errors.New(i18n.T("cli.rm.running"))
 	}

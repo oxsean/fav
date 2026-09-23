@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -9,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/oxsean/fav/internal/capture"
+	"github.com/oxsean/fav/internal/testkit"
 )
 
 const settingsBefore = `{
@@ -95,8 +95,7 @@ func TestHookEventMarksWaitingUntilTheTranscriptMoves(t *testing.T) {
 	os.WriteFile(tr, []byte("{}\n"), 0o644)
 	feed := func(event string) {
 		r, w, _ := os.Pipe()
-		q, _ := json.Marshal(tr)
-		w.WriteString(`{"session_id":"s1","transcript_path":` + string(q) + `,"hook_event_name":"` + event + `"}`)
+		w.WriteString(`{"session_id":"s1","transcript_path":` + testkit.JSONString(tr) + `,"hook_event_name":"` + event + `"}`)
 		w.Close()
 		old := os.Stdin
 		os.Stdin = r

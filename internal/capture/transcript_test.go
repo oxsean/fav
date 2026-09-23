@@ -99,7 +99,7 @@ func TestMessagesPaging(t *testing.T) {
 	var b strings.Builder
 	filler := strings.Repeat("字", 20000) // 60 messages ≈ 3.6MB, spans several chunks
 	const n = 60
-	for i := 0; i < n; i++ {
+	for i := range n {
 		fmt.Fprintf(&b, `{"type":"user","timestamp":"2026-09-12T15:%02d:00Z","message":{"content":"第%d句 %s"}}`+"\n", i%60, i, filler)
 		fmt.Fprintf(&b, `{"type":"assistant","timestamp":"2026-09-12T15:%02d:01Z","message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":"echo %d"}}]}}`+"\n", i%60, i)
 	}

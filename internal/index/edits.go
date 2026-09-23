@@ -43,7 +43,7 @@ func (f *File) takeEdits(b []byte) {
 		return
 	}
 	if l.Payload.Type == "custom_tool_call" && l.Payload.Name == "apply_patch" {
-		for _, line := range strings.Split(l.Payload.Input, "\n") {
+		for line := range strings.SplitSeq(l.Payload.Input, "\n") {
 			for _, h := range patchHeaders {
 				if p, ok := strings.CutPrefix(line, h); ok {
 					f.edited(strings.TrimSpace(p))

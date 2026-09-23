@@ -9,6 +9,7 @@ import (
 
 	"github.com/oxsean/fav/internal/fav"
 	"github.com/oxsean/fav/internal/i18n"
+	"github.com/oxsean/fav/internal/paths"
 )
 
 const (
@@ -134,7 +135,7 @@ func Handoff(r *fav.Rec) string {
 			line("- " + f)
 		}
 	}
-	if r.Cwd != "" && dirExists(r.Cwd) {
+	if r.Cwd != "" && paths.IsDir(r.Cwd) {
 		if st := GitOut(r.Cwd, "status", "--short", "--branch"); strings.Contains(st, "\n") { // --branch leads with a "## branch" line, so the trim keeps the status columns of the rest
 			section("handoff.uncommitted")
 			line("```")
@@ -192,10 +193,8 @@ func changedFiles(msgs []Message, cwd string, n int) []string {
 			return
 		}
 		seen[p] = true
-		if cwd != "" {
-			if rel, err := filepath.Rel(cwd, p); err == nil && filepath.IsAbs(p) && !strings.HasPrefix(rel, "..") {
-				p = rel
-			}
+		if rel, ok := paths.Inside(cwd, p); ok && filepath.IsAbs(p) {
+			p = rel
 		}
 		out = append(out, p)
 	}
@@ -208,7 +207,7 @@ func changedFiles(msgs []Message, cwd string, n int) []string {
 			case editTools[s.Tool]:
 				add(strings.TrimSpace(firstLine(s.Text)))
 			case s.Tool == "apply_patch":
-				for _, f := range strings.Fields(firstLine(s.Text)) {
+				for f := range strings.FieldsSeq(firstLine(s.Text)) {
 					add(f)
 				}
 			}

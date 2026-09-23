@@ -14,6 +14,7 @@ import (
 
 	"github.com/oxsean/fav/internal/fav"
 	"github.com/oxsean/fav/internal/index"
+	"github.com/oxsean/fav/internal/paths"
 )
 
 // Session is one scenario; Listed = shown by `fav sessions`, Agent = one-shot or scratch run (Agents list only).
@@ -28,8 +29,7 @@ type Dataset struct {
 }
 
 func (d *Dataset) Env() []string {
-	return []string{"FAV_HOME=" + d.Home, "CLAUDE_CONFIG_DIR=" + d.Claude, "CODEX_HOME=" + d.Codex,
-		"TMPDIR=" + d.Tmp, "TMP=" + d.Tmp, "TEMP=" + d.Tmp}
+	return append([]string{"FAV_HOME=" + d.Home, "CLAUDE_CONFIG_DIR=" + d.Claude, "CODEX_HOME=" + d.Codex}, paths.TempEnv(d.Tmp)...)
 }
 
 func (d *Dataset) Get(name string) Session {

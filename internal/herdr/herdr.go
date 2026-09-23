@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/oxsean/fav/internal/i18n"
+	"github.com/oxsean/fav/internal/paths"
 	"os"
 	"os/exec"
 	"strconv"
@@ -154,7 +155,7 @@ func matchWorkspaces(panes []Pane, ws []Workspace, cwd string) []Workspace {
 		switch {
 		case p.Cwd == cwd:
 			exact[p.WorkspaceID] = true
-		case sameTree(p.Cwd, cwd):
+		case paths.Nested(p.Cwd, cwd):
 			near[p.WorkspaceID] = true
 		}
 	}
@@ -168,10 +169,6 @@ func matchWorkspaces(panes []Pane, ws []Workspace, cwd string) []Workspace {
 		}
 	}
 	return out
-}
-
-func sameTree(a, b string) bool {
-	return a != "" && (a == b || strings.HasPrefix(a, b+"/") || strings.HasPrefix(b, a+"/"))
 }
 
 func FocusTab(tabID string) error { return run([]string{"tab", "focus", tabID}, nil) }

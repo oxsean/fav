@@ -1,8 +1,6 @@
 package render
 
 import (
-	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -10,6 +8,7 @@ import (
 	"github.com/oxsean/fav/internal/capture"
 	"github.com/oxsean/fav/internal/fav"
 	"github.com/oxsean/fav/internal/i18n"
+	"github.com/oxsean/fav/internal/paths"
 )
 
 // Sep separates the hidden id from the visible part of an fzf row (--delimiter, --with-nth=2).
@@ -221,9 +220,9 @@ func Preview(r *fav.Rec, width int, now time.Time) string {
 	field(GlyphProject+i18n.T("card.project"), r.Project)
 	field(GlyphTerm+i18n.T("card.type"), r.WorkType)
 	field(GlyphBranch+i18n.T("card.branch"), r.GitBranch)
-	field(GlyphDir+i18n.T("card.directory"), shortenHome(r.Cwd))
+	field(GlyphDir+i18n.T("card.directory"), paths.Tilde(r.Cwd))
 	if r.Repo != r.Cwd {
-		field(GlyphDir+i18n.T("card.repo"), shortenHome(r.Repo))
+		field(GlyphDir+i18n.T("card.repo"), paths.Tilde(r.Repo))
 	}
 	field(GlyphEdit+i18n.T("card.files"), FilesField(r, 6))
 	field(GlyphSession+i18n.T("card.session"), r.SessionID)
@@ -300,7 +299,7 @@ func resumeInfo(r *fav.Rec, now time.Time) string {
 
 func resumeTarget(r *fav.Rec) string {
 	target := providerLabel(r.Provider)
-	dir := shortenHome(r.Cwd)
+	dir := paths.Tilde(r.Cwd)
 	if dir == "" {
 		dir = i18n.T("resume.where.cwd")
 	}
@@ -345,17 +344,13 @@ func providerLabel(p string) string {
 	return p
 }
 
-var home, _ = os.UserHomeDir()
-
 // FileList: "a.go ×3  ·  b.go" with paths under base written relative to it.
 func FileList(fs []fav.FileCount, base string) string {
 	parts := make([]string, len(fs))
 	for i, f := range fs {
-		p := shortenHome(f.Path)
-		if base != "" {
-			if rel, err := filepath.Rel(base, f.Path); err == nil && !strings.HasPrefix(rel, "..") {
-				p = rel
-			}
+		p := paths.Tilde(f.Path)
+		if rel, ok := paths.Inside(base, f.Path); ok {
+			p = rel
 		}
 		if f.N > 1 {
 			p += " ×" + strconv.Itoa(f.N)
@@ -375,13 +370,6 @@ func FilesField(r *fav.Rec, n int) string {
 		base = r.Repo
 	}
 	return i18n.F("card.files_value", len(r.Files), FileList(fav.TopFiles(r.Files, n), base))
-}
-
-func shortenHome(p string) string {
-	if p != "" && home != "" && strings.HasPrefix(p, home) {
-		return "~" + p[len(home):]
-	}
-	return p
 }
 
 func ActivityLine(r *fav.Rec) string {

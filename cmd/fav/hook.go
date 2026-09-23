@@ -12,6 +12,7 @@ import (
 
 	"github.com/oxsean/fav/internal/capture"
 	"github.com/oxsean/fav/internal/i18n"
+	"github.com/oxsean/fav/internal/shell"
 )
 
 // hookEvents: the Claude Code hooks fav installs; the matcher narrows Notification to questions for the user.
@@ -132,7 +133,7 @@ func cmdInstallHook(args []string) error {
 		}
 		h := newObject()
 		h.set("type", "command")
-		h.set("command", shellWord(bin)+" "+hookVerb)
+		h.set("command", shell.POSIX.Quote(bin)+" "+hookVerb)
 		h.set("timeout", json.Number("5"))
 		h.set("async", true)
 		g := newObject()
@@ -229,11 +230,4 @@ func cmdHookEvent(args []string) error {
 		capture.RecordHookEvent(in.SessionID, in.Event, in.TranscriptPath)
 	}
 	return nil
-}
-
-func shellWord(s string) string {
-	if strings.ContainsAny(s, " \t'\"$`\\") {
-		return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
-	}
-	return s
 }

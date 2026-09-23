@@ -136,13 +136,12 @@ func GitOut(dir string, args ...string) string {
 
 // Claude transcripts are found by globbing the session id, not by re-encoding the cwd.
 func TranscriptPath(provider, sessionID string) string {
-	home, err := os.UserHomeDir()
-	if err != nil || sessionID == "" {
+	if sessionID == "" {
 		return ""
 	}
 	switch provider {
 	case fav.ProviderClaude:
-		hits, _ := filepath.Glob(filepath.Join(home, ".claude", "projects", "*", sessionID+".jsonl"))
+		hits, _ := filepath.Glob(filepath.Join(ClaudeHome(), "projects", "*", sessionID+".jsonl"))
 		if len(hits) > 0 {
 			return hits[0]
 		}

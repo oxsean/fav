@@ -10,9 +10,9 @@ import (
 func TestSortByOrders(t *testing.T) {
 	now := time.Now()
 	at := func(h int) *time.Time { x := now.Add(-time.Duration(h) * time.Hour); return &x }
-	a := &fav.Rec{Title: "a", FavoritedAt: ptr(now.Add(-1 * time.Hour)), SessionStartedAt: at(30)}
-	b := &fav.Rec{Title: "b", FavoritedAt: ptr(now.Add(-2 * time.Hour)), SessionStartedAt: at(10)}
-	c := &fav.Rec{Title: "c", FavoritedAt: ptr(now.Add(-3 * time.Hour)), SessionStartedAt: at(20)}
+	a := &fav.Rec{Title: "a", FavoritedAt: new(now.Add(-1 * time.Hour)), SessionStartedAt: at(30)}
+	b := &fav.Rec{Title: "b", FavoritedAt: new(now.Add(-2 * time.Hour)), SessionStartedAt: at(10)}
+	c := &fav.Rec{Title: "c", FavoritedAt: new(now.Add(-3 * time.Hour)), SessionStartedAt: at(20)}
 	in := []*fav.Rec{c, a, b}
 	for s, want := range map[sortBy]string{sortFavorited: "abc", sortStarted: "bca", sortActive: "abc"} {
 		got := ""

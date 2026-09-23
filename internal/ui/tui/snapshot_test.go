@@ -94,8 +94,8 @@ func click(m *Model, x, y int) {
 func findText(s, want string) (int, int) {
 	for y, line := range strings.Split(s, "\n") {
 		plain := ansi.Strip(line)
-		if i := strings.Index(plain, want); i >= 0 {
-			return ansi.StringWidth(plain[:i]), y
+		if before, _, ok := strings.Cut(plain, want); ok {
+			return ansi.StringWidth(before), y
 		}
 	}
 	return -1, -1
@@ -152,7 +152,7 @@ func demoStore(t *testing.T) *fav.Store {
 			r.Status = fav.StatusDone
 		}
 		r.Tags = fav.Normalize(r.Tags)
-		r.FavoritedAt = ptr(time.Now().Add(-time.Duration(len(d.title)) * time.Hour))
+		r.FavoritedAt = new(time.Now().Add(-time.Duration(len(d.title)) * time.Hour))
 		if err := st.Put(r); err != nil {
 			t.Fatal(err)
 		}
@@ -233,10 +233,10 @@ func TestSessionsViewFavorites(t *testing.T) {
 	m := New(st, noIndex(t), fav.DefaultConfig(), "")
 	m.Update(tea.WindowSizeMsg{Width: 120, Height: 36})
 	rec := &fav.Rec{Provider: fav.ProviderClaude, SessionID: "sess-x", Title: "第一句话",
-		Cwd: t.TempDir(), FavoritedAt: ptr(time.Now()), Status: fav.StatusDone}
+		Cwd: t.TempDir(), FavoritedAt: new(time.Now()), Status: fav.StatusDone}
 	rec.Attach(5, 10, time.Now(), "第一句话\n再来一句\n")
 	short := &fav.Rec{Provider: fav.ProviderClaude, SessionID: "sess-short", Title: "hi",
-		Cwd: t.TempDir(), FavoritedAt: ptr(time.Now()), Status: fav.StatusDone}
+		Cwd: t.TempDir(), FavoritedAt: new(time.Now()), Status: fav.StatusDone}
 	short.Attach(1, 2, time.Now(), "hi\n")
 	m.unfav = []*fav.Rec{rec, short}
 	m.setView(viewSessions)
@@ -258,12 +258,12 @@ func TestSessionsViewFavorites(t *testing.T) {
 		t.Fatal("应能按索引里的提示语搜到未收藏会话")
 	}
 	m.search.SetValue("")
-	codex := &fav.Rec{Provider: fav.ProviderCodex, SessionID: "sess-cx", Title: "codex 的会话", Cwd: t.TempDir(), FavoritedAt: ptr(time.Now().Add(-time.Hour)), Status: fav.StatusDone}
+	codex := &fav.Rec{Provider: fav.ProviderCodex, SessionID: "sess-cx", Title: "codex 的会话", Cwd: t.TempDir(), FavoritedAt: new(time.Now().Add(-time.Hour)), Status: fav.StatusDone}
 	codex.Attach(5, 10, time.Now().Add(-time.Hour), "")
 	m.unfav = append(m.unfav, codex)
 	m.setView(viewSessions)
 	var seen []string
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		m.cycleProvider()
 		seen = append(seen, m.search.Value())
 	}

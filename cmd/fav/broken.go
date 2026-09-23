@@ -12,12 +12,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mattn/go-isatty"
-
+	"github.com/charmbracelet/x/term"
 	"github.com/oxsean/fav/internal/capture"
 	"github.com/oxsean/fav/internal/fav"
 	"github.com/oxsean/fav/internal/i18n"
 	"github.com/oxsean/fav/internal/index"
+	"github.com/oxsean/fav/internal/paths"
 	"github.com/oxsean/fav/internal/render"
 )
 
@@ -39,10 +39,10 @@ func scanBroken(s *fav.Store, idx *index.Index, dir string) []broken {
 		if r.SessionID == "" || seen[key] {
 			return
 		}
-		if dir != "" && r.Cwd != dir && !strings.HasPrefix(r.Cwd, dir+string(filepath.Separator)) {
+		if dir != "" && !paths.Under(r.Cwd, dir) {
 			return
 		}
-		dirGone := r.Cwd != "" && !dirExists(r.Cwd)
+		dirGone := r.Cwd != "" && !paths.IsDir(r.Cwd)
 		if !dirGone && capture.TranscriptAlive(r) {
 			return
 		}
@@ -109,13 +109,17 @@ func printBroken(list []broken) {
 			kind += i18n.T("cli.broken.live")
 		}
 		fmt.Printf("%3d  %-6s  %s  %-5s  %s\n", b.n, r.Provider, shortID(r.SessionID), render.When(r.When(), now), render.Truncate(r.Title, w-30))
-		fmt.Printf("     %s  %s", kind, shortenHome(r.Cwd))
+		fmt.Printf("     %s  %s", kind, paths.Tilde(r.Cwd))
 		switch {
 		case !b.dirGone:
 		case len(b.found) == 1:
-			fmt.Printf("  →  %s", shortenHome(b.found[0]))
+			fmt.Printf("  →  %s", paths.Tilde(b.found[0]))
 		case len(b.found) > 1:
-			fmt.Print(i18n.T("cli.broken.ambiguous") + shortenHome(strings.Join(b.found, "  ")))
+			found := make([]string, len(b.found))
+			for i, p := range b.found {
+				found[i] = paths.Tilde(p)
+			}
+			fmt.Print(i18n.T("cli.broken.ambiguous") + strings.Join(found, "  "))
 		default:
 			fmt.Print(i18n.T("cli.broken.not_found"))
 		}
@@ -182,7 +186,7 @@ func brokenArgs(pos []string) (dir string, sel, query []string, err error) {
 	for _, a := range pos {
 		switch {
 		case strings.ContainsRune(a, filepath.Separator) || a == "." || a == ".." || a == "~":
-			dir, err = filepath.Abs(expandHome(a))
+			dir, err = filepath.Abs(paths.Expand(a))
 		case a == "all" || isNumber(a):
 			sel = append(sel, a)
 		default:
@@ -297,7 +301,7 @@ func confirmErr(prompt string, yes bool) (bool, error) {
 	if yes {
 		return true, nil
 	}
-	if !isatty.IsTerminal(os.Stdin.Fd()) {
+	if !term.IsTerminal(os.Stdin.Fd()) {
 		return false, errors.New(i18n.T("cli.confirm.no_tty"))
 	}
 	fmt.Print(prompt)
@@ -414,7 +418,7 @@ func cmdFix(args []string) error {
 		}
 	}
 	if *to != "" {
-		if *to, err = filepath.Abs(expandHome(*to)); err != nil {
+		if *to, err = filepath.Abs(paths.Expand(*to)); err != nil {
 			return err
 		}
 		for i := range picked {
@@ -477,7 +481,7 @@ func moveOne(s *fav.Store, idx *index.Index, r *fav.Rec, to string) (*index.Inde
 	}
 	next, _ := idx.Rescan(rep.Touched)
 	next.Save()
-	fmt.Print(i18n.F("cli.fix.moved", render.Truncate(r.Title, 40), shortenHome(to)))
+	fmt.Print(i18n.F("cli.fix.moved", render.Truncate(r.Title, 40), paths.Tilde(to)))
 	return next, nil
 }
 
@@ -486,25 +490,4 @@ func shortID(id string) string {
 		return id[:8]
 	}
 	return id
-}
-
-func dirExists(p string) bool {
-	st, err := os.Stat(p)
-	return err == nil && st.IsDir()
-}
-
-func expandHome(p string) string {
-	if p == "~" || strings.HasPrefix(p, "~/") {
-		if home, err := os.UserHomeDir(); err == nil {
-			return filepath.Join(home, p[1:])
-		}
-	}
-	return p
-}
-
-func shortenHome(p string) string {
-	if home, err := os.UserHomeDir(); err == nil && p != "" && (p == home || strings.HasPrefix(p, home+string(filepath.Separator))) {
-		return "~" + p[len(home):]
-	}
-	return p
 }

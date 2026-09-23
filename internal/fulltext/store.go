@@ -16,6 +16,7 @@ import (
 
 	"github.com/oxsean/fav/internal/capture"
 	"github.com/oxsean/fav/internal/fav"
+	"github.com/oxsean/fav/internal/filelock"
 )
 
 // Store layout: <dir>/<sha1(transcript path)[:16]>.tsv holds one line per entry, "off\trole\tunix\ttext" (text has no tab or
@@ -93,7 +94,10 @@ func UpdateWith(ctx context.Context, dir string, paths []string, opt Options, pr
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return Progress{}, err
 	}
-	unlock, err := tryLock(filepath.Join(dir, ".lock"))
+	unlock, err := filelock.TryLock(filepath.Join(dir, ".lock"))
+	if errors.Is(err, filelock.ErrLocked) {
+		return Progress{}, ErrBusy
+	}
 	if err != nil {
 		return Progress{}, err
 	}

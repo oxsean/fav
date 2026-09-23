@@ -12,6 +12,7 @@ import (
 
 	"github.com/oxsean/fav/internal/fav"
 	"github.com/oxsean/fav/internal/i18n"
+	"github.com/oxsean/fav/internal/paths"
 	"github.com/oxsean/fav/internal/render"
 )
 
@@ -48,7 +49,7 @@ func openDir(app, dir string) error {
 		c = exec.Command("open", "-a", app, dir)
 		return c.Run()
 	case runtime.GOOS == "windows" && strings.EqualFold(app, "rebased64.exe") && lookPath(app) == "":
-		if p := filepath.Join(os.Getenv("LOCALAPPDATA"), "Programs", "Rebased", "bin", "rebased64.exe"); fileExists(p) {
+		if p := filepath.Join(os.Getenv("LOCALAPPDATA"), "Programs", "Rebased", "bin", "rebased64.exe"); paths.Exists(p) {
 			app = p
 		}
 	}
@@ -66,11 +67,6 @@ func lookPath(app string) string {
 		return ""
 	}
 	return p
-}
-
-func fileExists(p string) bool {
-	_, err := os.Stat(p)
-	return err == nil
 }
 
 func recDir(r *fav.Rec) string {
@@ -119,7 +115,7 @@ func (m *Model) openWith(app, name string) {
 		return
 	}
 	m.closeOverlay()
-	m.flash(i18n.F("open.done", name, render.Truncate(shortenHome(dir), 60)))
+	m.flash(i18n.F("open.done", name, render.Truncate(paths.Tilde(dir), 60)))
 }
 
 // copyText writes the system clipboard; tests replace it.

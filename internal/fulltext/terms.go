@@ -59,7 +59,7 @@ func Keywords(q string) []Keyword { return ParseQuery(q).Kws }
 func keyword(t string, quoted bool) Keyword {
 	if !quoted {
 		var alts []Keyword
-		for _, p := range strings.Split(t, "|") {
+		for p := range strings.SplitSeq(t, "|") {
 			if p != "" {
 				alts = append(alts, plain(p, false))
 			}

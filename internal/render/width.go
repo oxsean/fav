@@ -68,7 +68,7 @@ func Wrap(s string, width int) []string {
 		return []string{s}
 	}
 	var lines []string
-	for _, para := range strings.Split(s, "\n") {
+	for para := range strings.SplitSeq(s, "\n") {
 		cur := ""
 		for _, t := range glue(tokenize(para, width), width) {
 			sep := ""

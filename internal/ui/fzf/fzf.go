@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -13,10 +14,41 @@ import (
 	"github.com/charmbracelet/x/term"
 	"github.com/oxsean/fav/internal/i18n"
 	"github.com/oxsean/fav/internal/render"
+	"github.com/oxsean/fav/internal/shell"
 )
 
-// sub-picker results go to a file that transform-query reads back
-const pickFileEnv = "FAV_PICK_FILE"
+// PickFileEnv: sub-picker results go to this file (execute's stdout is the terminal) and `fzf-pick read` hands them to
+// transform-query.
+const PickFileEnv = "FAV_PICK_FILE"
+
+// bindShellEnv tells `fav fzf-tab` which shell runs the bindings it prints.
+const bindShellEnv = "FAV_FZF_SHELL"
+
+// bindShell is the shell fzf runs bindings with, and quotes its placeholders for. POSIX: sh -c, named from 0.51
+// (--with-shell). Windows: fzf's own choice, $SHELL else cmd — naming one there switches fzf to POSIX placeholder quoting.
+func bindShell(major, minor int) ([]string, shell.Kind) {
+	if runtime.GOOS == "windows" {
+		if k, ok := shell.OfExe(os.Getenv("SHELL")); ok {
+			return nil, k
+		}
+		return nil, shell.Cmd
+	}
+	if atLeast(major, minor, 51) {
+		return []string{"--with-shell", "sh -c"}, shell.POSIX
+	}
+	return nil, shell.POSIX
+}
+
+// selfIn is this executable quoted for the shell running the bindings.
+func selfIn(k shell.Kind) string {
+	self, _ := os.Executable()
+	return k.Quote(self)
+}
+
+func childBindShell() shell.Kind {
+	k, _ := shell.Named(os.Getenv(bindShellEnv))
+	return k
+}
 
 // The three tabs are three candidate sources in one fzf process; the current tab lives only in the prompt, which fzf passes to children as FZF_PROMPT.
 type Tab int
@@ -86,20 +118,17 @@ func Run(initialQuery string, start Tab) (string, error) {
 	if !atLeast(major, minor, 46) {
 		return "", i18n.E("fzf.too_old", strconv.Itoa(major)+"."+strconv.Itoa(minor))
 	}
-	self, err := os.Executable()
-	if err != nil {
-		return "", err
-	}
-	q := shellQuote(self)
+	withShell, sh := bindShell(major, minor)
+	q := selfIn(sh)
 
 	pickFile := filepath.Join(os.TempDir(), "fav-pick-"+strconv.Itoa(os.Getpid()))
 	defer os.Remove(pickFile)
 
-	// fzf shell-escapes {q}
+	// fzf escapes {q} and {1} for the shell it runs
 	reload := reloadAction(q)
 	pick := func(kind string) string {
-		return "execute(" + q + " fzf-pick " + kind + " {q} > " + shellQuote(pickFile) + ")" +
-			"+transform-query(cat " + shellQuote(pickFile) + " 2>/dev/null)" +
+		return "execute(" + q + " fzf-pick " + kind + " {q})" +
+			"+transform-query(" + q + " fzf-pick read {q})" +
 			"+" + reload
 	}
 	// the reload after an action passes --keep {1}: the row stays until the next reload (typing, tab switch) so the action can be undone
@@ -109,38 +138,38 @@ func Run(initialQuery string, start Tab) (string, error) {
 	tab := func(name string) string { return "transform(" + q + " fzf-tab " + name + ")" }
 
 	head, foot := hints(start)
-	args := []string{
+	args := append(withShell,
 		"--ansi", "--reverse",
 		"--delimiter", render.Sep,
 		"--with-nth", "2",
-		"--preview", q + " preview {1}",
+		"--preview", q+" preview {1}",
 		"--preview-window", "right:55%:wrap",
 		"--prompt", start.prompt(),
 		"--header", head,
 		"--info", "inline-right",
 		"--disabled", // filtering is all done by fav
 		"--query", initialQuery,
-		"--bind", "start:" + reload,
-		"--bind", "change:" + reload,
-		"--bind", "ctrl-l:" + reload,
-		"--bind", "f1,alt-1:" + tab("favorites"), // Ctrl-digit does not exist in terminals and Alt-digit is taken by Herdr
-		"--bind", "f2,alt-2:" + tab("sessions"),
-		"--bind", "f3,alt-3:" + tab("live"),
-		"--bind", "tab:" + tab("next"), // no --multi, so Tab is free
-		"--bind", "btab:" + tab("prev"),
+		"--bind", "start:"+reload,
+		"--bind", "change:"+reload,
+		"--bind", "ctrl-l:"+reload,
+		"--bind", "f1,alt-1:"+tab("favorites"), // Ctrl-digit does not exist in terminals and Alt-digit is taken by Herdr
+		"--bind", "f2,alt-2:"+tab("sessions"),
+		"--bind", "f3,alt-3:"+tab("live"),
+		"--bind", "tab:"+tab("next"), // no --multi, so Tab is free
+		"--bind", "btab:"+tab("prev"),
 		// Ctrl-letter = the TUI's letter (acts on the current row), Alt-letter = filter pickers and the toggles whose Ctrl key is taken
 		// (⚠️ Ctrl-A is Herdr's prefix, Ctrl-F pages); fzf's own ctrl-p / ctrl-u / ctrl-d stay free
-		"--bind", "alt-t:" + pick("tags"),
-		"--bind", "alt-p:" + pick("projects"),
-		"--bind", "alt-s,ctrl-s:" + pick("status"),
-		"--bind", "alt-d:" + pick("date"),
-		"--bind", "ctrl-x:" + act("fzf-pick toggledone {1}"),
-		"--bind", "alt-a:" + act("fzf-pick togglearchive {1}"),
-		"--bind", "alt-f:" + act("fzf-pick togglefav {1}"), // Ctrl-F pages in the TUI and moves the cursor in fzf
-		"--bind", "ctrl-e:execute(" + q + " edit {1})+" + reload,
-		"--bind", "ctrl-y:execute-silent(" + q + " fzf-pick copy {1})",
-		"--bind", "alt-enter:become(" + q + " resume --no-herdr {1})",
-	}
+		"--bind", "alt-t:"+pick("tags"),
+		"--bind", "alt-p:"+pick("projects"),
+		"--bind", "alt-s,ctrl-s:"+pick("status"),
+		"--bind", "alt-d:"+pick("date"),
+		"--bind", "ctrl-x:"+act("fzf-pick toggledone {1}"),
+		"--bind", "alt-a:"+act("fzf-pick togglearchive {1}"),
+		"--bind", "alt-f:"+act("fzf-pick togglefav {1}"), // Ctrl-F pages in the TUI and moves the cursor in fzf
+		"--bind", "ctrl-e:execute("+q+" edit {1})+"+reload,
+		"--bind", "ctrl-y:execute-silent("+q+" fzf-pick copy {1})",
+		"--bind", "alt-enter:become("+q+" resume --no-herdr {1})",
+	)
 	if foot != "" {
 		args = append(args, "--footer", foot)
 	}
@@ -154,7 +183,7 @@ func Run(initialQuery string, start Tab) (string, error) {
 	cmd := exec.Command("fzf", args...)
 	// CI=1 stops termenv probing the terminal (bubbletea's init does, and inside execute() the reply lands in the y/N prompt);
 	// main drops CI again when FAV_IN_FZF is set so the exec'd claude / codex / $EDITOR never see it.
-	cmd.Env = append(os.Environ(), pickFileEnv+"="+pickFile, "CI=1", "FAV_IN_FZF=1")
+	cmd.Env = append(os.Environ(), PickFileEnv+"="+pickFile, bindShellEnv+"="+sh.Name(), shell.Env+"="+shell.User().Name(), "CI=1", "FAV_IN_FZF=1")
 	cmd.Stderr = os.Stderr
 	out, err := cmd.Output()
 	if err != nil {
@@ -173,13 +202,12 @@ func reloadAction(q string) string { return "reload(" + q + " fzf-list {q})" }
 // Switch is the action string `fav fzf-tab` prints for fzf transform: prompt, header, footer, reload.
 // Arguments are wrapped in ^ because the texts contain ( ) [ ] and newlines.
 func Switch(t Tab) string {
-	self, _ := os.Executable()
 	head, foot := hints(t)
 	s := "change-prompt(" + t.prompt() + ")+change-header^" + head + "^"
 	if foot != "" {
 		s += "+change-footer^" + foot + "^"
 	}
-	return s + "+" + reloadAction(shellQuote(self))
+	return s + "+" + reloadAction(selfIn(childBindShell()))
 }
 
 // Tick handles every(3): only the Agents tab refreshes on the timer.
@@ -187,8 +215,7 @@ func Tick(cur Tab) string {
 	if cur != TabLive {
 		return ""
 	}
-	self, _ := os.Executable()
-	return reloadAction(shellQuote(self))
+	return reloadAction(selfIn(childBindShell()))
 }
 
 func HasTimer() bool {
@@ -224,7 +251,7 @@ func hints(t Tab) (header, footer string) {
 	}
 	rows := packKeys(i18n.T("fzf.keys_tabs")+"  "+keys, width)
 	var lines []string
-	for _, para := range strings.Split(text, "\n") {
+	for para := range strings.SplitSeq(text, "\n") {
 		lines = append(lines, render.Wrap(para, width)...)
 	}
 	major, minor := version()
@@ -237,7 +264,7 @@ func hints(t Tab) (header, footer string) {
 func packKeys(spec string, width int) []string {
 	var out []string
 	cur := ""
-	for _, k := range strings.Split(spec, "  ") {
+	for k := range strings.SplitSeq(spec, "  ") {
 		if cur != "" && render.Width(cur)+2+render.Width(k) > width {
 			out = append(out, cur)
 			cur = ""
@@ -266,15 +293,10 @@ func Pick(prompt string, items []string, multi bool) []string {
 		return nil
 	}
 	var sel []string
-	for _, l := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+	for l := range strings.SplitSeq(strings.TrimSpace(string(out)), "\n") {
 		if l = strings.TrimSpace(l); l != "" {
 			sel = append(sel, l)
 		}
 	}
 	return sel
-}
-
-// shellQuote is for --bind strings, which a shell executes.
-func shellQuote(s string) string {
-	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }

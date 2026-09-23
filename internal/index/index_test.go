@@ -2,6 +2,7 @@ package index
 
 import (
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"github.com/oxsean/fav/internal/fav"
+	"github.com/oxsean/fav/internal/testkit"
 )
 
 func write(t *testing.T, path, content string) {
@@ -48,13 +50,6 @@ func claudeLines(prompts ...string) string {
 }
 
 var sprintf = fmt.Sprintf
-
-// posixOnly: the test's transcripts spell POSIX paths; internal/fixture covers the same behaviour with native paths.
-func posixOnly(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("POSIX path fixtures")
-	}
-}
 
 func setup(t *testing.T) (claude, codex string) {
 	t.Helper()
@@ -328,16 +323,15 @@ func TestAgentScratch(t *testing.T) {
 		"":                                                  false,
 	}
 	if runtime.GOOS != "windows" {
-		for cwd, want := range map[string]bool{
+		// a person's own scratch work stays listed
+		maps.Copy(cases, map[string]bool{
 			"/private/tmp/claude-501/-Users-ozn-dev-fav-0a24/scratchpad": true,
 			"/private/var/folders/m7/xx/T/claude-review-2370e1":          true,
 			"/tmp/claude-501/x":      true,
-			"/private/tmp":           false, // a person's own scratch work stays listed
+			"/private/tmp":           false,
 			"/tmp/notes":             false,
 			"/Users/me/claude-tools": false,
-		} {
-			cases[cwd] = want
-		}
+		})
 	}
 	for cwd, want := range cases {
 		if got := AgentScratch(cwd); got != want {
@@ -347,7 +341,7 @@ func TestAgentScratch(t *testing.T) {
 }
 
 func TestScratchSessionsOnlyInAgents(t *testing.T) {
-	posixOnly(t)
+	testkit.PosixOnly(t)
 	claude, _ := setup(t)
 	line := `{"type":"user","timestamp":"2026-09-10T01:00:0%dZ","cwd":"%s","message":{"content":"第 %d 句比较长的提示语在这里"}}` + "\n"
 	body := func(cwd string) string {

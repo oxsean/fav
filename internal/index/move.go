@@ -16,6 +16,7 @@ import (
 
 	"github.com/oxsean/fav/internal/capture"
 	"github.com/oxsean/fav/internal/fav"
+	"github.com/oxsean/fav/internal/paths"
 )
 
 // MovePlan is everything a move of old (and its subdirectories) to new touches; Plan first, show it, then Apply.
@@ -58,28 +59,11 @@ type MoveReport struct {
 var claudeEnc = regexp.MustCompile(`[^A-Za-z0-9]`)
 
 func ClaudeProjectDir(cwd string) string {
-	return filepath.Join(claudeHome(), "projects", ClaudeProjectName(cwd))
+	return filepath.Join(capture.ClaudeHome(), "projects", ClaudeProjectName(cwd))
 }
 
 // ClaudeProjectName is the directory name Claude Code gives a cwd under projects/.
 func ClaudeProjectName(cwd string) string { return claudeEnc.ReplaceAllString(cwd, "-") }
-
-// both sides Cleaned so forward slashes in records match on Windows
-func under(p, dir string) bool {
-	if p == "" {
-		return false
-	}
-	p = filepath.Clean(p)
-	return p == dir || strings.HasPrefix(p, dir+string(filepath.Separator))
-}
-
-func rebase(p, old, new string) string {
-	p = filepath.Clean(p)
-	if p == old {
-		return new
-	}
-	return new + p[len(old):]
-}
 
 // PlanMove lists the files to change for each session under old; live is the set of sessions running now.
 func (idx *Index) PlanMove(store *fav.Store, live map[string]capture.Live, old, new string) (*MovePlan, error) {
@@ -87,14 +71,14 @@ func (idx *Index) PlanMove(store *fav.Store, live map[string]capture.Live, old, 
 	if !filepath.IsAbs(old) || !filepath.IsAbs(new) {
 		return nil, errors.New("paths must be absolute")
 	}
-	if old == new || under(new, old) {
+	if old == new || paths.Under(new, old) {
 		return nil, errors.New("target must not be the source or inside it")
 	}
 	plan := &MovePlan{Old: old, New: new}
 	byKey := map[string]*MoveSession{}
 	var order []string
 	for _, f := range idx.files {
-		if f.SessionID == "" || !under(f.Cwd, old) {
+		if f.SessionID == "" || !paths.Under(f.Cwd, old) {
 			continue
 		}
 		k := f.Provider + ":" + f.SessionID
@@ -104,23 +88,23 @@ func (idx *Index) PlanMove(store *fav.Store, live map[string]capture.Live, old, 
 			if title == "" {
 				title = truncate(strings.Join(strings.Fields(f.First), " "), 60)
 			}
-			s = &MoveSession{Provider: f.Provider, SessionID: f.SessionID, Title: title, Cwd: f.Cwd, NewCwd: rebase(f.Cwd, old, new)}
+			s = &MoveSession{Provider: f.Provider, SessionID: f.SessionID, Title: title, Cwd: f.Cwd, NewCwd: paths.Rebase(f.Cwd, old, new)}
 			byKey[k] = s
 			order = append(order, k)
 		}
 		s.Files = append(s.Files, f.Path)
 		if f.Provider == fav.ProviderClaude {
-			if d := strings.TrimSuffix(f.Path, ".jsonl"); dirExists(d) {
+			if d := strings.TrimSuffix(f.Path, ".jsonl"); paths.IsDir(d) {
 				s.Dirs = append(s.Dirs, d)
 			}
 		}
 	}
 	for _, r := range store.All() {
-		if under(r.Cwd, old) || under(r.GitRoot, old) {
+		if paths.Under(r.Cwd, old) || paths.Under(r.GitRoot, old) {
 			plan.Records = append(plan.Records, r)
-			if under(r.Cwd, old) && r.SessionID != "" && byKey[r.Provider+":"+r.SessionID] == nil && r.TranscriptPath != "" && dirExists(filepath.Dir(r.TranscriptPath)) {
+			if paths.Under(r.Cwd, old) && r.SessionID != "" && byKey[r.Provider+":"+r.SessionID] == nil && r.TranscriptPath != "" && paths.IsDir(filepath.Dir(r.TranscriptPath)) {
 				if _, err := os.Stat(r.TranscriptPath); err == nil {
-					s := &MoveSession{Provider: r.Provider, SessionID: r.SessionID, Title: r.Title, Cwd: r.Cwd, NewCwd: rebase(r.Cwd, old, new), Files: []string{r.TranscriptPath}}
+					s := &MoveSession{Provider: r.Provider, SessionID: r.SessionID, Title: r.Title, Cwd: r.Cwd, NewCwd: paths.Rebase(r.Cwd, old, new), Files: []string{r.TranscriptPath}}
 					byKey[r.Provider+":"+r.SessionID] = s
 					order = append(order, r.Provider+":"+r.SessionID)
 				}
@@ -138,7 +122,7 @@ func (idx *Index) PlanMove(store *fav.Store, live map[string]capture.Live, old, 
 		plan.Sessions = append(plan.Sessions, *s)
 	}
 	for k := range claudeSettings() {
-		if under(k, old) {
+		if paths.Under(k, old) {
 			plan.Settings = true
 		}
 	}
@@ -189,11 +173,6 @@ func RescanAfterRestore(e fav.TrashEntry) map[string]bool {
 		}
 	}
 	return force
-}
-
-func dirExists(p string) bool {
-	st, err := os.Stat(p)
-	return err == nil && st.IsDir()
 }
 
 // Apply rewrites cwd in each transcript into its new location (originals go to trash), moves Claude session dirs into the new
@@ -282,11 +261,11 @@ func (p *MovePlan) Apply(store *fav.Store) (MoveReport, error) {
 		}
 	}
 	for _, r := range p.Records {
-		if under(r.Cwd, p.Old) {
-			r.Cwd = rebase(r.Cwd, p.Old, p.New)
+		if paths.Under(r.Cwd, p.Old) {
+			r.Cwd = paths.Rebase(r.Cwd, p.Old, p.New)
 		}
-		if under(r.GitRoot, p.Old) {
-			r.GitRoot = rebase(r.GitRoot, p.Old, p.New)
+		if paths.Under(r.GitRoot, p.Old) {
+			r.GitRoot = paths.Rebase(r.GitRoot, p.Old, p.New)
 		}
 		if r.Project == filepath.Base(p.Old) {
 			r.Project = filepath.Base(p.New)
@@ -297,7 +276,7 @@ func (p *MovePlan) Apply(store *fav.Store) (MoveReport, error) {
 		rep.Records++
 	}
 	for d := range oldDirs {
-		sweepProjectDir(d, ClaudeProjectDir(rebase(decodeHint(d, p), p.Old, p.New)))
+		sweepProjectDir(d, ClaudeProjectDir(paths.Rebase(decodeHint(d, p), p.Old, p.New)))
 	}
 	if p.Settings {
 		if err := moveClaudeSettings(p.Old, p.New); err != nil {
@@ -357,7 +336,7 @@ func rewriteCwd(src, dst, old, new string) error {
 		return err
 	}
 	w := bufio.NewWriterSize(out, 1<<20)
-	oldQ, newQ := jsonPath(old), jsonPath(new)
+	oldQ, newQ := paths.JSON(old), paths.JSON(new)
 	r := bufio.NewReaderSize(in, 1<<20)
 	for {
 		line, err := r.ReadBytes('\n')
@@ -390,12 +369,6 @@ func rewriteCwd(src, dst, old, new string) error {
 		os.Chtimes(tmp, time.Now(), st.ModTime())
 	}
 	return os.Rename(tmp, dst)
-}
-
-// Windows backslashes are escaped inside JSON strings
-func jsonPath(p string) string {
-	b, _ := json.Marshal(p)
-	return string(b[1 : len(b)-1])
 }
 
 func replaceCwd(line []byte, old, new string) []byte {
@@ -460,10 +433,10 @@ func moveClaudeSettings(old, new string) error {
 	}
 	changed := false
 	for k, v := range projects {
-		if !under(k, old) {
+		if !paths.Under(k, old) {
 			continue
 		}
-		nk := rebase(k, old, new)
+		nk := paths.Rebase(k, old, new)
 		if _, exists := projects[nk]; exists {
 			continue
 		}
@@ -515,7 +488,7 @@ func (idx *Index) FindMissing(store *fav.Store, only string) []Missing {
 		}
 		ok, seen := exists[cwd]
 		if !seen {
-			ok = dirExists(cwd)
+			ok = paths.IsDir(cwd)
 			exists[cwd] = ok
 		}
 		if ok {
@@ -534,7 +507,7 @@ func (idx *Index) FindMissing(store *fav.Store, only string) []Missing {
 		if remote != "" {
 			m.Remote = remote
 		}
-		if repo != "" && repo != cwd && dirExists(repo) {
+		if repo != "" && repo != cwd && paths.IsDir(repo) {
 			m.Repo = repo
 		}
 	}
@@ -562,7 +535,7 @@ func (idx *Index) FindMissing(store *fav.Store, only string) []Missing {
 			cands[c] = true
 		}
 		for cand := range cands {
-			if !dirExists(cand) || cand == m.Dir || under(cand, m.Dir) {
+			if !paths.IsDir(cand) || cand == m.Dir || paths.Under(cand, m.Dir) {
 				continue
 			}
 			if m.Remote != "" && capture.GitOut(cand, "remote", "get-url", "origin") != m.Remote {

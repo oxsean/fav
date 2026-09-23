@@ -161,10 +161,7 @@ func (m *Model) moveFocus(delta int) {
 			}
 		}
 	}
-	f := from + delta
-	if f < 0 {
-		f = 0
-	}
+	f := max(from+delta, 0)
 	if f >= n {
 		f = n - 1
 	}
@@ -390,7 +387,7 @@ func (m *Model) btnRows(y0, x0, inner int, bs []btn, base, right int) []string {
 	var cols [][]string
 	x := x0
 	flush := func() {
-		for i := 0; i < 3; i++ {
+		for i := range 3 {
 			parts := make([]string, len(cols))
 			for j := range cols {
 				parts[j] = at(cols[j], i)

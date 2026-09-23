@@ -2,7 +2,6 @@ package tui
 
 import (
 	"context"
-	"os"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -13,6 +12,7 @@ import (
 	"github.com/oxsean/fav/internal/fav"
 	"github.com/oxsean/fav/internal/fulltext"
 	"github.com/oxsean/fav/internal/i18n"
+	"github.com/oxsean/fav/internal/paths"
 	"github.com/oxsean/fav/internal/render"
 )
 
@@ -118,7 +118,7 @@ func (m *Model) applyHits(msg hitsMsg) tea.Cmd {
 	cur := 0
 	for i, h := range msg.items {
 		if _, ok := hl.self[h.Path]; !ok {
-			hl.self[h.Path] = samePath(h.Path, tr)
+			hl.self[h.Path] = paths.SameFile(h.Path, tr)
 		}
 		if h.Path == msg.pin.Path && h.Off == msg.pin.Off && cur == 0 {
 			cur = i
@@ -293,16 +293,6 @@ func (m *Model) hitPane(y0, x0, w, h int) []string {
 		out = append(out, "")
 	}
 	return out
-}
-
-// samePath: two paths of one file (a pinned session reads its hard link).
-func samePath(a, b string) bool {
-	if a == b {
-		return true
-	}
-	fa, err1 := os.Stat(a)
-	fb, err2 := os.Stat(b)
-	return err1 == nil && err2 == nil && os.SameFile(fa, fb)
 }
 
 // followChat moves the selection to the hit of the message the right pane stands on, or the nearest one of the same

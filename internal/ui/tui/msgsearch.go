@@ -16,6 +16,7 @@ import (
 	"github.com/oxsean/fav/internal/fulltext"
 	"github.com/oxsean/fav/internal/i18n"
 	"github.com/oxsean/fav/internal/index"
+	"github.com/oxsean/fav/internal/paths"
 )
 
 // Message search: a search box value starting with > (or 》) searches the prose of the sessions the rest of the query picks.
@@ -318,7 +319,7 @@ func (m *Model) landHit() tea.Cmd {
 		return nil
 	}
 	m.msg.landQ = m.msgKeywords()
-	if x, ok := m.msgHit(r); ok && x.Off >= 0 && samePath(x.Path, transcript(r)) {
+	if x, ok := m.msgHit(r); ok && x.Off >= 0 && paths.SameFile(x.Path, transcript(r)) {
 		return m.showOff(x.Off)
 	}
 	return m.findHit(0)

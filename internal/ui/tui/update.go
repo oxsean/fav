@@ -551,14 +551,14 @@ func (m *Model) navKey(msg tea.KeyMsg) tea.Cmd {
 
 func (m *Model) page(dir int) {
 	step := max(1, m.listHeight()/max(1, cardRows+1))
-	for i := 0; i < step; i++ {
+	for range step {
 		m.move(dir)
 	}
 }
 
 func (m *Model) halfPage(dir int) {
 	step := max(1, m.listHeight()/max(1, cardRows+1)/2)
-	for i := 0; i < step; i++ {
+	for range step {
 		m.move(dir)
 	}
 }
@@ -1017,7 +1017,7 @@ func (m *Model) cycleProvider() {
 func (m *Model) pickDate() {
 	q := fav.Parse(m.search.Value())
 	var cur []string
-	for _, t := range strings.Fields(m.search.Value()) {
+	for t := range strings.FieldsSeq(m.search.Value()) {
 		if hasPrefix("last:", "after:", "before:")(t) {
 			cur = append(cur, t)
 		}
@@ -1115,7 +1115,7 @@ func dateItem(s string, now time.Time) (item, bool) {
 
 func (m *Model) setQuery(add []string, sameKind func(string) bool) {
 	var kept []string
-	for _, t := range strings.Fields(m.search.Value()) {
+	for t := range strings.FieldsSeq(m.search.Value()) {
 		if !sameKind(t) {
 			kept = append(kept, t)
 		}

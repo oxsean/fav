@@ -2,12 +2,14 @@ package index
 
 import (
 	"encoding/json"
+	"maps"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 
 	"github.com/oxsean/fav/internal/capture"
+	"github.com/oxsean/fav/internal/paths"
 )
 
 // wtEntry is what git said about a session directory while it existed; kept after it is removed.
@@ -47,14 +49,12 @@ func (w worktrees) learn(files map[string]*File, path string) worktrees {
 				continue
 			}
 		}
-		if !dirExists(f.Cwd) {
+		if !paths.IsDir(f.Cwd) {
 			continue
 		}
 		if next == nil {
 			next = make(worktrees, len(w)+8)
-			for k, v := range w {
-				next[k] = v
-			}
+			maps.Copy(next, w)
 		}
 		next[f.Cwd] = gitWorktree(f.Cwd)
 	}
@@ -77,7 +77,7 @@ func gitWorktree(dir string) wtEntry {
 	if !ok || filepath.Base(common) != ".git" {
 		return wtEntry{}
 	}
-	if main := filepath.Dir(common); main != filepath.Clean(top) {
+	if main := filepath.Dir(paths.Clean(common)); !paths.Same(main, top) {
 		return wtEntry{Repo: main}
 	}
 	return wtEntry{Remote: capture.GitOut(dir, "remote", "get-url", "origin")}
@@ -101,8 +101,8 @@ func (w worktrees) repoOf(cwd, wtRepo, remote string) string {
 	if e, ok := w[cwd]; ok {
 		return e.Repo
 	}
-	rest, ok := strings.CutPrefix(cwd, filepath.Join(codexHome(), "worktrees")+string(filepath.Separator))
-	if !ok || remote == "" {
+	rest, ok := paths.Inside(filepath.Join(capture.CodexHome(), "worktrees"), cwd)
+	if !ok || rest == "." || remote == "" {
 		return ""
 	}
 	parts := strings.Split(rest, string(filepath.Separator))
@@ -117,7 +117,7 @@ func (w worktrees) repoOf(cwd, wtRepo, remote string) string {
 	}
 	sort.Strings(hits)
 	for _, h := range hits {
-		if dirExists(h) {
+		if paths.IsDir(h) {
 			return h
 		}
 	}

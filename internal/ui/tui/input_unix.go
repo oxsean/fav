@@ -9,7 +9,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/mattn/go-isatty"
+	"github.com/charmbracelet/x/term"
 )
 
 // wheelInput wraps the terminal so wheel sequences are thinned before bubbletea parses them: pixel-scrolling
@@ -92,7 +92,7 @@ func (w *wheelInput) thin(b []byte, now time.Time) []byte {
 			keep := step * accelSteps(w.acc/step, mult)
 			w.acc = 0
 			last := run[len(run)-1]
-			for i := 0; i < keep; i++ {
+			for range keep {
 				out = append(out, last...)
 			}
 		}
@@ -138,7 +138,7 @@ func accelSteps(want int, mult float64) int {
 // terminalInput is the tty bubbletea would use, wrapped; nil means keep bubbletea's default.
 func terminalInput() io.Reader {
 	f := os.Stdin
-	if !isatty.IsTerminal(f.Fd()) {
+	if !term.IsTerminal(f.Fd()) {
 		var err error
 		if f, err = os.Open("/dev/tty"); err != nil {
 			return nil

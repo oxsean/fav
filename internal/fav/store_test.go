@@ -65,7 +65,7 @@ func TestCompactKeepsLatestDropsHistory(t *testing.T) {
 	keep := rec("留下", nil)
 	drop := rec("删掉", nil)
 	s.Put(keep)
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		keep.Title = "留下"
 		s.Put(keep)
 	}
@@ -112,8 +112,8 @@ func TestGetByPrefix(t *testing.T) {
 
 func TestSortedByFavoritedAtDesc(t *testing.T) {
 	s := tmpStore(t)
-	old := rec("旧", func(r *Rec) { r.FavoritedAt = ptr(time.Now().Add(-48 * time.Hour)) })
-	fresh := rec("新", func(r *Rec) { r.FavoritedAt = ptr(time.Now()) })
+	old := rec("旧", func(r *Rec) { r.FavoritedAt = new(time.Now().Add(-48 * time.Hour)) })
+	fresh := rec("新", func(r *Rec) { r.FavoritedAt = new(time.Now()) })
 	s.Put(old)
 	s.Put(fresh)
 

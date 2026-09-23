@@ -41,8 +41,8 @@ func Cands(recs []*fav.Rec, bySession map[string][]string) []Cand {
 func Prefixed(s string) (rest string, ok bool) {
 	t := strings.TrimLeft(s, " ")
 	for _, p := range []string{">", "》"} {
-		if strings.HasPrefix(t, p) {
-			return strings.TrimSpace(strings.TrimPrefix(t, p)), true
+		if after, ok0 := strings.CutPrefix(t, p); ok0 {
+			return strings.TrimSpace(after), true
 		}
 	}
 	return s, false
@@ -262,10 +262,8 @@ func Search(ctx context.Context, dir string, cands []Cand, q string) []Result {
 	out := make(chan fileScan)
 	workers := max(1, min(runtime.NumCPU(), 8))
 	var wg sync.WaitGroup
-	for w := 0; w < workers; w++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range workers {
+		wg.Go(func() {
 			buf := make([]byte, 0, 4096)
 			for j := range jobs {
 				if ctx.Err() != nil {
@@ -368,7 +366,7 @@ func Search(ctx context.Context, dir string, cands []Cand, q string) []Result {
 				f.Close()
 				out <- fs
 			}
-		}()
+		})
 	}
 	go func() {
 		defer close(jobs)
@@ -489,7 +487,7 @@ func metaBonus(kws []Keyword, meta string) float64 {
 
 // field4 is the text column of "off\trole\tunix\ttext"; nil for a malformed line.
 func field4(line []byte) []byte {
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		t := bytes.IndexByte(line, '\t')
 		if t < 0 {
 			return nil
@@ -572,11 +570,11 @@ func window(buf []byte, mask uint64, kwTerms [][]int, termB [][]byte, present ui
 }
 
 func lineOff(line []byte) int64 {
-	t := bytes.IndexByte(line, '\t')
-	if t < 0 {
+	before, _, ok := bytes.Cut(line, []byte{'\t'})
+	if !ok {
 		return -1
 	}
-	n, err := strconv.ParseInt(string(line[:t]), 10, 64)
+	n, err := strconv.ParseInt(string(before), 10, 64)
 	if err != nil {
 		return -1
 	}

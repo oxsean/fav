@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -15,9 +14,11 @@ import (
 	"github.com/oxsean/fav/internal/capture"
 	"github.com/oxsean/fav/internal/fav"
 	"github.com/oxsean/fav/internal/index"
+	"github.com/oxsean/fav/internal/testkit"
 )
 
-func ptr(t time.Time) *time.Time { return &t }
+//go:fix inline
+func ptr(t time.Time) *time.Time { return new(t) }
 
 func fixture(t *testing.T) *fav.Store {
 	t.Helper()
@@ -43,7 +44,7 @@ func fixture(t *testing.T) *fav.Store {
 			Title: x.title, Summary: "排查搜索接口游标分页重复返回同一条的问题。确认 region-specific toggle 未创建时后端回退到 embedded YAML default。",
 			Project: x.project, Tags: x.tags, Status: fav.StatusDone,
 			Cwd: cwd, GitBranch: "feature/cursor-pagination",
-			FavoritedAt: ptr(base.Add(-x.ago)),
+			FavoritedAt: new(base.Add(-x.ago)),
 		}
 		if x.done {
 			r.Status = fav.StatusDone
@@ -476,7 +477,7 @@ func TestProjectsSortKeepsGroups(t *testing.T) {
 	m.move(1)
 	name := m.rows[m.cursor].group
 	row := m.rowTop(m.cursor) - m.scroll
-	for i := 0; i < 4; i++ {
+	for range 4 {
 		m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("o")})
 		if g := groups(); len(g) != len(before) {
 			t.Fatalf("%s：分组数 %d → %d", m.sortBy.label(), len(before), len(g))
@@ -496,10 +497,10 @@ func TestWheelReachesFirstGroup(t *testing.T) {
 	m.setView(viewProjects)
 	m.move(1)
 	m.toggleGroup()
-	for i := 0; i < 20; i++ {
+	for range 20 {
 		m.wheel(1, 0)
 	}
-	for i := 0; i < 200; i++ {
+	for range 200 {
 		m.wheel(-1, 0)
 	}
 	m.View()
@@ -677,8 +678,7 @@ func TestMoveProjectFromTUI(t *testing.T) {
 	pdir := index.ClaudeProjectDir(old)
 	os.MkdirAll(pdir, 0o755)
 	line := func(i int, cwd string) string {
-		q, _ := json.Marshal(cwd)
-		return `{"type":"user","timestamp":"2026-09-10T01:00:0` + strconv.Itoa(i) + `Z","cwd":` + string(q) + `,"message":{"content":"提示 ` + strconv.Itoa(i) + ` 做点什么事情"}}` + "\n"
+		return `{"type":"user","timestamp":"2026-09-10T01:00:0` + strconv.Itoa(i) + `Z","cwd":` + testkit.JSONString(cwd) + `,"message":{"content":"提示 ` + strconv.Itoa(i) + ` 做点什么事情"}}` + "\n"
 	}
 	os.WriteFile(filepath.Join(pdir, "s1.jsonl"), []byte(line(0, old)+line(1, old)+line(2, old)), 0o644)
 	os.WriteFile(filepath.Join(pdir, "s2.jsonl"), []byte(line(0, old)+line(1, old)+line(2, old)), 0o644)

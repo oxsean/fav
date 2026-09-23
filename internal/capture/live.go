@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/oxsean/fav/internal/fav"
+	"github.com/oxsean/fav/internal/filelock"
 	"github.com/oxsean/fav/internal/herdr"
 )
 
@@ -40,7 +41,7 @@ func HerdrLive(local, prev map[string]Live) map[string]Live {
 		return nil
 	}
 	now := time.Now()
-	_, tracked := os.Stat(filepath.Join(claudeDir(), "sessions"))
+	_, tracked := os.Stat(filepath.Join(ClaudeHome(), "sessions"))
 	out := map[string]Live{}
 	for _, a := range agents {
 		if a.AgentSession == nil || a.AgentSession.Value == "" {
@@ -63,7 +64,7 @@ func HerdrLive(local, prev map[string]Live) map[string]Live {
 // ClaudeLive reads ~/.claude/sessions/<pid>.json (session id, cwd, busy/idle, status time; kind=bg carries the jobId for attach); dead pids are skipped.
 func ClaudeLive() map[string]Live {
 	out := map[string]Live{}
-	files, _ := filepath.Glob(filepath.Join(claudeDir(), "sessions", "*.json"))
+	files, _ := filepath.Glob(filepath.Join(ClaudeHome(), "sessions", "*.json"))
 	for _, f := range files {
 		b, err := os.ReadFile(f)
 		if err != nil {
@@ -150,7 +151,7 @@ func CodexLive() map[string]Live {
 	locks, _ := filepath.Glob(filepath.Join(filepath.Dir(codexSessionsDir()), "thread-writer-locks", "*.lock"))
 	for _, f := range locks {
 		id := strings.TrimSuffix(filepath.Base(f), ".lock")
-		if strings.HasPrefix(id, ".") || !lockHeld(f) || codexOneOff(id, f) {
+		if strings.HasPrefix(id, ".") || !filelock.Held(f) || codexOneOff(id, f) {
 			continue
 		}
 		out[id] = Live{Agent: fav.ProviderCodex}
@@ -158,12 +159,22 @@ func CodexLive() map[string]Live {
 	return out
 }
 
-func claudeDir() string {
+// ClaudeHome is Claude Code's data directory: CLAUDE_CONFIG_DIR, else ~/.claude.
+func ClaudeHome() string {
 	if h := os.Getenv("CLAUDE_CONFIG_DIR"); h != "" {
 		return h
 	}
 	home, _ := os.UserHomeDir()
 	return filepath.Join(home, ".claude")
+}
+
+// CodexHome is Codex's data directory: CODEX_HOME, else ~/.codex.
+func CodexHome() string {
+	if h := os.Getenv("CODEX_HOME"); h != "" {
+		return h
+	}
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".codex")
 }
 
 func LocalLive() map[string]Live { return MergeLive(CodexLive(), ClaudeLive()) }

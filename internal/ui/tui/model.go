@@ -3,11 +3,9 @@ package tui
 
 import (
 	"os"
-	"path/filepath"
 	"slices"
 	"sort"
 	"strconv"
-	"strings"
 	"time"
 	"unicode/utf8"
 
@@ -19,6 +17,7 @@ import (
 	"github.com/oxsean/fav/internal/fulltext"
 	"github.com/oxsean/fav/internal/i18n"
 	"github.com/oxsean/fav/internal/index"
+	"github.com/oxsean/fav/internal/paths"
 	"github.com/oxsean/fav/internal/render"
 )
 
@@ -413,7 +412,7 @@ func (m *Model) autoOpenProject() {
 	for g, recs := range m.groups {
 		c := 0
 		for _, r := range recs {
-			if sameTree(r.Cwd, m.startDir) {
+			if paths.Nested(r.Cwd, m.startDir) {
 				c++
 			}
 		}
@@ -437,16 +436,6 @@ func (m *Model) autoOpenProject() {
 			return
 		}
 	}
-}
-
-// sameTree: one path is the other or inside it.
-func sameTree(a, b string) bool {
-	if a == "" || b == "" {
-		return false
-	}
-	a, b = filepath.Clean(a), filepath.Clean(b)
-	sep := string(filepath.Separator)
-	return a == b || strings.HasPrefix(a, b+sep) || strings.HasPrefix(b, a+sep)
 }
 
 func (m *Model) when(r *fav.Rec) time.Time {
@@ -888,15 +877,6 @@ func byCount(counts map[string]int) []item {
 		return out[i].name < out[j].name
 	})
 	return out
-}
-
-var home, _ = os.UserHomeDir()
-
-func shortenHome(p string) string {
-	if p != "" && home != "" && strings.HasPrefix(p, home) {
-		return "~" + p[len(home):]
-	}
-	return p
 }
 
 func (m *Model) chatVisible() bool { return m.twoColumn() || m.detail }

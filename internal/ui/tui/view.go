@@ -10,6 +10,7 @@ import (
 	"github.com/oxsean/fav/internal/capture"
 	"github.com/oxsean/fav/internal/fav"
 	"github.com/oxsean/fav/internal/i18n"
+	"github.com/oxsean/fav/internal/paths"
 	"github.com/oxsean/fav/internal/render"
 )
 
@@ -75,14 +76,14 @@ func (m *Model) baseLines() []string {
 
 func (m *Model) header() string {
 	names := []string{i18n.T("view.favorites") + " " + strconv.Itoa(m.nFav), i18n.T("view.sessions") + " " + strconv.Itoa(m.nAll), i18n.T("label.projects") + " " + strconv.Itoa(m.nProj), agentsTab(len(m.live), m.needCount())}
-	var tabs string
+	var tabs strings.Builder
 	var widths []int
 	for i, n := range names {
 		t, sty := "  "+n+"  ", dimmed
 		if view(i) == m.view {
 			t, sty = tabOpenL+" "+n+" "+tabOpenR, accent.Bold(true)
 		}
-		tabs += sty.Render(t)
+		tabs.WriteString(sty.Render(t))
 		widths = append(widths, ansi.StringWidth(t))
 	}
 
@@ -92,7 +93,7 @@ func (m *Model) header() string {
 		right += "  "
 	}
 
-	gap := m.w - ansi.StringWidth(left) - ansi.StringWidth(tabs) - ansi.StringWidth(right)
+	gap := m.w - ansi.StringWidth(left) - ansi.StringWidth(tabs.String()) - ansi.StringWidth(right)
 	if gap < 2 {
 		return fit(left, m.w)
 	}
@@ -107,7 +108,7 @@ func (m *Model) header() string {
 		tabX += wd
 	}
 
-	return left + strings.Repeat(" ", l) + tabs + strings.Repeat(" ", gap-l) + right
+	return left + strings.Repeat(" ", l) + tabs.String() + strings.Repeat(" ", gap-l) + right
 }
 
 func (m *Model) searchBox(y0 int) []string {
@@ -519,7 +520,7 @@ func (m *Model) cardBox(r *fav.Rec, sel bool, w int) []string {
 	metaLine := fit(render.Pad(meta, max(0, inner-render.Width(when)-1))+" "+when, inner)
 	tags := fit(tagString(r.Tags), inner)
 	if !r.Favorite() && len(r.Tags) == 0 {
-		tags = fit(shortenHome(r.Cwd), inner) // cwd when there are no tags
+		tags = fit(paths.Tilde(r.Cwd), inner) // cwd when there are no tags
 	}
 	if pulse != "" { // Agents: what it said last, how long this turn has run, how full the context is
 		tags = fit(pulse, inner)
@@ -682,9 +683,9 @@ func (m *Model) fieldLines(r *fav.Rec, w int) []string {
 	add(render.GlyphProject+i18n.T("card.project"), r.Project)
 	add(render.GlyphTerm+i18n.T("card.type"), r.WorkType)
 	add(render.GlyphBranch+i18n.T("card.branch"), r.GitBranch)
-	add(render.GlyphDir+i18n.T("card.directory"), shortenHome(r.Cwd))
+	add(render.GlyphDir+i18n.T("card.directory"), paths.Tilde(r.Cwd))
 	if r.Repo != r.Cwd {
-		add(render.GlyphDir+i18n.T("card.repo"), shortenHome(r.Repo))
+		add(render.GlyphDir+i18n.T("card.repo"), paths.Tilde(r.Repo))
 	}
 	add(render.GlyphEdit+i18n.T("card.files"), render.FilesField(r, 6))
 	add(render.GlyphSession+i18n.T("card.session"), r.SessionID)

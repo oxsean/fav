@@ -34,7 +34,7 @@ func textLines(t *testing.T, dir, path string) []string {
 	t.Helper()
 	b, _ := os.ReadFile(filepath.Join(dir, textName(path)))
 	var out []string
-	for _, l := range strings.Split(strings.TrimSpace(string(b)), "\n") {
+	for l := range strings.SplitSeq(strings.TrimSpace(string(b)), "\n") {
 		if l != "" {
 			out = append(out, string(field4([]byte(l))))
 		}
@@ -375,7 +375,7 @@ func TestATypoFindsTheWordTheSessionsUse(t *testing.T) {
 	dir, src := t.TempDir(), t.TempDir()
 	a, b := filepath.Join(src, "a.jsonl"), filepath.Join(src, "b.jsonl")
 	var lines []string
-	for i := 0; i < 6; i++ {
+	for range 6 {
 		lines = append(lines, claudeLine("user", "flyway baseline"))
 	}
 	writeTranscript(t, a, lines...)

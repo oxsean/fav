@@ -30,14 +30,14 @@ func TestScrollReadsNothing(t *testing.T) {
 		}
 		s.Put(&fav.Rec{ID: fav.NewID(), Provider: fav.ProviderClaude, SessionID: filepath.Base(p), Title: "t", Summary: "s",
 			Project: "webapp", Status: fav.StatusDone, Cwd: filepath.Join(home, "work", "webapp"), GitBranch: "main",
-			TranscriptPath: p, FavoritedAt: ptr(time.Now().Add(-time.Duration(i) * time.Hour))})
+			TranscriptPath: p, FavoritedAt: new(time.Now().Add(-time.Duration(i) * time.Hour))})
 	}
 	m := New(s, noIndex(t), fav.DefaultConfig(), "")
 	m.Update(tea.WindowSizeMsg{Width: 160, Height: 45})
 	m.View()
 	t0 := time.Now()
 
-	for i := 0; i < 50; i++ {
+	for range 50 {
 		m.Update(tea.KeyMsg{Type: tea.KeyDown})
 		m.View()
 	}
@@ -94,7 +94,7 @@ func TestChatScrollKeys(t *testing.T) {
 	}
 	s, _ := fav.OpenAt(filepath.Join(t.TempDir(), "records.jsonl"))
 	s.Put(&fav.Rec{ID: fav.NewID(), Provider: fav.ProviderClaude, SessionID: "x", Title: "t", Summary: "s", Project: "p",
-		Status: fav.StatusDone, Cwd: home, TranscriptPath: biggest, FavoritedAt: ptr(time.Now())})
+		Status: fav.StatusDone, Cwd: home, TranscriptPath: biggest, FavoritedAt: new(time.Now())})
 	m := New(s, noIndex(t), fav.DefaultConfig(), "")
 	m.Update(tea.WindowSizeMsg{Width: 150, Height: 44})
 	settle(m)
@@ -106,14 +106,14 @@ func TestChatScrollKeys(t *testing.T) {
 	if m.chatCur != 1 {
 		t.Errorf("J should move the chat cursor to the second message, got %d", m.chatCur)
 	}
-	for i := 0; i < 40; i++ {
+	for range 40 {
 		m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("J")})
 		m.View()
 	}
 	if m.chatScroll == 0 || m.chatCur < m.chatScroll {
 		t.Errorf("viewport should follow the cursor: scroll=%d cur=%d", m.chatScroll, m.chatCur)
 	}
-	for i := 0; i < 60; i++ {
+	for range 60 {
 		m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("K")})
 	}
 	if !strings.Contains(m.View(), "第 1–") || m.chatCur != 0 {
@@ -142,7 +142,7 @@ func TestChatSearch(t *testing.T) {
 	m := sized(t, 140, 40)
 	a, b := m.rows[1].rec, m.rows[2].rec
 	m.probes = map[*fav.Rec]*probe{a: {done: true}, b: {done: true}}
-	for i := 0; i < recentMsgs; i++ {
+	for i := range recentMsgs {
 		m.probes[a].msgs = append(m.probes[a].msgs, capture.Message{Role: "assistant", Text: "第" + strconv.Itoa(i) + "句", Off: int64(1000 - i)})
 	}
 	m.probes[a].msgs[3].Text = "cursor 回退到 id 兜底"
@@ -187,7 +187,7 @@ func TestChatSearch(t *testing.T) {
 
 func TestChatPagesBackward(t *testing.T) {
 	var b strings.Builder
-	for i := 0; i < 100; i++ {
+	for i := range 100 {
 		fmt.Fprintf(&b, `{"type":"user","timestamp":"2026-09-12T15:%02d:00Z","message":{"content":"第%d句"}}`+"\n", i%60, i)
 	}
 	path := filepath.Join(t.TempDir(), "t.jsonl")
@@ -202,7 +202,7 @@ func TestChatPagesBackward(t *testing.T) {
 		t.Fatalf("先只读尾 40 句：%d full=%v from=%d", len(p.msgs), p.full, p.from)
 	}
 	m.Update(tea.KeyMsg{Type: tea.KeyRight})
-	for i := 0; i < recentMsgs-8; i++ {
+	for range recentMsgs - 8 {
 		m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("j")})
 	}
 	m.View()
@@ -330,7 +330,7 @@ func TestMessageOverlayFullSteps(t *testing.T) {
 	r := m.current()
 	path := filepath.Join(t.TempDir(), "t.jsonl")
 	var big strings.Builder
-	for i := 0; i < 40; i++ {
+	for i := range 40 {
 		big.WriteString("line " + strconv.Itoa(i) + "\\n")
 	}
 	line1 := `{"type":"user","timestamp":"2026-09-12T15:15:38Z","message":{"content":"看一下"}}` + "\n"

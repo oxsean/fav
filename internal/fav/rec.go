@@ -3,6 +3,7 @@ package fav
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -21,12 +22,7 @@ const (
 var Statuses = []string{StatusTodo, StatusDoing, StatusDone}
 
 func ValidStatus(s string) bool {
-	for _, v := range Statuses {
-		if v == s {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(Statuses, s)
 }
 
 const (

@@ -7,6 +7,7 @@ import (
 	"github.com/oxsean/fav/internal/i18n"
 	"io"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -108,7 +109,7 @@ func customArg(name, input string, n int) string {
 		return head(input, n)
 	}
 	var files []string
-	for _, l := range strings.Split(input, "\n") {
+	for l := range strings.SplitSeq(input, "\n") {
 		for _, m := range patchFileMarks {
 			if strings.HasPrefix(l, m) {
 				files = append(files, strings.TrimSpace(l[len(m):]))
@@ -320,18 +321,15 @@ func LastPrompt(path string) Prompt {
 	if err != nil {
 		return Prompt{}
 	}
-	off := st.Size() - tail
-	if off < 0 {
-		off = 0
-	}
+	off := max(st.Size()-tail, 0)
 	buf, err := io.ReadAll(io.NewSectionReader(f, off, st.Size()-off))
 	if err != nil {
 		return Prompt{}
 	}
 	lines := bytes.Split(buf, []byte{'\n'})
-	for i := len(lines) - 1; i >= 0; i-- {
+	for _, line := range slices.Backward(lines) {
 		var l transcriptLine
-		if json.Unmarshal(lines[i], &l) != nil {
+		if json.Unmarshal(line, &l) != nil {
 			continue
 		}
 		if s := l.prompt(); s != "" {
@@ -489,12 +487,12 @@ func Messages(path string, before int64, n int) Page {
 			off += int64(len(l)) + 1
 		}
 		drained = true
-		for i := len(lines) - 1; i >= 0; i-- {
+		for i, b := range slices.Backward(lines) {
 			if len(page.Msgs) >= n {
 				drained = false
 				break
 			}
-			b := lines[i]
+
 			if len(b) == 0 || !interesting(b) {
 				continue
 			}

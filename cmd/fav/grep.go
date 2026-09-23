@@ -11,8 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mattn/go-isatty"
-
+	"github.com/charmbracelet/x/term"
 	"github.com/oxsean/fav/internal/fav"
 	"github.com/oxsean/fav/internal/fulltext"
 	"github.com/oxsean/fav/internal/i18n"
@@ -47,7 +46,7 @@ func cmdGrep(args []string) error {
 		return err
 	}
 	idx = refreshed(idx)
-	syncText(s, idx, 0, isatty.IsTerminal(os.Stderr.Fd()))
+	syncText(s, idx, 0, term.IsTerminal(os.Stderr.Fd()))
 	recs, res := grep(s, idx, kw, scope)
 	if *limit > 0 && len(res) > *limit {
 		res = res[:*limit]

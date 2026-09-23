@@ -4,9 +4,11 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"github.com/oxsean/fav/internal/filelock"
 	"github.com/oxsean/fav/internal/i18n"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -188,16 +190,7 @@ func (s *Store) RawLines() int { return s.raw }
 
 // lock takes records.jsonl.lock, ⚠️ never the data file itself: Compact replaces its inode.
 func (s *Store) lock() (func(), error) {
-	lf, err := os.OpenFile(s.Path+".lock", os.O_CREATE|os.O_RDWR, 0o600)
-	if err != nil {
-		return nil, err
-	}
-	unlock, err := lock(lf)
-	if err != nil {
-		lf.Close()
-		return nil, err
-	}
-	return func() { unlock(); lf.Close() }, nil
+	return filelock.Lock(s.Path + ".lock")
 }
 
 // Compact rewrites atomically; ⚠️ hold the lock and reload first, or rows another process just appended are lost.
@@ -220,8 +213,8 @@ func (s *Store) Compact() error {
 	defer os.Remove(tmp.Name())
 
 	w := bufio.NewWriter(tmp)
-	for i := len(s.recs) - 1; i >= 0; i-- {
-		line, err := json.Marshal(s.recs[i])
+	for _, v := range slices.Backward(s.recs) {
+		line, err := json.Marshal(v)
 		if err != nil {
 			tmp.Close()
 			return err

@@ -10,7 +10,8 @@ import (
 	"github.com/oxsean/fav/internal/fav"
 )
 
-func ptr(t time.Time) *time.Time { return &t }
+//go:fix inline
+func ptr(t time.Time) *time.Time { return new(t) }
 
 func init() { noColor = true }
 
@@ -27,7 +28,7 @@ func TestCardRightColumnAlignsAcrossScripts(t *testing.T) {
 	for _, title := range titles {
 		r := &fav.Rec{
 			Title: title, Provider: fav.ProviderClaude, Project: "notes-api",
-			Status: fav.StatusDone, FavoritedAt: ptr(now.Add(-90 * time.Minute)),
+			Status: fav.StatusDone, FavoritedAt: new(now.Add(-90 * time.Minute)),
 		}
 		got := Card(r, width, now)[0]
 		if w := Width(got); w != width {
@@ -83,7 +84,7 @@ func TestLineIsSingleLineWithHiddenID(t *testing.T) {
 	r := &fav.Rec{
 		ID: "abc123", Title: "notes-api 排障", Provider: fav.ProviderClaude,
 		Project: "notes-api", Tags: []string{"notes-api", "debug"},
-		Status: fav.StatusDone, FavoritedAt: ptr(time.Now()),
+		Status: fav.StatusDone, FavoritedAt: new(time.Now()),
 	}
 	got := Line(r, time.Now())
 	if strings.Contains(got, "\n") {
@@ -131,7 +132,7 @@ func TestWhen(t *testing.T) {
 func TestPreviewReportsDeadTranscript(t *testing.T) {
 	r := &fav.Rec{
 		Title: "排障", Provider: fav.ProviderClaude, SessionID: "x",
-		Status: fav.StatusDone, FavoritedAt: ptr(time.Now()),
+		Status: fav.StatusDone, FavoritedAt: new(time.Now()),
 		TranscriptPath: "/nope/definitely-missing.jsonl",
 	}
 	if !strings.Contains(Preview(r, 60, time.Now()), "会话记录文件已失效") {

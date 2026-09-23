@@ -2,11 +2,12 @@ package capture
 
 import (
 	"errors"
-	"os"
 	"os/exec"
 
 	"github.com/oxsean/fav/internal/fav"
 	"github.com/oxsean/fav/internal/i18n"
+	"github.com/oxsean/fav/internal/paths"
+	"github.com/oxsean/fav/internal/shell"
 )
 
 func lookPath(provider string) (string, error) {
@@ -29,13 +30,13 @@ type CommandSpec struct {
 func (c CommandSpec) Argv() []string { return append([]string{c.Exec}, c.Args...) }
 
 // Display is the command without the cd, quoted for the shell fav was started from; never executed.
-func (c CommandSpec) Display() string { return userShell().join(c.Argv()) }
+func (c CommandSpec) Display() string { return shell.User().Join(c.Argv()) }
 
 // TerminalLine is the line the user copies into the shell fav was started from; it cds first when Cwd is set.
-func (c CommandSpec) TerminalLine() string { return userShell().line(c) }
+func (c CommandSpec) TerminalLine() string { return shell.User().Line(c.Cwd, c.Argv()) }
 
 // ShellLine is the line typed into a Herdr pane (herdr pane run goes through a POSIX shell, not argv).
-func (c CommandSpec) ShellLine() string { return posixShell.line(c) }
+func (c CommandSpec) ShellLine() string { return shell.POSIX.Line(c.Cwd, c.Argv()) }
 
 // Claude keeps the original session id (no --fork-session).
 func BuildResume(r *fav.Rec) (CommandSpec, error) {
@@ -94,7 +95,7 @@ func Checks(r *fav.Rec) []Check {
 		out = append(out, Check{Warn: true, Text: i18n.F("resume.check.codex_archived", r.SessionID)})
 	}
 
-	if r.GitBranch != "" && r.Cwd != "" && dirExists(r.Cwd) {
+	if r.GitBranch != "" && r.Cwd != "" && paths.IsDir(r.Cwd) {
 		if cur := GitOut(r.Cwd, "rev-parse", "--abbrev-ref", "HEAD"); cur != "" && cur != r.GitBranch {
 			out = append(out, Check{Warn: true, Text: i18n.F("resume.check.branch_differs", cur, r.GitBranch)})
 		}
@@ -115,7 +116,7 @@ func dirCheck(cwd, remote string) Check {
 	switch {
 	case cwd == "":
 		return Check{Warn: true, Text: i18n.T("resume.check.no_cwd")}
-	case dirExists(cwd):
+	case paths.IsDir(cwd):
 		return Check{OK: true, Text: i18n.T("resume.check.dir_ok") + cwd}
 	}
 	hint := ""
@@ -144,9 +145,4 @@ func providerLabel(p string) string {
 		return "Codex CLI"
 	}
 	return p
-}
-
-func dirExists(p string) bool {
-	st, err := os.Stat(p)
-	return err == nil && st.IsDir()
 }

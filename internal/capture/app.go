@@ -6,23 +6,22 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"sync"
 
 	"github.com/oxsean/fav/internal/fav"
 	"github.com/oxsean/fav/internal/i18n"
+	"github.com/oxsean/fav/internal/paths"
+	"uuid"
 )
 
 // Desktop apps open a session by URL: Claude's resumes a CLI session (claude://resume?session=<uuid>), ChatGPT's Codex
 // opens a thread (codex://threads/<id>). Both read the CLI's own session files.
 // ⚠️ Neither URL is documented: they were found in the apps, so a failure has to fall back to the terminal.
 
-var uuidRe = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
-
 // AppURL opens r in its desktop app; "" when there is none for it.
 func AppURL(r *fav.Rec) string {
-	if !uuidRe.MatchString(r.SessionID) || appBlock(r) != "" {
+	if !canonicalUUID(r.SessionID) || appBlock(r) != "" {
 		return ""
 	}
 	switch r.Provider {
@@ -48,7 +47,7 @@ func appBlock(r *fav.Rec) string {
 	if r.Provider == fav.ProviderCodex {
 		root = filepath.Join(home, ".codex", "sessions")
 	}
-	if rel, err := filepath.Rel(root, r.TranscriptPath); r.TranscriptPath == "" || err != nil || !filepath.IsLocal(rel) {
+	if !paths.Under(r.TranscriptPath, root) {
 		return "resume.app_elsewhere"
 	}
 	if _, err := os.Stat(r.TranscriptPath); err != nil {
@@ -211,4 +210,10 @@ func StartedInApp(r *fav.Rec) bool {
 		return CodexFromApp(meta.Payload.Originator)
 	}
 	return false
+}
+
+// canonicalUUID: the 36-character hyphenated form only (uuid.Parse also takes braces, urn: and bare hex).
+func canonicalUUID(s string) bool {
+	_, err := uuid.Parse(s)
+	return len(s) == 36 && err == nil
 }

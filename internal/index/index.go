@@ -15,6 +15,7 @@ import (
 
 	"github.com/oxsean/fav/internal/capture"
 	"github.com/oxsean/fav/internal/fav"
+	"github.com/oxsean/fav/internal/paths"
 )
 
 // File is one transcript as scanned so far (a Codex session may span several rollouts, merged in Sessions); counters are cumulative.
@@ -595,7 +596,7 @@ func (idx *Index) Sessions() []*Session {
 		}
 	}
 	newest := func(id string) string {
-		for i := 0; i < 16; i++ { // ponytail: 16 hops is far more than any real chain
+		for range 16 { // ponytail: 16 hops is far more than any real chain
 			n, ok := next[id]
 			if !ok || n == id {
 				break
@@ -666,7 +667,7 @@ type candidate struct{ path, provider, sessionID string }
 
 func candidates() []candidate {
 	var out []candidate
-	hits, _ := filepath.Glob(filepath.Join(claudeHome(), "projects", "*", "*.jsonl"))
+	hits, _ := filepath.Glob(filepath.Join(capture.ClaudeHome(), "projects", "*", "*.jsonl"))
 	for _, p := range hits {
 		out = append(out, candidate{p, fav.ProviderClaude, strings.TrimSuffix(filepath.Base(p), ".jsonl")})
 	}
@@ -689,30 +690,14 @@ func candidates() []candidate {
 	return out
 }
 
-func claudeHome() string {
-	if h := os.Getenv("CLAUDE_CONFIG_DIR"); h != "" {
-		return h
-	}
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".claude")
-}
+func codexSessionsDir() string { return filepath.Join(capture.CodexHome(), "sessions") }
 
-func codexHome() string {
-	if h := os.Getenv("CODEX_HOME"); h != "" {
-		return h
-	}
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".codex")
-}
-
-func codexSessionsDir() string { return filepath.Join(codexHome(), "sessions") }
-
-func codexArchivedDir() string { return filepath.Join(codexHome(), "archived_sessions") }
+func codexArchivedDir() string { return filepath.Join(capture.CodexHome(), "archived_sessions") }
 
 // session_index.jsonl: {"id":…,"thread_name":…}
 func codexThreadNames() map[string]string {
 	out := map[string]string{}
-	fh, err := os.Open(filepath.Join(codexHome(), "session_index.jsonl"))
+	fh, err := os.Open(filepath.Join(capture.CodexHome(), "session_index.jsonl"))
 	if err != nil {
 		return out
 	}
@@ -764,7 +749,7 @@ func (idx *Index) Attach(store *fav.Store, prev []*fav.Rec) []*fav.Rec {
 					r.Cwd = s.Cwd
 				}
 			}
-			if r.TranscriptPath != s.Path && !fileExists(r.TranscriptPath) { // moved: Codex archive / unarchive
+			if r.TranscriptPath != s.Path && !paths.Exists(r.TranscriptPath) { // moved: Codex archive / unarchive
 				r.TranscriptPath = s.Path
 			}
 			r.Attach(s.Turns, s.Turns+s.Replies, s.LastAt, s.Prompts)
@@ -793,7 +778,7 @@ func SessionFiles(provider, sessionID string) []string {
 	}
 	switch provider {
 	case fav.ProviderClaude:
-		h := claudeHome()
+		h := capture.ClaudeHome()
 		add(filepath.Join(h, "projects", "*", sessionID+".jsonl"))
 		add(filepath.Join(h, "projects", "*", sessionID))
 		add(filepath.Join(h, "todos", sessionID+"*"))
@@ -805,27 +790,16 @@ func SessionFiles(provider, sessionID string) []string {
 	return out
 }
 
-func fileExists(p string) bool {
-	_, err := os.Stat(p)
-	return err == nil
-}
-
-// AgentScratch: cwd is a tool's scratch directory — under the system temp directory (macOS /var/folders and /private/tmp, /tmp,
-// %TEMP%) with a path element named claude-… (Claude Code's scratchpad /private/tmp/claude-<uid>/…, review runs
-// claude-review-…). A session a person started in /tmp itself is not one.
+// AgentScratch: cwd is a tool's scratch directory — inside a temp directory (paths.InTemp) under a path element named
+// claude-… (Claude Code's scratchpad claude-<uid>/…, review runs claude-review-…). A session started in /tmp itself is not one.
 func AgentScratch(cwd string) bool {
-	if cwd == "" {
+	rel, ok := paths.InTemp(cwd)
+	if !ok {
 		return false
 	}
-	for _, d := range []string{filepath.Clean(os.TempDir()), "/tmp", "/private/tmp", "/var/folders", "/private/var/folders"} {
-		rest, ok := strings.CutPrefix(cwd, d+string(filepath.Separator))
-		if !ok {
-			continue
-		}
-		for _, el := range strings.Split(rest, string(filepath.Separator)) {
-			if strings.HasPrefix(el, "claude-") {
-				return true
-			}
+	for el := range strings.SplitSeq(rel, string(filepath.Separator)) {
+		if strings.HasPrefix(el, "claude-") {
+			return true
 		}
 	}
 	return false

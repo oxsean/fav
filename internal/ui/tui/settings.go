@@ -9,6 +9,7 @@ import (
 
 	"github.com/oxsean/fav/internal/fav"
 	"github.com/oxsean/fav/internal/i18n"
+	"github.com/oxsean/fav/internal/paths"
 	"github.com/oxsean/fav/internal/render"
 )
 
@@ -227,6 +228,6 @@ func (m *Model) renderSettings() string {
 		})
 		body = append(body, sty.Render(fit(line, inner)))
 	}
-	body = append(body, "", dimmed.Render(render.Truncate(i18n.F("settings.file_hint", shortenHome(fav.ConfigPath())), inner)))
+	body = append(body, "", dimmed.Render(render.Truncate(i18n.F("settings.file_hint", paths.Tilde(fav.ConfigPath())), inner)))
 	return ovRender(body, w)
 }

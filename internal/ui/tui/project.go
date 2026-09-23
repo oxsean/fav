@@ -8,6 +8,7 @@ import (
 
 	"github.com/oxsean/fav/internal/fav"
 	"github.com/oxsean/fav/internal/i18n"
+	"github.com/oxsean/fav/internal/paths"
 	"github.com/oxsean/fav/internal/render"
 )
 
@@ -42,7 +43,7 @@ func (m *Model) projectBlock(name string, y0, x0, w, h int) []string {
 
 	dirs := topN(recs, func(r *fav.Rec) string { return r.Cwd }, 1)
 	if len(dirs) > 0 {
-		dir := shortenHome(dirs[0].key)
+		dir := paths.Tilde(dirs[0].key)
 		if st, err := os.Stat(dirs[0].key); err != nil || !st.IsDir() {
 			dir += errSty.Render(i18n.T("project.missing"))
 		}

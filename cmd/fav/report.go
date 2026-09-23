@@ -13,6 +13,7 @@ import (
 	"github.com/oxsean/fav/internal/fav"
 	"github.com/oxsean/fav/internal/i18n"
 	"github.com/oxsean/fav/internal/index"
+	"github.com/oxsean/fav/internal/paths"
 	"github.com/oxsean/fav/internal/render"
 )
 
@@ -124,7 +125,7 @@ func reportDir(recs []*fav.Rec) string {
 	}
 	best := ""
 	for d, c := range n {
-		if d != "" && dirExists(d) && (best == "" || c > n[best] || c == n[best] && d < best) {
+		if d != "" && paths.IsDir(d) && (best == "" || c > n[best] || c == n[best] && d < best) {
 			best = d
 		}
 	}
@@ -155,7 +156,7 @@ func printReport(period string, since, now time.Time, recs []*fav.Rec, projects 
 		fmt.Println()
 		head := i18n.F("report.project", p.Name, len(p.Sessions))
 		if p.Dir != "" {
-			head += "  " + shortenHome(p.Dir)
+			head += "  " + paths.Tilde(p.Dir)
 		}
 		fmt.Println(head)
 		for _, r := range p.Sessions {

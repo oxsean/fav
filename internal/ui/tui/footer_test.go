@@ -56,7 +56,7 @@ func TestWheel(t *testing.T) {
 		}
 	}
 	spin := func(msg tea.MouseMsg, n int) { // events are batched; the frame tick applies them
-		for i := 0; i < n; i++ {
+		for range n {
 			m.Update(msg)
 		}
 		m.Update(wheelTickMsg{})
@@ -71,7 +71,7 @@ func TestWheel(t *testing.T) {
 	}
 	r := m.current()
 	var msgs []capture.Message
-	for i := 0; i < 30; i++ {
+	for range 30 {
 		msgs = append(msgs, capture.Message{Role: "user", Text: "一行"})
 	}
 	m.probes = map[*fav.Rec]*probe{r: {done: true, msgs: msgs}}

@@ -10,6 +10,7 @@ import (
 	"github.com/oxsean/fav/internal/capture"
 	"github.com/oxsean/fav/internal/fav"
 	"github.com/oxsean/fav/internal/i18n"
+	"github.com/oxsean/fav/internal/paths"
 	"github.com/oxsean/fav/internal/render"
 )
 
@@ -18,7 +19,7 @@ import (
 func (m *Model) newSessionDir() (dir, name string) {
 	if r := m.current(); r != nil {
 		for _, d := range []string{r.Cwd, r.Repo} {
-			if isDir(d) {
+			if paths.IsDir(d) {
 				return d, r.Project
 			}
 		}
@@ -29,7 +30,7 @@ func (m *Model) newSessionDir() (dir, name string) {
 	}
 	g := m.groupUnderCursor()
 	for _, d := range topN(m.groups[g], func(r *fav.Rec) string { return r.Cwd }, 8) {
-		if isDir(d.key) {
+		if paths.IsDir(d.key) {
 			return d.key, g
 		}
 	}
@@ -59,7 +60,7 @@ func (m *Model) askStart() {
 		} else {
 			cur = &fav.Rec{Provider: l.Agent, SessionID: id, Title: l.Title, Cwd: l.Cwd}
 		}
-		if sameTree(cwd, dir) || repo != "" && sameTree(repo, dir) {
+		if paths.Nested(cwd, dir) || repo != "" && paths.Nested(repo, dir) {
 			ov.running = append(ov.running, cur)
 		}
 	}
@@ -89,7 +90,7 @@ func (m *Model) projectProviders(dir string) []string {
 	n := map[string]int{}
 	for _, rs := range [][]*fav.Rec{m.store.All(), m.unfav} {
 		for _, r := range rs {
-			if sameTree(r.Cwd, dir) {
+			if paths.Nested(r.Cwd, dir) {
 				n[r.Provider]++
 			}
 		}
@@ -150,7 +151,7 @@ func (m *Model) renderStart() string {
 	r := m.ov.rec
 	var body []string
 	body = append(body, boldSty.Foreground(cText).Render(render.Truncate(i18n.F("start.title", r.Title), inner)))
-	body = append(body, dimmed.Render(render.Truncate(shortenHome(r.Cwd), inner)))
+	body = append(body, dimmed.Render(render.Truncate(paths.Tilde(r.Cwd), inner)))
 	body = append(body, frame.Render(strings.Repeat(hRule, inner)))
 	if len(m.ov.running) == 0 {
 		body = append(body, dimmed.Render(i18n.T("start.none_running")))
@@ -163,7 +164,7 @@ func (m *Model) renderStart() string {
 				break
 			}
 			label, _ := m.needLabel(lr.SessionID, m.live[lr.SessionID])
-			where := shortenHome(lr.Cwd)
+			where := paths.Tilde(lr.Cwd)
 			if lr.Cwd == r.Cwd {
 				where = ""
 			}

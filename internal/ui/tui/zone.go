@@ -1,5 +1,7 @@
 package tui
 
+import "slices"
+
 // Click zones are registered while rendering and looked up on mouse events; they describe the current frame.
 type zone struct {
 	y, x1, x2 int // row, columns [x1, x2)
@@ -13,15 +15,15 @@ func (m *Model) mark(y, x, w int, act func(*Model)) {
 }
 
 func (m *Model) markRows(y0, x, w, rows int, act func(*Model)) {
-	for i := 0; i < rows; i++ {
+	for i := range rows {
 		m.mark(y0+i, x, w, act)
 	}
 }
 
 // hit searches from the end: last registered is drawn on top.
 func (m *Model) hit(x, y int) func(*Model) {
-	for i := len(m.zones) - 1; i >= 0; i-- {
-		z := m.zones[i]
+	for _, z := range slices.Backward(m.zones) {
+
 		if y == z.y && x >= z.x1 && x < z.x2 {
 			m.clickX = x - z.x1
 			return z.act

@@ -107,7 +107,7 @@ func Extract(ctx context.Context, path string, from, owner int64, outLines int, 
 // outputHead is the first n non-blank lines of a tool output, each capped, joined by " | ".
 func outputHead(s string, n int) string {
 	var lines []string
-	for _, l := range strings.Split(s, "\n") {
+	for l := range strings.SplitSeq(s, "\n") {
 		if l = strings.TrimSpace(l); l != "" {
 			lines = append(lines, capText(l, toolInputCap))
 			if len(lines) == n {

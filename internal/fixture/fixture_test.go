@@ -2,7 +2,6 @@ package fixture
 
 import (
 	"context"
-	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -15,6 +14,8 @@ import (
 	"github.com/oxsean/fav/internal/fav"
 	"github.com/oxsean/fav/internal/fulltext"
 	"github.com/oxsean/fav/internal/index"
+	"github.com/oxsean/fav/internal/paths"
+	"github.com/oxsean/fav/internal/testkit"
 )
 
 func load(t *testing.T) (*Dataset, *index.Index, *fav.Store) {
@@ -190,6 +191,16 @@ func TestMovedProjectIsFound(t *testing.T) {
 	}
 }
 
+func TestTranscriptFoundUnderConfiguredHomes(t *testing.T) {
+	d, _, _ := load(t)
+	for _, name := range []string{"oauth", "codex-cli"} {
+		s := d.Get(name)
+		if got := capture.TranscriptPath(s.Provider, s.ID); !paths.Same(got, s.Path) {
+			t.Errorf("%s: transcript %q, want %q", name, got, s.Path)
+		}
+	}
+}
+
 func TestStaleLiveFileIsIgnored(t *testing.T) {
 	d, _, _ := load(t)
 	if _, ok := capture.LiveSessions()[d.Get("oauth").ID]; ok {
@@ -224,9 +235,9 @@ func TestMoveProjectRewritesNativePaths(t *testing.T) {
 	if r := store.BySession(pg.Provider, pg.ID); r == nil || r.Cwd != moved {
 		t.Errorf("the favorite keeps the old cwd: %+v", r)
 	}
-	q, _ := json.Marshal(moved)
+	q := testkit.JSONString(moved)
 	b, err := os.ReadFile(filepath.Join(d.Claude, "projects", index.ClaudeProjectName(moved), pg.ID+".jsonl"))
-	if err != nil || !strings.Contains(string(b), `"cwd":`+string(q)) {
+	if err != nil || !strings.Contains(string(b), `"cwd":`+q) {
 		t.Errorf("the transcript under the new project dir carries the escaped new cwd: %v", err)
 	}
 }

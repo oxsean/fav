@@ -4,10 +4,10 @@ import "testing"
 
 func TestPickerFoldsSingletons(t *testing.T) {
 	var items []item
-	for i := 0; i < 4; i++ {
+	for i := range 4 {
 		items = append(items, item{name: "common" + string(rune('a'+i)), count: 2})
 	}
-	for i := 0; i < 30; i++ {
+	for i := range 30 {
 		items = append(items, item{name: "rare" + string(rune('a'+i)), count: 1})
 	}
 	o := overlay{items: items, checked: map[string]bool{"rarez": true}}

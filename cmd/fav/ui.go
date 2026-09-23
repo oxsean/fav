@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -23,12 +24,7 @@ import (
 )
 
 func hasFlag(args []string, name string) bool {
-	for _, a := range args {
-		if a == name {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(args, name)
 }
 
 func loadConfig() fav.Config {
@@ -270,55 +266,69 @@ func cmdFzfPick(args []string) error {
 			return err
 		}
 		return clipboard.WriteAll(plan.Spec.TerminalLine())
+	case "read":
+		f := os.Getenv(fzfui.PickFileEnv)
+		b, err := os.ReadFile(f)
+		if err != nil {
+			fmt.Print(query)
+			return nil
+		}
+		os.Remove(f)
+		fmt.Print(string(b))
 	case "tags":
 		sel := fzfui.Pick(i18n.T("label.tags"), counted(tagCounts(s)), true)
 		if sel == nil {
-			fmt.Print(query)
-			return nil
+			return pickResult(query)
 		}
 		var toks []string
 		for _, line := range sel {
 			toks = append(toks, "#"+firstField(line))
 		}
-		fmt.Print(replaceTokens(query, toks, func(t string) bool { return strings.HasPrefix(t, "#") }))
+		return pickResult(replaceTokens(query, toks, func(t string) bool { return strings.HasPrefix(t, "#") }))
 	case "projects":
 		sel := fzfui.Pick(i18n.T("label.projects"), append([]string{i18n.T("picker.all")}, counted(projectCounts(s))...), false)
 		if sel == nil {
-			fmt.Print(query)
-			return nil
+			return pickResult(query)
 		}
 		var toks []string
 		if sel[0] != i18n.T("picker.all") {
 			toks = []string{"project:" + firstField(sel[0])}
 		}
-		fmt.Print(replaceTokens(query, toks, hasPrefixFn("project:")))
+		return pickResult(replaceTokens(query, toks, hasPrefixFn("project:")))
 	case "status":
 		sel := fzfui.Pick(i18n.T("label.status"), []string{i18n.T("cli.pick.status_open"), i18n.T("cli.pick.status_active"), i18n.T("cli.pick.status_done"), i18n.T("cli.pick.status_archived"), i18n.T("cli.pick.status_live"), i18n.T("cli.pick.status_all")}, false)
 		if sel == nil {
-			fmt.Print(query)
-			return nil
+			return pickResult(query)
 		}
-		fmt.Print(replaceTokens(query, []string{"status:" + firstField(sel[0])}, hasPrefixFn("status:")))
+		return pickResult(replaceTokens(query, []string{"status:" + firstField(sel[0])}, hasPrefixFn("status:")))
 	case "date":
 		sel := fzfui.Pick(i18n.T("label.time"), []string{i18n.T("picker.all"), i18n.T("cli.pick.date_today"), i18n.T("cli.pick.date_week"), i18n.T("cli.pick.date_month"), i18n.T("cli.pick.date_year")}, false)
 		if sel == nil {
-			fmt.Print(query)
-			return nil
+			return pickResult(query)
 		}
 		var toks []string
 		if sel[0] != i18n.T("picker.all") {
 			toks = []string{firstField(sel[0])}
 		}
-		fmt.Print(replaceTokens(query, toks, hasPrefixFn("last:", "after:", "before:")))
+		return pickResult(replaceTokens(query, toks, hasPrefixFn("last:", "after:", "before:")))
 	default:
 		return i18n.E("cli.pick.unknown", kind)
 	}
 	return nil
 }
 
+// pickResult hands a picker's new query to fzf: through $FAV_PICK_FILE inside fzf, else stdout.
+func pickResult(q string) error {
+	if f := os.Getenv(fzfui.PickFileEnv); f != "" {
+		return os.WriteFile(f, []byte(q), 0o600)
+	}
+	_, err := fmt.Print(q)
+	return err
+}
+
 func replaceTokens(query string, add []string, isSameKind func(string) bool) string {
 	var kept []string
-	for _, t := range strings.Fields(query) {
+	for t := range strings.FieldsSeq(query) {
 		if !isSameKind(t) {
 			kept = append(kept, t)
 		}

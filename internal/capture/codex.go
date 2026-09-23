@@ -19,16 +19,7 @@ type Candidate struct {
 	ModTime   time.Time
 }
 
-func codexSessionsDir() string {
-	if h := os.Getenv("CODEX_HOME"); h != "" {
-		return filepath.Join(h, "sessions")
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return ""
-	}
-	return filepath.Join(home, ".codex", "sessions")
-}
+func codexSessionsDir() string { return filepath.Join(CodexHome(), "sessions") }
 
 func detectCodex(cwd string) (*Candidate, error) {
 	cands := activeCodexSessions(cwd, time.Now())
@@ -114,7 +105,7 @@ func findCodexRollout(sessionID string) string {
 		return ""
 	}
 	now := time.Now()
-	for i := 0; i < 400; i++ {
+	for i := range 400 {
 		day := now.AddDate(0, 0, -i)
 		dir := filepath.Join(root, day.Format("2006"), day.Format("01"), day.Format("02"))
 		hits, _ := filepath.Glob(filepath.Join(dir, "rollout-*-"+sessionID+".jsonl"))

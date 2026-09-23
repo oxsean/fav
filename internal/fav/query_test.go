@@ -5,12 +5,13 @@ import (
 	"time"
 )
 
-func ptr(t time.Time) *time.Time { return &t }
+//go:fix inline
+func ptr(t time.Time) *time.Time { return new(t) }
 
 func rec(title string, mod func(*Rec)) *Rec {
 	r := &Rec{
 		ID: NewID(), Provider: ProviderClaude, Title: title,
-		Status: StatusDone, FavoritedAt: ptr(time.Now()),
+		Status: StatusDone, FavoritedAt: new(time.Now()),
 	}
 	if mod != nil {
 		mod(r)
@@ -34,19 +35,19 @@ func TestParseDocExamples(t *testing.T) {
 		r.Tags = []string{"notes-api", "debug", "websocket"}
 		r.Project = "notes-api"
 		r.Summary = "cursor drift 相关排查"
-		r.FavoritedAt = ptr(time.Date(2026, 9, 12, 16, 42, 0, 0, time.Local))
+		r.FavoritedAt = new(time.Date(2026, 9, 12, 16, 42, 0, 0, time.Local))
 	})
 	wrongTag := rec("RBAC 数据范围设计", func(r *Rec) {
 		r.Tags = []string{"rbac", "design"}
 		r.Project = "webapp"
 		r.Provider = ProviderCodex
-		r.FavoritedAt = ptr(time.Date(2026, 9, 12, 9, 0, 0, 0, time.Local))
+		r.FavoritedAt = new(time.Date(2026, 9, 12, 9, 0, 0, 0, time.Local))
 	})
 	tooOld := rec("旧的 websocket 记录", func(r *Rec) {
 		r.Tags = []string{"notes-api", "debug", "websocket"}
 		r.Project = "notes-api"
 		r.Summary = "cursor drift"
-		r.FavoritedAt = ptr(time.Date(2026, 1, 1, 0, 0, 0, 0, time.Local))
+		r.FavoritedAt = new(time.Date(2026, 1, 1, 0, 0, 0, 0, time.Local))
 	})
 
 	t.Run("多标签 AND 加关键词", func(t *testing.T) {
@@ -193,7 +194,7 @@ func TestUnmarkedSessionsAreNotActive(t *testing.T) {
 }
 
 func TestFileQualifier(t *testing.T) {
-	r := &Rec{ID: "1", FavoritedAt: ptr(time.Now()), Status: StatusDoing, Files: map[string]int{"/w/Internal/Index/scan.go": 3}}
+	r := &Rec{ID: "1", FavoritedAt: new(time.Now()), Status: StatusDoing, Files: map[string]int{"/w/Internal/Index/scan.go": 3}}
 	if !Parse("file:internal/index").Match(r) || Parse("file:cmd/").Match(r) {
 		t.Error("file: matches a written path by case-insensitive substring")
 	}

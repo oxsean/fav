@@ -3,6 +3,7 @@ package tui
 import (
 	"os"
 	"os/exec"
+	"slices"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -10,6 +11,7 @@ import (
 	"github.com/oxsean/fav/internal/capture"
 	"github.com/oxsean/fav/internal/fav"
 	"github.com/oxsean/fav/internal/i18n"
+	"github.com/oxsean/fav/internal/paths"
 	"github.com/oxsean/fav/internal/render"
 )
 
@@ -109,12 +111,7 @@ func handoffProviders(r *fav.Rec) []string {
 }
 
 func contains(ss []string, s string) bool {
-	for _, x := range ss {
-		if x == s {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(ss, s)
 }
 
 func (m *Model) startHandoff(provider string) {
@@ -185,7 +182,7 @@ func (m *Model) renderHandoff() string {
 	var body []string
 	body = append(body, boldSty.Foreground(cText).Render(i18n.T("handoff.heading")))
 	m.mark(len(body)+1, ovPad, inner, func(mm *Model) { mm.pending = mm.editHandoff() })
-	body = append(body, dimmed.Render(render.Truncate(shortenHome(m.ov.title), inner)))
+	body = append(body, dimmed.Render(render.Truncate(paths.Tilde(m.ov.title), inner)))
 	body = append(body, frame.Render(strings.Repeat(hRule, inner)))
 
 	var text []string

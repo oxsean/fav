@@ -10,6 +10,7 @@ import (
 	"github.com/oxsean/fav/internal/fav"
 	"github.com/oxsean/fav/internal/i18n"
 	"github.com/oxsean/fav/internal/index"
+	"github.com/oxsean/fav/internal/paths"
 	"github.com/oxsean/fav/internal/render"
 )
 
@@ -40,7 +41,7 @@ func (m *Model) askMove() {
 		return
 	}
 	start := old
-	if !isDir(old) { // cwd is gone: prefill the single guess, else start from the parent
+	if !paths.IsDir(old) { // cwd is gone: prefill the single guess, else start from the parent
 		start = filepath.Dir(old) + string(filepath.Separator)
 		for _, miss := range m.idx.FindMissing(m.store, old) {
 			if miss.Dir == old && len(miss.Found) == 1 {
@@ -52,7 +53,7 @@ func (m *Model) askMove() {
 }
 
 func (m *Model) pickMoveTarget(old, start string, only *fav.Rec) {
-	m.openDirPicker(i18n.F("move.title", shortenHome(old)), start, func(m *Model, dst string) { m.confirmMove(old, dst, only) })
+	m.openDirPicker(i18n.F("move.title", paths.Tilde(old)), start, func(m *Model, dst string) { m.confirmMove(old, dst, only) })
 }
 
 func (m *Model) runningUnder(dir string, only *fav.Rec) []string {
@@ -65,7 +66,7 @@ func (m *Model) runningUnder(dir string, only *fav.Rec) []string {
 		if only != nil && r != only {
 			return
 		}
-		if r.Cwd == dir || strings.HasPrefix(r.Cwd, dir+string(filepath.Separator)) {
+		if paths.Under(r.Cwd, dir) {
 			seen[r.SessionID] = true
 			out = append(out, r.Title)
 		}
@@ -106,8 +107,8 @@ func (m *Model) confirmMove(old, dst string, only *fav.Rec) {
 		}
 	}
 	lines := []string{
-		i18n.F("move.from", shortenHome(old)),
-		i18n.F("move.to", shortenHome(dst)),
+		i18n.F("move.from", paths.Tilde(old)),
+		i18n.F("move.to", paths.Tilde(dst)),
 		"",
 		i18n.F("move.summary", len(plan.Sessions), claude, codex, plan.Files(), len(plan.Records)),
 	}
@@ -196,12 +197,12 @@ func (m *Model) pickDir() {
 
 // listDirs: a directory lists its children (itself first); otherwise the parent filtered by the typed prefix.
 func listDirs(text string) []item {
-	text = expandHome(strings.TrimSpace(text))
+	text = paths.Expand(strings.TrimSpace(text))
 	dir, prefix := text, ""
-	if !isDir(text) {
+	if !paths.IsDir(text) {
 		dir, prefix = filepath.Dir(text), filepath.Base(text)
 	}
-	if !isDir(dir) {
+	if !paths.IsDir(dir) {
 		return nil
 	}
 	entries, _ := os.ReadDir(dir)
@@ -220,22 +221,9 @@ func listDirs(text string) []item {
 	}
 	sort.Strings(names)
 	// the first row is always the listed directory (count=-1); the last path segment filters its children
-	out := []item{{name: filepath.Clean(dir), label: i18n.T("dir.this") + " " + shortenHome(filepath.Clean(dir)), count: -1}}
+	out := []item{{name: filepath.Clean(dir), label: i18n.T("dir.this") + " " + paths.Tilde(filepath.Clean(dir)), count: -1}}
 	for _, n := range names {
 		out = append(out, item{name: filepath.Join(dir, n), label: n + string(filepath.Separator)})
 	}
 	return out
-}
-
-func isDir(p string) bool {
-	st, err := os.Stat(p)
-	return err == nil && st.IsDir()
-}
-
-func expandHome(p string) string {
-	if p == "~" || strings.HasPrefix(p, "~/") {
-		home, _ := os.UserHomeDir()
-		return filepath.Join(home, strings.TrimPrefix(p, "~"))
-	}
-	return p
 }

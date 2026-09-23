@@ -39,7 +39,7 @@ func msgModel(t *testing.T, query string) (*Model, []*fav.Rec) {
 		p := filepath.Join(src, name+".jsonl")
 		os.WriteFile(p, []byte(strings.Join(bodies[name], "")), 0o644)
 		r := &fav.Rec{ID: fav.NewID(), Provider: fav.ProviderClaude, SessionID: name, Title: name + " session", Status: fav.StatusDone,
-			Cwd: src, TranscriptPath: p, FavoritedAt: ptr(time.Now())}
+			Cwd: src, TranscriptPath: p, FavoritedAt: new(time.Now())}
 		s.Put(r)
 		recs = append(recs, r)
 		paths = append(paths, p)
@@ -84,7 +84,7 @@ func TestMessageSearchRanksSessionsAndShowsHits(t *testing.T) {
 	if !strings.Contains(v, "滚轮加速和分页都要改") {
 		t.Fatalf("the card shows the hit:\n%s", v)
 	}
-	for _, l := range strings.Split(m.View(), "\n") {
+	for l := range strings.SplitSeq(m.View(), "\n") {
 		if w := ansi.StringWidth(l); w > 140 {
 			t.Fatalf("line wider than the terminal (%d): %q", w, ansi.Strip(l))
 		}
@@ -141,11 +141,11 @@ func TestMessageSearchSurvivesAStoreReload(t *testing.T) {
 func TestMessageSearchPagesBackOnlyToTheFirstHit(t *testing.T) {
 	m, recs := msgModel(t, "> 游标")
 	var body []string
-	for i := 0; i < 300; i++ {
+	for range 300 {
 		body = append(body, line("user", "older filler"))
 	}
 	body = append(body, line("user", "游标在这里"))
-	for i := 0; i < 150; i++ {
+	for range 150 {
 		body = append(body, line("assistant", "newer filler"))
 	}
 	r := recs[1]
@@ -240,7 +240,7 @@ func TestHitListWalksEveryHitAndTheRightPaneFollows(t *testing.T) {
 	if !strings.Contains(ansi.Strip(v), "滚轮太慢了") {
 		t.Fatalf("the list shows the hits:\n%s", ansi.Strip(v))
 	}
-	for _, l := range strings.Split(v, "\n") {
+	for l := range strings.SplitSeq(v, "\n") {
 		if w := ansi.StringWidth(l); w > 140 {
 			t.Fatalf("line wider than the terminal (%d): %q", w, ansi.Strip(l))
 		}
@@ -473,7 +473,7 @@ func TestResumeDialogOffersTheDesktopApp(t *testing.T) {
 	if !m.ov.app {
 		t.Fatal("started in the app, the setting follows the origin: the app comes first")
 	}
-	for _, l := range strings.Split(m.View(), "\n") {
+	for l := range strings.SplitSeq(m.View(), "\n") {
 		if w := ansi.StringWidth(l); w > 140 {
 			t.Fatalf("line wider than the terminal (%d): %q", w, ansi.Strip(l))
 		}

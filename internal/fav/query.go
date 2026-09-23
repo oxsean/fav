@@ -28,10 +28,10 @@ var DefaultTurns = 3
 func Parse(s string) Query {
 	q := Query{Status: StatusOpen, Turns: DefaultTurns}
 	now := time.Now()
-	for _, f := range strings.Fields(s) {
+	for f := range strings.FieldsSeq(s) {
 		low := strings.ToLower(f)
-		if strings.HasPrefix(low, "#") {
-			if t := strings.TrimPrefix(low, "#"); t != "" {
+		if after, ok := strings.CutPrefix(low, "#"); ok {
+			if t := after; t != "" {
 				q.Tags = append(q.Tags, t)
 			}
 			continue

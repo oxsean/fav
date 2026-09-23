@@ -279,7 +279,7 @@ func prettyJSON(s string) string {
 
 func hardWrap(s string, w int, indent string) []string {
 	var out []string
-	for _, para := range strings.Split(s, "\n") {
+	for para := range strings.SplitSeq(s, "\n") {
 		limit, n := w, 0
 		var cur strings.Builder
 		for _, r := range para {
