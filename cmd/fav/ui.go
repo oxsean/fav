@@ -66,6 +66,9 @@ func runTUI(s *fav.Store, query string, focus *fav.Rec, args []string) error {
 	if err != nil {
 		return err
 	}
+	if res.Start != nil {
+		return resumeHere(*res.Start)
+	}
 	if res.Resume == nil {
 		return nil
 	}

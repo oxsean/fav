@@ -372,7 +372,16 @@ type Message struct {
 }
 
 func (l *transcriptLine) speech() Message {
-	var role, text string
+	role, text := l.rawSpeech()
+	text = strings.Join(strings.Fields(text), " ")
+	if role == "" || text == "" || l.IsMeta || strings.HasPrefix(text, "<") || strings.HasPrefix(text, "[") {
+		return Message{}
+	}
+	return Message{Role: role, Text: text, Chars: utf8.RuneCountInString(text), At: l.Timestamp.Local()}
+}
+
+// rawSpeech is the line's prose with its line breaks.
+func (l *transcriptLine) rawSpeech() (role, text string) {
 	switch {
 	case l.Type == "user" || l.Type == "assistant":
 		role = l.Type
@@ -390,19 +399,41 @@ func (l *transcriptLine) speech() Message {
 					parts = append(parts, b.Text)
 				}
 			}
-			text = strings.Join(parts, " ")
+			text = strings.Join(parts, "\n\n")
 		}
 	case l.Type == "response_item" && l.Payload.Type == "message":
 		role = l.Payload.Role
+		var parts []string
 		for _, c := range l.Payload.Content {
-			text += c.Text + " "
+			parts = append(parts, c.Text)
 		}
+		text = strings.Join(parts, "\n\n")
 	}
-	text = strings.Join(strings.Fields(Unwrap(text)), " ")
-	if role == "" || text == "" || l.IsMeta || strings.HasPrefix(text, "<") || strings.HasPrefix(text, "[") {
-		return Message{}
+	return role, strings.TrimSpace(Unwrap(text))
+}
+
+// RawText re-reads the prose at Message.Off keeping its line breaks; falls back when unreadable.
+func RawText(path string, off int64, fallback string) string {
+	f, err := os.Open(path)
+	if err != nil {
+		return fallback
 	}
-	return Message{Role: role, Text: text, Chars: utf8.RuneCountInString(text), At: l.Timestamp.Local()}
+	defer f.Close()
+	if _, err := f.Seek(off, 0); err != nil {
+		return fallback
+	}
+	b, err := bufio.NewReaderSize(f, 1<<20).ReadBytes('\n')
+	if err != nil && len(b) == 0 {
+		return fallback
+	}
+	var l transcriptLine
+	if json.Unmarshal(b, &l) != nil {
+		return fallback
+	}
+	if _, t := l.rawSpeech(); t != "" {
+		return t
+	}
+	return fallback
 }
 
 // Page is newest first; From is the offset of the oldest line, Done means the file head was reached.

@@ -45,6 +45,7 @@ const viewCount = 4
 type Result struct {
 	Resume  *fav.Rec
 	NoHerdr bool
+	Start   *capture.CommandSpec // a new session (fork, handoff) to run in this terminal
 }
 
 type row struct {

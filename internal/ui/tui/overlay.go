@@ -29,6 +29,8 @@ const (
 	ovMessage
 	ovEdit
 	ovConfirm
+	ovHandoff
+	ovStart
 	ovPeek
 )
 
@@ -60,8 +62,10 @@ type overlay struct {
 	confirm   func(*Model)
 	back      func(*Model) // ovConfirm cancel goes back here (nil = close)
 	okLabel   string
-	app       bool   // resume dialog: opening in the desktop app is the primary action
-	armed     string // peek: the digit pressed once, sent on the second press
+	app       bool       // resume dialog: opening in the desktop app is the primary action
+	providers []string   // handoff / new session: the CLIs a new session can start in, the default first
+	running   []*fav.Rec // new session: sessions already running in that directory
+	armed     string     // peek: the digit pressed once, sent on the second press
 
 	msg    capture.Message
 	lines  []string
@@ -246,6 +250,10 @@ func (m *Model) renderOverlay() string {
 		return m.renderEdit()
 	case ovConfirm:
 		return m.renderConfirm()
+	case ovHandoff:
+		return m.renderHandoff()
+	case ovStart:
+		return m.renderStart()
 	case ovPeek:
 		return m.renderPeek()
 	}
@@ -345,6 +353,10 @@ func (m *Model) ovWidth() int {
 		w = min(m.w-8, 120)
 	case ovEdit:
 		w = min(m.w-8, 100)
+	case ovHandoff:
+		w = min(max(m.w-8, groupsWidth(m.handoffGroups())), 100, m.w-4)
+	case ovStart:
+		w = min(max(w, 64, groupsWidth(m.startGroups())), m.w-4)
 	case ovPeek:
 		w = min(m.w-8, 120)
 	case ovSettings:
@@ -635,6 +647,9 @@ func helpGroups() []helpGroup {
 			{[]string{t("help.key_t_resume")}, t("help.t_resume")},
 			{[]string{t("help.key_p_app")}, t("help.app")},
 			{[]string{t("help.key_y_resume")}, t("help.y_resume")},
+			{[]string{t("help.key_b_fork")}, t("help.fork")},
+			{[]string{t("help.key_s_handoff")}, t("help.handoff")},
+			{[]string{"w  Ctrl+W"}, t("help.new_session")},
 			{[]string{t("help.key_ide")}, t("help.ide")},
 			{[]string{"X"}, t("help.close_tab")},
 			{[]string{"Z"}, t("help.close_idle")},
@@ -850,7 +865,7 @@ func (m *Model) resumeGroups() []btnGroup {
 		}
 	}
 	if p.Live.PaneID != "" {
-		bs = append(bs, btn{i18n.T("resume.btn_peek"), false, func(mm *Model) { mm.askPeek(mm.ov.rec) }})
+		bs = append(bs, btn{i18n.T("resume.btn_peek"), false, func(mm *Model) { mm.askPeek(mm.ovRec()) }})
 	}
 	if m.resumeCommand() != "" {
 		bs = append(bs, btn{i18n.T("resume.btn_copy"), false, (*Model).copyResume})
@@ -858,6 +873,7 @@ func (m *Model) resumeGroups() []btnGroup {
 	project.end = []btn{cancel}
 	return []btnGroup{
 		{label: i18n.T("resume.group.resume"), bs: bs},
+		{label: i18n.T("resume.group.new"), bs: []btn{{i18n.T("resume.btn_fork"), false, (*Model).doFork}, {i18n.T("resume.btn_handoff"), false, (*Model).doHandoff}, {i18n.T("resume.btn_new"), false, (*Model).askStartFromDialog}}},
 		project,
 		{label: i18n.T("resume.group.record"), bs: m.recordBtns()},
 	}
@@ -895,12 +911,7 @@ func (m *Model) appFirst(r *fav.Rec, p capture.Plan) bool {
 
 // doApp hands the session to its desktop app. A session running in a terminal is not opened a second time there.
 func (m *Model) doApp() {
-	r := m.ov.rec
-	if r.ID != "" {
-		if cur := m.store.Get(r.ID); cur != nil {
-			r = cur
-		}
-	}
+	r := m.ovRec()
 	if m.isLive(r.SessionID) && !r.App {
 		m.flash(i18n.T("resume.app_live"))
 		return
@@ -984,12 +995,7 @@ func (m *Model) editTitle() {
 
 // doResume persists an edited title before resuming.
 func (m *Model) doResume(noHerdr bool) {
-	r := m.ov.rec
-	if r.ID != "" {
-		if cur := m.store.Get(r.ID); cur != nil { // ov.rec is stale after a store reload
-			r = cur
-		}
-	}
+	r := m.ovRec()
 	if t := strings.TrimSpace(m.ov.edit.Value()); t != "" && t != r.Title {
 		r.Title = t
 		if r.ID != "" {
@@ -1007,14 +1013,14 @@ func (m *Model) doResume(noHerdr bool) {
 		}
 	}
 	if p.Live.TabID == "" && p.Ws == nil && len(p.WsChoices) > 1 {
-		m.pickWorkspace(r, p)
+		m.pickWorkspace(r, p, (*Model).runPlan)
 		return
 	}
 	m.runPlan(r, p, noHerdr)
 }
 
 // pickWorkspace asks which of several Herdr workspaces in the session's directory to resume in; the last item is this terminal.
-func (m *Model) pickWorkspace(r *fav.Rec, p capture.Plan) {
+func (m *Model) pickWorkspace(r *fav.Rec, p capture.Plan, run func(*Model, *fav.Rec, capture.Plan, bool)) {
 	items := make([]item, 0, len(p.WsChoices)+1)
 	for _, w := range p.WsChoices {
 		items = append(items, item{name: w.WorkspaceID, label: w.Label})
@@ -1023,7 +1029,7 @@ func (m *Model) pickWorkspace(r *fav.Rec, p capture.Plan) {
 	m.openPicker(i18n.T("resume.pick_ws_title"), "", items, false, []string{p.WsChoices[0].WorkspaceID},
 		func(m *Model, chosen []string) {
 			if len(chosen) == 0 || chosen[0] == "" {
-				m.runPlan(r, capture.Plan{Spec: p.Spec, Live: p.Live, Checks: p.Checks}, true)
+				run(m, r, capture.Plan{Spec: p.Spec, Live: p.Live, Checks: p.Checks}, true)
 				return
 			}
 			for i := range p.WsChoices {
@@ -1031,7 +1037,7 @@ func (m *Model) pickWorkspace(r *fav.Rec, p capture.Plan) {
 					p.Ws = &p.WsChoices[i]
 				}
 			}
-			m.runPlan(r, p, false)
+			run(m, r, p, false)
 		})
 }
 
@@ -1058,7 +1064,7 @@ func (m *Model) runPlan(r *fav.Rec, p capture.Plan, noHerdr bool) {
 	}
 	m.pending = func() tea.Msg {
 		msg, warn, err := p.RunInHerdr(r)
-		return herdrDoneMsg{rec: r, msg: msg, focused: p.Live.TabID != "", warn: warn, err: err}
+		return herdrDoneMsg{rec: r, msg: msg, resumed: p.Live.TabID == "", warn: warn, err: err}
 	}
 }
 

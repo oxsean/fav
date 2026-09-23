@@ -68,8 +68,8 @@ fav 不是新的聊天客户端，不替代 Claude / Codex，也不上传任何�
 - **看**：右栏是这条会话的对话，从尾往前翻，句内可搜；不用打开就知道是不是它。
 - **恢复**：Herdr 在跑 → 它的 workspace 里开新 tab；没有 → 当前终端 `exec` 接管；已经在跑 → 切 tab；后台会话 → `claude attach`。恢复前逐项校验目录、记录文件、分支。
 - **桌面 App**：恢复框里也能在 Claude 桌面版或 ChatGPT 桌面版（Codex）里打开这个会话；设置里可以让 App 成为默认，或只对在 App 里建的会话默认用 App——这些会话的卡片标着 `Claude App`、`Codex App`。需要会话的工作目录还在、记录文件在默认的 `~/.claude/projects` 或 `~/.codex/sessions` 下，并且系统把 `claude://`、`codex://` 交给对应 App 处理时才显示这个按钮（macOS、Windows，Linux 走 xdg-mime）。
-- **瞄一眼**：Agents 页按 `v` 瞄一眼 Herdr 里 agent 的终端（每秒刷新；权限确认只出现在终端里，记录文件里没有），`Tab` 输入一句作为它的下一句话发过去，`1`–`3` 按两次回答编号选项。
-- **清理空闲**：Agents 页按 `Z` 一次关掉 4 小时没写东西、也没有没看过的输出的 Herdr tab（先确认，焦点在取消）。
+- **分叉与交接**：恢复框里按 `b` 分叉（`claude --resume … --fork-session` / `codex fork`），得到一个带着同样历史的新会话，原会话不动。按 `s` 写一份交接包（摘要、最近 5 条要求、最后一条回复、改过的文件、`git status`，不含工具输出），放在 `~/.agent/fav/handoff/`，先给你看、可以编辑，再在同一目录开一个新的 Claude 或 Codex 会话，第一条消息让它先读交接包。命令行：`fav resume --fork <id>`、`fav handoff <id> [--to claude|codex]`。
+- **在这里开新会话**：Agents 页按 `v` 瞄一眼 Herdr 里 agent 的终端（每秒刷新；权限确认只出现在终端里，记录文件里没有），`Tab` 输入一句作为它的下一句话发过去，`1`–`3` 按两次回答编号选项。按 `Z` 一次关掉 4 小时没写东西、也没有没看过的输出的 Herdr tab（先确认，焦点在取消）。项目页分组标题或任意会话上按 `w`（`Ctrl+W`），先列出那个目录里已经在跑的会话（↑↓ Enter 直接过去），再选 Claude 或 Codex 在那里开新会话；那里有 Herdr workspace 就开在新 tab 里。
 - **整理**：待办 / 进行中 / 已完成 / 已归档四态，改标题标签，按项目分组。
 - **搬家与自愈**：项目目录移动后会话一起迁（记录里的 cwd、Claude 项目目录、`~/.claude.json` 全改）；目录或记录文件没了的会话标 `!`，命令行批量修复或清理，删除进回收站可还原。
 - **Agents 面板**：此刻在跑的会话，三源合并（Claude `sessions/*.json`、Codex 线程锁、Herdr），不装 Herdr 也能用。

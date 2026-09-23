@@ -121,6 +121,29 @@ func Checks(r *fav.Rec) []Check {
 	return out
 }
 
+// startChecks: a new session only needs its CLI and the directory.
+func startChecks(provider, cwd string) []Check {
+	c := Check{OK: true, Text: i18n.T("resume.check.cli_ok") + providerLabel(provider)}
+	if !Installed(provider) {
+		c = Check{Text: providerLabel(provider) + i18n.T("resume.check.not_installed")}
+	}
+	return []Check{c, dirCheck(cwd, "")}
+}
+
+func dirCheck(cwd, remote string) Check {
+	switch {
+	case cwd == "":
+		return Check{Warn: true, Text: i18n.T("resume.check.no_cwd")}
+	case dirExists(cwd):
+		return Check{OK: true, Text: i18n.T("resume.check.dir_ok") + cwd}
+	}
+	hint := ""
+	if remote != "" {
+		hint = i18n.T("resume.check.remote_hint") + remote
+	}
+	return Check{Text: i18n.T("resume.check.dir_gone") + cwd + hint}
+}
+
 // sourceLabel names where r was started: the desktop app or the CLI.
 func sourceLabel(r *fav.Rec) string {
 	if !r.App {
@@ -145,18 +168,4 @@ func providerLabel(p string) string {
 func dirExists(p string) bool {
 	st, err := os.Stat(p)
 	return err == nil && st.IsDir()
-}
-
-func dirCheck(cwd, remote string) Check {
-	switch {
-	case cwd == "":
-		return Check{Warn: true, Text: i18n.T("resume.check.no_cwd")}
-	case dirExists(cwd):
-		return Check{OK: true, Text: i18n.T("resume.check.dir_ok") + cwd}
-	}
-	hint := ""
-	if remote != "" {
-		hint = i18n.T("resume.check.remote_hint") + remote
-	}
-	return Check{Text: i18n.T("resume.check.dir_gone") + cwd + hint}
 }

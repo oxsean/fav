@@ -391,9 +391,9 @@ func (m *Model) closeLive() {
 		confirm: func(m *Model) {
 			m.pending = func() tea.Msg {
 				if err := herdr.CloseTab(tab); err != nil {
-					return herdrDoneMsg{rec: r, focused: true, err: err}
+					return herdrDoneMsg{rec: r, err: err}
 				}
-				return herdrDoneMsg{rec: r, focused: true, msg: i18n.T("live.closed") + r.Title}
+				return herdrDoneMsg{rec: r, msg: i18n.T("live.closed") + r.Title}
 			}
 		}}
 }

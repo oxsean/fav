@@ -84,7 +84,7 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.flash(i18n.F("flash.herdr_failed", msg.err.Error()))
 			break
 		}
-		if !msg.focused {
+		if msg.resumed {
 			if err := capture.MarkResumed(m.store, msg.rec); err != nil {
 				m.flash(i18n.T("flash.count_not_saved") + err.Error())
 			}
@@ -108,6 +108,17 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.flash(msg.err.Error())
 		} else {
 			m.flash(i18n.F("peek.sent", msg.what))
+		}
+		return m, nil
+	case handoffMsg:
+		m.openHandoff(msg)
+		return m, nil
+	case handoffEditedMsg:
+		if msg.err != nil {
+			m.flash(i18n.F("handoff.failed", msg.err.Error()))
+		}
+		if m.ov.kind == ovHandoff {
+			m.loadHandoff()
 		}
 		return m, nil
 	case appProbedMsg:
@@ -245,7 +256,7 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 type herdrDoneMsg struct {
 	rec     *fav.Rec
 	msg     string
-	focused bool // focusing an already-running tab is not a resume
+	resumed bool // a new tab resumed the session (not a focus, fork or new session): counted
 	warn    error
 	err     error
 }
@@ -501,6 +512,8 @@ func (m *Model) navKey(msg tea.KeyMsg) tea.Cmd {
 		m.pickTags()
 	case "p":
 		m.pickProjects()
+	case "w", "ctrl+w":
+		m.askStart()
 	case "v":
 		if m.view == viewLive {
 			m.askPeek(m.current())
@@ -585,6 +598,10 @@ func (m *Model) overlayKey(msg tea.KeyMsg) tea.Cmd {
 	case ovConfirm:
 		m.confirmKey(msg.String())
 		return nil
+	case ovHandoff:
+		return m.handoffKey(msg)
+	case ovStart:
+		return m.startKey(msg)
 	case ovPeek:
 		return m.peekKey(msg)
 	case ovMessage:
@@ -686,9 +703,15 @@ func (m *Model) overlayKey(msg tea.KeyMsg) tea.Cmd {
 			m.pending = m.openEdit()
 		case "n":
 			m.editTitle()
+		case "b":
+			m.doFork()
+		case "s":
+			m.doHandoff()
+		case "w", "ctrl+w":
+			m.askStartFromDialog()
 		case "v":
 			if m.ov.plan.Live.PaneID != "" {
-				m.askPeek(m.ov.rec)
+				m.askPeek(m.ovRec())
 			}
 		case "esc", "q":
 			m.closeOverlay()
@@ -860,7 +883,7 @@ func (m *Model) wheel(dir, x int) bool {
 		}
 		return false
 	}
-	if m.ov.kind == ovMessage || m.ov.kind == ovHelp {
+	if m.ov.kind == ovMessage || m.ov.kind == ovHelp || m.ov.kind == ovHandoff {
 		n := min(max(m.ov.cursor+dir*m.wheelStep, 0), m.ov.scrollMax)
 		if n == m.ov.cursor {
 			return false
@@ -928,8 +951,9 @@ func (m *Model) chatFills(scroll, skip int) bool {
 	return lines > avail
 }
 
-func (m *Model) askResume() {
-	r := m.current()
+func (m *Model) askResume() { m.openResume(m.current()) }
+
+func (m *Model) openResume(r *fav.Rec) {
 	if r == nil {
 		return
 	}

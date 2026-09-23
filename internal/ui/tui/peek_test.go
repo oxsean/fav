@@ -68,26 +68,3 @@ func TestPeekAndReply(t *testing.T) {
 		t.Fatalf("second 1 answers, the typed line is the next prompt: %q", got)
 	}
 }
-
-// drain runs cmd and yields every message, opening batches.
-func drain(cmd tea.Cmd) func(func(tea.Msg) bool) {
-	return func(yield func(tea.Msg) bool) {
-		var walk func(tea.Cmd) bool
-		walk = func(c tea.Cmd) bool {
-			if c == nil {
-				return true
-			}
-			msg := c()
-			if b, ok := msg.(tea.BatchMsg); ok {
-				for _, c := range b {
-					if !walk(c) {
-						return false
-					}
-				}
-				return true
-			}
-			return yield(msg)
-		}
-		walk(cmd)
-	}
-}

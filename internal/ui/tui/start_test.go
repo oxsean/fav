@@ -1,14 +1,59 @@
 package tui
 
 import (
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/oxsean/fav/internal/capture"
 )
+
+func TestStartFromProjectShowsWhatRuns(t *testing.T) {
+	fakeCLIs(t)
+	m := sized(t, 140, 44)
+	dir := t.TempDir()
+	var running string
+	for _, r := range m.store.All() {
+		if r.Project == "notes-api" {
+			r.Cwd = dir
+			running = r.SessionID
+		}
+	}
+	m.live = map[string]capture.Live{running: {Status: "working", Cwd: dir}}
+	m.setView(viewProjects)
+	for i, row := range m.rows {
+		if row.group == "notes-api" {
+			m.cursor = i
+		}
+	}
+	key := func(s string) { m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(s)}) }
+	key("w")
+	if m.ov.kind != ovStart || m.ov.rec.Cwd != dir || len(m.ov.running) != 1 || m.ov.running[0].SessionID != running {
+		t.Fatalf("w on a project header: a new-session dialog in its directory listing what runs there: %+v", m.ov)
+	}
+	v := ansi.Strip(m.View())
+	for _, want := range []string{"开新会话 · notes-api", "这里已经在跑（1）", "1 Claude Code", "2 Codex CLI"} {
+		if !strings.Contains(v, want) {
+			t.Errorf("dialog lacks %q:\n%s", want, v)
+		}
+	}
+	m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if m.ov.kind != ovResume || m.ov.rec.SessionID != running {
+		t.Fatalf("↓ Enter goes to the running session's dialog: kind=%d", m.ov.kind)
+	}
+	m.closeOverlay()
+	key("w")
+	key("2")
+	s := m.result.Start
+	if !m.quitting || s == nil || !slices.Equal(s.Argv(), []string{"codex"}) || s.Cwd != dir {
+		t.Fatalf("2 starts a bare Codex session in the directory: %+v", s)
+	}
+}
 
 func TestCloseIdleTabs(t *testing.T) {
 	m := sized(t, 140, 40)

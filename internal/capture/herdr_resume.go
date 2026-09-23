@@ -32,15 +32,42 @@ func PlanResume(r *fav.Rec, live map[string]Live, noHerdr bool) (Plan, error) {
 	} else if p.Spec, err = BuildResume(r); err != nil {
 		return p, err
 	}
-	if !noHerdr && herdr.Reachable() {
-		switch ws, _ := herdr.WorkspacesFor(r.HerdrWorkspace, r.Cwd); {
-		case len(ws) == 1:
-			p.Ws = &ws[0]
-		case len(ws) > 1:
-			p.WsChoices = ws
-		}
-	}
+	p.findWorkspace(r, noHerdr)
 	return p, nil
+}
+
+// PlanFork: a new session carrying r's history, placed where a resume would go.
+func PlanFork(r *fav.Rec, noHerdr bool) (Plan, error) {
+	p := Plan{Checks: Checks(r)}
+	var err error
+	if p.Spec, err = BuildFork(r); err != nil {
+		return p, err
+	}
+	p.findWorkspace(r, noHerdr)
+	return p, nil
+}
+
+// PlanStart: a new provider session in r's directory whose first message is prompt.
+func PlanStart(r *fav.Rec, provider, prompt string, noHerdr bool) (Plan, error) {
+	p := Plan{Checks: startChecks(provider, r.Cwd)}
+	var err error
+	if p.Spec, err = BuildStart(provider, r.Cwd, prompt); err != nil {
+		return p, err
+	}
+	p.findWorkspace(r, noHerdr)
+	return p, nil
+}
+
+func (p *Plan) findWorkspace(r *fav.Rec, noHerdr bool) {
+	if noHerdr || !herdr.Reachable() {
+		return
+	}
+	switch ws, _ := herdr.WorkspacesFor(r.HerdrWorkspace, r.Cwd); {
+	case len(ws) == 1:
+		p.Ws = &ws[0]
+	case len(ws) > 1:
+		p.WsChoices = ws
+	}
 }
 
 func (p Plan) Target(r *fav.Rec, arrow string) string {

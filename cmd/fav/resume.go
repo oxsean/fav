@@ -20,6 +20,7 @@ func cmdResume(args []string) error {
 	inApp := fs.Bool("app", false, i18n.T("cli.resume.flag_app"))
 	inTerminal := fs.Bool("terminal", false, i18n.T("cli.resume.flag_terminal"))
 	workspace := fs.String("workspace", "", i18n.T("cli.resume.flag_workspace"))
+	fork := fs.Bool("fork", false, i18n.T("cli.resume.flag_fork"))
 	rest, err := parseMixed(fs, args)
 	if err != nil {
 		return err
@@ -31,6 +32,13 @@ func cmdResume(args []string) error {
 	r, err := pick(s, first(rest))
 	if err != nil {
 		return err
+	}
+	if *fork {
+		plan, err := capture.PlanFork(r, *noHerdr)
+		if err != nil {
+			return err
+		}
+		return runPlan(s, r, plan, *dryRun, *workspace, false)
 	}
 	if !*inTerminal && !*dryRun && (*inApp || wantsApp(loadConfig().ResumeIn, r)) {
 		err := openInApp(s, r)
@@ -70,6 +78,11 @@ func resumeRec(s *fav.Store, r *fav.Rec, dryRun, noHerdr bool, workspace string)
 	if err != nil {
 		return err
 	}
+	return runPlan(s, r, plan, dryRun, workspace, true)
+}
+
+// runPlan carries out a plan; resume = it continues r itself (counted), not a fork or a new session.
+func runPlan(s *fav.Store, r *fav.Rec, plan capture.Plan, dryRun bool, workspace string, resume bool) error {
 	if plan.Ws == nil && len(plan.WsChoices) > 1 {
 		var labels []string
 		for i, w := range plan.WsChoices {
@@ -83,15 +96,15 @@ func resumeRec(s *fav.Store, r *fav.Rec, dryRun, noHerdr bool, workspace string)
 		}
 	}
 	if dryRun {
-		printPlan(r, plan)
+		printPlan(r, plan, resume)
 		return nil
 	}
 	if plan.Blocking() != nil {
-		printPlan(r, plan)
+		printPlan(r, plan, resume)
 		return errors.New(i18n.T("cli.resume.check_failed"))
 	}
 
-	if plan.Live.TabID == "" {
+	if plan.Live.TabID == "" && resume {
 		if err := capture.MarkResumed(s, r); err != nil {
 			fmt.Fprintf(os.Stderr, i18n.T("cli.resume.count_not_saved"), err)
 		}
@@ -101,6 +114,9 @@ func resumeRec(s *fav.Store, r *fav.Rec, dryRun, noHerdr bool, workspace string)
 		if err == nil {
 			if warn != nil {
 				fmt.Fprintf(os.Stderr, i18n.T("cli.resume.warn"), warn)
+			}
+			if !resume {
+				msg = i18n.F("start.opened_tab", plan.Ws.Label, capture.TabLabel(r))
 			}
 			fmt.Println(msg)
 			return nil
@@ -123,8 +139,12 @@ func resumeHere(spec capture.CommandSpec) error {
 	return handOff(bin, spec.Argv())
 }
 
-func printPlan(r *fav.Rec, p capture.Plan) {
-	fmt.Print(i18n.F("cli.resume.header", r.Title))
+func printPlan(r *fav.Rec, p capture.Plan, resume bool) {
+	header := "cli.resume.header"
+	if !resume {
+		header = "cli.start.header"
+	}
+	fmt.Print(i18n.F(header, r.Title))
 	fmt.Println(i18n.T("resume.target"))
 	fmt.Println("  " + p.Target(r, " -> "))
 	if p.Ws != nil {
@@ -141,4 +161,42 @@ func printPlan(r *fav.Rec, p capture.Plan) {
 		}
 		fmt.Printf("  %s %s\n", mark, c.Text)
 	}
+}
+
+func cmdHandoff(args []string) error {
+	fs := flag.NewFlagSet("handoff", flag.ContinueOnError)
+	to := fs.String("to", "", i18n.T("cli.handoff.flag_to"))
+	dryRun := fs.Bool("dry-run", false, i18n.T("cli.handoff.flag_dry_run"))
+	noHerdr := fs.Bool("no-herdr", false, i18n.T("cli.resume.flag_no_herdr"))
+	workspace := fs.String("workspace", "", i18n.T("cli.resume.flag_workspace"))
+	rest, err := parseMixed(fs, args)
+	if err != nil {
+		return err
+	}
+	s, err := openStore()
+	if err != nil {
+		return err
+	}
+	r, err := pick(s, first(rest))
+	if err != nil {
+		return err
+	}
+	path, err := capture.WriteHandoff(r)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(os.Stderr, i18n.T("cli.handoff.written"), path)
+	if *to == "" {
+		b, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		_, err = os.Stdout.Write(b)
+		return err
+	}
+	plan, err := capture.PlanStart(r, *to, capture.HandoffPrompt(path), *noHerdr)
+	if err != nil {
+		return err
+	}
+	return runPlan(s, r, plan, *dryRun, *workspace, false)
 }
