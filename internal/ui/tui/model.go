@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
@@ -91,6 +92,8 @@ type Model struct {
 	detail     bool
 	ov         overlay
 	notice     string
+	noticeSeq  int  // bumped by flash; an expiry only clears its own notice
+	noticeNew  bool // flash ran during this Update: schedule the expiry
 	w, h       int
 	now        time.Time
 	result     Result
@@ -193,6 +196,12 @@ func (m *Model) Init() tea.Cmd {
 	tracef("start %dx%d wheelStep=%d", m.w, m.h, m.wheelStep)
 	if m.idx.Len() == 0 {
 		m.flash(i18n.T("flash.building_index"))
+	}
+	if m.cfg.ResumeIn == fav.ResumeApp || m.cfg.ResumeIn == fav.ResumeOrigin {
+		go func() { // the resume dialog's Enter depends on it; everyone else looks up on the first dialog
+			capture.AppAvailable(fav.ProviderClaude)
+			capture.AppAvailable(fav.ProviderCodex)
+		}()
 	}
 	return tea.Batch(textinput.Blink, m.pollLive(), watchStore(), m.refreshIndex(), m.syncText(m.idx))
 }
@@ -785,7 +794,7 @@ func (m *Model) dropUnfav(r *fav.Rec) {
 }
 
 func (m *Model) focusSearch() {
-	m.typing, m.moved = true, false
+	m.typing, m.moved, m.pane = true, false, paneList
 	m.search.Focus()
 }
 
@@ -817,7 +826,15 @@ func (m *Model) clickRow(i int) {
 	m.detail, m.pane = false, paneList
 }
 
-func (m *Model) flash(s string) { m.notice = s }
+// flash shows s in the footer; Update schedules its expiry (noticeFor).
+func (m *Model) flash(s string) { m.notice, m.noticeSeq, m.noticeNew = s, m.noticeSeq+1, true }
+
+// noticeFor: how long a notice stays — 3 s, plus a second per 15 characters, at most 10 s.
+func noticeFor(s string) time.Duration {
+	return min(3*time.Second+time.Duration(utf8.RuneCountInString(s)/15)*time.Second, 10*time.Second)
+}
+
+type noticeExpiredMsg struct{ seq int }
 
 type item struct {
 	name  string

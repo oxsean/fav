@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/oxsean/fav/internal/fav"
 )
@@ -149,5 +150,27 @@ func TestWrapFillsLineWithMixedText(t *testing.T) {
 	}
 	if !strings.Contains(strings.Join(lines, ""), "chip") {
 		t.Errorf("拉丁词被切碎了：%q", lines)
+	}
+}
+
+func TestWrapKeepsPunctuationOffLineStarts(t *testing.T) {
+	text := "搜所有会话的消息：按 >（》也行）打开搜索框并在前面填好 >；关键词在所有消息和命令里找，其余的筛选词（project: #标签 last: status:）限定会话范围；命令行：fav mv <旧> <新>，fav fix 会找已不存在的目录去了哪"
+	for w := 12; w <= 60; w++ { // narrower, a mark plus its word may not fit: the width wins
+		for _, l := range Wrap(text, w) {
+			if Width(l) > w {
+				t.Fatalf("width %d: %q is %d wide", w, l, Width(l))
+			}
+			if l == "" {
+				continue
+			}
+			r, _ := utf8.DecodeRuneInString(l)
+			if strings.ContainsRune("，。、；：！？）」』》", r) {
+				t.Errorf("width %d: line starts with %q: %q", w, r, l)
+			}
+			lr, _ := utf8.DecodeLastRuneInString(l)
+			if strings.ContainsRune("（「『《", lr) {
+				t.Errorf("width %d: line ends with %q: %q", w, lr, l)
+			}
+		}
 	}
 }

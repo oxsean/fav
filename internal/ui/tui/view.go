@@ -257,11 +257,11 @@ func (m *Model) body(y0, h int) []string {
 	if h < 1 {
 		return nil
 	}
-	if m.w < compactCols {
-		return m.listBlock(y0, 0, m.w, h)
-	}
 	if m.detail {
 		return m.detailBlock(y0, 0, m.w, h)
+	}
+	if m.w < compactCols {
+		return m.listBlock(y0, 0, m.w, h)
 	}
 
 	listW := m.listWidth()
@@ -477,6 +477,9 @@ func (m *Model) cardBox(r *fav.Rec, sel bool, w int) []string {
 	inner := w - 4
 	when := render.When(m.when(r), m.now)
 	meta := providerShort(r.Provider)
+	if r.App {
+		meta += " App"
+	}
 	if r.Project != "" {
 		meta += "  ·  " + r.Project
 	}
@@ -847,102 +850,189 @@ func (m *Model) targetBox(w int) []string {
 	return strings.Split(panelSty.Width(w-2).Render(content), "\n")
 }
 
+// footKey is one footer hint; when the line is too wide the highest rank goes first, rank 0 never.
+type footKey struct {
+	text string
+	rank int
+	raw  bool // drawn as is (the notice)
+}
+
+// footGroup is a run of hints drawn together; groups are split by a bar.
+type footGroup []footKey
+
+func fk(key string, rank int) footKey { return footKey{text: i18n.T(key), rank: rank} }
+
+// footer: the keys of what has focus, grouped (main action | search | record), with Tab / ? pinned to the right.
 func (m *Model) footer() string {
-	if m.notice != "" {
-		return fit(accent.Render(render.Truncate(m.notice, m.w)), m.w)
-	}
-	var keys []string
+	help := footGroup{fk("footer.help", 0)}
+	nav := footGroup{fk("footer.tab", 3), fk("footer.help", 0)}
+	var left []footGroup
+	right := nav
 	switch {
+	case m.notice != "":
+		note := noticeSty.Render(" " + m.notice + " ")
+		if w := m.w - ansi.StringWidth(renderFoot([]footGroup{help})) - 2; ansi.StringWidth(note) > w {
+			note = noticeSty.Render(" " + render.Truncate(m.notice, max(1, w-2)) + " ")
+		}
+		return m.footLine([]footGroup{{{text: note, raw: true}}}, help, "")
 	case m.typing:
-		keys = []string{i18n.T("footer.esc_typing"), i18n.T("footer.select_record"), i18n.T("footer.enter_typing")}
-	case m.detail:
-		keys = append([]string{i18n.T("footer.esc_back")}, m.sessionKeys(m.current())...)
-	case m.w < compactCols:
-		keys = []string{i18n.T("footer.enter_details"), i18n.T("footer.search"), i18n.T("footer.help"), i18n.T("footer.quit")}
-	case !m.twoColumn(): // single-pane list: Enter opens the detail, Space does nothing
-		keys = []string{i18n.T("footer.enter_details")}
-		for _, k := range m.sessionKeys(m.current())[1:] {
-			if k != i18n.T("footer.space_resume") {
-				keys = append(keys, k)
-			}
+		switch {
+		case m.msgMode():
+			left = []footGroup{{fk("footer.enter_results", 0), fk("footer.select_record", 1)}}
+		case m.moved && m.current() != nil && m.twoColumn():
+			left = []footGroup{{fk("footer.enter_actions", 0), fk("footer.select_record", 1)}}
+		case m.moved && m.current() != nil:
+			left = []footGroup{{fk("footer.enter_details", 0), fk("footer.select_record", 1)}}
+		default: // Enter only ends typing, like Esc
+			left = []footGroup{{fk("footer.select_record", 1)}}
 		}
+		left, right = append(left, footGroup{fk("footer.esc_typing", 0)}), nil
+	case m.chat.typing:
+		left, right = []footGroup{{fk("footer.enter_find", 0)}, {fk("footer.esc_cancel", 0)}}, nil
 	case m.chipFocus >= 0:
-		keys = []string{i18n.T("footer.chip_switch"), i18n.T("footer.chip_open"), i18n.T("footer.chip_back")}
-	case m.projectFocus():
-		keys = []string{i18n.T("footer.select_session"), i18n.T("footer.enter_jump"), i18n.T("footer.back_to_list"), i18n.T("footer.help")}
+		left, right = []footGroup{{fk("footer.chip_switch", 0), fk("footer.chip_open", 0)}, {fk("footer.chip_back", 0)}}, nil
 	case m.hitsOpen() && m.pane == paneList:
-		keys = []string{i18n.T("footer.select_hit"), i18n.T("footer.full_text"), i18n.T("footer.hit_chat"), i18n.T("footer.hit_back"), i18n.T("footer.help")}
+		left = []footGroup{{fk("footer.select_hit", 1), fk("footer.full_text", 0)}, {fk("footer.hit_chat", 2), fk("footer.hit_back", 0)}}
+		right = help
+	case m.projectFocus():
+		left = []footGroup{{fk("footer.select_session", 1), fk("footer.enter_jump", 0)}, {fk("footer.back_to_list", 0)}}
+		right = help
 	case m.pane == paneChat:
-		keys = []string{i18n.T("footer.select_message"), i18n.T("footer.full_text"), i18n.T("footer.copy"), i18n.T("footer.find"), i18n.T("footer.jump"), i18n.T("footer.back_to_list"), i18n.T("footer.help")}
-	case m.view == viewProjects && m.current() == nil:
-		keys = []string{i18n.T("footer.enter_expand"), i18n.T("footer.space_expand"), i18n.T("footer.fold_all"), i18n.T("footer.move_project"), i18n.T("footer.search"), i18n.T("footer.tab"), i18n.T("footer.help")}
-	case m.inTrash():
-		keys = []string{i18n.T("footer.restore"), i18n.T("footer.status"), i18n.T("footer.search"), i18n.T("footer.tab"), i18n.T("footer.help")}
-	default:
-		keys = m.sessionKeys(m.current())
-		if m.msgMode() && m.current() != nil {
-			keys = append([]string{i18n.T("footer.all_hits")}, keys...)
+		left = []footGroup{
+			{fk("footer.select_message", 3), fk("footer.full_text", 0), fk("footer.copy", 5)},
+			{fk("footer.find", 4), fk("footer.jump", 5)},
+			{fk("footer.back_to_list", 0)},
 		}
+		right = help
+	case m.detail:
+		if m.inTrash() {
+			left = []footGroup{{fk("footer.restore", 0)}}
+		} else {
+			left = []footGroup{m.mainKeys(m.current()), {m.favKey(m.current())}}
+		}
+		right = footGroup{fk("footer.esc_back", 0), fk("footer.help", 0)}
+	case m.inTrash() && m.current() != nil:
+		left = []footGroup{{fk("footer.restore", 0)}, {fk("footer.filter", 4), fk("footer.search", 0)}}
+	case m.view == viewProjects && m.current() == nil:
+		expand := "footer.enter_collapse"
+		if m.cursor < len(m.rows) && m.rows[m.cursor].folded {
+			expand = "footer.enter_expand"
+		}
+		left = []footGroup{{fk(expand, 0), fk("footer.fold_all", 4)}, {fk("footer.move_project", 4)}, {fk("footer.search", 0)}}
+	case m.current() == nil:
+		left = []footGroup{m.searchKeys()}
+		if m.w < compactCols {
+			left, right = []footGroup{{fk("footer.search", 0)}}, help
+		}
+	case m.w < compactCols:
+		left, right = []footGroup{{fk("footer.enter_details", 0)}, {fk("footer.search", 0)}}, help
+	case !m.twoColumn():
+		left = []footGroup{{fk("footer.enter_details", 0)}, m.searchKeys(), {m.favKey(m.current())}}
+	default:
+		left = []footGroup{m.mainKeys(m.current()), m.searchKeys(), {m.favKey(m.current())}}
 	}
 	count := "" // compact mode has no list title: the count goes to the footer
-	if m.w < compactCols {
+	if m.w < compactCols && !m.typing {
 		count = dimmed.Render(i18n.F("footer.items", m.countRecs()))
 	}
-	for len(keys) > 1 {
-		hint := renderKeys(keys)
-		if gap := m.w - ansi.StringWidth(hint) - ansi.StringWidth(count); gap >= 1 {
-			return hint + strings.Repeat(" ", gap) + count
-		}
-		keys = keys[:len(keys)-1]
-	}
-	return fit(renderKeys(keys), m.w)
+	return m.footLine(left, right, count)
 }
 
-// sessionKeys is the footer for a selected session, the same in all three views: actions → record state → edit / move / delete →
-// view-specific → navigation; cut from the end when narrow, so common keys come first.
-func (m *Model) sessionKeys(r *fav.Rec) []string {
-	pick := func(cond bool, on, off string) string {
-		if cond {
-			return i18n.T(on)
-		}
-		return i18n.T(off)
-	}
-	keys := []string{i18n.T("footer.enter_actions")}
+// mainKeys: Enter opens the action dialog; Space presses its primary button (resume, switch, or the hits of a message search).
+func (m *Model) mainKeys(r *fav.Rec) footGroup {
+	g := footGroup{fk("footer.enter_actions", 0)}
 	switch {
+	case r == nil:
+	case m.msgMode():
+		g = append(g, fk("footer.all_hits", 2), fk("footer.jump", 4))
 	case m.view == viewLive:
-		keys = append(keys, i18n.T("footer.space_switch"), i18n.T("footer.close_tab"))
+		g = append(g, fk("footer.space_switch", 2))
 	default:
 		if d, t := m.broken(r); !d && !t {
-			keys = append(keys, i18n.T("footer.space_resume"))
+			g = append(g, fk("footer.space_resume", 2))
 		}
 	}
-	keys = append(keys, pick(r != nil && r.Favorite(), "footer.unfavorite", "footer.favorite"))
-	if m.view != viewLive {
-		keys = append(keys,
-			pick(r != nil && r.Done(), "footer.undo_done", "footer.done"),
-			pick(r != nil && r.Archived(), "footer.unarchive", "footer.archive"))
-	}
-	keys = append(keys, i18n.T("footer.edit"))
-	if m.view != viewLive {
-		keys = append(keys, i18n.T("footer.move"), i18n.T("footer.delete"))
-	}
-	if m.view == viewProjects {
-		keys = append(keys, i18n.T("footer.fold_all"))
-	}
-	return append(keys, i18n.T("footer.search"), i18n.T("footer.msg_search"), i18n.T("footer.tab"), i18n.T("footer.help"))
+	return g
 }
 
-func renderKeys(keys []string) string {
-	parts := make([]string, len(keys))
-	for i, k := range keys {
-		key, desc, ok := strings.Cut(k, " ")
-		if !ok {
-			parts[i] = dimmed.Render(k)
-			continue
-		}
-		parts[i] = accent.Render(key) + dimmed.Render(" "+desc)
+func (m *Model) searchKeys() footGroup {
+	return footGroup{fk("footer.search", 0), fk("footer.msg_search", 5)}
+}
+
+func (m *Model) favKey(r *fav.Rec) footKey {
+	if r != nil && r.Favorite() {
+		return fk("footer.unfavorite", 4)
 	}
-	return strings.Join(parts, frame.Render("  "+vBar+"  "))
+	return fk("footer.favorite", 4)
+}
+
+// footLine fits the groups into the width, dropping the highest-ranked hint (the later one on a tie) until they fit; right is
+// drawn at the right edge, count after it.
+func (m *Model) footLine(left []footGroup, right footGroup, count string) string {
+	tail := func() string {
+		t := renderFoot([]footGroup{right})
+		if count != "" {
+			if t != "" {
+				t += "   "
+			}
+			t += count
+		}
+		return t
+	}
+	for ansi.StringWidth(renderFoot(left))+ansi.StringWidth(tail())+2 > m.w && dropFoot(left, &right) {
+		left = pruneFoot(left)
+	}
+	line, t := renderFoot(left), tail()
+	return fit(line+strings.Repeat(" ", max(1, m.w-ansi.StringWidth(line)-ansi.StringWidth(t)))+t, m.w)
+}
+
+// dropFoot removes the highest-ranked hint of left and right; false when every hint left is rank 0.
+func dropFoot(left []footGroup, right *footGroup) bool {
+	gi, ki, best := -1, -1, 0
+	for i, g := range append(append([]footGroup(nil), left...), *right) {
+		for j, k := range g {
+			if k.rank > 0 && k.rank >= best {
+				gi, ki, best = i, j, k.rank
+			}
+		}
+	}
+	if gi < 0 {
+		return false
+	}
+	if gi == len(left) {
+		*right = append((*right)[:ki:ki], (*right)[ki+1:]...)
+	} else {
+		left[gi] = append(left[gi][:ki:ki], left[gi][ki+1:]...)
+	}
+	return true
+}
+
+func pruneFoot(gs []footGroup) []footGroup {
+	out := gs[:0:0]
+	for _, g := range gs {
+		if len(g) > 0 {
+			out = append(out, g)
+		}
+	}
+	return out
+}
+
+// renderFoot draws the keys in the accent colour and the text dimmed: two spaces inside a group, a bar between groups.
+func renderFoot(gs []footGroup) string {
+	var groups []string
+	for _, g := range pruneFoot(gs) {
+		parts := make([]string, len(g))
+		for i, k := range g {
+			key, desc, ok := strings.Cut(k.text, " ")
+			if k.raw || !ok {
+				parts[i] = k.text
+				continue
+			}
+			parts[i] = accent.Render(key) + dimmed.Render(" "+desc)
+		}
+		groups = append(groups, strings.Join(parts, "  "))
+	}
+	return strings.Join(groups, frame.Render("  "+vBar+"  "))
 }
 
 // countRecs counts records under the current filter; collapsed groups count from their header.

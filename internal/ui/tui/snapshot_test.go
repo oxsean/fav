@@ -193,7 +193,7 @@ func TestResumeDialogEditsTitle(t *testing.T) {
 	m.ov.plan, _ = capture.PlanResume(rec, nil, false)
 
 	m.View()
-	x, y := findText(m.View(), "e 改标题")
+	x, y := findText(m.View(), "n 改标题")
 	if x < 0 {
 		t.Fatal("恢复框里没有改标题的入口")
 	}

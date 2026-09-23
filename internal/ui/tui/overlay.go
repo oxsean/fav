@@ -4,8 +4,8 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
-	"github.com/atotto/clipboard"
 	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
@@ -59,6 +59,7 @@ type overlay struct {
 	confirm   func(*Model)
 	back      func(*Model) // ovConfirm cancel goes back here (nil = close)
 	okLabel   string
+	app       bool // resume dialog: opening in the desktop app is the primary action
 
 	msg    capture.Message
 	lines  []string
@@ -334,8 +335,8 @@ func (m *Model) ovWidth() int {
 	}
 	w = min(max(w, 20), 72)
 	switch m.ov.kind {
-	case ovResume: // wide enough for the buttons to fit in two rows, so the command line is cut less
-		w = min(max(w, 72, btnsWidthRows(m.resumeBtns(), 2)), m.w-4, 110)
+	case ovResume: // wide enough for each button group to fit on one row
+		w = min(max(w, 72, groupsWidth(m.resumeGroups())), m.w-4)
 	case ovHelp:
 		w = min(m.w-8, 120)
 	case ovEdit:
@@ -355,10 +356,15 @@ type btn struct {
 // buttons draws a row of buttons as 3 lines and registers click zones, wrapping when a row does not fit.
 func (m *Model) buttons(y0 int, bs []btn) []string {
 	m.ov.btns = bs
-	inner := m.ovWidth() - 4 // same content width as ovRender
+	return m.btnRows(y0, ovPad, m.ovWidth()-4, bs, 0, len(bs))
+}
+
+// btnRows draws bs from column x0 within width inner; base is the focus index of bs[0]; bs[right:] are pushed to the
+// right edge when they fit on the same row.
+func (m *Model) btnRows(y0, x0, inner int, bs []btn, base, right int) []string {
 	var out []string
 	var cols [][]string
-	x := ovPad
+	x := x0
 	flush := func() {
 		for i := 0; i < 3; i++ {
 			parts := make([]string, len(cols))
@@ -367,26 +373,125 @@ func (m *Model) buttons(y0 int, bs []btn) []string {
 			}
 			out = append(out, strings.Join(parts, " "))
 		}
-		cols, x = nil, ovPad
+		cols, x = nil, x0
 	}
 	for i, b := range bs {
 		w := ansi.StringWidth(b.label) + 4
-		if len(cols) > 0 && x-ovPad+w > inner {
+		if len(cols) > 0 && x-x0+w > inner {
 			flush()
 		}
-		sty := btnSty
+		if i == right && len(cols) > 0 {
+			if sp := x0 + inner - rowWidth(bs[right:]) - x - 1; sp > 0 {
+				pad := strings.Repeat(" ", sp)
+				cols = append(cols, []string{pad, pad, pad})
+				x += sp + 1
+			}
+		}
+		sty, label := btnSty, keyedLabel(b.label)
 		if b.primary {
-			sty = btnPri
+			sty, label = btnPri, b.label
 		}
-		if i == m.ov.focus {
-			sty = btnFocus
+		if base+i == m.ov.focus {
+			sty, label = btnFocus, b.label
 		}
-		cols = append(cols, strings.Split(sty.Render(b.label), "\n"))
+		cols = append(cols, strings.Split(sty.Render(label), "\n"))
 		m.markRows(y0+len(out), x, w, 3, b.act)
 		x += w + 1
 	}
 	flush()
 	return out
+}
+
+// keyedLabel puts a button's leading key in the accent colour, like the footer; a label without one stays as is.
+func keyedLabel(label string) string {
+	key, desc, ok := labelKey(label)
+	if !ok {
+		return label
+	}
+	return btnKey.Render(key) + btnText.Render(" "+desc)
+}
+
+// labelKey splits "f 收藏" into its key and text.
+func labelKey(label string) (key, desc string, ok bool) {
+	key, desc, ok = strings.Cut(label, " ")
+	return key, desc, ok && isKeyName(key)
+}
+
+var keyNames = map[string]bool{"Enter": true, "Esc": true, "Tab": true, "Space": true, "Backspace": true, "PgUp": true, "PgDn": true, "Home": true, "End": true}
+
+func isKeyName(s string) bool {
+	return utf8.RuneCountInString(s) == 1 || keyNames[s] || strings.ContainsAny(s, "+/") && isASCII(s)
+}
+
+func isASCII(s string) bool {
+	for i := 0; i < len(s); i++ {
+		if s[i] >= 0x80 {
+			return false
+		}
+	}
+	return true
+}
+
+// btnGroup is one labelled row of a dialog's buttons; end sits at the row's right edge.
+type btnGroup struct {
+	label string
+	bs    []btn
+	end   []btn
+}
+
+// buttonGroups draws each group on its own row after a dim label column; focus runs through the groups in order.
+func (m *Model) buttonGroups(y0 int, gs []btnGroup) []string {
+	lw := groupLabelWidth(gs)
+	inner := m.ovWidth() - 4
+	var all []btn
+	var out []string
+	for _, g := range gs {
+		bs := append(g.bs[:len(g.bs):len(g.bs)], g.end...)
+		rows := m.btnRows(y0+len(out), ovPad+lw, inner-lw, bs, len(all), len(g.bs))
+		all = append(all, bs...)
+		for k, l := range rows {
+			lab := strings.Repeat(" ", lw)
+			if k == 1 {
+				lab = dimmed.Render(render.Pad(g.label, lw))
+			}
+			out = append(out, lab+l)
+		}
+	}
+	m.ov.btns = all
+	return out
+}
+
+func groupLabelWidth(gs []btnGroup) int {
+	w := 0
+	for _, g := range gs {
+		w = max(w, ansi.StringWidth(g.label))
+	}
+	return w + 2
+}
+
+// groupsWidth: the overlay width that puts every group on one row.
+func groupsWidth(gs []btnGroup) int {
+	w := 0
+	for _, g := range gs {
+		row := rowWidth(g.bs)
+		if len(g.end) > 0 {
+			row += 3 + rowWidth(g.end)
+		}
+		w = max(w, row)
+	}
+	return groupLabelWidth(gs) + w + 4
+}
+
+// rowWidth: the columns bs take on one row (button = text + 4, gap 1).
+func rowWidth(bs []btn) int {
+	w := 0
+	for i, b := range bs {
+		if i > 0 {
+			w++
+		}
+		w += ansi.StringWidth(b.label) + 4
+	}
+	return w
 }
 
 func (m *Model) renderPicker() string {
@@ -489,66 +594,119 @@ func (m *Model) toggleOrApply() {
 	}
 }
 
+// helpRow: one or more key lines (alternatives on their own lines) and a one-line description.
+type helpRow struct {
+	keys []string
+	desc string
+}
+
+type helpGroup struct {
+	title string
+	rows  []helpRow
+}
+
+func helpGroups() []helpGroup {
+	t := i18n.T
+	return []helpGroup{
+		{t("help.group.search"), []helpRow{
+			{[]string{"/  、"}, t("help.search")},
+			{[]string{"> 》"}, t("help.msg_search")},
+			{[]string{"\\  Ctrl+S"}, t("help.find")},
+			{[]string{"n / N"}, t("help.next_hit")},
+			{[]string{"→"}, t("help.all_hits")},
+			{[]string{"o  Ctrl+O"}, t("help.sort")},
+		}},
+		{t("help.group.read"), []helpRow{
+			{[]string{"j / k  ↑ ↓", "Ctrl+N / Ctrl+P"}, t("help.move")},
+			{[]string{"PgUp / PgDn", "Ctrl+B / Ctrl+F", "Ctrl+U / Ctrl+D", "g / G  Home / End"}, t("help.page")},
+			{[]string{"h / l  ← →"}, t("help.pane")},
+			{[]string{"J / K  Ctrl+J/K"}, t("help.chat_move")},
+			{[]string{t("help.key_enter_chat")}, t("help.enter_chat")},
+		}},
+		{t("help.group.resume"), []helpRow{
+			{[]string{"Enter / r"}, t("help.enter")},
+			{[]string{"Space  Ctrl+G"}, t("help.space")},
+			{[]string{t("help.key_t_resume")}, t("help.t_resume")},
+			{[]string{t("help.key_p_app")}, t("help.app")},
+			{[]string{t("help.key_y_resume")}, t("help.y_resume")},
+			{[]string{t("help.key_ide")}, t("help.ide")},
+			{[]string{"X"}, t("help.close_tab")},
+		}},
+		{t("help.group.record"), []helpRow{
+			{[]string{"f / *"}, t("help.favorite")},
+			{[]string{"x / a", "Ctrl+X / Ctrl+A"}, t("help.done_archive")},
+			{[]string{"e  Ctrl+E"}, t("help.edit")},
+			{[]string{"M"}, t("help.move_project")},
+			{[]string{"D"}, t("help.delete")},
+		}},
+		{t("help.group.view"), []helpRow{
+			{[]string{"Tab / Shift+Tab", "1 2 3 4"}, t("help.tabs")},
+			{[]string{t("help.key_chip_row")}, t("help.chip_row")},
+			{[]string{"t / p / v / d"}, t("help.filters")},
+			{[]string{"s"}, t("help.status")},
+			{[]string{t("help.key_enter_group")}, t("help.enter_group")},
+			{[]string{"z  - / +"}, t("help.fold_all")},
+		}},
+		{t("help.group.other"), []helpRow{
+			{[]string{t("help.key_settings")}, t("help.settings")},
+			{[]string{"Esc"}, t("help.esc")},
+			{[]string{"q  Ctrl+C"}, t("help.quit")},
+		}},
+	}
+}
+
+// helpKeyCap: the key column never grows past this, so one long key cannot push every description to the right.
+const helpKeyCap = 22
+
 func (m *Model) renderHelp() string {
 	w := m.ovWidth()
 	inner := w - 4
-	rows := [][2]string{
-		{"/", i18n.T("help.search")},
-		{"> 》", i18n.T("help.msg_search")},
-		{"j / k / ↑ ↓（ctrl+n / ctrl+p）", i18n.T("help.move")},
-		{"PgUp / PgDn（ctrl+b / ctrl+f）· ctrl+u / ctrl+d · g / G（Home / End）", i18n.T("help.page")},
-		{i18n.T("help.key_chip_row"), i18n.T("help.chip_row")},
-		{"J / K（ctrl+j/k）", i18n.T("help.chat_move")},
-		{i18n.T("help.key_enter_chat"), i18n.T("help.enter_chat")},
-		{i18n.T("help.key_find"), i18n.T("help.find")},
-		{"h / l / ← →", i18n.T("help.pane")},
-		{"Enter / r", i18n.T("help.enter")},
-		{"Space（ctrl+g）", i18n.T("help.space")},
-		{"X", i18n.T("help.close_tab")},
-		{"Tab / Shift+Tab", i18n.T("help.tabs")},
-		{"f / *", i18n.T("help.favorite")},
-		{i18n.T("help.key_enter_group"), i18n.T("help.enter_group")},
-		{"z（- / +）", i18n.T("help.fold_all")},
-		{"t / p / v / d", i18n.T("help.filters")},
-		{"s", i18n.T("help.status")},
-		{"D", i18n.T("help.delete")},
-		{"M", i18n.T("help.move_project")},
-		{"o（ctrl+o）", i18n.T("help.sort")},
-		{"x / a（ctrl+x / ctrl+a）", i18n.T("help.done_archive")},
-		{"e（ctrl+e）", i18n.T("help.edit")},
-		{i18n.T("help.key_settings"), i18n.T("help.settings")},
-		{i18n.T("help.key_t_resume"), i18n.T("help.t_resume")},
-		{i18n.T("help.key_y_resume") + "（ctrl+y）", i18n.T("help.y_resume")},
-		{i18n.T("help.key_ide"), i18n.T("help.ide")},
-		{"Esc", i18n.T("help.esc")},
-		{"q / ctrl+c", i18n.T("help.quit")},
-	}
-	keyW := 0
-	for _, r := range rows {
-		keyW = max(keyW, ansi.StringWidth(r[0]))
-	}
 	textW := inner - 2 // one column for the scrollbar
-	keyW = min(keyW+2, textW/2)
-	var lines []string
-	for _, r := range rows {
-		for i, seg := range render.Wrap(r[1], textW-keyW) {
-			key := strings.Repeat(" ", keyW)
-			if i == 0 {
-				key = accent.Render(render.Pad(r[0], keyW))
+	groups := helpGroups()
+	keyW := 0
+	for _, g := range groups {
+		for _, r := range g.rows {
+			for _, k := range r.keys {
+				keyW = max(keyW, ansi.StringWidth(k))
 			}
-			lines = append(lines, key+seg)
+		}
+	}
+	keyW = min(keyW+2, helpKeyCap, textW/2)
+	var lines []string
+	for gi, g := range groups {
+		if gi > 0 {
+			lines = append(lines, "")
+		}
+		lines = append(lines, boldSty.Foreground(cText).Render(g.title))
+		for _, r := range g.rows {
+			desc := render.Wrap(r.desc, textW-keyW-2)
+			for i := 0; i < max(len(r.keys), len(desc)); i++ {
+				key, seg := "", ""
+				if i < len(r.keys) {
+					key = render.Truncate(r.keys[i], keyW-1)
+				}
+				if i < len(desc) {
+					seg = desc[i]
+				}
+				lines = append(lines, "  "+accent.Render(render.Pad(key, keyW))+seg)
+			}
 		}
 	}
 	lines = append(lines, "")
 	notes := []string{
+		i18n.T("help.note_msg_syntax"),
+		i18n.T("help.note_query"),
+		i18n.T("help.note_move"),
+		i18n.T("help.note_delete"),
 		i18n.T("help.note_agents"),
 		i18n.T("help.note_ime"),
 		i18n.T("help.note_mouse"),
 		i18n.T("help.note_drag"),
-		"",
-		i18n.T("help.note_query"),
 	}
-	for _, l := range notes {
+	for i, l := range notes {
+		if i > 0 {
+			lines = append(lines, "")
+		}
 		for _, seg := range render.Wrap(l, textW) {
 			lines = append(lines, dimmed.Render(seg))
 		}
@@ -624,24 +782,32 @@ func (m *Model) renderResume() string {
 		if len(trouble) > 0 {
 			body = append(body, strings.Split(warnBox.Width(inner-2).Render(strings.Join(trouble, "\n")), "\n")...)
 		}
-		body = append(body, "", dimmed.Render(render.Truncate(p.Spec.Display(), inner)))
+		line := p.Spec.Display()
+		if m.ov.app {
+			line = capture.AppURL(r)
+		}
+		body = append(body, "", dimmed.Render(render.Truncate(line, inner)))
 	}
 	body = append(body, "")
 
-	body = append(body, m.buttons(len(body)+1, m.resumeBtns())...)
+	body = append(body, m.buttonGroups(len(body)+1, m.resumeGroups())...)
 	return ovRender(body, w)
 }
 
-// resumeBtns is the resume dialog's button row; the overlay width is computed from it.
-func (m *Model) resumeBtns() []btn {
+// resumeGroups are the resume dialog's buttons: where to continue, the project folder, the record; the overlay width
+// is computed from them.
+func (m *Model) resumeGroups() []btnGroup {
 	p := m.ov.plan
+	project := btnGroup{label: i18n.T("resume.group.project"), bs: []btn{{"i IDE", false, (*Model).openIDE}, {"c VS Code", false, (*Model).openCode}, {"o " + fileManagerName(), false, (*Model).openFiles}}}
+	cancel := btn{i18n.T("btn.cancel"), false, (*Model).closeOverlay}
 	if dirGone, tGone := m.broken(m.ov.rec); dirGone || tGone { // unrecoverable: move / delete instead of resume
-		bs := []btn{{i18n.T("resume.btn_move"), dirGone, (*Model).askMove}, {i18n.T("resume.btn_delete"), !dirGone, (*Model).askDelete}}
+		gs := []btnGroup{{label: i18n.T("resume.group.repair"), bs: []btn{{i18n.T("resume.btn_move"), dirGone, (*Model).askMove}, {i18n.T("resume.btn_delete"), !dirGone, (*Model).askDelete}}}}
 		if !dirGone {
-			bs = append(bs, btn{"i IDE", false, (*Model).openIDE}, btn{"c VS Code", false, (*Model).openCode})
+			gs = append(gs, project)
 		}
-		bs = append(bs, m.recordBtns()[:4]...) // favorite / done / archive / edit; move and delete are already there
-		return append(bs, btn{i18n.T("btn.cancel"), false, (*Model).closeOverlay})
+		gs[len(gs)-1].end = []btn{cancel}
+		// favorite / done / archive / edit; move and delete are already there
+		return append(gs, btnGroup{label: i18n.T("resume.group.record"), bs: m.recordBtns()[:4]})
 	}
 	primary := i18n.T("resume.btn_resume")
 	switch {
@@ -650,13 +816,86 @@ func (m *Model) resumeBtns() []btn {
 	case p.Live.BackgroundID != "":
 		primary = i18n.T("resume.btn_attach")
 	}
-	return append([]btn{
-		{primary, true, func(mm *Model) { mm.doResume(false) }},
+	if m.ov.app {
+		primary = i18n.T("resume.btn_resume_r")
+	}
+	bs := []btn{
+		{primary, !m.ov.app, func(mm *Model) { mm.doResume(false) }},
 		{i18n.T("resume.btn_terminal"), false, func(mm *Model) { mm.doResume(true) }},
-		{i18n.T("resume.btn_copy"), false, (*Model).copyResume},
-		{"i IDE", false, (*Model).openIDE},
-		{"c VS Code", false, (*Model).openCode},
-	}, append(m.recordBtns(), btn{i18n.T("btn.cancel"), false, (*Model).closeOverlay})...)
+	}
+	if r := m.ov.rec; appReady(r) {
+		label := i18n.F("resume.btn_app", capture.AppName(r.Provider))
+		if m.ov.app {
+			label = i18n.F("resume.btn_app_enter", capture.AppName(r.Provider))
+		}
+		app := btn{label, m.ov.app, (*Model).doApp}
+		if m.ov.app {
+			bs = append([]btn{app}, bs...)
+		} else {
+			bs = append(bs, app)
+		}
+	}
+	if m.resumeCommand() != "" {
+		bs = append(bs, btn{i18n.T("resume.btn_copy"), false, (*Model).copyResume})
+	}
+	project.end = []btn{cancel}
+	return []btnGroup{
+		{label: i18n.T("resume.group.resume"), bs: bs},
+		project,
+		{label: i18n.T("resume.group.record"), bs: m.recordBtns()},
+	}
+}
+
+// appReady: r's desktop app was found. The lookup runs in the background when the resume dialog first opens; the
+// button appears once it answers.
+func appReady(r *fav.Rec) bool {
+	ok, _ := capture.AppKnown(r.Provider)
+	return ok && capture.AppURL(r) != ""
+}
+
+type appProbedMsg struct{}
+
+// probeApp looks up r's desktop app unless that is already known.
+func probeApp(r *fav.Rec) tea.Cmd {
+	if _, known := capture.AppKnown(r.Provider); known || capture.AppURL(r) == "" {
+		return nil
+	}
+	p := r.Provider
+	return func() tea.Msg {
+		capture.AppAvailable(p)
+		return appProbedMsg{}
+	}
+}
+
+// appFirst: the resume dialog leads with the desktop app — the setting says so (always, or for sessions started there)
+// and the session is not running in a Herdr tab.
+func (m *Model) appFirst(r *fav.Rec, p capture.Plan) bool {
+	if !appReady(r) || p.Live.TabID != "" {
+		return false
+	}
+	return m.cfg.ResumeIn == fav.ResumeApp || m.cfg.ResumeIn == fav.ResumeOrigin && r.App
+}
+
+// doApp hands the session to its desktop app. A session running in a terminal is not opened a second time there.
+func (m *Model) doApp() {
+	r := m.ov.rec
+	if r.ID != "" {
+		if cur := m.store.Get(r.ID); cur != nil {
+			r = cur
+		}
+	}
+	if m.isLive(r.SessionID) && !r.App {
+		m.flash(i18n.T("resume.app_live"))
+		return
+	}
+	m.ov = overlay{}
+	m.flash(i18n.F("resume.opening_app", capture.AppName(r.Provider)))
+	m.pending = func() tea.Msg { return appDoneMsg{r, capture.OpenApp(r)} }
+}
+
+type appDoneMsg struct {
+	rec *fav.Rec
+	err error
 }
 
 // recordBtns: the letter-key actions also get buttons, reachable by Enter → ← → Enter when an IME eats letters.
@@ -681,37 +920,6 @@ func (m *Model) recordBtns() []btn {
 	}
 }
 
-// btnsWidthRows: the minimum overlay width that packs the buttons into at most rows rows, by buttons()' wrapping.
-func btnsWidthRows(bs []btn, rows int) int {
-	full := btnsWidth(bs)
-	for w := 40; w < full; w++ {
-		inner, x, n := w-4, 0, 1
-		for _, b := range bs {
-			bw := ansi.StringWidth(b.label) + 4
-			if x > 0 && x+bw > inner {
-				n, x = n+1, 0
-			}
-			x += bw + 1
-		}
-		if n <= rows {
-			return w
-		}
-	}
-	return full
-}
-
-// btnsWidth: overlay width for one row of buttons (button = text + 4, gap 1, content width w-4).
-func btnsWidth(bs []btn) int {
-	w := ovPad + 1
-	for i, b := range bs {
-		if i > 0 {
-			w++
-		}
-		w += ansi.StringWidth(b.label) + 4
-	}
-	return w
-}
-
 func (m *Model) resumeCommand() string {
 	p := m.ov.plan
 	if p.Spec.Exec == "" {
@@ -726,7 +934,7 @@ func (m *Model) copyResume() {
 		m.flash(i18n.T("resume.nothing_to_copy"))
 		return
 	}
-	if err := clipboard.WriteAll(cmd); err != nil {
+	if err := copyText(cmd); err != nil {
 		m.flash(cmd)
 		return
 	}
@@ -800,6 +1008,9 @@ func (m *Model) doResume(noHerdr bool) {
 }
 
 func (m *Model) resumeTargetLine(r *fav.Rec) string {
+	if m.ov.app {
+		return i18n.F("resume.where.app", capture.AppName(r.Provider))
+	}
 	return m.ov.plan.Target(r, "  "+render.GlyphArrow+"  ")
 }
 

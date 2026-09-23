@@ -73,6 +73,7 @@ type Rec struct {
 	Turns  int       `json:"-"`
 	Msgs   int       `json:"-"`
 	LastAt time.Time `json:"-"`
+	App    bool      `json:"-"` // started in a desktop app (Claude or ChatGPT): opening it there is the default when set so
 	extra  string
 
 	hay string

@@ -6,7 +6,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/atotto/clipboard"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -304,7 +303,7 @@ func (m *Model) copyMessage() {
 	if !ok {
 		return
 	}
-	if err := clipboard.WriteAll(msg.Text); err != nil {
+	if err := copyText(msg.Text); err != nil {
 		m.flash(i18n.T("flash.clipboard_unavailable") + err.Error())
 		return
 	}

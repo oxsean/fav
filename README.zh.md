@@ -30,7 +30,7 @@
  │   #index #perf                       │ │ + 已识别会话来源                          │
  ╰──────────────────────────────────────╯ │ + 项目目录存在                            │
  ╭──────────────────────────────────────╮ │ + 会话记录文件可用                        │
- │ ✓ shell-init：Ctrl-G 弹出 fav fzf    │ │ ! 当前分支 main，收藏时是 feat/oauth      │
+ │ ✓ shell-init：Ctrl+G 弹出 fav fzf    │ │ ! 当前分支 main，收藏时是 feat/oauth      │
  │   Codex  ·  fav  ·  6 轮       20:11 │ │                                           │
  │   #shell #zsh                        │ │ ── 对话 · 第 1-40/128 句 · J/K 翻 · \ 找  │
  ╰──────────────────────────────────────╯ │ 你  ·  17:01  ~ 42                        │
@@ -39,7 +39,7 @@
                                           │   中间件在每个请求上都重写 cookie，包括   │
                                           │   /callback ...                           │
                                           ╰───────────────────────────────────────────╯
- Enter 操作 │ Space 恢复 │ f 取消收藏 │ x 完成 │ a 归档 │ e 编辑 │ M 移动 │ D 删除
+ Enter 操作  Space 恢复 │ / 搜索  > 搜消息 │ f 取消收藏            Tab 视图  ? 帮助
 ```
 
 ## 它解决什么问题
@@ -63,10 +63,11 @@ fav 不是新的聊天客户端，不替代 Claude / Codex，也不上传任何�
 - **收藏**：会话里 `/fav`，AI 按对话语言写标题 / 摘要 / 标签，`fav` 自己采集 provider、session id、目录、git 分支、Herdr workspace。同一会话再 `/fav` 是更新。
 - **全部会话**：不用收藏也都在列表里——Claude 和 Codex 的全部历史增量索引，只读文件头尾和新增部分，几百 MB 的会话也不整读。
 - **搜**：同一套查询语法贯穿 TUI、fzf、命令行：关键词、`#标签`、`project:`、`provider:`、`status:`、`last:7d`、`turns:`。
-- **三个搜索键**：`/` 搜会话（标题、摘要、项目、标签），`>` 搜所有会话的消息，`\`（或 `ctrl+s`）搜当前会话的消息；焦点在哪含义都一样，中文输入法把 `/` 打成 `、` 也照样是搜会话。
+- **三个搜索键**：`/` 搜会话（标题、摘要、项目、标签），`>` 搜所有会话的消息，`\`（或 `Ctrl+S`）搜当前会话的消息；焦点在哪含义都一样，中文输入法把 `/` 打成 `、` 也照样是搜会话。
 - **搜消息**：按 `>` 或查询以 `>` 开头，就在其余条件选出的会话里搜每条消息和命令；结果是按相关度排的会话，带命中数和片段，右栏停在卡片片段那一处，`n`/`N` 跳转；`→` 列出这个会话的全部命中和前后文，`Enter` 打开整条消息并停在关键词处。中文不用分词。
 - **看**：右栏是这条会话的对话，从尾往前翻，句内可搜；不用打开就知道是不是它。
 - **恢复**：Herdr 在跑 → 它的 workspace 里开新 tab；没有 → 当前终端 `exec` 接管；已经在跑 → 切 tab；后台会话 → `claude attach`。恢复前逐项校验目录、记录文件、分支。
+- **桌面 App**：恢复框里也能在 Claude 桌面版或 ChatGPT 桌面版（Codex）里打开这个会话；设置里可以让 App 成为默认，或只对在 App 里建的会话默认用 App——这些会话的卡片标着 `Claude App`、`Codex App`。需要会话的工作目录还在、记录文件在默认的 `~/.claude/projects` 或 `~/.codex/sessions` 下，并且系统把 `claude://`、`codex://` 交给对应 App 处理时才显示这个按钮（macOS、Windows，Linux 走 xdg-mime）。
 - **整理**：待办 / 进行中 / 已完成 / 已归档四态，改标题标签，按项目分组。
 - **搬家与自愈**：项目目录移动后会话一起迁（记录里的 cwd、Claude 项目目录、`~/.claude.json` 全改）；目录或记录文件没了的会话标 `!`，命令行批量修复或清理，删除进回收站可还原。
 - **Agents 面板**：此刻在跑的会话，三源合并（Claude `sessions/*.json`、Codex 线程锁、Herdr），不装 Herdr 也能用。
@@ -91,7 +92,7 @@ Windows：到 [Releases](https://github.com/oxsean/fav/releases/latest) 下 `fav
 1. 在任何 Claude Code / Codex 会话里做完一件事，输入 `/fav`。
 2. 下周想接着做：`fav`，打几个词，`Enter`。
 
-想在 shell 里一键弹出：`.zshrc` 加一行 `eval "$(fav shell-init zsh)"`（bash 用 `shell-init bash`），之后按 `Ctrl-G` 弹出 fzf 版，退出回到提示符。
+想在 shell 里一键弹出：`.zshrc` 加一行 `eval "$(fav shell-init zsh)"`（bash 用 `shell-init bash`），之后按 `Ctrl+G` 弹出 fzf 版，退出回到提示符。
 换键 `--key alt-f`（或直接给 shell 自己的记法），`--ui tui` 改弹 TUI。
 
 可选依赖：`fzf`（fzf 模式）、Herdr（恢复到 workspace、看谁在跑、切 tab）、
@@ -125,7 +126,7 @@ fav tui --no-mouse
 
 一条典型流程：`/` 搜（`webapp oauth last:7d`）或 `;` 进 chip 行按项目 / 标签 / 来源 / 状态 / 时间筛；
 `↑↓` 挑到那条，右栏就是它的对话（`→` 进去逐句看，`Enter` 全文，`\` 在对话里找）；
-`Enter` 弹操作框——`Enter 恢复`、`t` 强制当前终端、`y` 复制恢复命令、`i` / `c` 用 IDE / VS Code 打开目录。
+`Enter` 弹操作框——`Enter 恢复`、`t` 强制当前终端、`y` 复制恢复命令、`p` 在 Claude / ChatGPT 桌面 App 里打开，`i` / `c` / `o` 用 IDE / VS Code / Finder（资源管理器、文件管理器）打开目录——按「继续会话 / 打开项目 / 这条记录」分三行。
 在跑的会话 `Enter` 是切到那个 tab，后台会话（`claude --bg`）是 attach。`Space` 跳过操作框直接恢复。
 
 整理：`f` / `*` 收藏、`x` 完成、`a` 归档、`e` 改标题 / 标签 / 摘要，`s` 状态筛选（未归档 / 进行中 / 已完成 / 已归档 / 全部 / 回收站）。
@@ -136,26 +137,26 @@ fav tui --no-mouse
 删除与回收站：`D` 把会话文件挪进 `~/.agent/fav/trash/`，状态筛「回收站」能看被删的对话，`D` 还原；默认 30 天后彻底清。
 目录或记录文件没了的会话标题后有暗红 `!`，操作框只给「移动」「删除」。
 
-中文输入法开着时小写字母会被拿去组词：收藏用 `*`，`Ctrl-X` 完成 / `Ctrl-A` 归档 / `Ctrl-E` 编辑 / `Ctrl-Y` 复制 /
-`Ctrl-N/P` 上下 / `Ctrl-G` 恢复；大写 `D M X` 输入法不拦；操作框里所有动作都有按钮。`?` 看全部键位。
+中文输入法开着时小写字母会被拿去组词：收藏用 `*`，`Ctrl+X` 完成 / `Ctrl+A` 归档 / `Ctrl+E` 编辑 / `Ctrl+Y` 复制 /
+`Ctrl+N/P` 上下 / `Ctrl+G` 恢复；大写 `D M X` 输入法不拦；操作框里所有动作都有按钮。`?` 看全部键位。
 
 鼠标默认开：点标签页、点 chip、点卡片、双击恢复、点输入框光标落到点的位置、滚轮、浮层按钮；按住左键拖过文字松手即复制。
 `,` 打开设置：时间显示、默认页 / 排序、短会话阈值、滚轮步长、图标、鼠标、回收站保留天数、IDE、语言。
 
 ### 两秒找一条：`fav fzf`
 
-同样三个页面（收藏 / 会话 / Agents，`Tab` / `Shift-Tab` 轮换，`F1`–`F3` 直达），没有对话预览和项目视图，适合 SSH、低资源、或者你已经知道要找什么。
+同样三个页面（收藏 / 会话 / Agents，`Tab` / `Shift+Tab` 轮换，`F1`–`F3` 直达），没有对话预览和项目视图，适合 SSH、低资源、或者你已经知道要找什么。
 输入框直接写查询语法，边打边筛，过滤仍由 `fav` 做（和 TUI 同一个解析器）；Agents 页每 3 秒自动刷新。需要 fzf 0.46+，0.73+ 才有自动刷新。
 
 | 键 | 动作 |
 |---|---|
-| `Enter` / `Alt-Enter` | 恢复（Herdr 在跑就开新 tab；在跑的会话是切过去 / 接管）/ 当前终端恢复 |
-| `Ctrl-X` / `Ctrl-A` / `Alt-F` | 完成 ↔ 重开 / 归档 ↔ 取消 / 收藏 ↔ 取消（都是切换，和 TUI 的 `x` `a` `f` 一样） |
-| `Ctrl-E` / `Ctrl-Y` | 用 `$EDITOR` 编辑 / 复制恢复命令 |
-| `Alt-T` / `Alt-P` / `Alt-S` / `Alt-D` | 标签 / 项目 / 状态 / 时间筛选器，选完写回查询（`Ctrl-S` 也是状态） |
-| `Ctrl-L` / `Shift-↑↓` | 重新加载 / 翻右栏预览（最近 40 句对话在下面） |
+| `Enter` / `Alt+Enter` | 恢复（Herdr 在跑就开新 tab；在跑的会话是切过去 / 接管）/ 当前终端恢复 |
+| `Ctrl+X` / `Ctrl+A` / `Alt+F` | 完成 ↔ 重开 / 归档 ↔ 取消 / 收藏 ↔ 取消（都是切换，和 TUI 的 `x` `a` `f` 一样） |
+| `Ctrl+E` / `Ctrl+Y` | 用 `$EDITOR` 编辑 / 复制恢复命令 |
+| `Alt+T` / `Alt+P` / `Alt+S` / `Alt+D` | 标签 / 项目 / 状态 / 时间筛选器，选完写回查询（`Ctrl+S` 也是状态） |
+| `Ctrl+L` / `Shift+↑↓` | 重新加载 / 翻右栏预览（最近 40 句对话在下面） |
 
-规则：`Ctrl-字母` = TUI 里同一个字母的动作，`Alt-字母` = 筛选器。取消收藏 / 归档之后那条先留在原位，再按一次就回来了，下次打字或切页才消失。
+规则：`Ctrl+字母` = TUI 里同一个字母的动作，`Alt+字母` = 筛选器。取消收藏 / 归档之后那条先留在原位，再按一次就回来了，下次打字或切页才消失。
 
 ### 脚本和维护：命令行
 
@@ -167,6 +168,7 @@ fav grep '滚轮 加速 project:fav'      # 搜消息：关键词 + 筛选，按
 fav open <id>                           # 直接打开这个会话的界面，右栏聚焦（列表不显示的也行）
 fav resume <id> --dry-run               # 只打印要执行的命令和检查项
 fav resume <id> --no-herdr              # 当前终端恢复
+fav resume <id> --app                   # 在桌面 App 里打开（Claude，Codex 用 ChatGPT）；--terminal 不管设置走终端
 
 fav status <id> todo|doing|done  ·  fav done <id>  ·  fav archive|unarchive <id>  ·  fav fav|unfav <id>
 fav edit <id>                           # $EDITOR 里改标题 / 标签 / 摘要

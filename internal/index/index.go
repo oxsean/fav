@@ -38,6 +38,7 @@ type File struct {
 	Prompts   string    `json:"prompts,omitempty"` // concatenated prompts capped at promptsCap, search only
 	// Claude moved the conversation to this session id when the context ran out; the chain is one session (Sessions)
 	ContinuedIn string `json:"continued_in,omitempty"`
+	App         bool   `json:"app,omitempty"` // Codex: started in the desktop app
 }
 
 type Session struct {
@@ -54,6 +55,7 @@ type Session struct {
 	Turns     int
 	Replies   int
 	Prompts   string
+	App       bool // started in a desktop app (Codex: from the file; Claude: set by Attach)
 }
 
 func (s *Session) Key() string { return s.Provider + ":" + s.SessionID }
@@ -81,11 +83,12 @@ func (s *Session) Rec() *fav.Rec {
 		r.Project = ""
 	}
 	r.Attach(s.Turns, s.Turns+s.Replies, s.LastAt, s.Prompts)
+	r.App = s.App
 	return r
 }
 
 const (
-	scanVer    = 3
+	scanVer    = 4
 	promptsCap = 8 * 1024 // max prompt bytes kept per file
 	promptCap  = 300      // max chars stored per prompt
 	titleMin   = 12       // prompts shorter than this are not titles
@@ -235,6 +238,7 @@ func (f *File) take(l *line) {
 		if capture.CodexOneOff(l.Payload.Originator, l.Payload.ParentThreadID) {
 			f.Skip = true
 		}
+		f.App = capture.CodexFromApp(l.Payload.Originator)
 		return
 	case "custom-title":
 		f.Title, f.Custom = l.CustomTitle, true
@@ -555,6 +559,7 @@ func (idx *Index) Sessions() []*Session {
 		} else if f.Provider == fav.ProviderClaude {
 			s.Path = f.Path
 		}
+		s.App = s.App || f.App
 		s.Turns += f.Turns
 		s.Replies += f.Replies
 		if f.Branch != "" {
@@ -647,7 +652,14 @@ func (idx *Index) Attach(store *fav.Store, prev []*fav.Rec) []*fav.Rec {
 		keep[r.Provider+":"+r.SessionID] = r
 	}
 	var out []*fav.Rec
+	desktop := capture.ClaudeDesktopIDs()
 	for _, s := range idx.Sessions() {
+		if s.Provider == fav.ProviderClaude && !s.App {
+			s.App = desktop[s.SessionID]
+			for _, a := range s.Aliases {
+				s.App = s.App || desktop[a]
+			}
+		}
 		r := store.BySession(s.Provider, s.SessionID)
 		for _, a := range s.Aliases {
 			if r != nil {
@@ -665,6 +677,7 @@ func (idx *Index) Attach(store *fav.Store, prev []*fav.Rec) []*fav.Rec {
 				}
 			}
 			r.Attach(s.Turns, s.Turns+s.Replies, s.LastAt, s.Prompts)
+			r.App = s.App
 			continue
 		}
 		r = s.Rec()

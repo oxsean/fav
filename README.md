@@ -31,7 +31,7 @@ a week later you find them by *what was done* and pick up in the right directory
  │   #index #perf                       │ │ Herdr webapp  ->  new tab  ->  Codex CLI  │
  ╰──────────────────────────────────────╯ │ + provider on PATH                        │
  ╭──────────────────────────────────────╮ │ + directory exists                        │
- │ ✓ shell-init: Ctrl-G opens fav fzf   │ │ + transcript available                    │
+ │ ✓ shell-init: Ctrl+G opens fav fzf   │ │ + transcript available                    │
  │   Codex  ·  fav  ·  6 turns    20:11 │ │ ! branch is main, favorited on feat/oauth │
  │   #shell #zsh                        │ │                                           │
  ╰──────────────────────────────────────╯ │ ── chat · 40 of 128 · J/K page · \ find ─ │
@@ -41,7 +41,7 @@ a week later you find them by *what was done* and pick up in the right directory
                                           │   The middleware rewrites the cookie on   │
                                           │   every request, including /callback ...  │
                                           ╰───────────────────────────────────────────╯
- Enter act │ Space resume │ f unfav │ x done │ a archive │ e edit │ M move │ D del
+ Enter actions  Space resume │ / search  > messages │ f unfavorite     Tab view  ? help
 ```
 
 ## The problem
@@ -65,10 +65,11 @@ plus a resume button that lands in the right place.
 - **Favorite**: `/fav` inside a session; the AI writes the title / summary / tags in the conversation's language, `fav` itself collects provider, session id, cwd, git branch and Herdr workspace. `/fav` again updates the same record.
 - **Every session**: unfavorited ones are listed too — the whole Claude and Codex history, indexed incrementally by reading heads, tails and new bytes only; a multi-hundred-MB session is never read whole.
 - **Search**: one query syntax across the TUI, fzf and the CLI: keywords, `#tag`, `project:`, `provider:`, `status:`, `last:7d`, `turns:`.
-- **Search keys**: `/` searches sessions (title, summary, project, tags), `>` searches the messages of every session, `\` (or `ctrl+s`) the messages of the selected session — the same wherever the focus is; `/` typed as `、` by a CJK input method still searches sessions.
+- **Search keys**: `/` searches sessions (title, summary, project, tags), `>` searches the messages of every session, `\` (or `Ctrl+S`) the messages of the selected session — the same wherever the focus is; `/` typed as `、` by a CJK input method still searches sessions.
 - **Search messages**: press `>` (or start the query with `>`) to search inside every message and command of the sessions the rest of the query picks; results are ranked sessions with hit counts and snippets, the right pane opens on the hit the card shows, `n`/`N` walk the hits, `→` lists every hit of the session with its surrounding text and `Enter` opens the full message at the keyword. Chinese needs no word segmentation.
 - **Read**: the right pane shows the session's chat, paged backwards from the end, searchable; you know whether it is the one before opening it.
 - **Resume**: Herdr running → a new tab in its workspace; no Herdr → `exec` in this terminal; already running → focus that tab; background session → `claude attach`. Directory, transcript and branch are checked first.
+- **Desktop apps**: the resume dialog also opens the session in Claude's desktop app or ChatGPT's (Codex); a setting makes the app the default, or only for sessions started there — those cards say `Claude App` / `Codex App`. The button needs the session's working directory to exist and its transcript under the default `~/.claude/projects` / `~/.codex/sessions`, and appears only when the system routes `claude://` / `codex://` to that app (macOS, Windows, and Linux via xdg-mime).
 - **Organise**: todo / doing / done / archived, edit titles and tags, group by project.
 - **Move and self-heal**: moving a project directory rewrites the sessions' cwd, the Claude project directory and `~/.claude.json`; sessions whose directory or transcript is gone get a `!`, the CLI fixes or clears them in bulk, deletes go to a trash you can restore from.
 - **Agents panel**: sessions running right now, merged from three sources (Claude `sessions/*.json`, Codex thread locks, Herdr); works without Herdr.
@@ -93,7 +94,7 @@ Then:
 1. Finish a piece of work in any Claude Code / Codex session and type `/fav`.
 2. Next week: `fav`, a few words, `Enter`.
 
-A shell hotkey: add `eval "$(fav shell-init zsh)"` to `.zshrc` (`shell-init bash` for bash) and `Ctrl-G` opens the fzf view from any prompt.
+A shell hotkey: add `eval "$(fav shell-init zsh)"` to `.zshrc` (`shell-init bash` for bash) and `Ctrl+G` opens the fzf view from any prompt.
 `--key alt-f` changes the key (or pass the shell's own notation), `--ui tui` opens the TUI instead.
 
 Optional: `fzf` (fzf mode), Herdr (resume into workspaces, see who is running, focus tabs),
@@ -127,7 +128,7 @@ Four tabs, `Tab` / `1`–`4`:
 
 A typical flow: `/` to search (`webapp oauth last:7d`) or `;` for the chip row to filter by project / tag / source / status / time;
 `↑↓` to the session, the right pane shows its chat (`→` steps through messages, `Enter` opens one in full, `\` searches inside it);
-`Enter` opens the action dialog — `Enter` resumes, `t` forces this terminal, `y` copies the resume command, `i` / `c` open the directory in the IDE / VS Code.
+`Enter` opens the action dialog — `Enter` resumes, `t` forces this terminal, `y` copies the resume command, `p` opens it in the Claude / ChatGPT desktop app, `i` / `c` / `o` open the directory in the IDE / VS Code / Finder (Explorer, the file manager) — grouped in rows: resume, project, record.
 On a running session `Enter` focuses its tab; on a background session (`claude --bg`) it attaches. `Space` skips the dialog and resumes.
 
 Organise: `f` / `*` favorite, `x` done, `a` archive, `e` edit title / tags / summary, `s` status filter (open / active / done / archived / all / trash).
@@ -139,26 +140,26 @@ Originals go to the trash first; a project with a running session is refused.
 Delete and trash: `D` moves the session files into `~/.agent/fav/trash/`; the "trash" status filter shows deleted chats, `D` restores; purged after 30 days by default.
 A session whose directory or transcript is gone shows a dim red `!` after its title and its dialog offers only move / delete.
 
-CJK input methods swallow lowercase letters: favorite with `*`, `Ctrl-X` done / `Ctrl-A` archive / `Ctrl-E` edit / `Ctrl-Y` copy /
-`Ctrl-N/P` up and down / `Ctrl-G` resume; uppercase `D M X` pass through; every dialog action has a button. `?` lists all keys.
+CJK input methods swallow lowercase letters: favorite with `*`, `Ctrl+X` done / `Ctrl+A` archive / `Ctrl+E` edit / `Ctrl+Y` copy /
+`Ctrl+N/P` up and down / `Ctrl+G` resume; uppercase `D M X` pass through; every dialog action has a button. `?` lists all keys.
 
 Mouse on by default: click tabs, chips, cards, double-click to resume, click an input to place the cursor, wheel, overlay buttons; drag over text to copy it.
 `,` opens settings: time format, default tab / sort, short-session threshold, wheel step, icons, mouse, trash retention, IDE, language.
 
 ### Find one in two seconds: `fav fzf`
 
-The same three tabs (favorites / sessions / Agents; `Tab` / `Shift-Tab` cycles, `F1`–`F3` jumps), no project view; for SSH, low resources, or when you already know what you want.
+The same three tabs (favorites / sessions / Agents; `Tab` / `Shift+Tab` cycles, `F1`–`F3` jumps), no project view; for SSH, low resources, or when you already know what you want.
 Type the query syntax straight into the prompt; filtering is still done by `fav` (the same parser as the TUI); the Agents tab refreshes every 3 s. Needs fzf 0.46+, auto-refresh from 0.73.
 
 | Key | Action |
 |---|---|
-| `Enter` / `Alt-Enter` | resume (a new Herdr tab if Herdr is running; a running session is focused / attached) / resume in this terminal |
-| `Ctrl-X` / `Ctrl-A` / `Alt-F` | done ↔ reopen / archive ↔ unarchive / favorite ↔ unfavorite (toggles, like the TUI's `x` `a` `f`) |
-| `Ctrl-E` / `Ctrl-Y` | edit in `$EDITOR` / copy the resume command |
-| `Alt-T` / `Alt-P` / `Alt-S` / `Alt-D` | tag / project / status / time pickers, written back into the query (`Ctrl-S` is status too) |
-| `Ctrl-L` / `Shift-↑↓` | reload / scroll the preview (the last 40 messages are at the bottom) |
+| `Enter` / `Alt+Enter` | resume (a new Herdr tab if Herdr is running; a running session is focused / attached) / resume in this terminal |
+| `Ctrl+X` / `Ctrl+A` / `Alt+F` | done ↔ reopen / archive ↔ unarchive / favorite ↔ unfavorite (toggles, like the TUI's `x` `a` `f`) |
+| `Ctrl+E` / `Ctrl+Y` | edit in `$EDITOR` / copy the resume command |
+| `Alt+T` / `Alt+P` / `Alt+S` / `Alt+D` | tag / project / status / time pickers, written back into the query (`Ctrl+S` is status too) |
+| `Ctrl+L` / `Shift+↑↓` | reload / scroll the preview (the last 40 messages are at the bottom) |
 
-Rule: `Ctrl-letter` = the TUI's letter, `Alt-letter` = a picker. After unfavorite / archive the row stays where it is so the same key undoes it; it disappears on the next keystroke or tab switch.
+Rule: `Ctrl+letter` = the TUI's letter, `Alt+letter` = a picker. After unfavorite / archive the row stays where it is so the same key undoes it; it disappears on the next keystroke or tab switch.
 
 ### Scripts and maintenance: the CLI
 
@@ -170,6 +171,7 @@ fav grep '滚轮 加速 project:fav'      # message search: keywords + filters, 
 fav open <id>                           # the TUI on that session, right pane focused (sessions the lists hide too)
 fav resume <id> --dry-run               # print the command and checks only
 fav resume <id> --no-herdr              # resume in this terminal
+fav resume <id> --app                   # open it in the desktop app (Claude, or ChatGPT for Codex); --terminal overrides the setting
 
 fav status <id> todo|doing|done  ·  fav done <id>  ·  fav archive|unarchive <id>  ·  fav fav|unfav <id>
 fav edit <id>                           # title / tags / summary in $EDITOR

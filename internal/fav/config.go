@@ -22,10 +22,18 @@ type Config struct {
 	Lang         string `json:"lang,omitempty"`         // "" follows the system | zh | en
 	TrashDays    int    `json:"trash_days"`             // days kept in trash; 0 = never auto-purge
 	ToolOutput   int    `json:"tool_output_lines"`      // lines of each tool output kept for message search; 0 = none
+	ResumeIn     string `json:"resume_in,omitempty"`    // what Enter on resume opens: terminal (default) | app | origin (the app for sessions started there)
 }
 
+// ResumeIn values.
+const (
+	ResumeTerminal = "terminal"
+	ResumeApp      = "app"
+	ResumeOrigin   = "origin"
+)
+
 func DefaultConfig() Config {
-	return Config{RelativeTime: true, DefaultView: "favorites", Sort: "active", MinTurns: 3, WheelStep: 3, WheelSpeed: "normal", Icons: "ascii", Mouse: true, TrashDays: 30, ToolOutput: 3}
+	return Config{RelativeTime: true, DefaultView: "favorites", Sort: "active", MinTurns: 3, WheelStep: 3, WheelSpeed: "normal", Icons: "ascii", Mouse: true, TrashDays: 30, ToolOutput: 3, ResumeIn: ResumeTerminal}
 }
 
 func ConfigPath() string { return filepath.Join(Home(), "config.json") }

@@ -14,6 +14,7 @@ import (
 	"github.com/oxsean/fav/internal/capture"
 	"github.com/oxsean/fav/internal/fav"
 	"github.com/oxsean/fav/internal/fulltext"
+	"github.com/oxsean/fav/internal/i18n"
 )
 
 func line(role, text string) string {
@@ -419,8 +420,8 @@ func TestEnterEndsTypingInMessageSearchSoNWalksHits(t *testing.T) {
 	if m.search.Value() != "> 滚轮 加速" {
 		t.Fatalf("n no longer types into the box: %q", m.search.Value())
 	}
-	if v := ansi.Strip(m.View()); !strings.Contains(v, "n/N") {
-		t.Fatalf("out of the box the title offers n/N:\n%s", v)
+	if f := ansi.Strip(m.footer()); !strings.Contains(f, "n/N") {
+		t.Fatalf("out of the box the footer offers n/N: %q", f)
 	}
 }
 
@@ -447,5 +448,252 @@ func TestTheHitListFollowsTheRightPane(t *testing.T) {
 	m.Update(tea.KeyMsg{Type: key})
 	if m.msg.hl.cur == start || m.msg.hl.items[m.msg.hl.cur].Off != page.Msgs[m.chatCur].Off {
 		t.Fatalf("moving in the right pane moves the list's selection: %d → %d", start, m.msg.hl.cur)
+	}
+}
+
+func TestResumeDialogOffersTheDesktopApp(t *testing.T) {
+	m := sized(t, 140, 40)
+	capture.SetAppAvailable(fav.ProviderClaude, true)
+	capture.SetAppAvailable(fav.ProviderCodex, true)
+	r := m.current()
+	r.SessionID, r.Provider = "c5126b86-64bb-46a8-9a69-fc421c8f4f9a", fav.ProviderClaude
+	appFiles(t, r)
+	m.cfg.ResumeIn = fav.ResumeOrigin
+
+	r.App = false
+	m.askResume()
+	if m.ov.app || !strings.Contains(ansi.Strip(m.View()), "Claude") {
+		t.Fatal("a terminal session: the app is offered, not first")
+	}
+	m.closeOverlay()
+
+	r.App = true
+	m.askResume()
+	if !m.ov.app {
+		t.Fatal("started in the app, the setting follows the origin: the app comes first")
+	}
+	for _, l := range strings.Split(m.View(), "\n") {
+		if w := ansi.StringWidth(l); w > 140 {
+			t.Fatalf("line wider than the terminal (%d): %q", w, ansi.Strip(l))
+		}
+	}
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if m.ov.active() || cmd == nil || !strings.Contains(m.notice, "Claude") {
+		t.Fatalf("Enter hands it to the app: %q", m.notice)
+	}
+}
+
+func TestAppButtonAppearsWhenTheLookupAnswers(t *testing.T) {
+	m := sized(t, 140, 40)
+	capture.ForgetAppAvailable(fav.ProviderClaude)
+	t.Cleanup(func() { capture.ForgetAppAvailable(fav.ProviderClaude) })
+	r := m.current()
+	r.SessionID, r.Provider = "c5126b86-64bb-46a8-9a69-fc421c8f4f9a", fav.ProviderClaude
+	appFiles(t, r)
+
+	m.askResume()
+	if m.pending == nil {
+		t.Fatal("the lookup starts in the background")
+	}
+	btn := i18n.F("resume.btn_app", "Claude")
+	if strings.Contains(ansi.Strip(m.View()), btn) {
+		t.Fatal("no button yet")
+	}
+	m.pending = nil
+	capture.SetAppAvailable(fav.ProviderClaude, true)
+	m.Update(appProbedMsg{})
+	if !strings.Contains(ansi.Strip(m.View()), btn) {
+		t.Fatal("the button appears once the app is found")
+	}
+	m.closeOverlay()
+	m.askResume()
+	if m.pending != nil {
+		t.Fatal("a known answer is not looked up again")
+	}
+}
+
+// appFiles puts r's transcript where the desktop apps read it, under a temporary HOME, with an existing cwd.
+func appFiles(t *testing.T, r *fav.Rec) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	dir := filepath.Join(home, ".claude", "projects", "-p")
+	if r.Provider == fav.ProviderCodex {
+		dir = filepath.Join(home, ".codex", "sessions")
+	}
+	os.MkdirAll(dir, 0o755)
+	r.TranscriptPath, r.Cwd = filepath.Join(dir, r.SessionID+".jsonl"), home
+	os.WriteFile(r.TranscriptPath, []byte("{}\n"), 0o644)
+}
+
+func TestResumeDialogOpensTheFileManager(t *testing.T) {
+	m := sized(t, 140, 40)
+	m.askResume()
+	if !strings.Contains(ansi.Strip(m.View()), "o "+fileManagerName()) {
+		t.Fatal("the project row offers the file manager")
+	}
+}
+
+func TestAppKeyIsP(t *testing.T) {
+	m := sized(t, 140, 40)
+	capture.SetAppAvailable(fav.ProviderClaude, true)
+	r := m.current()
+	r.SessionID, r.Provider = "c5126b86-64bb-46a8-9a69-fc421c8f4f9a", fav.ProviderClaude
+	appFiles(t, r)
+	m.askResume()
+	if !strings.Contains(ansi.Strip(m.View()), "p Claude App") {
+		t.Fatal("the app button is labelled p")
+	}
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("p")})
+	if m.ov.active() || cmd == nil {
+		t.Fatal("p hands the session to the app")
+	}
+}
+
+func TestButtonKeysStandOut(t *testing.T) {
+	for l, key := range map[string]string{"f 收藏": "f", "Enter 恢复": "Enter", "Esc 取消": "Esc", "Ctrl+S 保存": "Ctrl+S", "p ChatGPT App": "p", "j/k · Esc close": "j/k"} {
+		if k, _, ok := labelKey(l); !ok || k != key {
+			t.Errorf("%q: key %q, want %q", l, k, key)
+		}
+	}
+	for _, l := range []string{"Confirm", "Open in App", "确认 删除"} {
+		if _, _, ok := labelKey(l); ok || keyedLabel(l) != l {
+			t.Errorf("%q has no key: unchanged", l)
+		}
+	}
+}
+
+func TestResumeDialogEditKeys(t *testing.T) {
+	m := sized(t, 140, 40)
+	m.askResume()
+	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("n")})
+	if m.ov.kind != ovResume || !m.ov.editing {
+		t.Fatal("n edits the title in place")
+	}
+	m.closeOverlay()
+	m.askResume()
+	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("e")})
+	if m.ov.kind != ovEdit {
+		t.Fatal("e opens the full editor, like the e button")
+	}
+}
+
+func TestNoticeExpires(t *testing.T) {
+	m := sized(t, 140, 40)
+	m.askResume()
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")})
+	if !strings.HasPrefix(m.notice, i18n.T("resume.copied")) || cmd == nil {
+		t.Fatalf("copying says so and schedules the notice's expiry: %q", m.notice)
+	}
+	seq := m.noticeSeq
+	m.flash("newer")
+	m.Update(noticeExpiredMsg{seq})
+	if m.notice != "newer" {
+		t.Fatal("an older expiry leaves a newer notice alone")
+	}
+	m.Update(noticeExpiredMsg{m.noticeSeq})
+	if m.notice != "" {
+		t.Fatal("the notice goes away when its time is up")
+	}
+}
+
+func TestNoCopyButtonWithoutACommand(t *testing.T) {
+	m := sized(t, 140, 40)
+	m.askResume()
+	if !strings.Contains(ansi.Strip(m.View()), i18n.T("resume.btn_copy")) {
+		t.Fatal("a resumable session offers the command")
+	}
+	m.ov.plan.Spec = capture.CommandSpec{}
+	if strings.Contains(ansi.Strip(m.View()), i18n.T("resume.btn_copy")) {
+		t.Fatal("nothing to copy (a session running in Herdr): no copy button")
+	}
+}
+
+func TestFooterKeepsHelpAndSearch(t *testing.T) {
+	for _, lang := range []string{"zh", "en"} {
+		i18n.Set(lang)
+		for _, w := range []int{140, 100, 80, 60, 50} {
+			m := sized(t, w, 30)
+			f := ansi.Strip(m.footer())
+			if ansi.StringWidth(f) > w || !strings.Contains(f, i18n.T("footer.help")) || !strings.Contains(f, i18n.T("footer.search")) {
+				t.Errorf("%s %d: help and search stay, within the width: %q", lang, w, f)
+			}
+			if w >= 100 && strings.Contains(f, i18n.T("footer.delete")) {
+				t.Errorf("%s %d: record management lives in the Enter dialog: %q", lang, w, f)
+			}
+		}
+	}
+	i18n.Set("zh")
+}
+
+func TestTrashBlocksEveryAlias(t *testing.T) {
+	t.Setenv("FAV_HOME", t.TempDir())
+	m := sized(t, 140, 40)
+	r := m.current()
+	transcript := filepath.Join(t.TempDir(), r.SessionID+".jsonl")
+	os.WriteFile(transcript, []byte("{}\n"), 0o644)
+	r.PinnedPath = transcript
+	m.store.Put(r)
+	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("D")})
+	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m.search.SetValue("status:trash")
+	m.refresh()
+	if m.current() == nil {
+		t.Fatal("the deleted session is in the trash")
+	}
+	m.pane = paneChat
+	for _, k := range []tea.KeyMsg{{Type: tea.KeyRunes, Runes: []rune("*")}, {Type: tea.KeyCtrlX}, {Type: tea.KeyCtrlA}, {Type: tea.KeySpace, Runes: []rune(" ")}} {
+		m.Update(k)
+		if m.store.Get(r.ID) != nil || m.ov.active() || m.quitting {
+			t.Fatalf("in the trash %q is blocked like f, also from the right pane", k.String())
+		}
+	}
+}
+
+func TestSpacePressesTheAppButtonWhenItLeads(t *testing.T) {
+	m := sized(t, 140, 40)
+	capture.SetAppAvailable(fav.ProviderClaude, true)
+	r := m.current()
+	r.SessionID, r.Provider = "c5126b86-64bb-46a8-9a69-fc421c8f4f9a", fav.ProviderClaude
+	appFiles(t, r)
+	m.cfg.ResumeIn = fav.ResumeApp
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeySpace, Runes: []rune(" ")})
+	if m.quitting || cmd == nil || !strings.Contains(m.notice, "Claude") {
+		t.Fatalf("Space hands the session to the app, like Enter in the dialog: quitting=%v notice=%q", m.quitting, m.notice)
+	}
+}
+
+func TestCompactEnterShowsTheDetail(t *testing.T) {
+	m := sized(t, 50, 20)
+	before := ansi.Strip(m.View())
+	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if !m.detail || ansi.Strip(m.View()) == before {
+		t.Fatal("under 60 columns Enter shows the detail")
+	}
+}
+
+func TestSearchFromTheRightPaneMovesTheList(t *testing.T) {
+	m := sized(t, 140, 40)
+	m.pane = paneChat
+	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("/")})
+	if !m.typing || m.pane != paneList {
+		t.Fatal("/ from the right pane: the arrows select records")
+	}
+}
+
+func TestProjectHeaderFooterFollowsFolding(t *testing.T) {
+	m := sized(t, 140, 40)
+	m.view = viewProjects
+	m.refresh()
+	m.cursor = 0
+	if m.current() != nil {
+		t.Skip("first row is not a group header")
+	}
+	first := ansi.Strip(m.footer())
+	m.toggleGroup()
+	second := ansi.Strip(m.footer())
+	has := func(f, k string) bool { return strings.Contains(f, i18n.T(k)) }
+	if has(first, "footer.enter_expand") == has(second, "footer.enter_expand") || has(first, "footer.enter_collapse") == has(second, "footer.enter_collapse") {
+		t.Fatalf("Enter says expand on a folded group and collapse on an open one: %q → %q", first, second)
 	}
 }

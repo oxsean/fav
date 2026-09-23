@@ -8,6 +8,8 @@ import (
 	"runtime"
 	"strings"
 
+	"github.com/atotto/clipboard"
+
 	"github.com/oxsean/fav/internal/fav"
 	"github.com/oxsean/fav/internal/i18n"
 	"github.com/oxsean/fav/internal/render"
@@ -78,10 +80,32 @@ func recDir(r *fav.Rec) string {
 	return r.GitRoot
 }
 
-func (m *Model) openIDE()  { m.openWith(m.ideName()) }
-func (m *Model) openCode() { m.openWith("code") }
+func (m *Model) openIDE()   { m.openWith(m.ideName(), m.ideName()) }
+func (m *Model) openCode()  { m.openWith("code", "code") }
+func (m *Model) openFiles() { m.openWith(fileManager(), fileManagerName()) }
 
-func (m *Model) openWith(app string) {
+// fileManager opens a directory in the system's file manager.
+func fileManager() string {
+	switch runtime.GOOS {
+	case "darwin":
+		return "open"
+	case "windows":
+		return "explorer"
+	}
+	return "xdg-open"
+}
+
+func fileManagerName() string {
+	switch runtime.GOOS {
+	case "darwin":
+		return "Finder"
+	case "windows":
+		return i18n.T("open.explorer")
+	}
+	return i18n.T("open.files")
+}
+
+func (m *Model) openWith(app, name string) {
 	r := m.ov.rec
 	if r == nil {
 		r = m.current()
@@ -91,9 +115,12 @@ func (m *Model) openWith(app string) {
 	}
 	dir := recDir(r)
 	if err := openDir(app, dir); err != nil {
-		m.flash(i18n.F("open.failed", app, err.Error()))
+		m.flash(i18n.F("open.failed", name, err.Error()))
 		return
 	}
 	m.closeOverlay()
-	m.flash(i18n.F("open.done", app, render.Truncate(shortenHome(dir), 60)))
+	m.flash(i18n.F("open.done", name, render.Truncate(shortenHome(dir), 60)))
 }
+
+// copyText writes the system clipboard; tests replace it.
+var copyText = clipboard.WriteAll

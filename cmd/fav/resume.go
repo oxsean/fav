@@ -16,6 +16,8 @@ func cmdResume(args []string) error {
 	fs := flag.NewFlagSet("resume", flag.ContinueOnError)
 	dryRun := fs.Bool("dry-run", false, i18n.T("cli.resume.flag_dry_run"))
 	noHerdr := fs.Bool("no-herdr", false, i18n.T("cli.resume.flag_no_herdr"))
+	inApp := fs.Bool("app", false, i18n.T("cli.resume.flag_app"))
+	inTerminal := fs.Bool("terminal", false, i18n.T("cli.resume.flag_terminal"))
 	rest, err := parseMixed(fs, args)
 	if err != nil {
 		return err
@@ -28,7 +30,37 @@ func cmdResume(args []string) error {
 	if err != nil {
 		return err
 	}
+	if !*inTerminal && !*dryRun && (*inApp || wantsApp(loadConfig().ResumeIn, r)) {
+		err := openInApp(s, r)
+		if err == nil || *inApp {
+			return err
+		}
+		fmt.Fprintln(os.Stderr, err) // the setting asked for the app: fall back to the terminal
+	}
 	return resumeRec(s, r, *dryRun, *noHerdr)
+}
+
+// wantsApp: the resume setting sends r to its desktop app.
+func wantsApp(mode string, r *fav.Rec) bool {
+	if capture.AppURL(r) == "" || !capture.AppAvailable(r.Provider) {
+		return false
+	}
+	return mode == fav.ResumeApp || mode == fav.ResumeOrigin && capture.StartedInApp(r)
+}
+
+// openInApp hands r to its desktop app, unless it is running in a terminal (both would write the session).
+func openInApp(s *fav.Store, r *fav.Rec) error {
+	if _, live := capture.LiveSessions()[r.SessionID]; live && !capture.StartedInApp(r) {
+		return errors.New(i18n.T("resume.app_live"))
+	}
+	if err := capture.OpenApp(r); err != nil {
+		return err
+	}
+	if err := capture.MarkResumed(s, r); err != nil {
+		fmt.Fprintf(os.Stderr, i18n.T("cli.resume.count_not_saved"), err)
+	}
+	fmt.Println(i18n.F("resume.opened_app", capture.AppName(r.Provider)))
+	return nil
 }
 
 func resumeRec(s *fav.Store, r *fav.Rec, dryRun, noHerdr bool) error {

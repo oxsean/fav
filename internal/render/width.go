@@ -4,6 +4,7 @@ package render
 import (
 	"os"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/mattn/go-runewidth"
 )
@@ -69,7 +70,7 @@ func Wrap(s string, width int) []string {
 	var lines []string
 	for _, para := range strings.Split(s, "\n") {
 		cur := ""
-		for _, t := range tokenize(para, width) {
+		for _, t := range glue(tokenize(para, width), width) {
 			sep := ""
 			if t.space && cur != "" {
 				sep = " "
@@ -83,6 +84,41 @@ func Wrap(s string, width int) []string {
 		lines = append(lines, cur)
 	}
 	return lines
+}
+
+// ⚠️ Line-breaking rules (kinsoku): these never start a line, and opening ones never end one.
+const (
+	noLineStart = "，。、；：！？）」』》〉】…—,.;:!?)]}>"
+	noLineEnd   = "（「『《〈【“‘([{<"
+)
+
+// glue sticks a closing mark to the token before it and an opening mark to the token after it, while the pair still fits
+// the width; only where the source had no space between them.
+func glue(ts []tok, width int) []tok {
+	first := func(s string) string {
+		for _, r := range s {
+			return string(r)
+		}
+		return ""
+	}
+	last := func(s string) string {
+		_, n := utf8.DecodeLastRuneInString(s)
+		return s[len(s)-n:]
+	}
+	out := make([]tok, 0, len(ts))
+	for i := 0; i < len(ts); i++ {
+		t := ts[i]
+		for strings.Contains(noLineEnd, last(t.text)) && i+1 < len(ts) && !ts[i+1].space && Width(t.text+ts[i+1].text) <= width {
+			i++
+			t.text += ts[i].text
+		}
+		if n := len(out); n > 0 && !t.space && strings.Contains(noLineStart, first(t.text)) && Width(out[n-1].text+t.text) <= width {
+			out[n-1].text += t.text
+			continue
+		}
+		out = append(out, t)
+	}
+	return out
 }
 
 // space remembers whether the source had a space here

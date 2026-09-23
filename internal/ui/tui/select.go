@@ -3,7 +3,6 @@ package tui
 import (
 	"strings"
 
-	"github.com/atotto/clipboard"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/mattn/go-runewidth"
@@ -114,7 +113,7 @@ func (m *Model) copySelection() {
 	if text == "" {
 		return
 	}
-	if err := clipboard.WriteAll(text); err != nil {
+	if err := copyText(text); err != nil {
 		m.flash(i18n.T("flash.clipboard_unavailable") + err.Error())
 		return
 	}

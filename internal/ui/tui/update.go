@@ -14,8 +14,24 @@ import (
 )
 
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	mm, cmd := m.update(msg)
+	if m.noticeNew {
+		m.noticeNew = false
+		seq := m.noticeSeq
+		cmd = tea.Batch(cmd, tea.Tick(noticeFor(m.notice), func(time.Time) tea.Msg { return noticeExpiredMsg{seq} }))
+	}
+	return mm, cmd
+}
+
+func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	switch msg := msg.(type) {
+	case noticeExpiredMsg:
+		if msg.seq == m.noticeSeq {
+			m.notice = ""
+		}
+		return m, nil
+
 	case tea.WindowSizeMsg:
 		m.w, m.h = msg.Width, msg.Height
 		m.search.Width = max(10, m.w-6)
@@ -79,6 +95,23 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			note += "；" + msg.warn.Error()
 		}
 		m.flash(note)
+
+	case appProbedMsg:
+		if m.ov.kind == ovResume && m.ov.focus < 0 {
+			m.ov.app = m.appFirst(m.ov.rec, m.ov.plan)
+		}
+		return m, nil
+	case appDoneMsg:
+		if msg.err != nil {
+			m.flash(msg.err.Error() + i18n.T("resume.app_fallback"))
+			break
+		}
+		if err := capture.MarkResumed(m.store, msg.rec); err != nil {
+			m.flash(i18n.T("flash.count_not_saved") + err.Error())
+			break
+		}
+		m.refresh()
+		m.flash(i18n.F("resume.opened_app", capture.AppName(msg.rec.Provider)))
 
 	case liveMsg:
 		m.applyLive(msg)
@@ -236,9 +269,9 @@ func (m *Model) searchKey(msg tea.KeyMsg) tea.Cmd {
 
 // navKey: list navigation. ⚠️ Every action needs a non-letter key (letters never reach here under a CJK IME); 、？；， count as / ? ; , (a CJK input method types / as 、); ctrl+s stands in for \.
 func (m *Model) navKey(msg tea.KeyMsg) tea.Cmd {
-	if m.inTrash() && m.current() != nil && m.chipFocus < 0 && m.pane != paneChat {
+	if m.inTrash() && m.current() != nil && m.chipFocus < 0 {
 		switch msg.String() {
-		case "f", "x", "a", "e", "r", "X", "M", " ", "ctrl+g":
+		case "f", "*", "x", "ctrl+x", "a", "ctrl+a", "e", "ctrl+e", "r", "X", "M", " ", "ctrl+g":
 			m.flash(i18n.T("trash.in_trash_hint"))
 			return nil
 		}
@@ -390,7 +423,15 @@ func (m *Model) navKey(msg tea.KeyMsg) tea.Cmd {
 			m.toggleGroup()
 		} else if m.twoColumn() || m.detail {
 			m.askResume()
-			if d, t := m.broken(m.current()); !d && !t {
+			if m.ov.kind != ovResume {
+				break
+			}
+			if d, t := m.broken(m.ov.rec); d || t {
+				break // the dialog stays: move or delete instead
+			}
+			if m.ov.app {
+				m.doApp()
+			} else {
 				m.doResume(false)
 			}
 		}
@@ -540,7 +581,7 @@ func (m *Model) overlayKey(msg tea.KeyMsg) tea.Cmd {
 			return m.stepMessage(-1)
 		case "right", "l", "J", "ctrl+j":
 			return m.stepMessage(1)
-		case "y":
+		case "y", "ctrl+y":
 			m.copyMessage()
 		}
 		return nil
@@ -572,6 +613,16 @@ func (m *Model) overlayKey(msg tea.KeyMsg) tea.Cmd {
 				}
 				return nil
 			}
+			if m.ov.app {
+				m.doApp()
+				return nil
+			}
+			m.doResume(false)
+		case "p":
+			if appReady(m.ov.rec) {
+				m.doApp()
+			}
+		case "r":
 			m.doResume(false)
 		case "left", "h", "shift+tab":
 			m.moveFocus(-1)
@@ -598,7 +649,11 @@ func (m *Model) overlayKey(msg tea.KeyMsg) tea.Cmd {
 			m.openIDE()
 		case "c":
 			m.openCode()
+		case "o":
+			m.openFiles()
 		case "e", "ctrl+e":
+			m.pending = m.openEdit()
+		case "n":
 			m.editTitle()
 		case "esc", "q":
 			m.closeOverlay()
@@ -851,7 +906,10 @@ func (m *Model) askResume() {
 	ti.SetValue(r.Title)
 	ti.CharLimit = 120
 	plan, _ := capture.PlanResume(r, m.live, false) // plan.Spec is empty on error
-	m.ov = overlay{kind: ovResume, rec: r, plan: plan, edit: ti, focus: -1}
+	m.ov = overlay{kind: ovResume, rec: r, plan: plan, edit: ti, focus: -1, app: m.appFirst(r, plan)}
+	if cmd := probeApp(r); cmd != nil {
+		m.pending = tea.Batch(m.pending, cmd)
+	}
 }
 
 func (m *Model) visibleRecs() []*fav.Rec {

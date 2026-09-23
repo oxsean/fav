@@ -827,3 +827,8 @@ func TestDrillInAndBack(t *testing.T) {
 		t.Fatal("窄屏详情 ← 应退回列表")
 	}
 }
+
+func TestMain(m *testing.M) {
+	copyText = func(string) error { return nil } // ⚠️ never the user's clipboard
+	os.Exit(m.Run())
+}

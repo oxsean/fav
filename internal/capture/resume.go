@@ -86,7 +86,7 @@ func Checks(r *fav.Rec) []Check {
 	var out []Check
 
 	if _, err := lookPath(r.Provider); err == nil {
-		out = append(out, Check{OK: true, Text: i18n.T("resume.check.source") + providerLabel(r.Provider)})
+		out = append(out, Check{OK: true, Text: i18n.T("resume.check.source") + sourceLabel(r)})
 	} else {
 		out = append(out, Check{Text: providerLabel(r.Provider) + i18n.T("resume.check.not_installed")})
 	}
@@ -116,6 +116,17 @@ func Checks(r *fav.Rec) []Check {
 		}
 	}
 	return out
+}
+
+// sourceLabel names where r was started: the desktop app or the CLI.
+func sourceLabel(r *fav.Rec) string {
+	if !r.App {
+		return providerLabel(r.Provider)
+	}
+	if r.Provider == fav.ProviderCodex {
+		return "Codex App"
+	}
+	return "Claude App"
 }
 
 func providerLabel(p string) string {
