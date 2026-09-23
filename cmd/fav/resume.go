@@ -2,7 +2,6 @@ package main
 
 import (
 	"errors"
-	"flag"
 	"fmt"
 	"os"
 	"os/exec"
@@ -14,7 +13,7 @@ import (
 )
 
 func cmdResume(args []string) error {
-	fs := flag.NewFlagSet("resume", flag.ContinueOnError)
+	fs := newFlags("resume")
 	dryRun := fs.Bool("dry-run", false, i18n.T("cli.resume.flag_dry_run"))
 	noHerdr := fs.Bool("no-herdr", false, i18n.T("cli.resume.flag_no_herdr"))
 	inApp := fs.Bool("app", false, i18n.T("cli.resume.flag_app"))
@@ -164,7 +163,7 @@ func printPlan(r *fav.Rec, p capture.Plan, resume bool) {
 }
 
 func cmdHandoff(args []string) error {
-	fs := flag.NewFlagSet("handoff", flag.ContinueOnError)
+	fs := newFlags("handoff")
 	to := fs.String("to", "", i18n.T("cli.handoff.flag_to"))
 	dryRun := fs.Bool("dry-run", false, i18n.T("cli.handoff.flag_dry_run"))
 	noHerdr := fs.Bool("no-herdr", false, i18n.T("cli.resume.flag_no_herdr"))

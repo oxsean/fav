@@ -3,7 +3,6 @@ package main
 import (
 	"encoding/json"
 	"errors"
-	"flag"
 	"fmt"
 	"maps"
 	"os"
@@ -18,7 +17,7 @@ import (
 )
 
 func cmdRm(args []string) error {
-	fs := flag.NewFlagSet("rm", flag.ContinueOnError)
+	fs := newFlags("rm")
 	yes := fs.Bool("y", false, i18n.T("cli.rm.flag_yes"))
 	pos, err := parseMixed(fs, args)
 	if err != nil {
@@ -84,7 +83,7 @@ func trashSession(s *fav.Store, r *fav.Rec) (int, error) {
 }
 
 func cmdTrash(args []string) error {
-	fs := flag.NewFlagSet("trash", flag.ContinueOnError)
+	fs := newFlags("trash")
 	restore := fs.String("restore", "", i18n.T("cli.trash.flag_restore"))
 	purge := fs.Bool("purge", false, i18n.T("cli.trash.flag_purge"))
 	all := fs.Bool("all", false, i18n.T("cli.trash.flag_all"))

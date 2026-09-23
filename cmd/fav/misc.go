@@ -2,7 +2,6 @@ package main
 
 import (
 	"errors"
-	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -27,7 +26,7 @@ func termWidth() int {
 }
 
 func cmdDoctor(args []string) error {
-	fs := flag.NewFlagSet("doctor", flag.ContinueOnError)
+	fs := newFlags("doctor")
 	compact := fs.Bool("compact", false, i18n.T("cli.doctor.flag_compact"))
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -108,7 +107,7 @@ func cmdDoctor(args []string) error {
 
 // Claude and Codex both read skills/<name>/SKILL.md: one source symlinked to both.
 func cmdInstallSkill(args []string) error {
-	fs := flag.NewFlagSet("install-skill", flag.ContinueOnError)
+	fs := newFlags("install-skill")
 	src := fs.String("from", "", i18n.T("cli.skill.flag_from"))
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -221,7 +220,7 @@ bindkey '%s' fav-widget
 }
 
 func cmdShellInit(args []string) error {
-	fs := flag.NewFlagSet("shell-init", flag.ContinueOnError)
+	fs := newFlags("shell-init")
 	key := fs.String("key", "ctrl-g", i18n.T("cli.shell_init.flag_key"))
 	ui := fs.String("ui", "fzf", i18n.T("cli.shell_init.flag_ui"))
 	pos, err := parseMixed(fs, args)

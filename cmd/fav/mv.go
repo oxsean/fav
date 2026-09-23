@@ -2,7 +2,6 @@ package main
 
 import (
 	"errors"
-	"flag"
 	"fmt"
 	"path/filepath"
 
@@ -13,7 +12,7 @@ import (
 )
 
 func cmdMv(args []string) error {
-	fs := flag.NewFlagSet("mv", flag.ContinueOnError)
+	fs := newFlags("mv")
 	yes := fs.Bool("y", false, i18n.T("cli.rm.flag_yes"))
 	pos, err := parseMixed(fs, args)
 	if err != nil {

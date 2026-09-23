@@ -21,7 +21,7 @@ import (
 
 // cmdGrep searches the messages of every session (or those the filter tokens pick) and lists the sessions holding every keyword.
 func cmdGrep(args []string) error {
-	fs := flag.NewFlagSet("grep", flag.ContinueOnError)
+	fs := newFlags("grep")
 	asJSON := fs.Bool("json", false, i18n.T("cli.flag_json"))
 	limit := fs.Int("limit", 0, i18n.T("cli.flag_limit"))
 	fs.Usage = func() {

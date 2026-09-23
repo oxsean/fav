@@ -2,7 +2,6 @@ package main
 
 import (
 	"encoding/json"
-	"flag"
 	"fmt"
 	"os"
 	"sort"
@@ -43,7 +42,7 @@ type reportProject struct {
 // cmdReport: the sessions active today / this week, by project, with the files they wrote and the commits made in
 // that project since; long unfavorited sessions are listed for a /fav summary.
 func cmdReport(period string, args []string) error {
-	fs := flag.NewFlagSet(period, flag.ContinueOnError)
+	fs := newFlags(period)
 	asJSON := fs.Bool("json", false, i18n.T("cli.flag_json"))
 	rest, err := parseMixed(fs, args)
 	if err != nil {

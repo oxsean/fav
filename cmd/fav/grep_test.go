@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"flag"
 	"strings"
 	"testing"
@@ -21,6 +22,21 @@ func TestQueryDashesPassesHelp(t *testing.T) {
 	for _, a := range []string{"-h", "--help", "-help"} {
 		if flags, words := queryDashes(fs, []string{a}); len(flags) != 1 || len(words) != 0 {
 			t.Errorf("%s: flags %q words %q", a, flags, words)
+		}
+	}
+}
+
+func TestSubcommandHelpShowsOnlyItsOwnLines(t *testing.T) {
+	for name, want := range map[string]string{"mv": "fav mv ", "archive": "fav archive|unarchive", "fzf": "fav tui | fav fzf", "week": "fav today | fav week"} {
+		fs := newFlags(name)
+		fs.Bool("y", false, "")
+		var out strings.Builder
+		fs.SetOutput(&out)
+		if err := fs.Parse([]string{"-h"}); !errors.Is(err, flag.ErrHelp) {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if got := out.String(); !strings.Contains(got, want) || strings.Contains(got, "fav grep") || !strings.Contains(got, "-y") {
+			t.Errorf("%s help:\n%s", name, got)
 		}
 	}
 }

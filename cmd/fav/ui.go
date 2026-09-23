@@ -2,7 +2,6 @@ package main
 
 import (
 	"errors"
-	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -109,7 +108,7 @@ func cmdUI(cmd string, args []string) error {
 
 // cmdFzfList is the candidate source of all three fzf tabs, run on every keystroke; the tab comes from FZF_PROMPT.
 func cmdFzfList(args []string) error {
-	fs := flag.NewFlagSet("fzf-list", flag.ContinueOnError)
+	fs := newFlags("fzf-list")
 	keep := fs.String("keep", "", "")
 	flags, words := queryDashes(fs, args)
 	rest, err := parseMixed(fs, flags)

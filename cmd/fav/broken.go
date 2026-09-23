@@ -3,7 +3,6 @@ package main
 import (
 	"encoding/json"
 	"errors"
-	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -311,7 +310,7 @@ func confirmErr(prompt string, yes bool) (bool, error) {
 }
 
 func cmdClean(args []string) error {
-	fs := flag.NewFlagSet("clean", flag.ContinueOnError)
+	fs := newFlags("clean")
 	yes := fs.Bool("y", false, i18n.T("cli.rm.flag_yes"))
 	asJSON := fs.Bool("json", false, i18n.T("cli.flag_json"))
 	pos, err := parseMixed(fs, args)
@@ -366,7 +365,7 @@ func cmdClean(args []string) error {
 }
 
 func cmdFix(args []string) error {
-	fs := flag.NewFlagSet("fix", flag.ContinueOnError)
+	fs := newFlags("fix")
 	yes := fs.Bool("y", false, i18n.T("cli.rm.flag_yes"))
 	asJSON := fs.Bool("json", false, i18n.T("cli.flag_json"))
 	to := fs.String("to", "", i18n.T("cli.fix.flag_to"))

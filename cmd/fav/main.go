@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -20,12 +21,26 @@ import (
 
 func usage() string { return i18n.T("cli.usage") }
 
+// newFlags: a subcommand's flag set; -h prints its lines of the usage text, then its flags.
+func newFlags(name string) *flag.FlagSet {
+	fs := flag.NewFlagSet(name, flag.ContinueOnError)
+	own := regexp.MustCompile(`\bfav (\S+\|)?` + regexp.QuoteMeta(name) + `(\||\s|$)`)
+	fs.Usage = func() {
+		for l := range strings.Lines(usage()) {
+			if own.MatchString(l) {
+				fmt.Fprint(fs.Output(), l)
+			}
+		}
+		fs.PrintDefaults()
+	}
+	return fs
+}
+
 var version = "dev" // set by goreleaser via -X main.version
 
 func main() {
 	if err := run(os.Args[1:]); err != nil {
-		if errors.Is(err, flag.ErrHelp) { // the flag package already printed the subcommand's usage
-			fmt.Print(usage())
+		if errors.Is(err, flag.ErrHelp) { // the subcommand already printed its usage
 			return
 		}
 		fmt.Fprintln(os.Stderr, "fav: "+err.Error())
@@ -204,7 +219,7 @@ type skillInput struct {
 }
 
 func cmdAdd(args []string) error {
-	fs := flag.NewFlagSet("add", flag.ContinueOnError)
+	fs := newFlags("add")
 	supersede := fs.String("supersede", "", i18n.T("cli.add.flag_supersede"))
 	sessionID := fs.String("session-id", "", i18n.T("cli.add.flag_session_id"))
 	provider := fs.String("provider", "", i18n.T("cli.add.flag_provider"))
@@ -285,7 +300,7 @@ func cmdAdd(args []string) error {
 }
 
 func cmdList(args []string) error {
-	fs := flag.NewFlagSet("list", flag.ContinueOnError)
+	fs := newFlags("list")
 	asJSON := fs.Bool("json", false, i18n.T("cli.flag_json"))
 	asLine := fs.Bool("line", false, i18n.T("cli.list.flag_line"))
 	query := fs.String("query", "", i18n.T("cli.list.flag_query"))
@@ -336,7 +351,7 @@ func cmdList(args []string) error {
 }
 
 func cmdSessions(args []string) error {
-	fs := flag.NewFlagSet("sessions", flag.ContinueOnError)
+	fs := newFlags("sessions")
 	asJSON := fs.Bool("json", false, i18n.T("cli.flag_json"))
 	limit := fs.Int("limit", 0, i18n.T("cli.flag_limit"))
 	rest, err := parseMixed(fs, args)
@@ -442,7 +457,7 @@ func lastAt(r *fav.Rec) time.Time {
 }
 
 func cmdShow(args []string) error {
-	fs := flag.NewFlagSet("show", flag.ContinueOnError)
+	fs := newFlags("show")
 	asJSON := fs.Bool("json", false, i18n.T("cli.flag_json"))
 	rest, err := parseMixed(fs, args)
 	if err != nil {
@@ -466,7 +481,7 @@ func cmdShow(args []string) error {
 }
 
 func cmdPreview(args []string) error {
-	fs := flag.NewFlagSet("preview", flag.ContinueOnError)
+	fs := newFlags("preview")
 	width := fs.Int("width", 0, i18n.T("cli.preview.flag_width"))
 	rest, err := parseMixed(fs, args)
 	if err != nil {
