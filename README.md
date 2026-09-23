@@ -146,10 +146,121 @@ Delete and trash: `D`, confirmed with `y` (focus starts on Cancel), moves the se
 A session whose directory or transcript is gone shows a dim red `!` after its title and its dialog offers only move / delete.
 
 CJK input methods swallow lowercase letters: favorite with `*`, `Ctrl+X` done / `Ctrl+E` edit / `Ctrl+Y` copy /
-`Ctrl+N/P` up and down / `Ctrl+G` same as `Space`; uppercase `D M X` pass through; every dialog action has a button. `?` lists all keys, grouped by where they work.
+`Ctrl+N/P` up and down / `Ctrl+G` same as `Space`; uppercase `D M X` pass through; every dialog action has a button. `?` opens help in three pages: the list's keys, search syntax, mouse and IME.
 
 Mouse on by default: click tabs, chips, cards, double-click to resume, click an input to place the cursor, wheel, overlay buttons; drag over text to copy it.
 `,` opens settings: time format, default tab / sort, short-session threshold, wheel step, icons, mouse, trash retention, IDE, language.
+
+<details>
+<summary>Every key, in full</summary>
+
+`?` in the TUI shows the short version; this is the full description of every key, dialogs included.
+
+**Search**
+
+| Key | What it does |
+|---|---|
+| `/` `、` | search sessions: title, summary, project, #tag; works from any focus |
+| `>` `》` | search the messages of every session (see Query syntax) |
+| `Ctrl+S` `\` | search the messages of this session; hits listed on the left |
+| `n / N` | next / previous hit |
+| `l` `→` | in a message search: list every hit of this session, the right pane follows |
+| `o` `Ctrl+O` | switch the sort; in a message search, relevance / newest hit |
+
+**Move**
+
+| Key | What it does |
+|---|---|
+| `j / k` `↓ / ↑` `Ctrl+N / Ctrl+P` | move up / down; Ctrl+N / Ctrl+P in the search box |
+| `PgDn / PgUp` `Ctrl+F / Ctrl+B` `Ctrl+D / Ctrl+U` `g / G` `Home / End` | page / half page / top and bottom; also in the chat |
+| `h / l` `← / →` | switch pane; switch chip in the filter row |
+| `Tab / Shift+Tab` `1` `2` `3` `4` | switch tab: favorites / sessions / projects / Agents |
+
+**Views and filters**
+
+| Key | What it does |
+|---|---|
+| `;` | enter / leave the filter chip row (arrows move, Enter opens) |
+| `t / p / v / d` | tag / project / source / time filter |
+| `s` | status filter: open / active / done / archived / all / trash |
+| `Enter` | on a projects group header: fold / unfold it |
+| `z / - / =` `+` | projects view: toggle fold all, fold all, unfold all |
+
+**Open and continue**
+
+| Key | What it does |
+|---|---|
+| `Enter / r` | wide: the action dialog; narrow: the detail; a running session's primary button is switch or attach |
+| `Space` `Ctrl+G` | switch to a session already running in a Herdr tab; otherwise the same as Enter (open the dialog); pages down in the chat |
+| `w` `Ctrl+W` | start a new session in this project (shows what already runs there) |
+
+**This record**
+
+| Key | What it does |
+|---|---|
+| `f` `*` | favorite / unfavorite; the record stays, press again to restore |
+| `x` `Ctrl+X` | mark done; again: back to doing |
+| `a` | archive / unarchive |
+| `e` `Ctrl+E` | edit title / tags / summary |
+| `M` | move the project directory (see "Moved a project directory" above) |
+| `D` | delete into the trash; in the trash it restores |
+
+**Right pane**
+
+| Key | What it does |
+|---|---|
+| `J / K` `Ctrl+J / Ctrl+K` | move the highlighted message from the list (older / newer); the arrows do it when the right pane has focus |
+| `Enter` | the full message and every step after it |
+| `y` `Ctrl+Y` | copy the highlighted message |
+
+**Running sessions**
+
+| Key | What it does |
+|---|---|
+| `` ` `` `·` | peek at an agent's terminal in Herdr and reply to it |
+| `.` `。` | mark handled: a running session stays quiet until it writes something new |
+| `H` | snooze for an hour |
+| `X` | close its Herdr tab (asks first) |
+| `Z` | close every Herdr tab idle for hours (Agents; asks first) |
+
+**In the resume dialog**
+
+Keys that start a process, a tab or an app only focus their button; the same key again or Enter runs it. Keys that mean the same as in the list act at once.
+
+| Key | What it does |
+|---|---|
+| `r` | resume in the terminal (the key when the desktop app comes first) |
+| `t` `Ctrl+T` | resume in this terminal, not in Herdr |
+| `p` | open it in the Claude / ChatGPT desktop app |
+| `y` `Ctrl+Y` | copy cd + the resume command |
+| `b` | fork: a new session carrying this one's history |
+| `s` | hand off: a new Claude / Codex session reads a summary pack |
+| `i / c / o` | open the project directory in the IDE / VS Code / file manager |
+| `n` | edit just the title |
+
+**Dialogs**
+
+| Key | What it does |
+|---|---|
+| `Tab / Shift+Tab` `→ / ←` `l / h` | move focus across fields and buttons |
+| `Enter` | press the focused button; the primary one before focus moved |
+| `Esc` `q` `n` | close, or back one level; cancels a confirmation |
+| `y` | confirm at once in a confirmation |
+| `1 / 2` | new session / hand off: pick Claude / Codex, the same key again starts it |
+| `e` `Ctrl+E` `y` `Ctrl+Y` | hand off: edit / copy the pack |
+| `1` `2` `3` | peek: answer a numbered question; the same digit twice sends it |
+| `:` | peek: type a line; Enter sends it as the agent's next prompt |
+
+**Other**
+
+| Key | What it does |
+|---|---|
+| `,` | settings |
+| `?` | open help |
+| `Esc` | close the dialog; back to the list; clear filters |
+| `q` `Ctrl+C` | quit (Ctrl+C also works in the search box and dialogs) |
+
+</details>
 
 ### Find one in two seconds: `fav fzf`
 
@@ -209,11 +320,11 @@ fav doctor [--compact]                  # check data files, dead sessions, trash
 ## Query syntax
 
 `#tag`, `project:x`, `provider:claude|codex`, `status:open|active|done|archived|trash|all|live|agent`,
-`after:2026-09-01`, `before:…` (when the session started), `last:7d` / `last:2026-09-01` (active since — a session started last week and used today counts), `turns:3`, `file:internal/index` (the AI wrote a path containing it), plus plain keywords. All ANDed; CJK matches by substring.
+`after:2026-09-01`, `before:…` (when the session started), `last:7d` / `last:2026-09-01` (active since — a session started last week and used today counts), `turns:3`, `file:internal/index` (the AI wrote a path containing it), plus plain keywords. The time box in the filter row also takes `09-01`, `09-01..09-15`, `..09-15`, `7d`. All ANDed; CJK matches by substring.
 Starting the query with `>` (or `》`) searches message text instead: keywords are looked up in every message and tool command, the filter tokens only pick the
 sessions (default `status:all turns:0`). Every keyword must occur somewhere in the session; a keyword matches when 60% of its terms do (Chinese is cut into
 character pairs, so word order inside a Chinese keyword does not matter; quote a keyword — `"…"`, `“…”` or `「…」` — to require it verbatim; `a|b` matches either, `-x` drops messages holding x, `who:me`, `who:ai` or `who:tool` keep one speaker; a misspelt English word the sessions barely use also searches the known words one letter away, and the title says so); ranking is BM25 with bonuses for keywords close together, newer messages, what you said yourself (tool commands, tool output and Claude's context recaps count less) and sessions whose title, summary or tags hold the keywords; sessions with one message holding every keyword come first, `o` switches to the newest hit first.
-Unarchived by default; keywords also search the prompts in the index, so remembering "I had it do X" is enough. All three front-ends share one parser.
+Unarchived by default; keywords also search the prompts in the index, so remembering "I had it do X" is enough. All three front-ends share one parser. The same table is in the TUI (`?` → Search syntax), under a bare `>` in the search box, and in `fav grep --help`.
 
 ## How it works
 
@@ -248,7 +359,7 @@ the favorite follows) and does not count the parked process as running.
 | `~/.agent/fav/trash/` | deleted session files moved as-is, `manifest.jsonl` records where they came from |
 | `~/.agent/fav/config.json` | written by the settings panel |
 
-Environment: `FAV_HOME` moves the data directory, `FAV_UI=fzf|tui` sets the default front-end, `FAV_ICONS=nerd|ascii` picks icons.
+Environment: `FAV_HOME` moves the data directory, `FAV_UI=fzf|tui` sets the default front-end, `FAV_ICONS=nerd|ascii` picks icons, `FAV_TRACE=1` logs a timeline of keys, wheel and background events to `~/.agent/fav/trace.log` (for reporting a slow or stuck UI).
 The UI language follows the system (`LANG` etc. starting with zh → Chinese, otherwise English) and can be pinned in settings.
 
 Chat text is kept only in the local `text/` copy for search, and nothing is uploaded; session files are only modified when you explicitly move a directory (the cwd field), and the originals go to the trash first. `fav pin` is a local hard link.

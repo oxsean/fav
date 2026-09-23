@@ -418,9 +418,33 @@ func (m *Model) listLines(w, from, to int) (lines []string, acts []func(*Model))
 	return
 }
 
+// syntaxPane: a message search with no keyword yet shows its syntax where the results will be.
+func (m *Model) syntaxPane(w, h int) []string {
+	sec := render.SearchSyntax()[1]
+	g := helpGroup{title: sec.Title}
+	keyW := 0
+	for _, r := range sec.Rows {
+		g.rows = append(g.rows, helpRow{[]string{r.Form}, r.Meaning})
+		keyW = max(keyW, render.Width(r.Form)+2)
+	}
+	lines := helpBlock(g, w, min(keyW, w/2))
+	out := make([]string, h)
+	for i := range out {
+		if i < len(lines) {
+			out[i] = fit(lines[i], w)
+		} else {
+			out[i] = strings.Repeat(" ", w)
+		}
+	}
+	return out
+}
+
 func (m *Model) listPane(y0, x0, w, h int) []string {
 	if h < 1 {
 		return nil
+	}
+	if m.msgMode() && m.msgKeywords() == "" {
+		return m.syntaxPane(w, h)
 	}
 	if len(m.rows) == 0 {
 		return append([]string{dimmed.Render(i18n.T("list.empty"))}, blanks(h-1)...)

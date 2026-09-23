@@ -24,6 +24,11 @@ func cmdGrep(args []string) error {
 	fs := flag.NewFlagSet("grep", flag.ContinueOnError)
 	asJSON := fs.Bool("json", false, i18n.T("cli.flag_json"))
 	limit := fs.Int("limit", 0, i18n.T("cli.flag_limit"))
+	fs.Usage = func() {
+		fmt.Fprintln(fs.Output(), i18n.T("cli.grep.usage"))
+		fs.PrintDefaults()
+		fmt.Fprint(fs.Output(), "\n"+render.SyntaxText())
+	}
 	flags, words := queryDashes(fs, args)
 	rest, err := parseMixed(fs, flags)
 	if err != nil {
@@ -32,7 +37,7 @@ func cmdGrep(args []string) error {
 	query, _ := fulltext.Prefixed(strings.Join(append(rest, words...), " "))
 	kw, scope := fulltext.Split(query)
 	if kw == "" {
-		return errors.New(i18n.T("cli.grep.usage"))
+		return errors.New(i18n.T("cli.grep.usage") + "\n\n" + strings.TrimRight(render.SyntaxText(), "\n"))
 	}
 	if fulltext.TooLong(kw) {
 		return errors.New(i18n.T("msg.too_long"))
@@ -161,6 +166,8 @@ func queryDashes(fs *flag.FlagSet, args []string) (flags, words []string) {
 		f := fs.Lookup(name)
 		switch {
 		case !strings.HasPrefix(a, "-") || a == "-":
+			flags = append(flags, a)
+		case name == "h" || name == "help":
 			flags = append(flags, a)
 		case f == nil:
 			words = append(words, a)

@@ -40,6 +40,7 @@ const ovPad = 3
 
 type overlay struct {
 	kind      ovKind
+	page      int // help: the page shown
 	scrollMax int // last line offset the message / help text can scroll to, set while rendering
 	title     string
 	hint      string
@@ -353,7 +354,7 @@ func (m *Model) ovWidth() int {
 	case ovResume: // wide enough for each button group to fit on one row
 		w = min(max(w, 72, groupsWidth(m.resumeGroups())), m.w-4)
 	case ovHelp:
-		w = min(m.w-8, 120)
+		w = min(m.w-8, 150)
 	case ovEdit:
 		w = min(m.w-8, 100)
 	case ovHandoff:
@@ -642,14 +643,36 @@ func helpGroups() []helpGroup {
 	return gs
 }
 
-// helpKeyCap: the key column never grows past this, so one long key cannot push every description to the right.
-const helpKeyCap = 22
+// helpBlock renders one group within width colW, keys in a column keyW wide.
+func helpBlock(g helpGroup, colW, keyW int) []string {
+	lines := []string{boldSty.Foreground(cText).Render(g.title)}
+	if g.note != "" {
+		for _, seg := range render.Wrap(g.note, colW-2) {
+			lines = append(lines, "  "+dimmed.Render(seg))
+		}
+	}
+	for _, r := range g.rows {
+		desc := render.Wrap(r.desc, colW-keyW-2)
+		for i := 0; i < max(len(r.keys), len(desc)); i++ {
+			key, seg := "", ""
+			if i < len(r.keys) {
+				key = render.Truncate(r.keys[i], keyW-1)
+			}
+			if i < len(desc) {
+				seg = desc[i]
+			}
+			lines = append(lines, "  "+accent.Render(render.Pad(key, keyW))+seg)
+		}
+	}
+	return lines
+}
 
-func (m *Model) renderHelp() string {
-	w := m.ovWidth()
-	inner := w - 4
-	textW := inner - 2 // one column for the scrollbar
-	groups := helpGroups()
+// helpColumns lays the groups out in as many columns of at least helpColMin as fit, in reading order (down, then
+// across), splitting only between groups so the tallest column is as short as possible.
+func helpColumns(groups []helpGroup, textW int) []string {
+	const gap = 3
+	n := min(max(1, (textW+gap)/(helpColMin+gap)), len(groups))
+	colW := (textW - (n-1)*gap) / n
 	keyW := 0
 	for _, g := range groups {
 		for _, r := range g.rows {
@@ -658,62 +681,146 @@ func (m *Model) renderHelp() string {
 			}
 		}
 	}
-	keyW = min(keyW+2, helpKeyCap, textW/2)
-	var lines []string
-	for gi, g := range groups {
-		if gi > 0 {
-			lines = append(lines, "")
-		}
-		lines = append(lines, boldSty.Foreground(cText).Render(g.title))
-		if g.note != "" {
-			for _, seg := range render.Wrap(g.note, textW-2) {
-				lines = append(lines, "  "+dimmed.Render(seg))
+	keyW = min(keyW+2, helpKeyCap, colW/2)
+	blocks := make([][]string, len(groups))
+	for i, g := range groups {
+		blocks[i] = helpBlock(g, colW, keyW)
+	}
+	cols := splitBlocks(blocks, n)
+	var out []string
+	for r := 0; ; r++ {
+		var row []string
+		more := false
+		for _, c := range cols {
+			cell := ""
+			if r < len(c) {
+				cell, more = c[r], true
 			}
+			row = append(row, fit(cell, colW))
 		}
-		for _, r := range g.rows {
-			desc := render.Wrap(r.desc, textW-keyW-2)
-			for i := 0; i < max(len(r.keys), len(desc)); i++ {
-				key, seg := "", ""
-				if i < len(r.keys) {
-					key = render.Truncate(r.keys[i], keyW-1)
-				}
-				if i < len(desc) {
-					seg = desc[i]
-				}
-				lines = append(lines, "  "+accent.Render(render.Pad(key, keyW))+seg)
+		if !more {
+			return out
+		}
+		out = append(out, strings.Join(row, strings.Repeat(" ", gap)))
+	}
+}
+
+// splitBlocks cuts blocks into n consecutive columns (a blank line between blocks) minimising the tallest one.
+func splitBlocks(blocks [][]string, n int) [][]string {
+	height := func(bs [][]string) int {
+		h := 0
+		for i, b := range bs {
+			if i > 0 {
+				h++
 			}
+			h += len(b)
+		}
+		return h
+	}
+	fits := func(limit int) ([][][]string, bool) {
+		var cols [][][]string
+		var cur [][]string
+		for _, b := range blocks {
+			if len(cur) > 0 && height(append(cur[:len(cur):len(cur)], b)) > limit {
+				cols, cur = append(cols, cur), nil
+			}
+			cur = append(cur, b)
+		}
+		cols = append(cols, cur)
+		return cols, len(cols) <= n
+	}
+	var cols [][][]string
+	for limit := 1; ; limit++ {
+		if c, ok := fits(limit); ok {
+			cols = c
+			break
 		}
 	}
-	lines = append(lines, "")
-	notes := []string{
-		i18n.T("help.note_msg_syntax"),
-		i18n.T("help.note_query"),
-		i18n.T("help.note_move"),
-		i18n.T("help.note_delete"),
-		i18n.T("help.note_agents"),
-		imeNote(),
-		i18n.T("help.note_mouse"),
-		i18n.T("help.note_drag"),
-	}
-	for i, l := range notes {
-		if i > 0 {
-			lines = append(lines, "")
-		}
-		for _, seg := range render.Wrap(l, textW) {
-			lines = append(lines, dimmed.Render(seg))
+	out := make([][]string, len(cols))
+	for i, c := range cols {
+		for j, b := range c {
+			if j > 0 {
+				out[i] = append(out[i], "")
+			}
+			out[i] = append(out[i], b...)
 		}
 	}
+	return out
+}
+
+// helpKeyCap: the key column never grows past this, so one long key cannot push every description to the right.
+const helpKeyCap = 22
+
+// helpColMin: a help column narrower than this wraps most descriptions, so the groups stay in fewer columns.
+const helpColMin = 44
+
+func helpPageNames() []string {
+	return []string{i18n.T("help.tab.keys"), i18n.T("help.tab.syntax"), i18n.T("help.tab.input")}
+}
+
+func helpPage(page int) []helpGroup {
+	switch page {
+	case 1:
+		var gs []helpGroup
+		for _, sec := range render.SearchSyntax() {
+			g := helpGroup{title: sec.Title}
+			for _, r := range sec.Rows {
+				g.rows = append(g.rows, helpRow{[]string{r.Form}, r.Meaning})
+			}
+			gs = append(gs, g)
+		}
+		return gs
+	case 2:
+		mouse := helpGroup{title: i18n.T("help.group.mouse")}
+		for _, k := range [][2]string{
+			{"help.mouse.tab", "help.mouse.tab_do"},
+			{"help.mouse.chip", "help.mouse.chip_do"},
+			{"help.mouse.card", "help.mouse.card_do"},
+			{"help.mouse.wheel", "help.mouse.wheel_do"},
+			{"help.mouse.drag", "help.mouse.drag_do"},
+			{"help.mouse.native", "help.mouse.native_do"},
+		} {
+			mouse.rows = append(mouse.rows, helpRow{[]string{i18n.T(k[0])}, i18n.T(k[1])})
+		}
+		mouse.rows = append(mouse.rows, helpRow{[]string{"--no-mouse"}, i18n.T("help.mouse.off_do")})
+		return []helpGroup{{title: i18n.T("help.group.ime"), note: i18n.T("help.ime_note"), rows: imeRows()}, mouse}
+	}
+	return helpGroups()
+}
+
+func (m *Model) turnHelpPage(delta int) {
+	n := len(helpPageNames())
+	m.ov.page = ((m.ov.page+delta)%n + n) % n
+	m.ov.cursor = 0
+}
+
+func (m *Model) renderHelp() string {
+	w := m.ovWidth()
+	inner := w - 4
+	textW := inner - 2 // one column for the scrollbar
+	lines := helpColumns(helpPage(m.ov.page), textW)
 
 	// scrolls when it does not fit: cursor is the first visible line; j/k, paging and the wheel move it
 	room := max(1, m.h-4-7)
 	m.ov.scrollMax = max(0, len(lines)-room)
 	m.ov.cursor = min(max(m.ov.cursor, 0), m.ov.scrollMax)
 	end := min(len(lines), m.ov.cursor+room)
-	title := i18n.T("help.title")
-	if len(lines) > room {
-		title += i18n.F("overlay.line_range", m.ov.cursor+1, end, len(lines))
+	head := boldSty.Foreground(cText).Render(i18n.T("help.title")) + "  "
+	x := ovPad + render.Width(i18n.T("help.title")) + 2
+	for i, name := range helpPageNames() {
+		label, sty := " "+name+" ", dimmed
+		if i == m.ov.page {
+			label, sty = tabOpenL+" "+name+" "+tabOpenR, accent.Bold(true)
+		}
+		m.mark(1, x, ansi.StringWidth(label), func(mm *Model) { mm.ov.page, mm.ov.cursor = i, 0 })
+		head += sty.Render(label) + " "
+		x += ansi.StringWidth(label) + 1
 	}
-	body := []string{boldSty.Foreground(cText).Render(title), ""}
+	if len(lines) > room {
+		at := strings.TrimLeft(i18n.F("overlay.line_range", m.ov.cursor+1, end, len(lines)), " ·")
+		head = fit(head, max(0, inner-render.Width(at))) + dimmed.Render(at)
+	}
+	body := []string{head, ""}
 	bar := scrollbar(len(lines), m.ov.cursor, room)
 	for i := m.ov.cursor; i < end; i++ {
 		body = append(body, fit(lines[i], textW)+" "+bar[i-m.ov.cursor])
@@ -723,7 +830,8 @@ func (m *Model) renderHelp() string {
 	if len(lines) > room {
 		label = "j/k · PgUp/PgDn · " + i18n.T("btn.wheel") + " · " + label
 	}
-	body = append(body, m.buttons(len(body)+1, []btn{{label, true, (*Model).closeOverlay}})...)
+	page := btn{keyed(keyName("tab"), i18n.T("help.btn_page")), false, func(mm *Model) { mm.turnHelpPage(1) }}
+	body = append(body, m.buttons(len(body)+1, []btn{page, {label, true, (*Model).closeOverlay}})...)
 	return ovRender(body, w)
 }
 
@@ -783,7 +891,19 @@ func (m *Model) renderResume() string {
 	body = append(body, "")
 
 	body = append(body, m.buttonGroups(len(body)+1, m.resumeGroups())...)
+	body = append(body, dimmed.Render(render.Truncate(i18n.F("resume.start_hint", strings.Join(startKeys(), " ")), inner)))
 	return ovRender(body, w)
+}
+
+// startKeys: the resume dialog's keys that start something; one press only focuses their button (focusKey).
+func startKeys() []string {
+	var out []string
+	for _, b := range bindings {
+		if b.in&inResume != 0 && b.tier == tierStart && b.act != actResume {
+			out = append(out, keyName(b.keys[0]))
+		}
+	}
+	return out
 }
 
 // resumeGroups are the resume dialog's buttons: where to continue, the project folder, the record; the overlay width

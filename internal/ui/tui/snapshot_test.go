@@ -40,6 +40,10 @@ func openOverlay(m *Model, kind string) {
 		m.pickTags()
 	case "help":
 		m.ov = overlay{kind: ovHelp}
+	case "help-syntax":
+		m.ov = overlay{kind: ovHelp, page: 1}
+	case "help-input":
+		m.ov = overlay{kind: ovHelp, page: 2}
 	case "resume":
 		m.askResume()
 	case "resume-edit":

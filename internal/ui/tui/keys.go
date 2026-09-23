@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"slices"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -314,11 +315,12 @@ func isWide(k string) bool {
 	return n == len(k) && r >= 0xFF01 && r <= 0xFF5E
 }
 
-// shownKeys: the keys of b a reader needs, in table order.
+// shownKeys: the keys of b the help page shows — the first, then the plain ASCII alternatives (arrows, `*`, `\`);
+// Ctrl stand-ins and IME punctuation are listed on the IME page instead.
 func shownKeys(b *binding) []string {
-	var out []string
-	for _, k := range b.keys {
-		if !isWide(k) {
+	out := []string{keyName(b.keys[0])}
+	for _, k := range b.keys[1:] {
+		if !strings.HasPrefix(k, "ctrl+") && isASCII(k) {
 			out = append(out, keyName(k))
 		}
 	}
@@ -339,6 +341,7 @@ type helpSection struct {
 	rows  []helpSpec
 }
 
+// helpLayout: the list's keys; dialogs label their own buttons, so only moving between them is listed.
 func helpLayout() []helpSection {
 	return []helpSection{
 		{"help.group.search", "", []helpSpec{
@@ -351,16 +354,12 @@ func helpLayout() []helpSection {
 		}},
 		{"help.group.read", "", []helpSpec{
 			{"help.move", inList, true, []act{actDown, actUp}},
-			{"help.page", inList, true, []act{actPageDown, actPageUp, actHalfDown, actHalfUp, actTop, actBottom}},
+			{"help.page", inList, true, []act{actPageDown, actPageUp}},
+			{"help.half", inList, true, []act{actHalfDown, actHalfUp}},
+			{"help.ends", inList, true, []act{actTop, actBottom}},
 			{"help.pane", inList, true, []act{actLeft, actRight}},
-			{"help.tabs", inList, true, []act{actNextView, actPrevView, actView}},
-		}},
-		{"help.group.view", "", []helpSpec{
-			{"help.chip_row", inList, false, []act{actChips}},
-			{"help.filters", inList, false, []act{actTags, actProjects, actProvider, actDate}},
-			{"help.status", inList, false, []act{actStatus}},
-			{"help.enter_group", inList, false, []act{actEnter}},
-			{"help.fold_all", inList, false, []act{actFoldAll, actFold, actUnfold}},
+			{"help.tabs", inList, true, []act{actNextView, actPrevView}},
+			{"help.tab_n", inList, false, []act{actView}},
 		}},
 		{"help.group.open", "", []helpSpec{
 			{"help.enter", inList, false, []act{actEnter, actResume}},
@@ -375,6 +374,13 @@ func helpLayout() []helpSection {
 			{"help.move_project", inList, false, []act{actMove}},
 			{"help.delete", inList, false, []act{actDelete}},
 		}},
+		{"help.group.view", "", []helpSpec{
+			{"help.chip_row", inList, false, []act{actChips}},
+			{"help.filters", inList, false, []act{actTags, actProjects, actProvider, actDate}},
+			{"help.status", inList, false, []act{actStatus}},
+			{"help.enter_group", inList, false, []act{actEnter}},
+			{"help.fold_all", inList, false, []act{actFoldAll, actFold, actUnfold}},
+		}},
 		{"help.group.chat", "", []helpSpec{
 			{"help.chat_move", inList, true, []act{actChatDown, actChatUp}},
 			{"help.enter_chat", inList, false, []act{actEnter}},
@@ -387,31 +393,12 @@ func helpLayout() []helpSection {
 			{"help.close_tab", inList, false, []act{actCloseTab}},
 			{"help.close_idle", inList, false, []act{actCloseIdle}},
 		}},
-		{"help.group.resume", "help.resume_note", []helpSpec{
-			{"help.r_resume", inResume, false, []act{actResume}},
-			{"help.t_resume", inResume, false, []act{actTerminal}},
-			{"help.app", inResume, false, []act{actApp}},
-			{"help.y_resume", inResume, false, []act{actCopy}},
-			{"help.fork", inResume, false, []act{actFork}},
-			{"help.handoff", inResume, false, []act{actHandoff}},
-			{"help.ide", inResume, false, []act{actIDE, actCode, actFiles}},
-			{"help.edit_title", inResume, false, []act{actTitle}},
-		}},
-		{"help.group.dialog", "", []helpSpec{
-			{"help.dlg_focus", inConfirm, true, []act{actFocusNext, actFocusPrev}},
-			{"help.dlg_enter", inConfirm, false, []act{actEnter}},
-			{"help.dlg_close", inConfirm, false, []act{actClose}},
-			{"help.dlg_confirm", inConfirm, false, []act{actConfirm}},
-			{"help.dlg_provider", inStart, true, []act{actClaude, actCodex}},
-			{"help.dlg_pack", inHandoff, false, []act{actEdit, actCopy}},
-			{"help.dlg_answer", inPeek, false, []act{actAnswer}},
-			{"help.dlg_reply", inPeek, false, []act{actReply}},
-		}},
 		{"help.group.other", "", []helpSpec{
 			{"help.settings", inList, false, []act{actSettings}},
 			{"help.help", inList, false, []act{actHelp}},
 			{"help.esc", inList, false, []act{actBack}},
 			{"help.quit", inList, false, []act{actQuit}},
+			{"help.dlg_focus", inConfirm, true, []act{actFocusNext, actFocusPrev}},
 		}},
 	}
 }
@@ -468,32 +455,86 @@ func helpKeys(h helpSpec, w int) []string {
 	return groups
 }
 
-// imeNote: how every list action is reached when an IME eats lowercase letters, built from the table.
-func imeNote() string {
-	var alias, dialog, chips []string
+// imeRows: how every list action is reached when an IME takes lowercase letters, built from the table: a punctuation
+// or Ctrl stand-in, the dialog's button, the filter row; then the CJK punctuation the table accepts.
+func imeRows() []helpRow {
+	var rows []helpRow
+	var dialog, chips, chipKeys []string
+	var dialogKeys []string
 	for i := range bindings {
 		b := &bindings[i]
 		if b.in&inList == 0 || !isLower(b.keys[0]) {
 			continue
 		}
-		name := i18n.T(actName(b.act))
+		name := helpName(b.act)
 		switch {
 		case b.ime == actViaDialog:
-			dialog = append(dialog, name)
+			dialog, dialogKeys = append(dialog, name), append(dialogKeys, b.keys[0])
 		case b.ime == actChips:
-			chips = append(chips, name)
+			chips, chipKeys = append(chips, name), append(chipKeys, b.keys[0])
 		case b.ime != actNone:
+			if r := bindingOf(inList, b.ime); r != nil {
+				rows = append(rows, helpRow{[]string{b.keys[0] + " → " + imeKey(r)}, name})
+			}
 		default:
-			for _, k := range b.keys[1:] {
-				if _, named := keyNamesShown[k]; !named && !isLetter(k) && !isWide(k) {
-					alias = append(alias, keyName(k)+" "+name)
-					break
-				}
+			if k := imeKey(b); !slices.Contains([]string{"↑", "↓", "←", "→", "Home", "End"}, k) { // arrows need no note
+				rows = append(rows, helpRow{[]string{b.keys[0] + " → " + k}, name})
 			}
 		}
 	}
 	sep := i18n.T("help.list_sep")
-	return i18n.F("help.note_ime", strings.Join(alias, sep), strings.Join(dialog, sep), strings.Join(chips, sep), keyOf(inList, actChips))
+	if len(chips) > 0 {
+		rows = append(rows, helpRow{[]string{strings.Join(chipKeys, " ") + " → " + keyOf(inList, actChips)}, i18n.F("help.ime_via_chips", strings.Join(chips, sep))})
+	}
+	if len(dialog) > 0 {
+		rows = append(rows, helpRow{[]string{strings.Join(dialogKeys, " ") + " → " + keyName("enter")}, i18n.F("help.ime_via_dialog", strings.Join(dialog, sep))})
+	}
+	var punct []string
+	for i := range bindings {
+		b := &bindings[i]
+		if b.in&inList == 0 {
+			continue
+		}
+		for _, k := range b.keys[1:] {
+			if !isASCII(k) && !isWide(k) && !slices.Contains(punct, k+" "+b.keys[0]) {
+				punct = append(punct, k+" "+b.keys[0])
+			}
+		}
+	}
+	var lines []string
+	for len(punct) > 0 {
+		n := min(3, len(punct))
+		lines, punct = append(lines, strings.Join(punct[:n], "  ")), punct[n:]
+	}
+	if len(lines) > 0 {
+		rows = append(rows, helpRow{lines, i18n.T("help.ime_punct")})
+	}
+	return rows
+}
+
+// imeKey: the first key of b an IME lets through (an arrow, punctuation or a Ctrl key).
+func imeKey(b *binding) string {
+	for _, k := range b.keys {
+		if !isLetter(k) && !isWide(k) {
+			return keyName(k)
+		}
+	}
+	return keyName(b.keys[0])
+}
+
+// helpName: the action's short name, else its description on the keys page.
+func helpName(a act) string {
+	if k := actName(a); k != "" {
+		return i18n.T(k)
+	}
+	for _, sec := range helpLayout() {
+		for _, h := range sec.rows {
+			if h.s == inList && slices.Contains(h.acts, a) {
+				return i18n.T(h.desc)
+			}
+		}
+	}
+	return ""
 }
 
 // actName: the short name of an action (buttons, footer, the IME note).

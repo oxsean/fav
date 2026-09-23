@@ -587,6 +587,10 @@ func (m *Model) overlayKey(msg tea.KeyPressMsg) tea.Cmd {
 			m.ov.cursor = 0
 		case "G", "end":
 			m.ov.cursor = 1 << 30
+		case "tab", "right", "l":
+			m.turnHelpPage(1)
+		case "shift+tab", "left", "h":
+			m.turnHelpPage(-1)
 		default:
 			m.closeOverlay()
 		}
