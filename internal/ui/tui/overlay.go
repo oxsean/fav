@@ -29,6 +29,7 @@ const (
 	ovMessage
 	ovEdit
 	ovConfirm
+	ovPeek
 )
 
 // ovPad: border + padding columns left of the overlay box; box-local zones add it.
@@ -59,7 +60,8 @@ type overlay struct {
 	confirm   func(*Model)
 	back      func(*Model) // ovConfirm cancel goes back here (nil = close)
 	okLabel   string
-	app       bool // resume dialog: opening in the desktop app is the primary action
+	app       bool   // resume dialog: opening in the desktop app is the primary action
+	armed     string // peek: the digit pressed once, sent on the second press
 
 	msg    capture.Message
 	lines  []string
@@ -244,6 +246,8 @@ func (m *Model) renderOverlay() string {
 		return m.renderEdit()
 	case ovConfirm:
 		return m.renderConfirm()
+	case ovPeek:
+		return m.renderPeek()
 	}
 	return ""
 }
@@ -341,6 +345,8 @@ func (m *Model) ovWidth() int {
 		w = min(m.w-8, 120)
 	case ovEdit:
 		w = min(m.w-8, 100)
+	case ovPeek:
+		w = min(m.w-8, 120)
 	case ovSettings:
 		w = min(m.w-8, 96)
 	}
@@ -631,6 +637,10 @@ func helpGroups() []helpGroup {
 			{[]string{t("help.key_y_resume")}, t("help.y_resume")},
 			{[]string{t("help.key_ide")}, t("help.ide")},
 			{[]string{"X"}, t("help.close_tab")},
+			{[]string{"Z"}, t("help.close_idle")},
+			{[]string{"v"}, t("help.peek")},
+			{[]string{".  。"}, t("help.handled")},
+			{[]string{"H"}, t("help.snooze")},
 		}},
 		{t("help.group.record"), []helpRow{
 			{[]string{"f / *"}, t("help.favorite")},
@@ -839,6 +849,9 @@ func (m *Model) resumeGroups() []btnGroup {
 			bs = append(bs, app)
 		}
 	}
+	if p.Live.PaneID != "" {
+		bs = append(bs, btn{i18n.T("resume.btn_peek"), false, func(mm *Model) { mm.askPeek(mm.ov.rec) }})
+	}
 	if m.resumeCommand() != "" {
 		bs = append(bs, btn{i18n.T("resume.btn_copy"), false, (*Model).copyResume})
 	}
@@ -891,6 +904,9 @@ func (m *Model) doApp() {
 	if m.isLive(r.SessionID) && !r.App {
 		m.flash(i18n.T("resume.app_live"))
 		return
+	}
+	if _, ok := m.live[r.SessionID]; ok {
+		m.markSeen(r.SessionID, true)
 	}
 	m.ov = overlay{}
 	m.flash(i18n.F("resume.opening_app", capture.AppName(r.Provider)))
@@ -1022,6 +1038,9 @@ func (m *Model) pickWorkspace(r *fav.Rec, p capture.Plan) {
 // runPlan carries out a resume plan: focus the running tab, a new Herdr tab, or this terminal (the TUI quits and the caller
 // execs).
 func (m *Model) runPlan(r *fav.Rec, p capture.Plan, noHerdr bool) {
+	if _, ok := m.live[r.SessionID]; ok {
+		m.markSeen(r.SessionID, true) // switching to it is taking it in
+	}
 	if p.Live.TabID == "" && p.Ws == nil {
 		// resuming in this terminal execs over it: quit the TUI and let the caller do it
 		m.finish(Result{Resume: r, NoHerdr: noHerdr})

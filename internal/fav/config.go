@@ -17,6 +17,7 @@ type Config struct {
 	Icons        string `json:"icons"`       // ascii (default) | nerd
 	Mouse        bool   `json:"mouse"`
 	LiveSort     string `json:"live_sort,omitempty"`    // Agents page order: started (default) | group | active
+	Notify       string `json:"notify,omitempty"`       // a running session starts to need you: off (footer only, default) | bell
 	ProjectSort  string `json:"project_sort,omitempty"` // projects page group order: active (default) | count | name
 	IDE          string `json:"ide,omitempty"`          // app name or path for "open in IDE"; empty = Rebased
 	Lang         string `json:"lang,omitempty"`         // "" follows the system | zh | en
@@ -27,6 +28,9 @@ type Config struct {
 
 // ResumeIn values.
 const (
+	NotifyOff  = "off"
+	NotifyBell = "bell"
+
 	ResumeTerminal = "terminal"
 	ResumeApp      = "app"
 	ResumeOrigin   = "origin"

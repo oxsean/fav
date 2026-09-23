@@ -70,6 +70,7 @@ plus a resume button that lands in the right place.
 - **Read**: the right pane shows the session's chat, paged backwards from the end, searchable; you know whether it is the one before opening it.
 - **Resume**: Herdr running → a new tab in its workspace; no Herdr → `exec` in this terminal; already running → focus that tab; background session → `claude attach`. Directory, transcript and branch are checked first.
 - **Desktop apps**: the resume dialog also opens the session in Claude's desktop app or ChatGPT's (Codex); a setting makes the app the default, or only for sessions started there — those cards say `Claude App` / `Codex App`. The button needs the session's working directory to exist and its transcript under the default `~/.claude/projects` / `~/.codex/sessions`, and appears only when the system routes `claude://` / `codex://` to that app (macOS, Windows, and Linux via xdg-mime).
+- **Peek**: in Agents, `v` peeks at a Herdr agent's terminal (refreshed every second — permission questions show there, not in the transcript), `Tab` types a reply sent as its next prompt, and `1`–`3` pressed twice answer a numbered question.
 - **Organise**: todo / doing / done / archived, edit titles and tags, group by project.
 - **Move and self-heal**: moving a project directory rewrites the sessions' cwd, the Claude project directory and `~/.claude.json`; sessions whose directory or transcript is gone get a `!`, the CLI fixes or clears them in bulk, deletes go to a trash you can restore from.
 - **Agents panel**: sessions running right now, merged from three sources (Claude `sessions/*.json`, Codex thread locks, Herdr); works without Herdr.
@@ -84,6 +85,7 @@ curl -fsSL https://github.com/oxsean/fav/releases/latest/download/fav_$(uname -s
 go install github.com/oxsean/fav/cmd/fav@latest
 
 fav install-skill      # links the /fav skill into ~/.claude/skills and ~/.codex/skills
+fav install-hook       # optional: Claude Code tells fav when it asks you something, so Agents flags permission questions without Herdr (fav uninstall-hook removes it)
 fav                    # the first start builds the index in the background; the Sessions tab fills up in seconds
 ```
 
@@ -124,7 +126,7 @@ Four tabs, `Tab` / `1`–`4`:
 | Favorites | `/fav`ed sessions, by last activity (`o` cycles the sort) |
 | Sessions | every session on the machine (fewer than 3 turns hidden by default, `turns:1` shows all) |
 | Projects | grouped by directory (a session in a git worktree goes under its main checkout, its card says `worktree <branch>`; `fav fix` moves the sessions of a removed worktree there): `→` expands, `←` collapses, `→` again shows project info on the right (directory / session count / sources / recent sessions); the group of the directory `fav` was started in opens by itself, scrolled to the top |
-| Agents | who is running now: waiting / working / idle for how long, refreshed every 3 s |
+| Agents | who is running now: waiting / working / idle for how long, how long this turn has run, how full the context is, what the AI said last; refreshed every 3 s. Sessions asking you or finished and unseen are flagged (tab `Agents 5 !2`); `.` marks one handled, `H` snoozes it for an hour |
 
 A typical flow: `/` to search (`webapp oauth last:7d`) or `;` for the chip row to filter by project / tag / source / status / time;
 `↑↓` to the session, the right pane shows its chat (`→` steps through messages, `Enter` opens one in full, `\` searches inside it);
@@ -198,7 +200,7 @@ Numbers follow the filter, so reuse the same directory / query. Without a TTY an
 fav mv <old dir> <new dir>              # same as the TUI's M
 fav rm <id>                             # one session to the trash; every <id> also accepts a session-id prefix
 fav trash [--json]                      # list the trash; --purge removes expired entries, --purge --all empties it (asks)
-fav doctor [--compact]                  # check data files, dead sessions, trash expiry; --compact rewrites the store
+fav doctor [--compact]                  # check data files, dead sessions, trash expiry, agents idle for hours, big old transcripts nobody kept; --compact rewrites the store
 ```
 
 ## Query syntax

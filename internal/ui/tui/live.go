@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"cmp"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -26,6 +27,60 @@ type liveMsg struct {
 
 type liveTickMsg struct{}
 
+type pulseMsg map[string]capture.Pulse
+
+// readPulses reads the transcript tails of the running sessions in the background; unchanged files cost a stat.
+func (m *Model) readPulses() tea.Cmd {
+	paths := map[string]string{}
+	for id := range m.live {
+		if r := m.bySession(id); r != nil && transcript(r) != "" {
+			paths[id] = transcript(r)
+		}
+	}
+	if len(paths) == 0 {
+		return nil
+	}
+	return func() tea.Msg {
+		out := make(pulseMsg, len(paths))
+		for id, p := range paths {
+			if pl, ok := capture.ReadPulse(p); ok {
+				pl.Asking = pl.Asking || capture.HookWaiting(id, pl.Size)
+				out[id] = pl
+			}
+		}
+		return out
+	}
+}
+
+// pulseText: "this turn 12m · context 40%" (Claude: tokens, its transcripts do not record the window) and the last reply.
+func pulseText(p capture.Pulse, l capture.Live, now time.Time) string {
+	var parts []string
+	if l.Status == "working" && !p.TurnAt.IsZero() {
+		parts = append(parts, i18n.F("live.turn", render.ShortDur(now.Sub(p.TurnAt))))
+	}
+	switch {
+	case p.Window > 0:
+		parts = append(parts, i18n.F("live.context_pct", p.Context*100/p.Window))
+	case p.Context > 0:
+		parts = append(parts, i18n.F("live.context_tokens", tokens(p.Context)))
+	}
+	if p.Reply != "" {
+		parts = append(parts, i18n.F("live.reply", p.Reply))
+	}
+	return strings.Join(parts, "  ·  ")
+}
+
+// tokens: 950, 12k, 509k, 1.2M.
+func tokens(n int) string {
+	switch {
+	case n >= 1_000_000:
+		return strconv.FormatFloat(float64(n)/1e6, 'f', 1, 64) + "M"
+	case n >= 1000:
+		return strconv.Itoa(n/1000) + "k"
+	}
+	return strconv.Itoa(n)
+}
+
 func (m *Model) pollLive() tea.Cmd {
 	prev := m.liveHerdr
 	return func() tea.Msg {
@@ -49,15 +104,6 @@ func (m *Model) applyLive(msg liveMsg) {
 			}
 		}
 	}
-	for id, l := range next {
-		if l.Status == "blocked" && m.live[id].Status != "blocked" && m.live != nil {
-			title := l.Title
-			if r := m.bySession(id); r != nil {
-				title = r.Title
-			}
-			m.flash(render.GlyphWarn + i18n.F("live.waiting_flash", render.Truncate(title, 40)))
-		}
-	}
 	changed := len(next) != len(m.live)
 	for id, l := range next {
 		if old, ok := m.live[id]; !ok || old.Status != l.Status {
@@ -65,6 +111,7 @@ func (m *Model) applyLive(msg liveMsg) {
 		}
 	}
 	m.live = next
+	m.checkNeeds()
 	if changed {
 		m.refresh()
 	}
@@ -172,30 +219,67 @@ func (m *Model) liveRows(recs []*fav.Rec) []row {
 	}
 	by := map[int][]*fav.Rec{}
 	for _, r := range recs {
-		l, _ := m.liveOf(r)
-		_, tone := liveLabel(l, m.now)
-		by[tone] = append(by[tone], r)
+		g := m.liveGroup(r)
+		by[g] = append(by[g], r)
 	}
 	var out []row
-	for _, g := range []struct {
-		tone int
-		name string
-	}{{toneBlocked, i18n.T("live.waiting")}, {toneWork, i18n.T("live.working")}, {toneIdle, i18n.T("live.idle")}, {toneDone, i18n.T("live.finished")}} {
-		if len(by[g.tone]) == 0 {
+	for g, name := range liveGroupNames() {
+		if len(by[g]) == 0 {
 			continue
 		}
-		out = append(out, row{group: g.name, count: len(by[g.tone])})
-		for _, r := range by[g.tone] {
+		out = append(out, row{group: name, count: len(by[g])})
+		for _, r := range by[g] {
 			out = append(out, row{rec: r})
 		}
 	}
 	return out
 }
 
+// live groups, most in need of the user first
+const (
+	groupWait = iota
+	groupUnseen
+	groupWork
+	groupIdle
+	groupDone
+)
+
+func liveGroupNames() []string {
+	return []string{i18n.T("live.waiting"), i18n.T("attn.unseen_group"), i18n.T("live.working"), i18n.T("live.idle"), i18n.T("live.finished")}
+}
+
+func (m *Model) liveGroup(r *fav.Rec) int {
+	switch m.need(r.SessionID) {
+	case needWait:
+		return groupWait
+	case needUnseen:
+		return groupUnseen
+	}
+	l, _ := m.liveOf(r)
+	switch _, tone := liveLabel(l, m.now); tone {
+	case toneBlocked: // blocked but handled / snoozed: it still waits
+		return groupWait
+	case toneIdle:
+		return groupIdle
+	case toneDone:
+		return groupDone
+	}
+	return groupWork
+}
+
+// agentsTab: "Agents 5", with "!2" when two of them need the user.
+func agentsTab(n, need int) string {
+	s := "Agents " + strconv.Itoa(n)
+	if need > 0 {
+		s += " !" + strconv.Itoa(need)
+	}
+	return s
+}
+
 func (m *Model) liveSummary() string {
 	n := map[int]int{}
-	for _, l := range m.live {
-		_, tone := liveLabel(l, m.now)
+	for id, l := range m.live {
+		_, tone := m.needLabel(id, l)
 		n[tone]++
 	}
 	var parts []string
@@ -310,6 +394,59 @@ func (m *Model) closeLive() {
 					return herdrDoneMsg{rec: r, focused: true, err: err}
 				}
 				return herdrDoneMsg{rec: r, focused: true, msg: i18n.T("live.closed") + r.Title}
+			}
+		}}
+}
+
+// closeIdle (Z, Agents): close every Herdr tab whose session has been quiet for capture.IdleAfter and has nothing the user
+// has not seen; irreversible, so the dialog starts on Cancel.
+func (m *Model) closeIdle() {
+	type idle struct {
+		tab, title string
+		for_       time.Duration
+	}
+	var list []idle
+	for id, l := range m.live {
+		r := m.bySession(id)
+		if l.TabID == "" || r == nil || l.Status == "working" || l.Status == "blocked" || m.need(id) != needNone {
+			continue
+		}
+		if d := m.now.Sub(r.ActiveAt()); d >= capture.IdleAfter {
+			list = append(list, idle{l.TabID, r.Title, d})
+		}
+	}
+	hours := int(capture.IdleAfter.Hours())
+	if len(list) == 0 {
+		m.flash(i18n.F("live.no_idle", hours))
+		return
+	}
+	sort.Slice(list, func(i, j int) bool { return list[i].for_ > list[j].for_ })
+	lines := []string{i18n.F("live.close_idle_intro", len(list), hours), ""}
+	for i, it := range list {
+		if i == 8 {
+			lines = append(lines, i18n.F("project.more", len(list)-i))
+			break
+		}
+		lines = append(lines, "  "+render.Truncate(it.title, 50)+"  ·  "+render.ShortDur(it.for_))
+	}
+	lines = append(lines, "", i18n.T("live.close_hint"))
+	tabs := make([]string, len(list))
+	for i, it := range list {
+		tabs[i] = it.tab
+	}
+	m.ov = overlay{kind: ovConfirm, title: i18n.T("live.close_idle_title"), focus: 1, okLabel: i18n.F("live.btn_close_n", len(list)), lines: lines,
+		confirm: func(m *Model) {
+			m.pending = func() tea.Msg {
+				closed := 0
+				var first error
+				for _, t := range tabs {
+					if err := herdr.CloseTab(t); err != nil {
+						first = cmp.Or(first, err)
+						continue
+					}
+					closed++
+				}
+				return herdrDoneMsg{msg: i18n.F("live.closed_idle", closed), err: first}
 			}
 		}}
 }

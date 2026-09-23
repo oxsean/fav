@@ -94,6 +94,12 @@ func run(args []string) error {
 		return cmdFzfTab(args)
 	case "doctor":
 		return cmdDoctor(args)
+	case "install-hook":
+		return cmdInstallHook(args)
+	case "uninstall-hook":
+		return cmdUninstallHook(args)
+	case hookVerb:
+		return cmdHookEvent(args)
 	case "install-skill":
 		return cmdInstallSkill(args)
 	case "uninstall-skill":

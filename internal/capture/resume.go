@@ -82,6 +82,9 @@ type Check struct {
 	Text string
 }
 
+// contextNearlyFull: percent of the context window above which a resume starts by compacting.
+const contextNearlyFull = 80
+
 func Checks(r *fav.Rec) []Check {
 	var out []Check
 
@@ -100,6 +103,10 @@ func Checks(r *fav.Rec) []Check {
 		out = append(out, Check{OK: true, Text: i18n.T("resume.check.transcript_ok")})
 	} else {
 		out = append(out, Check{Text: i18n.T("resume.check.transcript_gone")})
+	}
+
+	if p, ok := ReadPulse(r.TranscriptPath); ok && p.Window > 0 && p.Context*100 >= p.Window*contextNearlyFull {
+		out = append(out, Check{Warn: true, Text: i18n.F("resume.check.context_full", p.Context*100/p.Window)})
 	}
 
 	if r.CodexArchived {

@@ -76,6 +76,14 @@ func cmdDoctor(args []string) error {
 			printBroken(list)
 			fmt.Print(i18n.T("cli.doctor.suggest_fix"))
 		}
+		live := capture.LiveSessions()
+		if hookInstalled() {
+			fmt.Print(i18n.T("cli.doctor.hook_on"))
+		} else {
+			fmt.Print(i18n.T("cli.doctor.hook_off"))
+		}
+		printIdleAgents(s, idx, live)
+		printBigStale(s, idx, live)
 	}
 
 	if days := loadConfig().TrashDays; days > 0 {

@@ -96,6 +96,20 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.flash(note)
 
+	case peekMsg:
+		return m, m.applyPeek(msg)
+	case peekTickMsg:
+		if m.ov.kind == ovPeek && m.ov.title == msg.pane {
+			return m, peekRead(msg.pane)
+		}
+		return m, nil
+	case peekSentMsg:
+		if msg.err != nil {
+			m.flash(msg.err.Error())
+		} else {
+			m.flash(i18n.F("peek.sent", msg.what))
+		}
+		return m, nil
 	case appProbedMsg:
 		if m.ov.kind == ovResume && m.ov.focus < 0 {
 			m.ov.app = m.appFirst(m.ov.rec, m.ov.plan)
@@ -115,7 +129,10 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case liveMsg:
 		m.applyLive(msg)
-		cmd = tea.Tick(liveEvery, func(time.Time) tea.Msg { return liveTickMsg{} })
+		cmd = tea.Batch(tea.Tick(liveEvery, func(time.Time) tea.Msg { return liveTickMsg{} }), m.readPulses())
+
+	case pulseMsg:
+		m.applyPulses(msg)
 
 	case liveTickMsg:
 		cmd = tea.Batch(m.pollLive(), m.refreshChat())
@@ -418,6 +435,10 @@ func (m *Model) navKey(msg tea.KeyMsg) tea.Cmd {
 		}
 	case "f", "*": // *: non-letter, IME-safe
 		m.toggleFavorite()
+	case ".", "。":
+		m.handleAttn(false)
+	case "H":
+		m.handleAttn(true)
 	case " ", "ctrl+g":
 		if m.current() == nil {
 			m.toggleGroup()
@@ -470,6 +491,10 @@ func (m *Model) navKey(msg tea.KeyMsg) tea.Cmd {
 		m.askResume()
 	case "X":
 		m.closeLive()
+	case "Z":
+		if m.view == viewLive {
+			m.closeIdle()
+		}
 	case "r":
 		m.askResume()
 	case "t":
@@ -477,6 +502,10 @@ func (m *Model) navKey(msg tea.KeyMsg) tea.Cmd {
 	case "p":
 		m.pickProjects()
 	case "v":
+		if m.view == viewLive {
+			m.askPeek(m.current())
+			return nil
+		}
 		m.cycleProvider()
 	case "s":
 		m.pickStatus()
@@ -556,6 +585,8 @@ func (m *Model) overlayKey(msg tea.KeyMsg) tea.Cmd {
 	case ovConfirm:
 		m.confirmKey(msg.String())
 		return nil
+	case ovPeek:
+		return m.peekKey(msg)
 	case ovMessage:
 		room := max(1, m.h-4-6)
 		switch msg.String() {
@@ -655,6 +686,10 @@ func (m *Model) overlayKey(msg tea.KeyMsg) tea.Cmd {
 			m.pending = m.openEdit()
 		case "n":
 			m.editTitle()
+		case "v":
+			if m.ov.plan.Live.PaneID != "" {
+				m.askPeek(m.ov.rec)
+			}
 		case "esc", "q":
 			m.closeOverlay()
 		}

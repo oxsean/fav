@@ -23,6 +23,9 @@ type Live struct {
 	BackgroundID  string // short id for claude attach
 }
 
+// IdleAfter: a running agent whose transcript has not been written for this long counts as idle (cleanup suggestions).
+const IdleAfter = 4 * time.Hour
+
 // LiveSessions merges Claude sessions/*.json, Codex thread locks and Herdr by session id; an unavailable source counts as empty.
 func LiveSessions() map[string]Live {
 	local := LocalLive()

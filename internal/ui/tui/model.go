@@ -127,12 +127,15 @@ type Model struct {
 	probeSeq   int
 
 	live      map[string]capture.Live
-	liveHerdr map[string]capture.Live // previous Herdr result, needed for "since when"
-	lastWheel time.Time               // last wheel event; no index swap while scrolling
-	heldIdx   *index.Index            // index that arrived mid-scroll, applied once scrolling stops
-	idxGen    int                     // +1 after a project move: refreshes started before it return stale snapshots
-	idx       *index.Index            // index snapshot, replaced whole by the background refresh
-	nFav      int                     // tab totals, query-independent, recomputed when the index or the store changes
+	liveHerdr map[string]capture.Live  // previous Herdr result, needed for "since when"
+	pulse     map[string]capture.Pulse // running sessions' last reply / turn start / context, read after each live poll
+	attn      map[string]attnEntry     // what the user has taken in of each running session (attention.json)
+	lastNeed  map[string]int           // need() at the last check: a change to "needs you" is announced once
+	lastWheel time.Time                // last wheel event; no index swap while scrolling
+	heldIdx   *index.Index             // index that arrived mid-scroll, applied once scrolling stops
+	idxGen    int                      // +1 after a project move: refreshes started before it return stale snapshots
+	idx       *index.Index             // index snapshot, replaced whole by the background refresh
+	nFav      int                      // tab totals, query-independent, recomputed when the index or the store changes
 	nAll      int
 	nProj     int
 	unfav     []*fav.Rec          // unfavorited sessions from the index (empty ID); objects survive refreshes
@@ -157,7 +160,7 @@ func New(s *fav.Store, idx *index.Index, cfg fav.Config, initialQuery string) *M
 	ti.CharLimit = 200
 
 	m := &Model{
-		store: s, idx: idx, cfg: cfg, search: ti, open: map[string]bool{},
+		store: s, idx: idx, cfg: cfg, search: ti, open: map[string]bool{}, attn: loadAttn(),
 		w: 80, h: 24, now: time.Now(), chipFocus: -1, chat: newChatSearch(),
 		view: view(indexOf(views, cfg.DefaultView)), sortBy: sortBy(indexOf(sorts, cfg.Sort)), wheelStep: max(1, cfg.WheelStep),
 	}

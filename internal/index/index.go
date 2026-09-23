@@ -67,6 +67,7 @@ type Session struct {
 	// Repo: the main checkout when the session ran in a linked git worktree (worktrees.go)
 	Repo   string
 	Files  map[string]int
+	Size   int64 // bytes of all its transcripts
 	wtRepo string
 	remote string
 }
@@ -623,6 +624,7 @@ func (idx *Index) Sessions() []*Session {
 		s.App = s.App || f.App
 		s.Turns += f.Turns
 		s.Replies += f.Replies
+		s.Size += f.Size
 		if f.Branch != "" {
 			s.Branch = f.Branch
 		}

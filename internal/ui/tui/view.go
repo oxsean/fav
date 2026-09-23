@@ -74,7 +74,7 @@ func (m *Model) baseLines() []string {
 }
 
 func (m *Model) header() string {
-	names := []string{i18n.T("view.favorites") + " " + strconv.Itoa(m.nFav), i18n.T("view.sessions") + " " + strconv.Itoa(m.nAll), i18n.T("label.projects") + " " + strconv.Itoa(m.nProj), "Agents " + strconv.Itoa(len(m.live))}
+	names := []string{i18n.T("view.favorites") + " " + strconv.Itoa(m.nFav), i18n.T("view.sessions") + " " + strconv.Itoa(m.nAll), i18n.T("label.projects") + " " + strconv.Itoa(m.nProj), agentsTab(len(m.live), m.needCount())}
 	var tabs string
 	var widths []int
 	for i, n := range names {
@@ -496,10 +496,13 @@ func (m *Model) cardBox(r *fav.Rec, sel bool, w int) []string {
 	if r.Turns > 0 {
 		meta += "  ·  " + i18n.F("card.turns", r.Turns)
 	}
-	liveText, tone := "", 0
+	liveText, tone, pulse := "", 0, ""
 	if l, ok := m.liveOf(r); ok && m.view == viewLive { // live status only on the Agents page
-		liveText, tone = liveLabel(l, m.now)
+		liveText, tone = m.needLabel(r.SessionID, l)
 		meta += "  ·  " + liveText
+		if p, ok := m.pulse[r.SessionID]; ok {
+			pulse = pulseText(p, l, m.now)
+		}
 	}
 	if r.ID != "" && r.Status != fav.StatusDefault {
 		meta += "  ·  " + render.Glyph(r.Status) + " " + render.StatusLabel(r.Status)
@@ -517,6 +520,9 @@ func (m *Model) cardBox(r *fav.Rec, sel bool, w int) []string {
 	tags := fit(tagString(r.Tags), inner)
 	if !r.Favorite() && len(r.Tags) == 0 {
 		tags = fit(shortenHome(r.Cwd), inner) // cwd when there are no tags
+	}
+	if pulse != "" { // Agents: what it said last, how long this turn has run, how full the context is
+		tags = fit(pulse, inner)
 	}
 	snip, isHit := m.msgHit(r)
 	if isHit && m.msgMode() { // message search: hit count and the best hit instead of tags
@@ -967,6 +973,12 @@ func (m *Model) mainKeys(r *fav.Rec) footGroup {
 		g = append(g, fk("footer.all_hits", 2), fk("footer.jump", 4))
 	case m.view == viewLive:
 		g = append(g, fk("footer.space_switch", 2))
+		if l, ok := m.liveOf(r); ok && l.PaneID != "" {
+			g = append(g, fk("footer.peek", 3))
+		}
+		if m.need(r.SessionID) != needNone {
+			g = append(g, fk("footer.handled", 3))
+		}
 	default:
 		if d, t := m.broken(r); !d && !t {
 			g = append(g, fk("footer.space_resume", 2))

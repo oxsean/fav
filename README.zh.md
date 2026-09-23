@@ -68,6 +68,8 @@ fav 不是新的聊天客户端，不替代 Claude / Codex，也不上传任何�
 - **看**：右栏是这条会话的对话，从尾往前翻，句内可搜；不用打开就知道是不是它。
 - **恢复**：Herdr 在跑 → 它的 workspace 里开新 tab；没有 → 当前终端 `exec` 接管；已经在跑 → 切 tab；后台会话 → `claude attach`。恢复前逐项校验目录、记录文件、分支。
 - **桌面 App**：恢复框里也能在 Claude 桌面版或 ChatGPT 桌面版（Codex）里打开这个会话；设置里可以让 App 成为默认，或只对在 App 里建的会话默认用 App——这些会话的卡片标着 `Claude App`、`Codex App`。需要会话的工作目录还在、记录文件在默认的 `~/.claude/projects` 或 `~/.codex/sessions` 下，并且系统把 `claude://`、`codex://` 交给对应 App 处理时才显示这个按钮（macOS、Windows，Linux 走 xdg-mime）。
+- **瞄一眼**：Agents 页按 `v` 瞄一眼 Herdr 里 agent 的终端（每秒刷新；权限确认只出现在终端里，记录文件里没有），`Tab` 输入一句作为它的下一句话发过去，`1`–`3` 按两次回答编号选项。
+- **清理空闲**：Agents 页按 `Z` 一次关掉 4 小时没写东西、也没有没看过的输出的 Herdr tab（先确认，焦点在取消）。
 - **整理**：待办 / 进行中 / 已完成 / 已归档四态，改标题标签，按项目分组。
 - **搬家与自愈**：项目目录移动后会话一起迁（记录里的 cwd、Claude 项目目录、`~/.claude.json` 全改）；目录或记录文件没了的会话标 `!`，命令行批量修复或清理，删除进回收站可还原。
 - **Agents 面板**：此刻在跑的会话，三源合并（Claude `sessions/*.json`、Codex 线程锁、Herdr），不装 Herdr 也能用。
@@ -82,6 +84,7 @@ curl -fsSL https://github.com/oxsean/fav/releases/latest/download/fav_$(uname -s
 go install github.com/oxsean/fav/cmd/fav@latest
 
 fav install-skill                            # /fav Skill 装进 ~/.claude/skills 和 ~/.codex/skills
+fav install-hook                             # 可选：Claude Code 问你问题时告诉 fav，没有 Herdr 也能在 Agents 页标出权限确认（fav uninstall-hook 删掉）
 fav                                          # 第一次启动后台建索引，几秒后「会话」页就有你所有历史
 ```
 
@@ -122,7 +125,7 @@ fav tui --no-mouse
 | 收藏 | `/fav` 过的，按最后活跃排（`o` 切排序） |
 | 会话 | 本机全部会话（短于 3 轮的默认不列，`turns:1` 全列） |
 | 项目 | 按目录分组（git worktree 里的会话归到主仓库，卡片标 `worktree <分支>`；worktree 删了，`fav fix` 把会话移回主仓库）：`→` 展开、`←` 折叠、再 `→` 到右栏看项目信息（目录 / 会话数 / 来源 / 最近会话）；在哪个目录里启动 `fav`，那个项目的分组自动展开并滚到顶上 |
-| Agents | 现在谁在跑：等你 / 工作中 / 空闲多久，每 3 秒刷 |
+| Agents | 现在谁在跑：等你 / 工作中 / 空闲多久，本轮跑了多久、上下文用了多少、AI 最后说了什么，每 3 秒刷；等你回答、跑完了还没看的会提醒（标签页 `Agents 5 !2`），`.` 标已处理、`H` 暂缓 1 小时 |
 
 一条典型流程：`/` 搜（`webapp oauth last:7d`）或 `;` 进 chip 行按项目 / 标签 / 来源 / 状态 / 时间筛；
 `↑↓` 挑到那条，右栏就是它的对话（`→` 进去逐句看，`Enter` 全文，`\` 在对话里找）；
@@ -195,7 +198,7 @@ fav trash --restore 01a07dcf
 fav mv <旧目录> <新目录>                 # 等于 TUI 的 M
 fav rm <id>                              # 单条进回收站；所有 <id> 也认会话 id 前缀
 fav trash [--json]                      # 看回收站；--purge 清过期的，--purge --all 清空（会确认）
-fav doctor [--compact]                  # 体检：数据文件、失效会话、回收站过期；--compact 压实
+fav doctor [--compact]                  # 体检：数据文件、失效会话、回收站过期、空闲几小时的 agent、没人留的大文件；--compact 压实
 ```
 
 ## 查询语法

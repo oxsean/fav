@@ -32,6 +32,8 @@ var trashOpts = []int{7, 30, 90, 0}
 var outputOpts = []int{0, 3, 10, 30}
 var resumeIns = []string{fav.ResumeTerminal, fav.ResumeApp, fav.ResumeOrigin}
 
+var notifies = []string{fav.NotifyOff, fav.NotifyBell}
+
 func indexOf[T comparable](xs []T, x T) int {
 	for i, v := range xs {
 		if v == x {
@@ -92,6 +94,9 @@ func settingsTable() []setting {
 		{i18n.T("settings.trash_days"), []string{i18n.T("settings.trash_7"), i18n.T("settings.trash_30"), i18n.T("settings.trash_90"), i18n.T("settings.trash_forever")},
 			func(m *Model) int { return indexOf(trashOpts, m.cfg.TrashDays) },
 			func(m *Model, i int) tea.Cmd { m.cfg.TrashDays = trashOpts[i]; return nil }, nil, ""},
+		{i18n.T("settings.notify"), []string{i18n.T("settings.notify_off"), i18n.T("settings.notify_bell")},
+			func(m *Model) int { return max(0, indexOf(notifies, m.cfg.Notify)) },
+			func(m *Model, i int) tea.Cmd { m.cfg.Notify = notifies[i]; return nil }, nil, ""},
 		{i18n.T("settings.resume_in"), []string{i18n.T("settings.resume_terminal"), i18n.T("settings.resume_app"), i18n.T("settings.resume_origin")},
 			func(m *Model) int { return indexOf(resumeIns, m.cfg.ResumeIn) },
 			func(m *Model, i int) tea.Cmd { m.cfg.ResumeIn = resumeIns[i]; return nil }, nil, ""},

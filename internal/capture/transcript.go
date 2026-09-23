@@ -24,6 +24,11 @@ type transcriptLine struct {
 	IsSummary  bool      `json:"isCompactSummary"` // Claude: the recap written when the context ran out
 	Message    struct {
 		Content json.RawMessage `json:"content"`
+		Usage   *struct {
+			Input         int `json:"input_tokens"`
+			CacheCreation int `json:"cache_creation_input_tokens"`
+			CacheRead     int `json:"cache_read_input_tokens"`
+		} `json:"usage"` // Claude assistant lines: what this request sent, i.e. the context
 	} `json:"message"`
 	Payload struct {
 		Type    string `json:"type"`
@@ -35,6 +40,12 @@ type transcriptLine struct {
 		Arguments string          `json:"arguments"` // Codex function_call: JSON string
 		Output    json.RawMessage `json:"output"`    // Codex function_call_output / custom_tool_call_output: string or block array
 		Input     string          `json:"input"`     // Codex custom_tool_call (apply_patch): free text
+		Info      *struct {
+			Last struct {
+				Input int `json:"input_tokens"`
+			} `json:"last_token_usage"`
+			Window int `json:"model_context_window"`
+		} `json:"info"` // Codex token_count
 	} `json:"payload"`
 }
 
