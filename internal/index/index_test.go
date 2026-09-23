@@ -237,3 +237,40 @@ func TestClaudeContinuationChainIsOneSession(t *testing.T) {
 		t.Fatalf("record should follow the chain: id=%s path=%s turns=%d", r.SessionID, r.TranscriptPath, r.Turns)
 	}
 }
+
+func TestAgentSessionsAreOnlyTheSkippedOnes(t *testing.T) {
+	dir := t.TempDir()
+	proj := filepath.Join(dir, "projects", "-tmp-p")
+	if err := os.MkdirAll(proj, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CLAUDE_CONFIG_DIR", dir)
+	t.Setenv("CODEX_HOME", filepath.Join(dir, "codex"))
+	write := func(name, entrypoint string) {
+		lines := []string{
+			`{"type":"user","entrypoint":"` + entrypoint + `","cwd":"/tmp/p","timestamp":"2026-09-22T10:00:00Z","message":{"role":"user","content":"hello there"}}`,
+			`{"type":"assistant","timestamp":"2026-09-22T10:00:01Z","message":{"role":"assistant","content":[{"type":"text","text":"hi"}]}}`,
+		}
+		if err := os.WriteFile(filepath.Join(proj, name), []byte(strings.Join(lines, "\n")+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("11111111-1111-1111-1111-111111111111.jsonl", "cli")
+	write("22222222-2222-2222-2222-222222222222.jsonl", "sdk-cli")
+
+	idx, err := OpenAt(filepath.Join(dir, "sessions.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	idx, _ = idx.Refresh()
+	if got := len(idx.Sessions()); got != 1 {
+		t.Fatalf("the normal listing keeps only the cli session, got %d", got)
+	}
+	agents := idx.AgentSessions()
+	if len(agents) != 1 || agents[0].SessionID != "22222222-2222-2222-2222-222222222222" {
+		t.Fatalf("AgentSessions should return the sdk session alone, got %+v", agents)
+	}
+	if want := "p: hello there"; agents[0].DisplayTitle() != want {
+		t.Fatalf("an untitled agent run is named after its directory and first prompt: %q", agents[0].DisplayTitle())
+	}
+}

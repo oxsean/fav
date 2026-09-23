@@ -150,3 +150,19 @@ func TestParseWhen(t *testing.T) {
 		t.Error("无法解析的时间应返回 false，而不是悄悄给个零值")
 	}
 }
+
+func TestStatusAgentIsItsOwnListing(t *testing.T) {
+	q := Parse("status:agent kol")
+	if q.Status != StatusAgent || len(q.Words) != 1 {
+		t.Fatalf("parse gave status=%q words=%v", q.Status, q.Words)
+	}
+	r := &Rec{Provider: ProviderClaude, SessionID: "x", Title: "kol-13 run", Cwd: "/tmp/kol-13"}
+	r.Prepare()
+	q.All = true
+	if !q.Match(r) {
+		t.Fatal("an agent row with a matching keyword should pass")
+	}
+	if Parse("status:agent").Match(&Rec{Provider: ProviderClaude, SessionID: "y"}) {
+		t.Fatal("without All the listing stays empty (agent rows never come from the store)")
+	}
+}

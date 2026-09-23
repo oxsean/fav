@@ -208,3 +208,34 @@ func distinct(recs []*fav.Rec, key func(*fav.Rec) string) int {
 	}
 	return len(seen)
 }
+
+const (
+	projSortActive = "active"
+	projSortCount  = "count"
+	projSortName   = "name"
+)
+
+var projSorts = []string{projSortActive, projSortCount, projSortName}
+
+func projSortLabel(name string) string {
+	switch name {
+	case projSortCount:
+		return i18n.T("sort.count")
+	case projSortName:
+		return i18n.T("sort.name")
+	}
+	return i18n.T("sort.active")
+}
+
+// orderGroups: the projects view orders groups by their newest record (the record order), by how many sessions they hold, or by name.
+func orderGroups(names []string, by map[string][]*fav.Rec, mode string) []string {
+	switch mode {
+	case projSortCount:
+		sort.SliceStable(names, func(i, j int) bool { return len(by[names[i]]) > len(by[names[j]]) })
+	case projSortName:
+		sort.SliceStable(names, func(i, j int) bool {
+			return strings.ToLower(names[i]) < strings.ToLower(names[j])
+		})
+	}
+	return names
+}

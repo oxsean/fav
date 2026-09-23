@@ -21,7 +21,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.search.Width = max(10, m.w-6)
 
 	case tea.MouseMsg:
-		m.handleMouse(msg)
+		cmd = m.handleMouse(msg)
+
+	case wheelTickMsg:
+		m.wheelTick = false
+		m.applyWheel()
 
 	case tea.KeyMsg:
 		if isMouseFragment(msg) {
@@ -390,12 +394,14 @@ func (m *Model) navKey(msg tea.KeyMsg) tea.Cmd {
 	case "d":
 		m.pickDate()
 	case "o", "ctrl+o":
-		if m.view == viewLive {
+		switch m.view {
+		case viewLive:
 			m.cfg.LiveSort = liveSorts[(indexOf(liveSorts, m.cfg.LiveSort)+1)%len(liveSorts)]
-			if err := m.cfg.Save(); err != nil {
-				m.flash(i18n.T("flash.settings_not_saved") + err.Error())
-			}
-		} else {
+			m.saveConfig()
+		case viewProjects:
+			m.cfg.ProjectSort = projSorts[(indexOf(projSorts, m.cfg.ProjectSort)+1)%len(projSorts)]
+			m.saveConfig()
+		default:
 			m.sortBy = m.sortBy.next()
 		}
 		m.refresh()
@@ -612,7 +618,12 @@ func (m *Model) overlayKey(msg tea.KeyMsg) tea.Cmd {
 	return cmd
 }
 
-func (m *Model) handleMouse(msg tea.MouseMsg) {
+type wheelTickMsg struct{}
+
+// wheelFrame: wheel events are collected and applied once per frame, so a flood costs one render, not thousands.
+const wheelFrame = 16 * time.Millisecond
+
+func (m *Model) handleMouse(msg tea.MouseMsg) tea.Cmd {
 	switch msg.Button {
 	case tea.MouseButtonWheelUp, tea.MouseButtonWheelDown:
 		dir := 1
@@ -620,18 +631,18 @@ func (m *Model) handleMouse(msg tea.MouseMsg) {
 			dir = -1
 		}
 		m.lastWheel = time.Now()
-		m.reuseFrame = !m.wheel(dir, msg.X)
-		if traceQ != nil {
-			if m.reuseFrame {
-				tracef("wheel %+d acc=%d -", dir, m.wheelAcc)
-			} else {
-				tracef("wheel %+d x=%d,%d acc=%d moved cursor=%d ov=%d/%d %s", dir, msg.X, msg.Y, m.wheelAcc, m.cursor, m.ov.kind, m.ov.cursor, m.traceChat())
-			}
+		m.wheelPend += dir
+		m.wheelX = msg.X
+		m.reuseFrame = true
+		if m.wheelTick {
+			return nil
 		}
+		m.wheelTick = true
+		return tea.Tick(wheelFrame, func(time.Time) tea.Msg { return wheelTickMsg{} })
 	case tea.MouseButtonLeft:
 		m.mouseSelect(msg)
 		if msg.Action != tea.MouseActionPress {
-			return
+			return nil
 		}
 		m.notice = ""
 		if act := m.hit(msg.X, msg.Y); act != nil {
@@ -642,9 +653,27 @@ func (m *Model) handleMouse(msg tea.MouseMsg) {
 			m.mouseSelect(msg) // some terminals report release as key none
 		}
 	}
+	return nil
 }
 
 // isMouseFragment recognises SGR mouse sequences split by bubbletea's 256-byte reads ("[<64;33;12M") that arrive as keys; they are dropped.
+func (m *Model) applyWheel() {
+	n, x := m.wheelPend, m.wheelX
+	m.wheelPend = 0
+	dir := 1
+	if n < 0 {
+		dir, n = -1, -n
+	}
+	moved := false
+	for i := 0; i < n; i++ {
+		moved = m.wheel(dir, x) || moved
+	}
+	m.reuseFrame = !moved
+	if traceQ != nil {
+		tracef("wheel %+d x=%d acc=%d moved=%v cursor=%d ov=%d/%d %s", dir*n, x, m.wheelAcc, moved, m.cursor, m.ov.kind, m.ov.cursor, m.traceChat())
+	}
+}
+
 func isMouseFragment(k tea.KeyMsg) bool {
 	if k.Type != tea.KeyRunes {
 		return false
@@ -688,7 +717,11 @@ func (m *Model) wheel(dir, x int) bool {
 		return false
 	}
 	if m.ov.kind == ovMessage || m.ov.kind == ovHelp {
-		m.ov.cursor += dir * m.wheelStep // clamped in render
+		n := min(max(m.ov.cursor+dir*m.wheelStep, 0), m.ov.scrollMax)
+		if n == m.ov.cursor {
+			return false
+		}
+		m.ov.cursor = n
 		return true
 	}
 	if m.ov.active() {
@@ -800,6 +833,12 @@ func (m *Model) pickProjects() {
 			}
 			m.setQuery(toks, hasPrefix("project:"))
 		})
+}
+
+func (m *Model) saveConfig() {
+	if err := m.cfg.Save(); err != nil {
+		m.flash(i18n.T("flash.settings_not_saved") + err.Error())
+	}
 }
 
 func (m *Model) cycleProvider() {

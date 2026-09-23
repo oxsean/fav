@@ -23,6 +23,7 @@ func (m *Model) pickStatus() {
 		{name: "archived", label: i18n.T("status.archived")},
 		{name: "all", label: i18n.T("label.all")},
 		{name: fav.StatusTrash, label: i18n.T("status.trash")},
+		{name: fav.StatusAgent, label: i18n.T("status.agent")},
 	}
 	m.openPicker(i18n.T("picker.status_title"), "", items, false, []string{q.Status},
 		func(m *Model, chosen []string) {
@@ -35,6 +36,26 @@ func (m *Model) pickStatus() {
 }
 
 // trashRecs turns the trash manifest into cards; objects are reused per session so the cursor can follow them.
+// agentRecs: one-shot SDK / exec / sub-agent sessions, which no other listing shows; objects are reused across refreshes.
+func (m *Model) agentRecs(q fav.Query) []*fav.Rec {
+	if m.agents == nil {
+		m.agents = map[string]*fav.Rec{}
+	}
+	q.Status, q.All, q.Turns = "all", true, 0
+	var out []*fav.Rec
+	for _, ss := range m.idx.AgentSessions() {
+		r := m.agents[ss.Key()]
+		if r == nil {
+			r = ss.Rec()
+			m.agents[ss.Key()] = r
+		}
+		if q.Match(r) {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
 func (m *Model) trashRecs(q fav.Query) []*fav.Rec {
 	entries, err := fav.LoadTrash()
 	if err != nil {

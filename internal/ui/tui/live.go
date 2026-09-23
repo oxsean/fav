@@ -131,6 +131,9 @@ func (m *Model) synthLive(q fav.Query) []*fav.Rec {
 		if r.Title == "" {
 			r.Title = i18n.F("live.just_started", id[:min(8, len(id))])
 		}
+		if r.TranscriptPath == "" {
+			r.TranscriptPath = m.idx.Transcript(id)
+		}
 		r.Prepare()
 		if q.Match(r) {
 			out = append(out, r)

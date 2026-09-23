@@ -56,6 +56,8 @@ func run(args []string) error {
 		return cmdShow(args)
 	case "preview":
 		return cmdPreview(args)
+	case "open":
+		return cmdOpen(args)
 	case "edit":
 		return cmdEdit(args)
 	case "status":
@@ -156,8 +158,13 @@ func pick(s *fav.Store, ref string) (*fav.Rec, error) {
 	if hit == nil {
 		for id, l := range capture.LiveSessions() {
 			if id == ref || strings.HasPrefix(id, ref) {
-				hit = synthLive(id, l)
+				hit = synthLive(id, l, idx.Transcript(id))
 			}
+		}
+	}
+	if hit == nil {
+		if f := idx.FileByPrefix(ref); f != nil {
+			hit = f.Rec()
 		}
 	}
 	if hit == nil {
@@ -379,9 +386,12 @@ func refreshed(idx *index.Index) *index.Index {
 // keep is the key of the row just acted on: it stays until the next reload even when it no longer matches,
 // so the action can be undone (the TUI's pin).
 func sessionRecs(s *fav.Store, idx *index.Index, expr, keep string) []*fav.Rec {
-	all := append(idx.Attach(s, nil), s.All()...)
 	q := fav.Parse(expr)
 	q.All = true
+	all := agentRecs(idx, q)
+	if all == nil {
+		all = append(idx.Attach(s, nil), s.All()...)
+	}
 	if q.Status == "live" {
 		live := capture.LiveSessions()
 		q.Live = func(id string) bool { _, ok := live[id]; return ok }
@@ -394,6 +404,18 @@ func sessionRecs(s *fav.Store, idx *index.Index, expr, keep string) []*fav.Rec {
 	}
 	sort.SliceStable(recs, func(i, j int) bool { return lastAt(recs[i]).After(lastAt(recs[j])) })
 	return recs
+}
+
+// agentRecs: the rows of status:agent, nil for every other query.
+func agentRecs(idx *index.Index, q fav.Query) []*fav.Rec {
+	if q.Status != fav.StatusAgent {
+		return nil
+	}
+	out := []*fav.Rec{}
+	for _, ss := range idx.AgentSessions() {
+		out = append(out, ss.Rec())
+	}
+	return out
 }
 
 func kept(r *fav.Rec, keep string) bool { return keep != "" && !r.Deleted && render.LineKey(r) == keep }

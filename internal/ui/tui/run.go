@@ -7,9 +7,13 @@ import (
 	"github.com/oxsean/fav/internal/index"
 )
 
-func Run(s *fav.Store, idx *index.Index, cfg fav.Config, initialQuery string, mouse bool) (Result, error) {
+func Run(s *fav.Store, idx *index.Index, cfg fav.Config, initialQuery string, focus *fav.Rec, mouse bool) (Result, error) {
 	m := New(s, idx, cfg, initialQuery)
+	m.Focus(focus)
 	opts := []tea.ProgramOption{tea.WithAltScreen()}
+	if in := terminalInput(); in != nil {
+		opts = append(opts, tea.WithInput(in))
+	}
 	if mouse && cfg.Mouse {
 		// with the mouse on, native terminal selection needs Shift (Option on iTerm2), or --no-mouse
 		opts = append(opts, tea.WithMouseCellMotion())

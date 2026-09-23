@@ -75,6 +75,9 @@ type Model struct {
 	lastTime   time.Time
 	wheelAcc   int
 	wheelStep  int
+	wheelPend  int  // wheel events not yet applied: some terminals send one per pixel, a trackpad fling is thousands
+	wheelX     int  // column of the last wheel event
+	wheelTick  bool // a wheelTickMsg is scheduled
 	reuseFrame bool // nothing changed: View returns the previous frame
 	lastFrame  string
 	sel        selection
@@ -128,7 +131,9 @@ type Model struct {
 	nFav      int                     // tab totals, query-independent, recomputed when the index or the store changes
 	nAll      int
 	nProj     int
-	unfav     []*fav.Rec // unfavorited sessions from the index (empty ID); objects survive refreshes
+	unfav     []*fav.Rec          // unfavorited sessions from the index (empty ID); objects survive refreshes
+	extra     *fav.Rec            // a session opened by id that the lists would not show (fav open)
+	agents    map[string]*fav.Rec // status:agent rows, by session key
 	// a just-edited record stays in place until the cursor leaves, the filter or the tab changes
 	pin     *fav.Rec
 	pinKey  string
@@ -151,11 +156,34 @@ func New(s *fav.Store, idx *index.Index, cfg fav.Config, initialQuery string) *M
 		w: 80, h: 24, now: time.Now(), chipFocus: -1, chat: newChatSearch(),
 		view: view(indexOf(views, cfg.DefaultView)), sortBy: sortBy(indexOf(sorts, cfg.Sort)), wheelStep: max(1, cfg.WheelStep),
 	}
+	setWheelTuning(m.wheelStep, cfg.WheelSpeed)
 	m.startDir, _ = os.Getwd()
 	m.unfav = idx.Attach(s, nil)
 	m.recount()
 	m.refresh()
 	return m
+}
+
+// Focus opens the sessions view on r (or the list's own object for that session) with the right pane active.
+func (m *Model) Focus(r *fav.Rec) {
+	if r == nil {
+		return
+	}
+	if have := m.bySession(r.SessionID); have != nil {
+		r = have
+	} else {
+		m.extra = r
+	}
+	m.view = viewSessions
+	m.search.SetValue("")
+	m.refresh()
+	for i, row := range m.rows {
+		if row.rec == r {
+			m.cursor = i
+			break
+		}
+	}
+	m.pane = paneChat
 }
 
 func (m *Model) Init() tea.Cmd {
@@ -295,11 +323,16 @@ func (m *Model) refresh() {
 	recs := m.store.Query(q)
 	if q.Status == fav.StatusTrash {
 		recs = m.trashRecs(q)
+	} else if q.Status == fav.StatusAgent {
+		recs = m.agentRecs(q)
 	} else if q.All {
 		for _, r := range m.unfav {
 			if q.Match(r) && !m.gone[r.Provider+":"+r.SessionID] {
 				recs = append(recs, r)
 			}
+		}
+		if m.extra != nil && !slices.Contains(recs, m.extra) {
+			recs = append(recs, m.extra)
 		}
 	}
 	cur := m.current()
@@ -322,7 +355,7 @@ func (m *Model) refresh() {
 		recs, m.at = m.sortBy.sorted(recs)
 		switch {
 		case m.view == viewProjects:
-			m.rows, m.groups = projectRows(recs, m.open)
+			m.rows, m.groups = projectRows(recs, m.open, m.cfg.ProjectSort)
 		case m.sortBy == sortTurns: // sorting by turns breaks date order: no groups
 			m.rows = make([]row, 0, len(recs))
 			for _, r := range recs {
@@ -413,7 +446,7 @@ func timelineRows(recs []*fav.Rec, at map[*fav.Rec]time.Time, now time.Time) []r
 }
 
 // projectRows groups by project, groups ordered by their newest record; groups not in open are collapsed.
-func projectRows(recs []*fav.Rec, open map[string]bool) ([]row, map[string][]*fav.Rec) {
+func projectRows(recs []*fav.Rec, open map[string]bool, order string) ([]row, map[string][]*fav.Rec) {
 	byProject := map[string][]*fav.Rec{}
 	var names []string
 	for _, r := range recs {
@@ -428,7 +461,7 @@ func projectRows(recs []*fav.Rec, open map[string]bool) ([]row, map[string][]*fa
 	}
 
 	var out []row
-	for _, p := range names {
+	for _, p := range orderGroups(names, byProject, order) {
 		out = append(out, row{group: p, folded: !open[p], count: len(byProject[p])})
 		if !open[p] {
 			continue

@@ -161,6 +161,7 @@ fav tui --no-mouse
 fav list '#notes-api last:7d' --json    # 收藏
 fav sessions 'webapp oauth' --json      # 全部会话
 fav show <id> --json
+fav open <id>                           # 直接打开这个会话的界面，右栏聚焦（列表不显示的也行）
 fav resume <id> --dry-run               # 只打印要执行的命令和检查项
 fav resume <id> --no-herdr              # 当前终端恢复
 
@@ -192,7 +193,7 @@ fav doctor [--compact]                  # 体检：数据文件、失效会话�
 
 ## 查询语法
 
-`#标签`、`project:x`、`provider:claude|codex`、`status:open|active|done|archived|trash|all|live`、
+`#标签`、`project:x`、`provider:claude|codex`、`status:open|active|done|archived|trash|all|live|agent`、
 `after:2026-09-01`、`before:…`、`last:7d`、`turns:3`，以及普通关键词。全部 AND，中文直接子串匹配。
 默认看未归档的；关键词也搜索引里的用户提示语——记得「让它做过 X」就能搜到。三个前端共用同一个解析器。
 

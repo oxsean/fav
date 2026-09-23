@@ -62,7 +62,11 @@ func (s *Session) DisplayTitle() string {
 	if s.Title != "" {
 		return s.Title
 	}
-	return truncate(strings.Join(strings.Fields(s.First), " "), 60)
+	first := truncate(strings.Join(strings.Fields(s.First), " "), 60)
+	if s.Cwd != "" {
+		return filepath.Base(s.Cwd) + ": " + first
+	}
+	return first
 }
 
 func (s *Session) Rec() *fav.Rec {
@@ -311,6 +315,70 @@ func OpenAt(path string) (*Index, error) {
 }
 
 func (idx *Index) Len() int { return len(idx.files) }
+
+// Transcript is the newest file of a session, Skip files included (an SDK-launched agent still has a readable transcript).
+func (idx *Index) Transcript(sessionID string) string {
+	if f := idx.FileByPrefix(sessionID); f != nil {
+		return f.Path
+	}
+	return ""
+}
+
+// FileByPrefix: the newest file whose session id starts with ref, Skip files included.
+func (idx *Index) FileByPrefix(ref string) *File {
+	var hit *File
+	for _, f := range idx.files {
+		if strings.HasPrefix(f.SessionID, ref) && (hit == nil || f.ModTime.After(hit.ModTime)) {
+			hit = f
+		}
+	}
+	return hit
+}
+
+// AgentSessions: the one-shot sessions Sessions() drops — SDK / exec / sub-agent runs, newest activity first.
+// They carry no title of their own more often than not, so DisplayTitle falls back to the first prompt.
+func (idx *Index) AgentSessions() []*Session {
+	byKey := map[string]*Session{}
+	for _, f := range idx.files {
+		if !f.Skip || f.SessionID == "" {
+			continue
+		}
+		s := byKey[f.Provider+":"+f.SessionID]
+		if s == nil {
+			s = &Session{Provider: f.Provider, SessionID: f.SessionID, Path: f.Path, Cwd: f.Cwd, Branch: f.Branch,
+				StartedAt: f.StartedAt, First: f.First}
+			byKey[s.Key()] = s
+		}
+		if f.Title != "" && (s.Title == "" || !f.ModTime.Before(s.LastAt)) {
+			s.Title = f.Title
+		}
+		if f.ModTime.After(s.LastAt) {
+			s.LastAt, s.Path = f.ModTime, f.Path
+		}
+		s.Turns += f.Turns
+		s.Replies += f.Replies
+	}
+	out := make([]*Session, 0, len(byKey))
+	for _, s := range byKey {
+		out = append(out, s)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].LastAt.After(out[j].LastAt) })
+	return out
+}
+
+// Rec is a bare record for a file outside Sessions() (Skip): enough to preview and resume it.
+func (f *File) Rec() *fav.Rec {
+	r := &fav.Rec{Provider: f.Provider, SessionID: f.SessionID, Cwd: f.Cwd, GitBranch: f.Branch, Title: f.Title,
+		Summary: strings.Join(strings.Fields(f.First), " "), Project: filepath.Base(f.Cwd), TranscriptPath: f.Path,
+		SessionStartedAt: &f.StartedAt, UpdatedAt: f.ModTime, Status: fav.StatusDoing}
+	if f.Cwd == "" {
+		r.Project = ""
+	}
+	if r.Title == "" {
+		r.Title = r.Summary
+	}
+	return r
+}
 
 func (idx *Index) Refresh() (*Index, bool) { return idx.Rescan(nil) }
 

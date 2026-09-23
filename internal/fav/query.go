@@ -87,6 +87,7 @@ const (
 	StatusActive = "active"
 	StatusOpen   = "open"
 	StatusTrash  = "trash" // trash rows do not live in the store; the UI reads them from the manifest
+	StatusAgent  = "agent" // one-shot SDK / exec / sub-agent sessions, kept out of every other listing
 )
 
 func normalizeStatus(v string) string {
@@ -107,6 +108,8 @@ func normalizeStatus(v string) string {
 		return StatusOpen
 	case StatusTrash, "deleted":
 		return StatusTrash
+	case StatusAgent, "sdk", "agents":
+		return StatusAgent
 	default:
 		return StatusOpen
 	}
@@ -171,7 +174,7 @@ func (q Query) Match(r *Rec) bool {
 	if q.Provider != "" && !strings.EqualFold(r.Provider, q.Provider) {
 		return false
 	}
-	if r.ID == "" && r.Turns < q.Turns && q.Status != "live" {
+	if r.ID == "" && r.Turns < q.Turns && q.Status != "live" && q.Status != StatusAgent {
 		return false
 	}
 	if !q.After.IsZero() && r.When().Before(q.After) {
@@ -201,6 +204,8 @@ func (q Query) matchStatus(r *Rec) bool {
 		return r.Archived()
 	case StatusTrash:
 		return false
+	case StatusAgent:
+		return true
 	}
 	if r.Archived() {
 		return false

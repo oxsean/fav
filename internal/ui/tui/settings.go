@@ -77,6 +77,14 @@ func settingsTable() []setting {
 			func(m *Model, i int) tea.Cmd {
 				m.cfg.WheelStep = wheelOpts[i]
 				m.wheelStep = m.cfg.WheelStep
+				setWheelTuning(m.wheelStep, m.cfg.WheelSpeed)
+				return nil
+			}, nil, ""},
+		{i18n.T("settings.wheel_speed"), []string{i18n.T("settings.speed_off"), i18n.T("settings.speed_normal"), i18n.T("settings.speed_fast")},
+			func(m *Model) int { return indexOf(wheelSpeeds, m.cfg.WheelSpeed) },
+			func(m *Model, i int) tea.Cmd {
+				m.cfg.WheelSpeed = wheelSpeeds[i]
+				setWheelTuning(m.wheelStep, m.cfg.WheelSpeed)
 				return nil
 			}, nil, ""},
 		{i18n.T("settings.trash_days"), []string{i18n.T("settings.trash_7"), i18n.T("settings.trash_30"), i18n.T("settings.trash_90"), i18n.T("settings.trash_forever")},
@@ -169,9 +177,14 @@ func (m *Model) settingsKey(msg tea.KeyMsg) tea.Cmd {
 func (m *Model) renderSettings() string {
 	w := m.ovWidth()
 	inner := w - 4
-	const labelW = 14
+	table := settingsTable()
+	labelW := 0 // the longest label, so no row wraps or cuts its name
+	for _, s := range table {
+		labelW = max(labelW, render.Width(s.label)+1)
+	}
+	labelW = min(labelW, max(8, inner/2))
 	body := []string{boldSty.Foreground(cText).Render(i18n.T("settings.title")), dimmed.Render(i18n.T("settings.hint")), ""}
-	for i, s := range settingsTable() {
+	for i, s := range table {
 		var val string
 		switch {
 		case s.text != nil && i == m.ov.cursor && m.ov.editing:

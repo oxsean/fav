@@ -229,6 +229,8 @@ func statusLabel(s string) string {
 		return i18n.T("status.archived")
 	case fav.StatusTrash:
 		return i18n.T("status.trash")
+	case fav.StatusAgent:
+		return i18n.T("status.agent")
 	}
 	return render.StatusLabel(s)
 }
@@ -288,7 +290,7 @@ func (m *Model) listTitle() string {
 	n := m.countRecs()
 	switch m.view {
 	case viewProjects:
-		return i18n.F("title.projects", m.nProj, n, m.sortBy.label())
+		return i18n.F("title.projects", m.nProj, n, projSortLabel(m.cfg.ProjectSort))
 	case viewFavorites:
 		return i18n.F("title.favorites", n, m.sortBy.label())
 	case viewLive:

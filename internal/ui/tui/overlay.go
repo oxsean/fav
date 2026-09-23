@@ -35,29 +35,30 @@ const (
 const ovPad = 3
 
 type overlay struct {
-	kind    ovKind
-	title   string
-	hint    string
-	items   []item
-	filter  textinput.Model
-	checked map[string]bool
-	cursor  int
-	multi   bool
-	apply   func(m *Model, chosen []string)
-	parse   func(string) (item, bool) // the search text itself is selectable (custom date input)
-	browse  func(string) []item       // dir picker: the list follows the typed path, items unused
-	btns    []btn                     // buttons drawn this frame; arrow keys move focus among them
-	focus   int                       // focused button; -1 = none, Enter runs the default
-	rec     *fav.Rec
-	plan    capture.Plan
-	edit    textinput.Model
-	edit2   textinput.Model
-	area    textarea.Model
-	field   int
-	editing bool
-	confirm func(*Model)
-	back    func(*Model) // ovConfirm cancel goes back here (nil = close)
-	okLabel string
+	kind      ovKind
+	scrollMax int // last line offset the message / help text can scroll to, set while rendering
+	title     string
+	hint      string
+	items     []item
+	filter    textinput.Model
+	checked   map[string]bool
+	cursor    int
+	multi     bool
+	apply     func(m *Model, chosen []string)
+	parse     func(string) (item, bool) // the search text itself is selectable (custom date input)
+	browse    func(string) []item       // dir picker: the list follows the typed path, items unused
+	btns      []btn                     // buttons drawn this frame; arrow keys move focus among them
+	focus     int                       // focused button; -1 = none, Enter runs the default
+	rec       *fav.Rec
+	plan      capture.Plan
+	edit      textinput.Model
+	edit2     textinput.Model
+	area      textarea.Model
+	field     int
+	editing   bool
+	confirm   func(*Model)
+	back      func(*Model) // ovConfirm cancel goes back here (nil = close)
+	okLabel   string
 
 	msg    capture.Message
 	lines  []string
@@ -281,7 +282,8 @@ func (m *Model) renderMessage() string {
 	w := m.ov.boxW
 	room := max(1, m.h-4-6) // 2 rows top and bottom, minus border 2, title 1, blank 2, hint 1
 	lines := m.ov.lines
-	m.ov.cursor = min(max(m.ov.cursor, 0), max(0, len(lines)-room))
+	m.ov.scrollMax = max(0, len(lines)-room)
+	m.ov.cursor = min(max(m.ov.cursor, 0), m.ov.scrollMax)
 	end := min(len(lines), m.ov.cursor+room)
 	who := i18n.T("chat.you")
 	if m.ov.msg.Role != "user" {
@@ -553,7 +555,8 @@ func (m *Model) renderHelp() string {
 
 	// scrolls when it does not fit: cursor is the first visible line; j/k, paging and the wheel move it
 	room := max(1, m.h-4-7)
-	m.ov.cursor = min(max(m.ov.cursor, 0), max(0, len(lines)-room))
+	m.ov.scrollMax = max(0, len(lines)-room)
+	m.ov.cursor = min(max(m.ov.cursor, 0), m.ov.scrollMax)
 	end := min(len(lines), m.ov.cursor+room)
 	title := i18n.T("help.title")
 	if len(lines) > room {

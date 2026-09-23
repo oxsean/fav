@@ -164,6 +164,7 @@ Rule: `Ctrl-letter` = the TUI's letter, `Alt-letter` = a picker. After unfavorit
 fav list '#notes-api last:7d' --json    # favorites
 fav sessions 'webapp oauth' --json      # every session
 fav show <id> --json
+fav open <id>                           # the TUI on that session, right pane focused (sessions the lists hide too)
 fav resume <id> --dry-run               # print the command and checks only
 fav resume <id> --no-herdr              # resume in this terminal
 
@@ -195,7 +196,7 @@ fav doctor [--compact]                  # check data files, dead sessions, trash
 
 ## Query syntax
 
-`#tag`, `project:x`, `provider:claude|codex`, `status:open|active|done|archived|trash|all|live`,
+`#tag`, `project:x`, `provider:claude|codex`, `status:open|active|done|archived|trash|all|live|agent`,
 `after:2026-09-01`, `before:…`, `last:7d`, `turns:3`, plus plain keywords. All ANDed; CJK matches by substring.
 Unarchived by default; keywords also search the prompts in the index, so remembering "I had it do X" is enough. All three front-ends share one parser.
 

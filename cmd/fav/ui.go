@@ -40,6 +40,37 @@ func loadConfig() fav.Config {
 	return cfg
 }
 
+// cmdOpen: the TUI on one session, right pane focused, even when the lists would hide it.
+func cmdOpen(args []string) error {
+	if len(args) == 0 {
+		return errors.New(i18n.T("cli.missing_id"))
+	}
+	s, err := openStore()
+	if err != nil {
+		return err
+	}
+	r, err := pick(s, args[0])
+	if err != nil {
+		return err
+	}
+	return runTUI(s, "", r, args)
+}
+
+func runTUI(s *fav.Store, query string, focus *fav.Rec, args []string) error {
+	idx, err := index.Open()
+	if err != nil {
+		return err
+	}
+	res, err := tuiui.Run(s, idx, loadConfig(), query, focus, !hasFlag(args, "--no-mouse"))
+	if err != nil {
+		return err
+	}
+	if res.Resume == nil {
+		return nil
+	}
+	return resumeRec(s, res.Resume, false, res.NoHerdr)
+}
+
 func cmdUI(cmd string, args []string) error {
 	mode := cmd
 	if mode == "" {
@@ -70,18 +101,7 @@ func cmdUI(cmd string, args []string) error {
 		if err != nil {
 			return err
 		}
-		idx, err := index.Open()
-		if err != nil {
-			return err
-		}
-		res, err := tuiui.Run(s, idx, loadConfig(), query, !hasFlag(args, "--no-mouse"))
-		if err != nil {
-			return err
-		}
-		if res.Resume == nil {
-			return nil
-		}
-		return resumeRec(s, res.Resume, false, res.NoHerdr)
+		return runTUI(s, query, nil, args)
 	default:
 		return i18n.E("cli.unknown_ui", mode)
 	}
@@ -124,7 +144,7 @@ func cmdFzfList(args []string) error {
 			}
 		}
 		for id, l := range live {
-			if r := synthLive(id, l); !seen[id] && q.Match(r) {
+			if r := synthLive(id, l, idx.Transcript(id)); !seen[id] && q.Match(r) {
 				recs = append(recs, r)
 			}
 		}
@@ -146,8 +166,8 @@ func cmdFzfList(args []string) error {
 	return nil
 }
 
-func synthLive(id string, l capture.Live) *fav.Rec {
-	r := &fav.Rec{Provider: l.Agent, SessionID: id, Cwd: l.Cwd, Title: l.Title, Status: fav.StatusDoing}
+func synthLive(id string, l capture.Live, transcript string) *fav.Rec {
+	r := &fav.Rec{Provider: l.Agent, SessionID: id, Cwd: l.Cwd, Title: l.Title, Status: fav.StatusDoing, TranscriptPath: transcript}
 	if l.Cwd != "" {
 		r.Project = filepath.Base(l.Cwd)
 	}
