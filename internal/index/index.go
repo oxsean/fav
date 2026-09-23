@@ -47,6 +47,8 @@ type File struct {
 	Remote string `json:"remote,omitempty"` // Codex: session_meta git.repository_url
 	// Files: absolute path → times the AI wrote it (Claude Edit / Write / MultiEdit / NotebookEdit, Codex apply_patch); filesCap paths
 	Files map[string]int `json:"files,omitempty"`
+
+	line int // bytes of its line in the cache
 }
 
 type Session struct {
@@ -346,7 +348,7 @@ type Index struct {
 	path  string
 	files map[string]*File
 	dirty []*File // changed by this Refresh; Save writes only these
-	raw   int
+	size  int     // bytes of the cache file, stale lines included
 	wt    worktrees
 }
 
@@ -370,9 +372,11 @@ func OpenAt(path string) (*Index, error) {
 		if len(sc.Bytes()) == 0 {
 			continue
 		}
-		idx.raw++
+		n := len(sc.Bytes()) + 1
+		idx.size += n
 		var f File
 		if json.Unmarshal(sc.Bytes(), &f) == nil && f.Path != "" {
+			f.line = n
 			idx.files[f.Path] = &f
 		}
 	}
@@ -482,7 +486,7 @@ func (idx *Index) Refresh() (*Index, bool) { return idx.Rescan(nil) }
 
 // Rescan is Refresh, but force files skip the incremental path and start over: they were rewritten in place (cwd changed by a move), size and mtime lie.
 func (idx *Index) Rescan(force map[string]bool) (*Index, bool) {
-	next := &Index{path: idx.path, files: make(map[string]*File, len(idx.files)), raw: idx.raw, wt: idx.wt}
+	next := &Index{path: idx.path, files: make(map[string]*File, len(idx.files)), size: idx.size, wt: idx.wt}
 	seen := 0
 	threads := codexThreadNames()
 	for _, c := range candidates() {
@@ -518,7 +522,7 @@ func (idx *Index) Rescan(force map[string]bool) (*Index, bool) {
 	return next, len(next.dirty) > 0 || seen != len(idx.files)
 }
 
-// Save appends this Refresh's changes; rewrites the whole cache once it exceeds twice the entry count.
+// Save appends this Refresh's changes; rewrites the whole cache once stale lines outweigh the current ones.
 func (idx *Index) Save() error {
 	if len(idx.dirty) == 0 {
 		return nil
@@ -526,7 +530,19 @@ func (idx *Index) Save() error {
 	if err := os.MkdirAll(filepath.Dir(idx.path), 0o755); err != nil {
 		return err
 	}
-	if idx.raw+len(idx.dirty) > 2*len(idx.files)+64 {
+	var buf bytes.Buffer
+	for _, f := range idx.dirty {
+		n := buf.Len()
+		if err := json.NewEncoder(&buf).Encode(f); err != nil {
+			return err
+		}
+		f.line = buf.Len() - n
+	}
+	live := 0
+	for _, f := range idx.files {
+		live += f.line
+	}
+	if idx.size+buf.Len() > 2*live+64<<10 {
 		return idx.rewrite()
 	}
 	fh, err := os.OpenFile(idx.path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
@@ -534,15 +550,12 @@ func (idx *Index) Save() error {
 		return err
 	}
 	defer fh.Close()
-	w := bufio.NewWriter(fh)
-	for _, f := range idx.dirty {
-		if err := json.NewEncoder(w).Encode(f); err != nil {
-			return err
-		}
-		idx.raw++
+	if _, err := fh.Write(buf.Bytes()); err != nil {
+		return err
 	}
+	idx.size += buf.Len()
 	idx.dirty = nil
-	return w.Flush()
+	return nil
 }
 
 func (idx *Index) rewrite() error {
@@ -552,11 +565,17 @@ func (idx *Index) rewrite() error {
 		return err
 	}
 	w := bufio.NewWriter(fh)
+	var line bytes.Buffer
+	size := 0
 	for _, f := range idx.files {
-		if err := json.NewEncoder(w).Encode(f); err != nil {
+		line.Reset()
+		if err := json.NewEncoder(&line).Encode(f); err != nil {
 			fh.Close()
 			return err
 		}
+		w.Write(line.Bytes())
+		f.line = line.Len()
+		size += line.Len()
 	}
 	if err := w.Flush(); err != nil {
 		fh.Close()
@@ -568,7 +587,7 @@ func (idx *Index) rewrite() error {
 	if err := os.Rename(tmp, idx.path); err != nil {
 		return err
 	}
-	idx.raw, idx.dirty = len(idx.files), nil
+	idx.size, idx.dirty = size, nil
 	return nil
 }
 

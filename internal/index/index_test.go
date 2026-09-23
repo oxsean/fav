@@ -389,3 +389,38 @@ func TestRecapBecomesTheSummary(t *testing.T) {
 		t.Fatalf("Codex: the first paragraph of the last reply: %+v", r)
 	}
 }
+
+func TestCacheStaysSmallWhenOneBigFileKeepsChanging(t *testing.T) {
+	cache := filepath.Join(t.TempDir(), "sessions.jsonl")
+	p := filepath.Join(t.TempDir(), "live.jsonl")
+	prompts := strings.Repeat("长提示语", 700)
+	for i := range 200 {
+		idx, err := OpenAt(cache)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for j := range 3 {
+			q := fmt.Sprintf("%s-%d.jsonl", p, j)
+			if idx.files[q] == nil {
+				f := &File{Path: q, Provider: fav.ProviderClaude, SessionID: fmt.Sprint(j), Turns: 1}
+				idx.files[q], idx.dirty = f, append(idx.dirty, f)
+			}
+		}
+		f := &File{Path: p, Provider: fav.ProviderClaude, SessionID: "live", Turns: i + 1, Prompts: prompts}
+		idx.files[p], idx.dirty = f, append(idx.dirty, f)
+		if err := idx.Save(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	idx, err := OpenAt(cache)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f := idx.files[p]; f == nil || f.Turns != 200 || idx.Len() != 4 {
+		t.Fatalf("the newest line wins: %+v, %d files", f, idx.Len())
+	}
+	st, _ := os.Stat(cache)
+	if line := int64(len(prompts)); st.Size() > 3*line+64<<10 {
+		t.Fatalf("stale rewrites of one big line piled up: cache %d bytes, the line is ~%d", st.Size(), line)
+	}
+}
