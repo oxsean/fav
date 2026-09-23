@@ -5,7 +5,7 @@ import (
 	"sort"
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/oxsean/fav/internal/capture"
 	"github.com/oxsean/fav/internal/fav"
@@ -191,7 +191,7 @@ func (m *Model) renderStart() string {
 	return ovRender(body, w)
 }
 
-func (m *Model) startKey(msg tea.KeyMsg) tea.Cmd {
+func (m *Model) startKey(msg tea.KeyPressMsg) tea.Cmd {
 	switch a := keyAct(inStart, msg.String()); a {
 	case actEnter:
 		if m.pressFocused() {

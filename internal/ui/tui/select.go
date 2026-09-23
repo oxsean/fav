@@ -3,7 +3,7 @@ package tui
 import (
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/mattn/go-runewidth"
 	"github.com/oxsean/fav/internal/i18n"
@@ -32,17 +32,18 @@ func (m *Model) region(x, y int) (left, right, top, bottom int) {
 }
 
 func (m *Model) mouseSelect(msg tea.MouseMsg) {
-	switch msg.Action {
-	case tea.MouseActionPress:
-		l, r, t, b := m.region(msg.X, msg.Y)
-		m.sel = selection{x1: msg.X, y1: msg.Y, x2: msg.X, y2: msg.Y, pressed: true, left: l, right: r, top: t, bottom: b}
-	case tea.MouseActionMotion:
-		if m.sel.pressed && (msg.X != m.sel.x1 || msg.Y != m.sel.y1) {
-			m.sel.x2, m.sel.y2, m.sel.dragging = msg.X, msg.Y, true
+	mo := msg.Mouse()
+	switch msg.(type) {
+	case tea.MouseClickMsg:
+		l, r, t, b := m.region(mo.X, mo.Y)
+		m.sel = selection{x1: mo.X, y1: mo.Y, x2: mo.X, y2: mo.Y, pressed: true, left: l, right: r, top: t, bottom: b}
+	case tea.MouseMotionMsg:
+		if m.sel.pressed && (mo.X != m.sel.x1 || mo.Y != m.sel.y1) {
+			m.sel.x2, m.sel.y2, m.sel.dragging = mo.X, mo.Y, true
 		}
-	case tea.MouseActionRelease:
+	case tea.MouseReleaseMsg:
 		if m.sel.dragging {
-			m.sel.x2, m.sel.y2 = msg.X, msg.Y
+			m.sel.x2, m.sel.y2 = mo.X, mo.Y
 			m.copySelection()
 		}
 		m.sel = selection{}

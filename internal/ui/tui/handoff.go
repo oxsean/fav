@@ -6,7 +6,7 @@ import (
 	"slices"
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/oxsean/fav/internal/capture"
 	"github.com/oxsean/fav/internal/fav"
@@ -216,7 +216,7 @@ func (m *Model) renderHandoff() string {
 	return ovRender(body, w)
 }
 
-func (m *Model) handoffKey(msg tea.KeyMsg) tea.Cmd {
+func (m *Model) handoffKey(msg tea.KeyPressMsg) tea.Cmd {
 	room := max(3, m.h-18)
 	switch a := keyAct(inHandoff, msg.String()); a {
 	case actEnter:

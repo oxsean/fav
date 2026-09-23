@@ -23,9 +23,6 @@ func usage() string { return i18n.T("cli.usage") }
 var version = "dev" // set by goreleaser via -X main.version
 
 func main() {
-	if os.Getenv("FAV_IN_FZF") != "" {
-		os.Unsetenv("CI")
-	}
 	if err := run(os.Args[1:]); err != nil {
 		if errors.Is(err, flag.ErrHelp) { // the flag package already printed the subcommand's usage
 			fmt.Print(usage())

@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/oxsean/fav/internal/capture"
@@ -34,23 +34,23 @@ func TestScrollReadsNothing(t *testing.T) {
 	}
 	m := New(s, noIndex(t), fav.DefaultConfig(), "")
 	m.Update(tea.WindowSizeMsg{Width: 160, Height: 45})
-	m.View()
+	m.screen()
 	t0 := time.Now()
 
 	for range 50 {
-		m.Update(tea.KeyMsg{Type: tea.KeyDown})
-		m.View()
+		m.Update(press("down"))
+		m.screen()
 	}
 	per := time.Since(t0) / 50
 	t.Logf("key+frame while scrolling 50 records: %s", per)
 	if per > 3*time.Millisecond {
 		t.Errorf("scrolling should not touch disk; %s per step", per)
 	}
-	if !strings.Contains(m.View(), "检查中") {
+	if !strings.Contains(m.screen(), "检查中") {
 		t.Errorf("detail should show the placeholder before the probe lands")
 	}
 	settle(m)
-	if !strings.Contains(m.View(), "已识别会话来源") {
+	if !strings.Contains(m.screen(), "已识别会话来源") {
 		t.Errorf("probe result should render into the detail panel")
 	}
 }
@@ -98,33 +98,33 @@ func TestChatScrollKeys(t *testing.T) {
 	m := New(s, noIndex(t), fav.DefaultConfig(), "")
 	m.Update(tea.WindowSizeMsg{Width: 150, Height: 44})
 	settle(m)
-	if !strings.Contains(m.View(), "第 1–") || !m.chatFills(0, 0) {
+	if !strings.Contains(m.screen(), "第 1–") || !m.chatFills(0, 0) {
 		t.Skip("transcript has no conversation to show, or it all fits on screen")
 	}
-	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("J")})
-	m.View()
+	m.Update(press("J"))
+	m.screen()
 	if m.chatCur != 1 {
 		t.Errorf("J should move the chat cursor to the second message, got %d", m.chatCur)
 	}
 	for range 40 {
-		m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("J")})
-		m.View()
+		m.Update(press("J"))
+		m.screen()
 	}
 	if m.chatScroll == 0 || m.chatCur < m.chatScroll {
 		t.Errorf("viewport should follow the cursor: scroll=%d cur=%d", m.chatScroll, m.chatCur)
 	}
 	for range 60 {
-		m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("K")})
+		m.Update(press("K"))
 	}
-	if !strings.Contains(m.View(), "第 1–") || m.chatCur != 0 {
+	if !strings.Contains(m.screen(), "第 1–") || m.chatCur != 0 {
 		t.Errorf("K should not scroll past the newest message")
 	}
 }
 
 func TestProbeWaitsForCursorToRest(t *testing.T) {
 	m := sized(t, 150, 44)
-	m.Update(tea.KeyMsg{Type: tea.KeyDown})
-	m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	m.Update(press("down"))
+	m.Update(press("down"))
 	if len(m.probes) != 0 {
 		t.Fatalf("moving the cursor must not start probes, got %d", len(m.probes))
 	}
@@ -150,12 +150,12 @@ func TestChatSearch(t *testing.T) {
 	m.probes[b].msgs = []capture.Message{{Role: "user", Text: "别的会话"}}
 	a.TranscriptPath = filepath.Join(t.TempDir(), "none.jsonl")
 
-	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(`\`)})
+	m.Update(press(`\`))
 	if !m.chat.typing {
 		t.Fatal("\\ 应打开右栏搜索")
 	}
-	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("cursor")})
-	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m.Update(press("cursor"))
+	m.Update(press("enter"))
 	if m.chat.typing || !m.msg.hl.loading {
 		t.Fatal("Enter 应在左栏列出本会话的命中")
 	}
@@ -163,14 +163,14 @@ func TestChatSearch(t *testing.T) {
 	if !m.hitsOpen() || len(m.msg.hl.items) != 2 || m.chatScroll != 3 {
 		t.Fatalf("应定位到最近一处命中（第 4 句）：items=%d chatScroll=%d", len(m.msg.hl.items), m.chatScroll)
 	}
-	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("n")})
+	m.Update(press("n"))
 	if m.chatScroll != 9 {
 		t.Fatalf("n 应跳到下一处，chatScroll=%d", m.chatScroll)
 	}
-	if v := m.View(); !strings.Contains(v, "第 2/2 处") {
+	if v := m.screen(); !strings.Contains(v, "第 2/2 处") {
 		t.Fatal("标题里应显示命中计数")
 	}
-	m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m.Update(press("esc"))
 	if m.chat.query() != "" || m.hitsOpen() {
 		t.Fatal("Esc 应关掉命中列表并清掉查询")
 	}
@@ -201,12 +201,12 @@ func TestChatPagesBackward(t *testing.T) {
 	if len(p.msgs) != recentMsgs || p.full || p.from == 0 {
 		t.Fatalf("先只读尾 40 句：%d full=%v from=%d", len(p.msgs), p.full, p.from)
 	}
-	m.Update(tea.KeyMsg{Type: tea.KeyRight})
+	m.Update(press("right"))
 	for range recentMsgs - 8 {
-		m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("j")})
+		m.Update(press("j"))
 	}
-	m.View()
-	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("j")})
+	m.screen()
+	_, cmd := m.Update(press("j"))
 	if !p.loading || cmd == nil {
 		t.Fatal("快到末尾应排一次补页")
 	}
@@ -217,8 +217,8 @@ func TestChatPagesBackward(t *testing.T) {
 	for guard := 0; !p.full && guard < 10; guard++ {
 		m.chatCur = len(p.msgs) - 1
 		m.chatFollow = true
-		m.View()
-		_, cmd = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("k")})
+		m.screen()
+		_, cmd = m.Update(press("k"))
 		if cmd != nil {
 			m.Update(runCmd(t, cmd))
 		}
@@ -226,7 +226,7 @@ func TestChatPagesBackward(t *testing.T) {
 	if !p.full || len(p.msgs) != 100 || p.msgs[99].Text != "第0句" {
 		t.Fatalf("翻到头应是全文 100 句：%d full=%v", len(p.msgs), p.full)
 	}
-	if v := ansi.Strip(m.View()); !strings.Contains(v, "全文 100 句") {
+	if v := ansi.Strip(m.screen()); !strings.Contains(v, "全文 100 句") {
 		t.Fatal("标题应写全文")
 	}
 }
@@ -236,41 +236,41 @@ func TestMessageOverlay(t *testing.T) {
 	r := m.current()
 	long := strings.Repeat("这是一段很长的回复，长到一个小框放不下。", 300)
 	m.probes = map[*fav.Rec]*probe{r: {done: true, msgs: []capture.Message{{Role: "user", Text: "好的"}, {Role: "assistant", Text: long}}}}
-	m.View()
-	m.Update(tea.KeyMsg{Type: tea.KeyRight})
+	m.screen()
+	m.Update(press("right"))
 	if m.pane != paneChat {
 		t.Fatal("→ 应把焦点给右栏")
 	}
-	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m.Update(press("enter"))
 	if m.ov.kind != ovMessage || m.ov.boxW != 140-8 || len(m.ov.lines) != 1 {
 		t.Fatalf("短句也用固定大小的框：kind=%v w=%d lines=%d", m.ov.kind, m.ov.boxW, len(m.ov.lines))
 	}
 	if h := len(strings.Split(m.renderMessage(), "\n")); h != 40-4 {
 		t.Fatalf("框高应固定为终端高 − 4，得到 %d", h)
 	}
-	m.Update(tea.KeyMsg{Type: tea.KeyEsc})
-	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("j")})
-	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m.Update(press("esc"))
+	m.Update(press("j"))
+	m.Update(press("enter"))
 	if m.ov.kind != ovMessage || len(m.ov.lines) < 15 {
 		t.Fatalf("长文应折成多行：lines=%d", len(m.ov.lines))
 	}
-	v := m.View()
+	v := m.screen()
 	if !strings.Contains(v, "/ "+strconv.Itoa(len(m.ov.lines))+" 行") {
 		t.Fatal("长文标题应带行数")
 	}
-	m.Update(tea.KeyMsg{Type: tea.KeyPgDown})
+	m.Update(press("pgdown"))
 	if m.ov.cursor == 0 {
 		t.Fatal("PgDn 应往下翻")
 	}
-	m.Update(tea.KeyMsg{Type: tea.KeyLeft})
+	m.Update(press("left"))
 	if m.chatCur != 0 || m.ov.kind != ovMessage || len(m.ov.lines) != 1 {
 		t.Fatalf("← 应换到上一句：cur=%d lines=%d", m.chatCur, len(m.ov.lines))
 	}
-	m.Update(tea.KeyMsg{Type: tea.KeyLeft})
+	m.Update(press("left"))
 	if m.chatCur != 0 {
 		t.Fatal("最新一句再往前不该动")
 	}
-	m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m.Update(press("esc"))
 	m.pane = paneList
 	m.clickChat(0)
 	if m.pane != paneChat || m.chatCur != 0 || m.ov.active() {
@@ -288,10 +288,10 @@ func TestMessageOverlaySteps(t *testing.T) {
 	msg := capture.Message{Role: "assistant", Text: "我来跑测试", Steps: []capture.Step{
 		{Tool: "Bash", Text: "go test ./..."}, {Result: true, Text: "ok fav 0.1s"}}}
 	m.probes = map[*fav.Rec]*probe{r: {done: true, full: true, msgs: []capture.Message{msg}}}
-	m.View()
+	m.screen()
 	m.pane = paneChat
-	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	v := m.View()
+	m.Update(press("enter"))
+	v := ansi.Strip(m.screen())
 	for _, want := range []string{"我来跑测试", "Bash  go test ./...", "→ ok fav 0.1s"} {
 		if !strings.Contains(v, want) {
 			t.Errorf("全文里缺 %q", want)
@@ -306,10 +306,10 @@ func TestMessageOverlayMultilineStep(t *testing.T) {
 		{Tool: "Bash", Text: "cat <<'EOF'\n    indented line\nEOF"},
 		{Result: true, Text: strings.Repeat("x", 80)}}}
 	m.probes = map[*fav.Rec]*probe{r: {done: true, full: true, msgs: []capture.Message{msg}}}
-	m.View()
+	m.screen()
 	m.pane = paneChat
-	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	v := m.View()
+	m.Update(press("enter"))
+	v := m.screen()
 	for _, want := range []string{"cat <<'EOF'", "    indented line", "EOF"} {
 		if !strings.Contains(v, want) {
 			t.Errorf("全文里缺 %q", want)
@@ -344,10 +344,10 @@ func TestMessageOverlayFullSteps(t *testing.T) {
 		t.Fatalf("内存里的步骤应是截过的：%q", msgs[0].Steps[2].Text)
 	}
 	m.probes = map[*fav.Rec]*probe{r: {done: true, full: true, msgs: msgs}}
-	m.View()
+	m.screen()
 	m.pane = paneChat
 	m.chatCur = 0
-	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m.Update(press("enter"))
 	if m.ov.kind != ovMessage || len(m.ov.msg.Steps) != 3 {
 		t.Fatalf("应打开带三步的全文：%+v", m.ov.msg)
 	}
@@ -358,7 +358,7 @@ func TestMessageOverlayFullSteps(t *testing.T) {
 	if !strings.Contains(string(m.ov.kinds), "S") {
 		t.Fatal("40 行的一步后面应有分隔线")
 	}
-	v := m.View()
+	v := m.screen()
 	if !strings.Contains(v, "┃") {
 		t.Fatal("超出一屏应画滚动条")
 	}

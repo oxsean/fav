@@ -9,8 +9,8 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/oxsean/fav/internal/capture"
 	"github.com/oxsean/fav/internal/fav"
@@ -132,6 +132,8 @@ type Model struct {
 	attn      map[string]attnEntry     // what the user has taken in of each running session (attention.json)
 	lastNeed  map[string]int           // need() at the last check: a change to "needs you" is announced once
 	lastWheel time.Time                // last wheel event; no index swap while scrolling
+	mouse     bool                     // mouse reporting on; View asks the terminal for it
+	themed    bool                     // the terminal's background is known (or will not be): View draws only from then on
 	heldIdx   *index.Index             // index that arrived mid-scroll, applied once scrolling stops
 	idxGen    int                      // +1 after a project move: refreshes started before it return stale snapshots
 	idx       *index.Index             // index snapshot, replaced whole by the background refresh
@@ -153,7 +155,7 @@ type Model struct {
 }
 
 func New(s *fav.Store, idx *index.Index, cfg fav.Config, initialQuery string) *Model {
-	ti := textinput.New()
+	ti := newInput()
 	ti.Placeholder = i18n.T("search.placeholder")
 	ti.Prompt = render.GlyphSearch + "  "
 	ti.SetValue(initialQuery)
@@ -206,7 +208,7 @@ func (m *Model) Init() tea.Cmd {
 			capture.AppAvailable(fav.ProviderCodex)
 		}()
 	}
-	return tea.Batch(textinput.Blink, m.pollLive(), watchStore(), m.refreshIndex(), m.syncText(m.idx))
+	return tea.Batch(textinput.Blink, askTheme(), m.pollLive(), watchStore(), m.refreshIndex(), m.syncText(m.idx))
 }
 
 const indexEvery = 10 * time.Second

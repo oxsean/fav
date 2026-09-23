@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/oxsean/fav/internal/capture"
@@ -14,7 +15,20 @@ import (
 	"github.com/oxsean/fav/internal/render"
 )
 
-func (m *Model) View() string {
+func (m *Model) View() tea.View {
+	v := tea.NewView("")
+	if m.themed { // before that a frame would be drawn in the dark palette and repainted light
+		v.SetContent(m.screen())
+	}
+	v.AltScreen = true
+	if m.mouse {
+		// with the mouse on, native terminal selection needs Shift (Option on iTerm2), or --no-mouse
+		v.MouseMode = tea.MouseModeCellMotion
+	}
+	return v
+}
+
+func (m *Model) screen() string {
 	if m.quitting {
 		return ""
 	}
@@ -53,7 +67,7 @@ func (m *Model) View() string {
 func (m *Model) baseLines() []string {
 	var out []string
 	if m.w < compactCols {
-		out = append(out, m.search.View())
+		out = append(out, inputView(m.search))
 	} else {
 		out = append(out, m.header())
 		out = append(out, m.searchBox(len(out))...)
@@ -116,12 +130,12 @@ func (m *Model) searchBox(y0 int) []string {
 	if m.typing {
 		sty = panelSty.BorderForeground(cAccent)
 	}
-	content := fit(m.search.View(), m.w-4)
+	content := fit(inputView(m.search), m.w-4)
 	if m.msgMode() { // the > prefix switched the box: say so at its right end
 		tag := " " + i18n.T("search.msg_tag") + " "
-		content = fit(m.search.View(), m.w-4-render.Width(tag)) + selTitle.Render(tag)
+		content = fit(inputView(m.search), m.w-4-render.Width(tag)) + selTitle.Render(tag)
 	}
-	lines := strings.Split(sty.Width(m.w-2).Render(content), "\n")
+	lines := strings.Split(sty.Width(m.w).Render(content), "\n")
 	m.markRows(y0, 0, m.w, len(lines), func(mm *Model) { mm.focusSearch(); mm.placeCursor(&mm.search, 2) })
 	return lines
 }
@@ -169,7 +183,7 @@ func (m *Model) chipRow(y0 int) []string {
 		if render.Width(text) > w-4 {
 			text = c.icon + " " + c.value
 		}
-		cols[i] = strings.Split(sty.Width(w-2).Render(fit(text, w-4)), "\n")
+		cols[i] = strings.Split(sty.Width(w).Render(fit(text, w-4)), "\n")
 		open := c.open
 		m.markRows(y0, x, w, len(cols[i]), func(mm *Model) { open(mm) })
 		x += w + 1
@@ -328,7 +342,7 @@ func panel(title string, content []string, w, h int) []string {
 	for i := 0; i < h-2; i++ {
 		body = append(body, fit(at(content, i), w-4))
 	}
-	lines := strings.Split(panelSty.Width(w-2).Height(h-2).Render(strings.Join(body, "\n")), "\n")
+	lines := strings.Split(panelSty.Width(w).Height(h).Render(strings.Join(body, "\n")), "\n")
 
 	if len(lines) > 0 && title != "" {
 		lines[0] = titledTopBorder(title, w)
@@ -543,7 +557,7 @@ func (m *Model) cardBox(r *fav.Rec, sel bool, w int) []string {
 		tagsOut = highlightWith(tags, m.msgKeywords(), gSty, hitSty.Inherit(gSty))
 	}
 	content := tSty.Render(title) + brokenSty.Inherit(tSty).Render(mark) + "\n" + metaOut + "\n" + tagsOut
-	return strings.Split(sty.Width(w-2).Render(content), "\n")
+	return strings.Split(sty.Width(w).Render(content), "\n")
 }
 
 func tagString(tags []string) string {
@@ -756,7 +770,7 @@ func (m *Model) chatLines(r *fav.Rec, w, room int) (lines []string, owners []int
 	var tail string
 	switch {
 	case m.chat.typing:
-		tail = m.chat.input.View()
+		tail = inputView(m.chat.input)
 	case q != "" && m.hitsOpen() && !m.msg.hl.loading:
 		tail = i18n.F("chat.find_hits", q, m.msg.hl.cur+1, len(m.msg.hl.items))
 	case q != "":
@@ -872,9 +886,9 @@ func (m *Model) targetBox(w int) []string {
 	if r == nil || w < 12 {
 		return nil
 	}
-	// ⚠️ content cut at w-4 (lipgloss Width includes padding, not border); two more columns wrap
+	// ⚠️ content cut at w-4 (Width w includes border and padding); two more columns wrap
 	content := accent.Render(i18n.T("card.resume_target")) + "\n" + fit(render.Truncate(m.resumeTargetLine(r), w-4), w-4)
-	return strings.Split(panelSty.Width(w-2).Render(content), "\n")
+	return strings.Split(panelSty.Width(w).Render(content), "\n")
 }
 
 // footKey is one footer hint; when the line is too wide the highest rank goes first, rank 0 never.
@@ -983,7 +997,7 @@ func (m *Model) mainKeys(r *fav.Rec) footGroup {
 		g = append(g, fk(keyName("right"), "footer.all_hits", 2), fk(keyOf(inList, actNextHit)+"/"+keyOf(inList, actPrevHit), "footer.jump", 4))
 	default:
 		if l, ok := m.liveOf(r); ok && l.TabID != "" {
-			g = append(g, fk(keyName(" "), "footer.space_switch", 2))
+			g = append(g, fk(keyName("space"), "footer.space_switch", 2))
 		}
 		if l, ok := m.liveOf(r); ok && l.PaneID != "" {
 			g = append(g, fk(keyOf(inList, actPeek), "footer.peek", 3))

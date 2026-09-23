@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/oxsean/fav/internal/fav"
@@ -30,15 +30,15 @@ func TestForkFromResumeDialog(t *testing.T) {
 	r.TranscriptPath = filepath.Join(r.Cwd, "s.jsonl")
 	os.WriteFile(r.TranscriptPath, []byte("{}\n"), 0o644)
 	m.askResume()
-	if v := ansi.Strip(m.View()); !strings.Contains(v, "b 分叉") || !strings.Contains(v, "s 交接") {
+	if v := ansi.Strip(m.screen()); !strings.Contains(v, "b 分叉") || !strings.Contains(v, "s 交接") {
 		t.Fatalf("the resume dialog offers fork and handoff:\n%s", v)
 	}
-	m.View()
-	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'b'}})
+	m.screen()
+	m.Update(press("b"))
 	if m.quitting {
 		t.Fatal("the first b only focuses the fork button")
 	}
-	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'b'}})
+	m.Update(press("b"))
 	if !m.quitting || m.result.Start == nil || m.result.Resume != nil {
 		t.Fatalf("fork quits with a start command, not a resume: %+v", m.result)
 	}
@@ -59,9 +59,9 @@ func TestHandoffDialog(t *testing.T) {
 	r := m.current()
 	r.Cwd = t.TempDir()
 	m.askResume()
-	m.View()
-	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}})
-	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}})
+	m.screen()
+	m.Update(press("s"))
+	_, cmd := m.Update(press("s"))
 	var got handoffMsg
 	for msg := range drain(cmd) {
 		if h, ok := msg.(handoffMsg); ok {
@@ -75,7 +75,7 @@ func TestHandoffDialog(t *testing.T) {
 	if m.ov.kind != ovHandoff {
 		t.Fatalf("the pack is shown before anything starts: kind=%d", m.ov.kind)
 	}
-	v := ansi.Strip(m.View())
+	v := ansi.Strip(m.screen())
 	for _, want := range []string{"交接包", r.Title, "1 Claude Code", "2 Codex CLI", "e 编辑", "y 复制内容"} {
 		if !strings.Contains(v, want) {
 			t.Errorf("handoff dialog lacks %q:\n%s", want, v)
@@ -87,11 +87,11 @@ func TestHandoffDialog(t *testing.T) {
 		}
 	}
 
-	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'2'}})
+	m.Update(press("2"))
 	if m.quitting {
 		t.Fatal("the first 2 only selects Codex")
 	}
-	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'2'}})
+	m.Update(press("2"))
 	s := m.result.Start
 	if !m.quitting || s == nil || s.Exec != "codex" || len(s.Args) != 1 || !strings.Contains(s.Args[0], got.path) || s.Cwd != r.Cwd {
 		t.Fatalf("2 starts Codex in the session's directory, told to read the pack: %+v", s)

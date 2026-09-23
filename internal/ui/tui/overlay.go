@@ -7,10 +7,10 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/charmbracelet/bubbles/textarea"
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/textarea"
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/oxsean/fav/internal/capture"
@@ -126,7 +126,7 @@ func (m *Model) openPicker(title, hint string, items []item, multi bool, preset 
 			checked[p] = true
 		}
 	}
-	ti := textinput.New()
+	ti := newInput()
 	ti.Placeholder = i18n.T("picker.filter_placeholder")
 	ti.Prompt = render.GlyphSearch + " "
 	ti.CharLimit = 60
@@ -523,9 +523,9 @@ func (m *Model) renderPicker() string {
 	if m.ov.hint != "" {
 		body = append(body, dimmed.Render(m.ov.hint))
 	}
-	m.ov.filter.Width = inner - 6
+	m.ov.filter.SetWidth(inner - 6)
 	m.mark(len(body)+2, ovPad, inner, (*Model).clickInput)
-	body = append(body, strings.Split(panelSty.Width(inner-2).Render(fit(m.ov.filter.View(), inner-4)), "\n")...)
+	body = append(body, strings.Split(panelSty.Width(inner).Render(fit(inputView(m.ov.filter), inner-4)), "\n")...)
 	body = append(body, "")
 
 	vis := m.ov.visible()
@@ -732,7 +732,7 @@ func ovRender(body []string, w int) string {
 	for i := range body {
 		body[i] = fit(body[i], w-4)
 	}
-	return ovBox.Width(w).Render(strings.Join(body, "\n"))
+	return ovBox.Width(w + 2).Render(strings.Join(body, "\n"))
 }
 
 func (m *Model) renderResume() string {
@@ -772,7 +772,7 @@ func (m *Model) renderResume() string {
 			trouble = append(trouble, render.Wrap(g+" "+c.Text, inner-4)...)
 		}
 		if len(trouble) > 0 {
-			body = append(body, strings.Split(warnBox.Width(inner-2).Render(strings.Join(trouble, "\n")), "\n")...)
+			body = append(body, strings.Split(warnBox.Width(inner).Render(strings.Join(trouble, "\n")), "\n")...)
 		}
 		line := p.Spec.Display()
 		if m.ov.app {
@@ -1005,9 +1005,9 @@ func (m *Model) titleLines(inner, y0 int) []string {
 		m.mark(y0, ovPad, inner, (*Model).editTitle)
 		return []string{line}
 	}
-	m.ov.edit.Width = inner - 6
+	m.ov.edit.SetWidth(inner - 6)
 	m.mark(y0+1, ovPad, inner, func(mm *Model) { mm.placeCursor(&mm.ov.edit, 2) })
-	box := strings.Split(panelSty.BorderForeground(cAccent).Width(inner-2).Render(fit(m.ov.edit.View(), inner-4)), "\n")
+	box := strings.Split(panelSty.BorderForeground(cAccent).Width(inner).Render(fit(inputView(m.ov.edit), inner-4)), "\n")
 	return append(box, dimmed.Render(i18n.T("resume.edit_hint")))
 }
 

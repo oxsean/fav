@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/oxsean/fav/internal/capture"
@@ -77,14 +77,14 @@ func TestMessageSearchRanksSessionsAndShowsHits(t *testing.T) {
 		}
 		t.Fatalf("both sessions holding the keywords, the one with a message holding both first: %q", got)
 	}
-	v := ansi.Strip(m.View())
+	v := ansi.Strip(m.screen())
 	if !strings.Contains(v, "2 sessions") && !strings.Contains(v, "2 个会话") {
 		t.Fatalf("title counts the sessions:\n%s", v)
 	}
 	if !strings.Contains(v, "滚轮加速和分页都要改") {
 		t.Fatalf("the card shows the hit:\n%s", v)
 	}
-	for l := range strings.SplitSeq(m.View(), "\n") {
+	for l := range strings.SplitSeq(m.screen(), "\n") {
 		if w := ansi.StringWidth(l); w > 140 {
 			t.Fatalf("line wider than the terminal (%d): %q", w, ansi.Strip(l))
 		}
@@ -219,7 +219,7 @@ func TestHitListWalksEveryHitAndTheRightPaneFollows(t *testing.T) {
 	m.probes = map[*fav.Rec]*probe{r: {done: true, msgs: page.Msgs, from: page.From, full: page.Done}}
 	m.typing = false
 	m.search.Blur()
-	m.Update(tea.KeyMsg{Type: tea.KeyRight})
+	m.Update(press("right"))
 	loadHits(t, m)
 	if !m.hitsOpen() || len(m.msg.hl.items) != 2 {
 		t.Fatalf("→ lists the session's hits: open=%v items=%d", m.hitsOpen(), len(m.msg.hl.items))
@@ -228,15 +228,15 @@ func TestHitListWalksEveryHitAndTheRightPaneFollows(t *testing.T) {
 	if page.Msgs[first].Off != m.msg.hl.items[m.msg.hl.cur].Off {
 		t.Fatal("the right pane stands on the selected hit")
 	}
-	key, other := tea.KeyDown, 1
+	key, other := "down", 1
 	if m.msg.hl.cur == 1 {
-		key, other = tea.KeyUp, 0
+		key, other = "up", 0
 	}
-	m.Update(tea.KeyMsg{Type: key})
+	m.Update(press(key))
 	if m.chatCur == first || page.Msgs[m.chatCur].Off != m.msg.hl.items[other].Off {
 		t.Fatalf("↓ moves the right pane to the next hit: %d → %d", first, m.chatCur)
 	}
-	v := m.View()
+	v := m.screen()
 	if !strings.Contains(ansi.Strip(v), "滚轮太慢了") {
 		t.Fatalf("the list shows the hits:\n%s", ansi.Strip(v))
 	}
@@ -245,12 +245,12 @@ func TestHitListWalksEveryHitAndTheRightPaneFollows(t *testing.T) {
 			t.Fatalf("line wider than the terminal (%d): %q", w, ansi.Strip(l))
 		}
 	}
-	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m.Update(press("enter"))
 	if m.ov.kind != ovMessage {
 		t.Fatal("Enter opens the full text of the hit")
 	}
-	m.Update(tea.KeyMsg{Type: tea.KeyEsc})
-	m.Update(tea.KeyMsg{Type: tea.KeyLeft})
+	m.Update(press("esc"))
+	m.Update(press("left"))
 	if m.hitsOpen() {
 		t.Fatal("← goes back to the sessions")
 	}
@@ -271,7 +271,7 @@ func TestHitListSurvivesAStoreReload(t *testing.T) {
 	m.cursor = 1
 	m.typing = false
 	m.search.Blur()
-	m.Update(tea.KeyMsg{Type: tea.KeyRight})
+	m.Update(press("right"))
 	loadHits(t, m)
 	if !m.hitsOpen() {
 		t.Fatal("→ opens the hit list")
@@ -330,8 +330,8 @@ func TestOTogglesNewestHitFirst(t *testing.T) {
 	m.msg.res[msgKey(recs[0])] = x
 	m.typing = false
 	m.search.Blur()
-	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("o")})
-	if m.rows[0].rec != recs[0] || !strings.Contains(ansi.Strip(m.View()), "latest hit") && !strings.Contains(ansi.Strip(m.View()), "最近命中") {
+	m.Update(press("o"))
+	if m.rows[0].rec != recs[0] || !strings.Contains(ansi.Strip(m.screen()), "latest hit") && !strings.Contains(ansi.Strip(m.screen()), "最近命中") {
 		t.Fatalf("o puts the newest hit first and says so: %v", m.rows[0].rec.Title)
 	}
 }
@@ -374,17 +374,17 @@ func TestBackslashSearchesThisSessionStartingFromTheKeywords(t *testing.T) {
 	m.cursor = 1
 	m.typing = false
 	m.search.Blur()
-	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(`\`)})
+	m.Update(press(`\`))
 	if !m.chat.typing || m.chat.input.Value() != "滚轮 加速" {
 		t.Fatalf("\\ starts from the > keywords: %q", m.chat.input.Value())
 	}
 	m.chat.input.SetValue("加速")
-	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m.Update(press("enter"))
 	loadHits(t, m)
 	if !m.hitsOpen() || len(m.msg.hl.items) != 1 || m.msg.hl.rec != recs[0] {
 		t.Fatalf("the session's own hits of the new query: open=%v items=%d", m.hitsOpen(), len(m.msg.hl.items))
 	}
-	if v := ansi.Strip(m.View()); !strings.Contains(v, "Messages") && !strings.Contains(v, "搜消息") {
+	if v := ansi.Strip(m.screen()); !strings.Contains(v, "Messages") && !strings.Contains(v, "搜消息") {
 		t.Fatalf("the search box says it is in message search:\n%s", v)
 	}
 }
@@ -394,12 +394,12 @@ func TestImeSlashSearchesSessionsAndCtrlSThisSession(t *testing.T) {
 	m.typing = false
 	m.search.Blur()
 	m.pane = paneChat
-	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("、")})
+	m.Update(press("、"))
 	if !m.typing || m.chat.typing {
 		t.Fatal("、 (a / under a CJK input method) focuses the search box, even from the right pane")
 	}
-	m.Update(tea.KeyMsg{Type: tea.KeyEsc})
-	m.Update(tea.KeyMsg{Type: tea.KeyCtrlS})
+	m.Update(press("esc"))
+	m.Update(press("ctrl+s"))
 	if !m.chat.typing {
 		t.Fatal("ctrl+s searches this session")
 	}
@@ -409,15 +409,15 @@ func TestEnterEndsTypingInMessageSearchSoNWalksHits(t *testing.T) {
 	m, _ := msgModel(t, "> 滚轮 加速")
 	search(t, m)
 	m.focusSearch()
-	if v := ansi.Strip(m.View()); !strings.Contains(v, "Enter to walk the hits") && !strings.Contains(v, "Enter 开始看命中") {
+	if v := ansi.Strip(m.screen()); !strings.Contains(v, "Enter to walk the hits") && !strings.Contains(v, "Enter 开始看命中") {
 		t.Fatalf("while typing the title says how to reach the hits:\n%s", v)
 	}
-	m.Update(tea.KeyMsg{Type: tea.KeyDown}) // moved: in a normal search Enter would resume
-	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m.Update(press("down")) // moved: in a normal search Enter would resume
+	m.Update(press("enter"))
 	if m.typing || m.ov.active() {
 		t.Fatalf("Enter only leaves the box: typing=%v overlay=%v", m.typing, m.ov.active())
 	}
-	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("n")})
+	m.Update(press("n"))
 	if m.search.Value() != "> 滚轮 加速" {
 		t.Fatalf("n no longer types into the box: %q", m.search.Value())
 	}
@@ -435,18 +435,18 @@ func TestTheHitListFollowsTheRightPane(t *testing.T) {
 	m.probes = map[*fav.Rec]*probe{r: {done: true, msgs: page.Msgs, from: page.From, full: page.Done}}
 	m.typing = false
 	m.search.Blur()
-	m.Update(tea.KeyMsg{Type: tea.KeyRight})
+	m.Update(press("right"))
 	loadHits(t, m)
 	start := m.msg.hl.cur
-	m.Update(tea.KeyMsg{Type: tea.KeyRight}) // into the right pane
+	m.Update(press("right")) // into the right pane
 	if m.pane != paneChat {
 		t.Fatal("→ from the hit list goes to the right pane")
 	}
-	key := tea.KeyDown
+	key := "down"
 	if m.chatCur == len(page.Msgs)-1 {
-		key = tea.KeyUp
+		key = "up"
 	}
-	m.Update(tea.KeyMsg{Type: key})
+	m.Update(press(key))
 	if m.msg.hl.cur == start || m.msg.hl.items[m.msg.hl.cur].Off != page.Msgs[m.chatCur].Off {
 		t.Fatalf("moving in the right pane moves the list's selection: %d → %d", start, m.msg.hl.cur)
 	}
@@ -463,7 +463,7 @@ func TestResumeDialogOffersTheDesktopApp(t *testing.T) {
 
 	r.App = false
 	m.askResume()
-	if m.ov.app || !strings.Contains(ansi.Strip(m.View()), "Claude") {
+	if m.ov.app || !strings.Contains(ansi.Strip(m.screen()), "Claude") {
 		t.Fatal("a terminal session: the app is offered, not first")
 	}
 	m.closeOverlay()
@@ -473,12 +473,12 @@ func TestResumeDialogOffersTheDesktopApp(t *testing.T) {
 	if !m.ov.app {
 		t.Fatal("started in the app, the setting follows the origin: the app comes first")
 	}
-	for l := range strings.SplitSeq(m.View(), "\n") {
+	for l := range strings.SplitSeq(m.screen(), "\n") {
 		if w := ansi.StringWidth(l); w > 140 {
 			t.Fatalf("line wider than the terminal (%d): %q", w, ansi.Strip(l))
 		}
 	}
-	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	_, cmd := m.Update(press("enter"))
 	if m.ov.active() || cmd == nil || !strings.Contains(m.notice, "Claude") {
 		t.Fatalf("Enter hands it to the app: %q", m.notice)
 	}
@@ -497,13 +497,13 @@ func TestAppButtonAppearsWhenTheLookupAnswers(t *testing.T) {
 		t.Fatal("the lookup starts in the background")
 	}
 	btn := i18n.F("resume.btn_app", "Claude")
-	if strings.Contains(ansi.Strip(m.View()), btn) {
+	if strings.Contains(ansi.Strip(m.screen()), btn) {
 		t.Fatal("no button yet")
 	}
 	m.pending = nil
 	capture.SetAppAvailable(fav.ProviderClaude, true)
 	m.Update(appProbedMsg{})
-	if !strings.Contains(ansi.Strip(m.View()), btn) {
+	if !strings.Contains(ansi.Strip(m.screen()), btn) {
 		t.Fatal("the button appears once the app is found")
 	}
 	m.closeOverlay()
@@ -530,7 +530,7 @@ func appFiles(t *testing.T, r *fav.Rec) {
 func TestResumeDialogOpensTheFileManager(t *testing.T) {
 	m := sized(t, 140, 40)
 	m.askResume()
-	if !strings.Contains(ansi.Strip(m.View()), "o "+fileManagerName()) {
+	if !strings.Contains(ansi.Strip(m.screen()), "o "+fileManagerName()) {
 		t.Fatal("the project row offers the file manager")
 	}
 }
@@ -542,14 +542,14 @@ func TestAppKeyIsP(t *testing.T) {
 	r.SessionID, r.Provider = "c5126b86-64bb-46a8-9a69-fc421c8f4f9a", fav.ProviderClaude
 	appFiles(t, r)
 	m.askResume()
-	if !strings.Contains(ansi.Strip(m.View()), "p Claude App") {
+	if !strings.Contains(ansi.Strip(m.screen()), "p Claude App") {
 		t.Fatal("the app button is labelled p")
 	}
-	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("p")})
+	m.Update(press("p"))
 	if !m.ov.active() || !strings.HasPrefix(m.ov.btns[m.ov.focus].label, "p ") {
 		t.Fatal("the first p focuses the app button")
 	}
-	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("p")})
+	_, cmd := m.Update(press("p"))
 	if m.ov.active() || cmd == nil {
 		t.Fatal("p again hands the session to the app")
 	}
@@ -571,13 +571,13 @@ func TestButtonKeysStandOut(t *testing.T) {
 func TestResumeDialogEditKeys(t *testing.T) {
 	m := sized(t, 140, 40)
 	m.askResume()
-	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("n")})
+	m.Update(press("n"))
 	if m.ov.kind != ovResume || !m.ov.editing {
 		t.Fatal("n edits the title in place")
 	}
 	m.closeOverlay()
 	m.askResume()
-	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("e")})
+	m.Update(press("e"))
 	if m.ov.kind != ovEdit {
 		t.Fatal("e opens the full editor, like the e button")
 	}
@@ -586,7 +586,7 @@ func TestResumeDialogEditKeys(t *testing.T) {
 func TestNoticeExpires(t *testing.T) {
 	m := sized(t, 140, 40)
 	m.askResume()
-	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")})
+	_, cmd := m.Update(press("y"))
 	if !strings.HasPrefix(m.notice, i18n.T("resume.copied")) || cmd == nil {
 		t.Fatalf("copying says so and schedules the notice's expiry: %q", m.notice)
 	}
@@ -605,11 +605,11 @@ func TestNoticeExpires(t *testing.T) {
 func TestNoCopyButtonWithoutACommand(t *testing.T) {
 	m := sized(t, 140, 40)
 	m.askResume()
-	if !strings.Contains(ansi.Strip(m.View()), i18n.T("resume.btn_copy")) {
+	if !strings.Contains(ansi.Strip(m.screen()), i18n.T("resume.btn_copy")) {
 		t.Fatal("a resumable session offers the command")
 	}
 	m.ov.plan.Spec = capture.CommandSpec{}
-	if strings.Contains(ansi.Strip(m.View()), i18n.T("resume.btn_copy")) {
+	if strings.Contains(ansi.Strip(m.screen()), i18n.T("resume.btn_copy")) {
 		t.Fatal("nothing to copy (a session running in Herdr): no copy button")
 	}
 }
@@ -639,15 +639,15 @@ func TestTrashBlocksEveryAlias(t *testing.T) {
 	os.WriteFile(transcript, []byte("{}\n"), 0o644)
 	r.PinnedPath = transcript
 	m.store.Put(r)
-	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("D")})
-	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")})
+	m.Update(press("D"))
+	m.Update(press("y"))
 	m.search.SetValue("status:trash")
 	m.refresh()
 	if m.current() == nil {
 		t.Fatal("the deleted session is in the trash")
 	}
 	m.pane = paneChat
-	for _, k := range []tea.KeyMsg{{Type: tea.KeyRunes, Runes: []rune("*")}, {Type: tea.KeyCtrlX}, {Type: tea.KeyRunes, Runes: []rune("a")}, {Type: tea.KeySpace, Runes: []rune(" ")}} {
+	for _, k := range []tea.KeyPressMsg{press("*"), press("ctrl+x"), press("a"), press("space")} {
 		m.Update(k)
 		if m.store.Get(r.ID) != nil || m.ov.active() || m.quitting {
 			t.Fatalf("in the trash %q is blocked like f, also from the right pane", k.String())
@@ -663,13 +663,13 @@ func TestSpaceOnlyOpensTheDialogOrSwitches(t *testing.T) {
 	r.SessionID, r.Provider = "c5126b86-64bb-46a8-9a69-fc421c8f4f9a", fav.ProviderClaude
 	appFiles(t, r)
 	m.cfg.ResumeIn = fav.ResumeApp
-	m.Update(tea.KeyMsg{Type: tea.KeySpace, Runes: []rune(" ")})
+	m.Update(press("space"))
 	if m.quitting || m.ov.kind != ovResume || m.notice != "" {
 		t.Fatalf("Space opens the dialog, like Enter: quitting=%v kind=%d notice=%q", m.quitting, m.ov.kind, m.notice)
 	}
 	m.closeOverlay()
 	m.pane = paneChat
-	m.Update(tea.KeyMsg{Type: tea.KeySpace, Runes: []rune(" ")})
+	m.Update(press("space"))
 	if m.ov.active() || m.quitting {
 		t.Fatal("in the chat Space pages, it does not open the dialog")
 	}
@@ -677,9 +677,9 @@ func TestSpaceOnlyOpensTheDialogOrSwitches(t *testing.T) {
 
 func TestCompactEnterShowsTheDetail(t *testing.T) {
 	m := sized(t, 50, 20)
-	before := ansi.Strip(m.View())
-	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	if !m.detail || ansi.Strip(m.View()) == before {
+	before := ansi.Strip(m.screen())
+	m.Update(press("enter"))
+	if !m.detail || ansi.Strip(m.screen()) == before {
 		t.Fatal("under 60 columns Enter shows the detail")
 	}
 }
@@ -687,7 +687,7 @@ func TestCompactEnterShowsTheDetail(t *testing.T) {
 func TestSearchFromTheRightPaneMovesTheList(t *testing.T) {
 	m := sized(t, 140, 40)
 	m.pane = paneChat
-	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("/")})
+	m.Update(press("/"))
 	if !m.typing || m.pane != paneList {
 		t.Fatal("/ from the right pane: the arrows select records")
 	}
@@ -721,7 +721,7 @@ func TestResumeAsksWhichWorkspace(t *testing.T) {
 		t.Fatalf("two workspaces fit: the user picks (or this terminal): kind=%v items=%d", m.ov.kind, len(m.ov.items))
 	}
 	m.ov.cursor = 1
-	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	_, cmd := m.Update(press("enter"))
 	if cmd == nil || !strings.Contains(m.notice, "web") || m.quitting {
 		t.Fatalf("picking web opens the tab there: notice=%q", m.notice)
 	}
@@ -767,7 +767,7 @@ func TestAttentionQueue(t *testing.T) {
 	if m.notice != "" {
 		t.Fatal("announced once, not every poll")
 	}
-	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(".")})
+	m.Update(press("."))
 	if m.need(id) != needNone {
 		t.Fatal(". marks it handled")
 	}
@@ -781,7 +781,7 @@ func TestAttentionQueue(t *testing.T) {
 		t.Fatalf("what the user took in survives a restart: %+v", reloaded[id])
 	}
 
-	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("H")})
+	m.Update(press("H"))
 	if m.need(id) != needNone {
 		t.Fatal("H snoozes it")
 	}

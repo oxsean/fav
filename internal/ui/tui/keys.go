@@ -141,7 +141,7 @@ var bindings = []binding{
 	{act: actChatDown, in: inList, keys: []string{"J", "ctrl+j"}},
 	{act: actChatUp, in: inList, keys: []string{"K", "ctrl+k"}},
 	{act: actEnter, in: inList, keys: []string{"enter"}},
-	{act: actSpace, in: inList, keys: []string{" ", "ctrl+g"}},
+	{act: actSpace, in: inList, keys: []string{"space", "ctrl+g"}},
 	{act: actNextView, in: inList, keys: []string{"tab"}},
 	{act: actPrevView, in: inList, keys: []string{"shift+tab"}},
 	{act: actView, in: inList, keys: []string{"1", "2", "3", "4"}},
@@ -194,7 +194,7 @@ var bindings = []binding{
 	{act: actCodex, in: inStart | inHandoff, tier: tierStart, keys: []string{"2"}},
 	{act: actDown, in: inStart | inHandoff, keys: []string{"j", "down", "ctrl+n"}},
 	{act: actUp, in: inStart | inHandoff, keys: []string{"k", "up", "ctrl+p"}},
-	{act: actPageDown, in: inHandoff, keys: []string{" ", "pgdown", "ctrl+f"}},
+	{act: actPageDown, in: inHandoff, keys: []string{"space", "pgdown", "ctrl+f"}},
 	{act: actPageUp, in: inHandoff, keys: []string{"pgup", "ctrl+b"}},
 	{act: actEdit, in: inHandoff, keys: []string{"e", "ctrl+e"}},
 	{act: actCopy, in: inHandoff, keys: []string{"y", "ctrl+y"}},
@@ -283,7 +283,7 @@ func keyed(key, text string) string {
 }
 
 var keyNamesShown = map[string]string{
-	" ": "Space", "enter": "Enter", "esc": "Esc", "tab": "Tab", "shift+tab": "Shift+Tab", "backspace": "Backspace",
+	"space": "Space", "enter": "Enter", "esc": "Esc", "tab": "Tab", "shift+tab": "Shift+Tab", "backspace": "Backspace",
 	"up": "↑", "down": "↓", "left": "←", "right": "→", "pgup": "PgUp", "pgdown": "PgDn", "home": "Home", "end": "End",
 }
 

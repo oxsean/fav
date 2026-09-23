@@ -7,7 +7,6 @@ import (
 	"testing"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/oxsean/fav/internal/capture"
@@ -31,25 +30,25 @@ func TestStartFromProjectShowsWhatRuns(t *testing.T) {
 			m.cursor = i
 		}
 	}
-	key := func(s string) { m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(s)}) }
+	key := func(s string) { m.Update(press(s)) }
 	key("w")
 	if m.ov.kind != ovStart || m.ov.rec.Cwd != dir || len(m.ov.running) != 1 || m.ov.running[0].SessionID != running {
 		t.Fatalf("w on a project header: a new-session dialog in its directory listing what runs there: %+v", m.ov)
 	}
-	v := ansi.Strip(m.View())
+	v := ansi.Strip(m.screen())
 	for _, want := range []string{"开新会话 · notes-api", "这里已经在跑（1）", "1 Claude Code", "2 Codex CLI"} {
 		if !strings.Contains(v, want) {
 			t.Errorf("dialog lacks %q:\n%s", want, v)
 		}
 	}
-	m.Update(tea.KeyMsg{Type: tea.KeyDown})
-	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m.Update(press("down"))
+	m.Update(press("enter"))
 	if m.ov.kind != ovResume || m.ov.rec.SessionID != running {
 		t.Fatalf("↓ Enter goes to the running session's dialog: kind=%d", m.ov.kind)
 	}
 	m.closeOverlay()
 	key("w")
-	m.View()
+	m.screen()
 	key("2")
 	if m.quitting {
 		t.Fatal("the first 2 only selects Codex")
@@ -76,7 +75,7 @@ func TestCloseIdleTabs(t *testing.T) {
 	}
 	m.pulse = pulseMsg{unseen.SessionID: {Size: 10, Finished: true}}
 	m.setView(viewLive)
-	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("Z")})
+	m.Update(press("Z"))
 	if m.ov.kind != ovConfirm || m.ov.focus != 1 {
 		t.Fatalf("Z asks first, focus on Cancel: kind=%d focus=%d", m.ov.kind, m.ov.focus)
 	}
@@ -94,11 +93,11 @@ func TestResumeRefusedWhileRunningElsewhere(t *testing.T) {
 	os.WriteFile(r.TranscriptPath, []byte("{}\n"), 0o644)
 	m.live = map[string]capture.Live{r.SessionID: {Status: "idle"}} // another terminal, not Herdr
 	m.askResume()
-	v := ansi.Strip(m.View())
+	v := ansi.Strip(m.screen())
 	if !strings.Contains(v, "在别的终端里运行") || !strings.Contains(v, "在跑") || !strings.Contains(v, "H 暂缓") || strings.Contains(v, "X 关掉 tab") {
 		t.Fatalf("the check says why, and the running row has the actions that apply:\n%s", v)
 	}
-	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m.Update(press("enter"))
 	if m.quitting || !strings.Contains(m.notice, "别的终端") {
 		t.Fatalf("resuming a second copy is refused: quitting=%v notice=%q", m.quitting, m.notice)
 	}

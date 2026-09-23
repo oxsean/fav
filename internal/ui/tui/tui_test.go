@@ -7,8 +7,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/oxsean/fav/internal/capture"
@@ -75,8 +76,34 @@ func sized(t *testing.T, w, h int) *Model {
 	return m
 }
 
+var pressCodes = map[string]rune{
+	"enter": tea.KeyEnter, "esc": tea.KeyEscape, "tab": tea.KeyTab, "backspace": tea.KeyBackspace, "up": tea.KeyUp, "down": tea.KeyDown,
+	"left": tea.KeyLeft, "right": tea.KeyRight, "pgup": tea.KeyPgUp, "pgdown": tea.KeyPgDown, "home": tea.KeyHome, "end": tea.KeyEnd,
+}
+
+// press is the key message bubbletea delivers for k, spelled as msg.String() reports it ("enter", "ctrl+s", "space", "J", "，", or typed text).
+func press(k string) tea.KeyPressMsg {
+	switch k {
+	case "space":
+		return tea.KeyPressMsg{Code: tea.KeySpace, Text: " "}
+	case "shift+tab":
+		return tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift}
+	}
+	if c, ok := pressCodes[k]; ok {
+		return tea.KeyPressMsg{Code: c}
+	}
+	if rest, ok := strings.CutPrefix(k, "ctrl+"); ok && utf8.RuneCountInString(rest) == 1 {
+		r, _ := utf8.DecodeRuneInString(rest)
+		return tea.KeyPressMsg{Code: r, Mod: tea.ModCtrl}
+	}
+	if r, n := utf8.DecodeRuneInString(k); n == len(k) {
+		return tea.KeyPressMsg{Code: r, Text: k}
+	}
+	return tea.KeyPressMsg{Code: tea.KeyExtended, Text: k}
+}
+
 func viewLines(m *Model) []string {
-	return strings.Split(m.View(), "\n")
+	return strings.Split(m.screen(), "\n")
 }
 
 func TestNoLineExceedsTerminalWidth(t *testing.T) {
@@ -119,7 +146,7 @@ func TestLayoutSwitchesOnWidth(t *testing.T) {
 	if !wide.twoColumn() {
 		t.Error("140 列应走双栏")
 	}
-	if !strings.Contains(ansi.Strip(wide.View()), "恢复目标") {
+	if !strings.Contains(ansi.Strip(wide.screen()), "恢复目标") {
 		t.Error("双栏应在右侧同屏显示预览")
 	}
 
@@ -127,21 +154,21 @@ func TestLayoutSwitchesOnWidth(t *testing.T) {
 	if narrow.twoColumn() {
 		t.Error("80 列应退为单栏")
 	}
-	if strings.Contains(ansi.Strip(narrow.View()), "恢复目标") {
+	if strings.Contains(ansi.Strip(narrow.screen()), "恢复目标") {
 		t.Error("单栏列表页不应并排显示预览")
 	}
 }
 
 func TestNarrowEnterGoesToDetailFirst(t *testing.T) {
 	m := sized(t, 80, 24)
-	m.navKey(tea.KeyMsg{Type: tea.KeyEnter})
+	m.navKey(press("enter"))
 	if !m.detail {
 		t.Fatal("窄屏第一次 Enter 应进入详情页")
 	}
 	if m.ov.active() {
 		t.Fatal("窄屏第一次 Enter 不应直接起恢复确认")
 	}
-	m.navKey(tea.KeyMsg{Type: tea.KeyEnter})
+	m.navKey(press("enter"))
 	if m.ov.kind != ovResume {
 		t.Fatal("详情页里再按 Enter 应起恢复确认")
 	}
@@ -149,12 +176,12 @@ func TestNarrowEnterGoesToDetailFirst(t *testing.T) {
 
 func TestKeysAreTextWhileTyping(t *testing.T) {
 	m := sized(t, 140, 40)
-	m.navKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
+	m.navKey(press("/"))
 	if !m.typing {
 		t.Fatal("/ 应聚焦搜索框")
 	}
 	for _, r := range "tpsdx" {
-		m.searchKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		m.searchKey(press(string(r)))
 	}
 	if m.ov.active() {
 		t.Fatal("输入状态下的快捷键字母不应触发筛选浮层")
@@ -170,7 +197,7 @@ func TestTabKeepsFilters(t *testing.T) {
 	m.refresh()
 	before := m.countRecs()
 
-	m.navKey(tea.KeyMsg{Type: tea.KeyTab})
+	m.navKey(press("tab"))
 	if m.view != viewSessions {
 		t.Fatal("Tab 应切到「会话」")
 	}
@@ -187,7 +214,7 @@ func TestOverlayCancelKeepsQuery(t *testing.T) {
 	m.search.SetValue("#debug websocket")
 	m.refresh()
 	m.pickTags()
-	m.overlayKey(tea.KeyMsg{Type: tea.KeyEsc})
+	m.overlayKey(press("esc"))
 	if m.ov.active() {
 		t.Fatal("Esc 应关闭浮层")
 	}
@@ -202,7 +229,7 @@ func TestPickTagsReplacesOnlyTagTokens(t *testing.T) {
 	m.refresh()
 	m.pickTags()
 	m.ov.checked = map[string]bool{"debug": true}
-	m.overlayKey(tea.KeyMsg{Type: tea.KeyEnter})
+	m.overlayKey(press("enter"))
 
 	got := m.search.Value()
 	if strings.Contains(got, "#old") {
@@ -232,10 +259,10 @@ func TestNavigationSkipsGroupHeaders(t *testing.T) {
 			t.Fatal("默认不该有展开的分组")
 		}
 	}
-	if v := ansi.Strip(m.View()); !strings.Contains(v, "Enter 展开") {
+	if v := ansi.Strip(m.screen()); !strings.Contains(v, "Enter 展开") {
 		t.Fatal("底栏应提示 Enter 展开")
 	}
-	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m.Update(press("enter"))
 	if m.rows[m.cursor].folded || m.rows[m.cursor+1].rec == nil {
 		t.Fatal("Enter 应展开光标下的分组")
 	}
@@ -247,16 +274,16 @@ func TestNavigationSkipsGroupHeaders(t *testing.T) {
 
 func TestViewHotkeys(t *testing.T) {
 	m := sized(t, 140, 40)
-	key := func(k tea.KeyMsg) { m.Update(k) }
-	key(tea.KeyMsg{Type: tea.KeyShiftTab})
+	key := func(k tea.KeyPressMsg) { m.Update(k) }
+	key(press("shift+tab"))
 	if m.view != viewLive {
 		t.Fatalf("收藏页 Shift+Tab 应绕到最后一页 Agents：%v", m.view)
 	}
-	key(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("3")})
+	key(press("3"))
 	if m.view != viewProjects {
 		t.Fatalf("3 应跳到项目：%v", m.view)
 	}
-	key(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("；")})
+	key(press("；"))
 	if m.chipFocus != 0 {
 		t.Fatal("； 应进筛选行")
 	}
@@ -312,20 +339,20 @@ func TestFoldAll(t *testing.T) {
 	if open() != 0 {
 		t.Fatal("默认应全折")
 	}
-	m.navKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("z")})
+	m.navKey(press("z"))
 	before := open()
 	if before == 0 {
 		t.Fatal("z 应全展")
 	}
-	m.navKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("z")})
+	m.navKey(press("z"))
 	if open() != 0 {
 		t.Fatalf("再按 z 应全折，还剩 %d 条可见", open())
 	}
-	m.navKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("-")})
+	m.navKey(press("-"))
 	if open() != 0 {
 		t.Fatal("- 应全折")
 	}
-	m.navKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("=")})
+	m.navKey(press("="))
 	if open() != before {
 		t.Fatal("= 应全展")
 	}
@@ -360,7 +387,7 @@ func TestDatePicker(t *testing.T) {
 	m := New(fixture(t), noIndex(t), fav.DefaultConfig(), "")
 	m.pickDate()
 	m.ov.filter.SetValue("9-1..9-15")
-	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m.Update(press("enter"))
 	if got := m.search.Value(); !strings.Contains(got, "after:2026-09-01") || !strings.Contains(got, "before:2026-09-16") {
 		t.Errorf("手输区间没进查询串：%q", got)
 	}
@@ -379,8 +406,8 @@ func TestPickerClear(t *testing.T) {
 	m.search.SetValue("geo #pagination last:7d")
 	m.pickTags()
 	m.ov.filter.SetValue("x")
-	m.Update(tea.KeyMsg{Type: tea.KeyCtrlU})
-	m.Update(tea.KeyMsg{Type: tea.KeyBackspace})
+	m.Update(press("ctrl+u"))
+	m.Update(press("backspace"))
 	if !m.ov.active() || m.ov.filter.Value() != "" {
 		t.Fatalf("多选框里 ^U 只清输入、空着退格不关框（勾选不能误丢）：ov=%v %q", m.ov.active(), m.ov.filter.Value())
 	}
@@ -390,11 +417,11 @@ func TestPickerClear(t *testing.T) {
 	}
 	m.pickDate()
 	m.ov.filter.SetValue("本")
-	m.Update(tea.KeyMsg{Type: tea.KeyBackspace})
+	m.Update(press("backspace"))
 	if !m.ov.active() || m.ov.filter.Value() != "" {
 		t.Fatalf("搜索框有字时退格只删字：ov=%v %q", m.ov.active(), m.ov.filter.Value())
 	}
-	m.Update(tea.KeyMsg{Type: tea.KeyBackspace})
+	m.Update(press("backspace"))
 	if m.ov.active() || m.search.Value() != "geo" {
 		t.Fatalf("空着再退格应清掉时间：ov=%v %q", m.ov.active(), m.search.Value())
 	}
@@ -402,17 +429,17 @@ func TestPickerClear(t *testing.T) {
 
 func TestConventionalKeys(t *testing.T) {
 	m := sized(t, 140, 40)
-	key := func(k string) { m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(k)}) }
+	key := func(k string) { m.Update(press(k)) }
 	key("/")
 	if !m.typing {
 		t.Fatal("列表里 / 应聚焦搜索框")
 	}
 	before := m.cursor
-	m.Update(tea.KeyMsg{Type: tea.KeyCtrlN})
+	m.Update(press("ctrl+n"))
 	if m.cursor <= before || !m.typing {
 		t.Fatalf("搜索框里 ctrl+n 应选下一条且不离开搜索框：cursor=%d typing=%v", m.cursor, m.typing)
 	}
-	m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m.Update(press("esc"))
 	key("l")
 	if m.pane != paneChat {
 		t.Fatal("l 应把焦点切到右栏")
@@ -421,20 +448,20 @@ func TestConventionalKeys(t *testing.T) {
 	if !m.typing || m.chat.typing {
 		t.Fatal("/ 在哪都是搜会话，右栏有焦点时也一样")
 	}
-	m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m.Update(press("esc"))
 	key(">")
 	if !m.typing || !m.msgMode() {
 		t.Fatal("> 打开搜消息")
 	}
 	m.search.SetValue("")
 	m.refresh()
-	m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m.Update(press("esc"))
 	key("l")
 	key("h")
 	m.cursor = 0
 	m.clampCursor()
 	before = m.cursor
-	m.Update(tea.KeyMsg{Type: tea.KeyCtrlD})
+	m.Update(press("ctrl+d"))
 	if m.cursor <= before {
 		t.Fatalf("ctrl+d 应往下走半页：%d", m.cursor)
 	}
@@ -445,7 +472,7 @@ func TestViewSwitchClampsChip(t *testing.T) {
 	m := sized(t, 140, 40)
 	m.chipFocus = 4
 	m.setView(viewLive)
-	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m.Update(press("enter"))
 	if m.chipFocus != 3 {
 		t.Fatalf("chipFocus=%d", m.chipFocus)
 	}
@@ -478,7 +505,7 @@ func TestProjectsSortKeepsGroups(t *testing.T) {
 	name := m.rows[m.cursor].group
 	row := m.rowTop(m.cursor) - m.scroll
 	for range 4 {
-		m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("o")})
+		m.Update(press("o"))
 		if g := groups(); len(g) != len(before) {
 			t.Fatalf("%s：分组数 %d → %d", m.sortBy.label(), len(before), len(g))
 		}
@@ -503,7 +530,7 @@ func TestWheelReachesFirstGroup(t *testing.T) {
 	for range 200 {
 		m.wheel(-1, 0)
 	}
-	m.View()
+	m.screen()
 	if m.cursor != 0 || m.scroll != 0 {
 		t.Fatalf("应回到顶上：cursor=%d scroll=%d", m.cursor, m.scroll)
 	}
@@ -517,7 +544,7 @@ func TestStatusPickerAndTrash(t *testing.T) {
 		t.Fatalf("选择器应打开并停在当前值：%+v", m.ov.cursor)
 	}
 	m.ov.filter.SetValue("回收")
-	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m.Update(press("enter"))
 	if m.search.Value() != "status:trash" || !m.inTrash() {
 		t.Fatalf("选回收站应写进查询串：%q", m.search.Value())
 	}
@@ -534,17 +561,17 @@ func TestStatusPickerAndTrash(t *testing.T) {
 	os.WriteFile(transcript, []byte("{}\n"), 0o644)
 	r.PinnedPath = transcript
 	m.store.Put(r)
-	key := func(k string) { m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(k)}) }
+	key := func(k string) { m.Update(press(k)) }
 	key("D")
 	if m.ov.kind != ovConfirm {
 		t.Fatal("D 应先确认")
 	}
-	m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m.Update(press("esc"))
 	if m.ov.active() || m.store.Get(r.ID) == nil {
 		t.Fatal("Esc 应取消，不删")
 	}
 	key("D")
-	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m.Update(press("enter"))
 	if m.ov.active() || m.store.Get(r.ID) == nil {
 		t.Fatal("删除确认的焦点在取消：Enter 不删")
 	}
@@ -594,23 +621,23 @@ func TestProjectArrowsAndInfoPane(t *testing.T) {
 		t.Fatal("项目页起始应停在分组标题上")
 	}
 	g := m.rows[m.cursor].group
-	v := ansi.Strip(m.View())
+	v := ansi.Strip(m.screen())
 	if !strings.Contains(v, "项目") || !strings.Contains(v, "最近会话") || !strings.Contains(v, "个会话") {
 		t.Fatalf("右栏应显示项目信息\n%s", v)
 	}
-	m.Update(tea.KeyMsg{Type: tea.KeyRight})
+	m.Update(press("right"))
 	if !m.open[g] || m.rows[m.cursor+1].rec == nil {
 		t.Fatal("→ 应展开分组")
 	}
-	m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	m.Update(press("down"))
 	if m.current() == nil {
 		t.Fatal("↓ 应停到子项")
 	}
-	m.Update(tea.KeyMsg{Type: tea.KeyLeft})
+	m.Update(press("left"))
 	if m.open[g] || m.rows[m.cursor].group != g {
 		t.Fatalf("子项上 ← 应折叠并回到分组标题：open=%v row=%+v", m.open[g], m.rows[m.cursor])
 	}
-	m.Update(tea.KeyMsg{Type: tea.KeyLeft})
+	m.Update(press("left"))
 	if m.pane != paneList || m.rows[m.cursor].group != g {
 		t.Fatal("折着的分组上再按 ← 什么都不做")
 	}
@@ -621,11 +648,11 @@ func TestProjectClicks(t *testing.T) {
 	m.setView(viewProjects)
 	m.refresh()
 	first := m.rows[0].group
-	m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	m.Update(press("down"))
 	if m.cursor == 0 {
 		t.Fatal("要有第二个分组")
 	}
-	m.View()
+	m.screen()
 	for y := 0; y < m.h && !m.open[first]; y++ {
 		if act := m.hit(3, y); act != nil {
 			act(m)
@@ -636,7 +663,7 @@ func TestProjectClicks(t *testing.T) {
 	}
 	m.open[first] = false
 	m.refresh()
-	m.View()
+	m.screen()
 	target := m.groups[first][0]
 	m.jumpTo(first, target)
 	if m.current() != target || !m.open[first] {
@@ -649,7 +676,7 @@ func TestProjectKeyboardJump(t *testing.T) {
 	m.setView(viewProjects)
 	m.refresh()
 	g := m.rows[0].group
-	right := tea.KeyMsg{Type: tea.KeyRight}
+	right := press("right")
 	m.Update(right)
 	if !m.open[g] || m.pane != paneList {
 		t.Fatal("第一下 → 展开")
@@ -658,12 +685,12 @@ func TestProjectKeyboardJump(t *testing.T) {
 	if !m.projectFocus() {
 		t.Fatal("第二下 → 焦点到右栏")
 	}
-	m.Update(tea.KeyMsg{Type: tea.KeyDown})
-	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m.Update(press("down"))
+	m.Update(press("enter"))
 	if m.pane != paneList || m.current() != m.groups[g][1] {
 		t.Fatalf("↓ Enter 应跳到分组里第二条：%v", m.current())
 	}
-	if v := ansi.Strip(m.View()); !strings.Contains(v, m.groups[g][1].Title[:6]) {
+	if v := ansi.Strip(m.screen()); !strings.Contains(v, m.groups[g][1].Title[:6]) {
 		t.Fatal("跳过去后右栏应是那条会话")
 	}
 }
@@ -692,7 +719,7 @@ func TestMoveProjectFromTUI(t *testing.T) {
 	if m.current() != nil || m.groupUnderCursor() != "proj" {
 		t.Fatalf("应停在 proj 分组上：%+v", m.rows[:1])
 	}
-	key := func(k string) { m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(k)}) }
+	key := func(k string) { m.Update(press(k)) }
 
 	m.live = map[string]capture.Live{"s2": {}}
 	key("M")
@@ -711,15 +738,15 @@ func TestMoveProjectFromTUI(t *testing.T) {
 		t.Fatalf("列出 dev 下的子目录：%+v", vis)
 	}
 	m.ov.cursor = 1
-	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m.Update(press("enter"))
 	if m.ov.kind != ovPicker || m.ov.filter.Value() != dst+string(filepath.Separator) || m.ov.cursor != 0 {
 		t.Fatalf("子目录上 Enter 应进入而不是选定：%q cur=%d", m.ov.filter.Value(), m.ov.cursor)
 	}
-	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m.Update(press("enter"))
 	if m.ov.kind != ovConfirm || !strings.Contains(strings.Join(m.ov.lines, "\n"), "2 个会话（Claude 2 · Codex 0）") {
 		t.Fatalf("「就是这个目录」上 Enter 应弹确认框：kind=%d %v", m.ov.kind, m.ov.lines)
 	}
-	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m.Update(press("enter"))
 	if m.ov.kind != ovPicker || m.ov.browse == nil || m.ov.filter.Value() != dst+string(filepath.Separator) || m.notice != "" {
 		t.Fatalf("确认框默认焦点在取消，Enter 应回到目录选择器：kind=%d %q notice=%q", m.ov.kind, m.ov.filter.Value(), m.notice)
 	}
@@ -729,7 +756,7 @@ func TestMoveProjectFromTUI(t *testing.T) {
 	}
 	m.ov.filter.SetValue(dst + string(filepath.Separator))
 	m.ov.cursor = 0
-	m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // the first row = this directory
+	m.Update(press("enter")) // the first row = this directory
 	key("y")
 	if m.ov.active() || !strings.Contains(m.notice, "已移动 2") {
 		t.Fatalf("y 应搬完：notice=%q", m.notice)
@@ -754,7 +781,7 @@ func TestDirPickerClickPlacesCursor(t *testing.T) {
 	m := sized(t, 140, 40)
 	m.openDirPicker("t", "/Users/x/dev/", func(*Model, string) {})
 	m.ov.focus = 0
-	m.View()
+	m.screen()
 	var z *zone
 	for i := range m.zones {
 		if m.zones[i].x2-m.zones[i].x1 > 40 {
@@ -766,7 +793,7 @@ func TestDirPickerClickPlacesCursor(t *testing.T) {
 		t.Fatalf("输入框应登记点击区：%+v", m.zones)
 	}
 	x := z.x1 + 2 + 2 + len("/Users/x/") // border+padding, prompt 2 columns: the click lands on the d of dev
-	m.Update(tea.MouseMsg{Button: tea.MouseButtonLeft, Action: tea.MouseActionPress, X: x, Y: z.y})
+	m.Update(tea.MouseClickMsg{Button: tea.MouseLeft, X: x, Y: z.y})
 	if m.ov.filter.Position() != len("/Users/x/") || m.ov.focus != -1 {
 		t.Fatalf("点哪光标落哪、焦点回列表：pos=%d focus=%d", m.ov.filter.Position(), m.ov.focus)
 	}
@@ -775,9 +802,9 @@ func TestDirPickerClickPlacesCursor(t *testing.T) {
 func TestSearchBarClickPlacesCursor(t *testing.T) {
 	m := sized(t, 140, 40)
 	m.search.SetValue("webapp rbac")
-	m.View()
+	m.screen()
 	x := 2 + ansi.StringWidth(m.search.Prompt) + len("webapp ")
-	m.Update(tea.MouseMsg{Button: tea.MouseButtonLeft, Action: tea.MouseActionPress, X: x, Y: 1})
+	m.Update(tea.MouseClickMsg{Button: tea.MouseLeft, X: x, Y: 1})
 	if !m.typing || m.search.Position() != len("webapp ") {
 		t.Fatalf("点搜索框应进入输入且光标落在点的那列：typing=%v pos=%d", m.typing, m.search.Position())
 	}
@@ -791,15 +818,15 @@ func TestBrokenSessionOffersMoveOrDelete(t *testing.T) {
 	if v := ansi.Strip(strings.Join(m.cardBox(r, true, m.listWidth()), "\n")); !strings.Contains(v, r.Title[:6]) || !strings.Contains(v, " !") {
 		t.Fatalf("目录没了的卡片标题后应有 ! 小标：\n%s", v)
 	}
-	m.Update(tea.KeyMsg{Type: tea.KeySpace})
+	m.Update(press("space"))
 	if m.ov.kind != ovResume || m.quitting {
 		t.Fatalf("Space 不该直接恢复，应停在恢复框：kind=%d quit=%v", m.ov.kind, m.quitting)
 	}
-	m.View()
-	if v := ansi.Strip(m.View()); strings.Contains(v, "Enter 恢复") || !strings.Contains(v, "M 移动") || !strings.Contains(v, "D 删除") {
+	m.screen()
+	if v := ansi.Strip(m.screen()); strings.Contains(v, "Enter 恢复") || !strings.Contains(v, "M 移动") || !strings.Contains(v, "D 删除") {
 		t.Fatalf("恢复框应只给移动 / 删除：\n%s", v)
 	}
-	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m.Update(press("enter"))
 	if m.ov.kind != ovPicker || m.ov.browse == nil {
 		t.Fatalf("目录没了时 Enter 应进移动流程：kind=%d", m.ov.kind)
 	}
@@ -810,35 +837,35 @@ func TestDrillInAndBack(t *testing.T) {
 	m := sized(t, 140, 40)
 	r := m.current()
 	m.probes = map[*fav.Rec]*probe{r: {done: true, msgs: []capture.Message{{Role: "user", Text: "一句话"}}}}
-	key := func(k tea.KeyType) { m.Update(tea.KeyMsg{Type: k}) }
-	key(tea.KeyRight)
+	key := func(k string) { m.Update(press(k)) }
+	key("right")
 	if m.pane != paneChat {
 		t.Fatal("→ 应进右栏")
 	}
-	key(tea.KeyRight)
+	key("right")
 	if m.ov.kind != ovMessage {
 		t.Fatal("右栏里 → 应打开整句全文")
 	}
-	key(tea.KeyEsc)
+	key("esc")
 	if m.ov.active() || m.pane != paneChat {
 		t.Fatal("Esc 只退一层：回到右栏")
 	}
-	key(tea.KeyLeft)
+	key("left")
 	if m.pane != paneList {
 		t.Fatal("← 应回左栏")
 	}
-	key(tea.KeyRight)
+	key("right")
 	m.clickRow(1)
 	if m.pane != paneList || m.cursor != 1 {
 		t.Fatalf("点左栏焦点应回左栏：pane=%d cur=%d", m.pane, m.cursor)
 	}
 
 	m.w = 80 // narrow: Enter opens the detail, ← and Esc both leave
-	key(tea.KeyEnter)
+	key("enter")
 	if !m.detail {
 		t.Fatal("窄屏 Enter 应进详情")
 	}
-	key(tea.KeyLeft)
+	key("left")
 	if m.detail {
 		t.Fatal("窄屏详情 ← 应退回列表")
 	}

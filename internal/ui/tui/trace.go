@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/oxsean/fav/internal/fav"
 )
@@ -62,8 +62,8 @@ func (m *Model) traceChat() string {
 		m.chatScroll, m.chatSkip, m.chatCur, m.chatFollow, len(p.msgs), p.full, p.loading, len(p.fresh), m.chatFills(m.chatScroll, m.chatSkip), m.chatRoom, m.pane)
 }
 
-func (m *Model) traceKey(k tea.KeyMsg) {
-	if traceQ != nil && !isMouseFragment(k) {
+func (m *Model) traceKey(k tea.KeyPressMsg) {
+	if traceQ != nil {
 		tracef("key %q ov=%d cursor=%d %s", k.String(), m.ov.kind, m.cursor, m.traceChat())
 	}
 }

@@ -6,9 +6,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/oxsean/fav/internal/capture"
 	"github.com/oxsean/fav/internal/fav"
@@ -74,7 +74,7 @@ type chatSearch struct {
 }
 
 func newChatSearch() chatSearch {
-	ti := textinput.New()
+	ti := newInput()
 	ti.Placeholder = i18n.T("chat.find_placeholder")
 	ti.Prompt = render.GlyphSearch + " "
 	ti.CharLimit = 80
@@ -98,14 +98,14 @@ func (m *Model) startChatSearch() tea.Cmd {
 	return textinput.Blink
 }
 
-func (m *Model) chatSearchKey(msg tea.KeyMsg) tea.Cmd {
-	switch msg.Type {
-	case tea.KeyEsc:
+func (m *Model) chatSearchKey(msg tea.KeyPressMsg) tea.Cmd {
+	switch msg.String() {
+	case "esc":
 		m.chat.input.SetValue("")
 		m.chat.typing = false
 		m.chat.input.Blur()
 		return nil
-	case tea.KeyEnter:
+	case "enter":
 		m.chat.typing = false
 		m.chat.input.Blur()
 		if q := m.chat.query(); q != "" {

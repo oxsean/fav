@@ -4,8 +4,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/oxsean/fav/internal/fav"
 	"github.com/oxsean/fav/internal/i18n"
@@ -121,10 +121,8 @@ func settingsTable() []setting {
 			func(m *Model) int { return map[bool]int{true: 0, false: 1}[m.cfg.Mouse] },
 			func(m *Model, i int) tea.Cmd {
 				m.cfg.Mouse = i == 0
-				if m.cfg.Mouse {
-					return tea.EnableMouseCellMotion
-				}
-				return tea.DisableMouse
+				m.mouse = m.cfg.Mouse
+				return nil
 			}, nil, ""},
 	}
 }
@@ -134,7 +132,7 @@ func (m *Model) openSettings() { m.ov = overlay{kind: ovSettings} }
 func (m *Model) cycleSetting(i, delta int) tea.Cmd {
 	s := settingsTable()[i]
 	if s.text != nil {
-		ti := textinput.New()
+		ti := newInput()
 		ti.SetValue(*s.text(m))
 		ti.Placeholder = defaultIDE()
 		ti.CharLimit = 200
@@ -151,13 +149,13 @@ func (m *Model) cycleSetting(i, delta int) tea.Cmd {
 	return cmd
 }
 
-func (m *Model) settingsKey(msg tea.KeyMsg) tea.Cmd {
+func (m *Model) settingsKey(msg tea.KeyPressMsg) tea.Cmd {
 	if m.ov.editing {
-		switch msg.Type {
-		case tea.KeyEsc:
+		switch msg.String() {
+		case "esc":
 			m.ov.editing = false
 			return nil
-		case tea.KeyEnter:
+		case "enter":
 			*settingsTable()[m.ov.cursor].text(m) = strings.TrimSpace(m.ov.edit.Value())
 			m.ov.editing = false
 			if err := m.cfg.Save(); err != nil {
@@ -182,7 +180,7 @@ func (m *Model) settingsKey(msg tea.KeyMsg) tea.Cmd {
 		}
 	case "left", "h":
 		return m.cycleSetting(m.ov.cursor, -1)
-	case "right", "l", "enter", " ":
+	case "right", "l", "enter", "space":
 		return m.cycleSetting(m.ov.cursor, 1)
 	}
 	return nil
@@ -202,7 +200,7 @@ func (m *Model) renderSettings() string {
 		var val string
 		switch {
 		case s.text != nil && i == m.ov.cursor && m.ov.editing:
-			val = m.ov.edit.View()
+			val = inputView(m.ov.edit)
 		case s.text != nil && *s.text(m) == "":
 			val = s.hint
 		case s.text != nil:

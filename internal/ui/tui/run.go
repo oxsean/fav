@@ -1,7 +1,7 @@
 package tui
 
 import (
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/oxsean/fav/internal/fav"
 	"github.com/oxsean/fav/internal/index"
@@ -10,13 +10,10 @@ import (
 func Run(s *fav.Store, idx *index.Index, cfg fav.Config, initialQuery string, focus *fav.Rec, mouse bool) (Result, error) {
 	m := New(s, idx, cfg, initialQuery)
 	m.Focus(focus)
-	opts := []tea.ProgramOption{tea.WithAltScreen()}
+	m.mouse = mouse && cfg.Mouse
+	var opts []tea.ProgramOption
 	if in := terminalInput(); in != nil {
 		opts = append(opts, tea.WithInput(in))
-	}
-	if mouse && cfg.Mouse {
-		// with the mouse on, native terminal selection needs Shift (Option on iTerm2), or --no-mouse
-		opts = append(opts, tea.WithMouseCellMotion())
 	}
 	final, err := tea.NewProgram(m, opts...).Run()
 	if err != nil {

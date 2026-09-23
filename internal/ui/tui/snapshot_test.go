@@ -2,18 +2,15 @@ package tui
 
 import (
 	"fmt"
+	"image/color"
 	"os"
 	"path/filepath"
-	"regexp"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/muesli/termenv"
 
 	"github.com/oxsean/fav/internal/capture"
 	"github.com/oxsean/fav/internal/fav"
@@ -27,7 +24,7 @@ func TestFrameLinesFillWidth(t *testing.T) {
 			m := New(st, noIndex(t), fav.DefaultConfig(), "")
 			m.Update(tea.WindowSizeMsg{Width: size.w, Height: size.h})
 			openOverlay(m, ov)
-			for i, line := range strings.Split(m.View(), "\n") {
+			for i, line := range strings.Split(m.screen(), "\n") {
 				if got := ansi.StringWidth(line); got != size.w {
 					t.Errorf("%dx%d ov=%q 第 %d 行宽 %d：%q",
 						size.w, size.h, ov, i+1, got, ansi.Strip(line))
@@ -50,15 +47,36 @@ func openOverlay(m *Model, kind string) {
 		m.editTitle()
 	case "settings":
 		m.openSettings()
+	case "settings-ide":
+		m.openSettings()
+		for i, s := range settingsTable() {
+			if s.text != nil {
+				m.cycleSetting(i, 0)
+			}
+		}
+	case "edit":
+		m.openEdit()
+	case "edit-summary":
+		m.openEdit()
+		m.editKey(press("tab"))
+		m.editKey(press("tab"))
+	case "status":
+		m.pickStatus()
+	case "delete":
+		m.askDelete()
+	case "start":
+		m.askStart()
+	case "find":
+		m.startChatSearch()
 	}
 }
 
 func TestClickZones(t *testing.T) {
 	m := New(demoStore(t), noIndex(t), fav.DefaultConfig(), "")
 	m.Update(tea.WindowSizeMsg{Width: 120, Height: 36})
-	m.View()
+	m.screen()
 
-	x, y := findText(m.View(), "项目")
+	x, y := findText(m.screen(), "项目")
 	if x < 0 {
 		t.Fatal("画面上找不到「项目」标签页")
 	}
@@ -68,9 +86,9 @@ func TestClickZones(t *testing.T) {
 	}
 
 	m.setView(viewSessions)
-	m.View()
+	m.screen()
 	first := m.current()
-	x, y = findText(m.View(), "WebApp 分支栈")
+	x, y = findText(m.screen(), "WebApp 分支栈")
 	if x < 0 {
 		t.Fatal("画面上找不到第二张卡片")
 	}
@@ -79,8 +97,8 @@ func TestClickZones(t *testing.T) {
 		t.Errorf("点第二张卡片后选中项没变")
 	}
 
-	m.View()
-	x, y = findText(m.View(), "标签 全部")
+	m.screen()
+	x, y = findText(m.screen(), "标签 全部")
 	click(m, x, y)
 	if m.ov.kind != ovPicker {
 		t.Errorf("点标签 chip 没有打开选择器，kind=%v", m.ov.kind)
@@ -88,7 +106,7 @@ func TestClickZones(t *testing.T) {
 }
 
 func click(m *Model, x, y int) {
-	m.Update(tea.MouseMsg{X: x, Y: y, Button: tea.MouseButtonLeft, Action: tea.MouseActionPress})
+	m.Update(tea.MouseClickMsg{Button: tea.MouseLeft, X: x, Y: y})
 }
 
 func findText(s, want string) (int, int) {
@@ -111,8 +129,6 @@ func TestDumpFrame(t *testing.T) {
 	if _, err := fmt.Sscanf(spec, "%dx%d", &w, &h); err != nil {
 		t.Fatalf("FAV_DUMP 应形如 120x34：%v", err)
 	}
-	// lipgloss drops colours without a TTY
-	lipgloss.SetColorProfile(termenv.TrueColor)
 	m := New(demoStore(t), noIndex(t), fav.DefaultConfig(), "")
 	m.Update(tea.WindowSizeMsg{Width: w, Height: h})
 	if os.Getenv("FAV_DUMP_VIEW") == "real" {
@@ -121,7 +137,7 @@ func TestDumpFrame(t *testing.T) {
 		m.applyIndex(idx)
 	}
 	openOverlay(m, os.Getenv("FAV_DUMP_OV"))
-	fmt.Println(m.View())
+	fmt.Println(m.screen())
 }
 
 func demoStore(t *testing.T) *fav.Store {
@@ -161,25 +177,21 @@ func demoStore(t *testing.T) *fav.Store {
 }
 
 func TestOverlayBackdropIsDarkerThanFrame(t *testing.T) {
-	lipgloss.SetColorProfile(termenv.TrueColor)
-	back := lum(lipgloss.NewStyle().Foreground(cBackdrop).Render("x"))
-	for name, c := range map[string]lipgloss.AdaptiveColor{"cMuted": cMuted, "cText": cText, "cAccent": cAccent} {
-		if got := lum(lipgloss.NewStyle().Foreground(c).Render("x")); back >= got {
+	setTheme(true)
+	back := lum(cBackdrop)
+	for name, c := range map[string]color.Color{"cMuted": cMuted, "cText": cText, "cAccent": cAccent} {
+		if got := lum(c); back >= got {
 			t.Errorf("底图色亮度 %d 不低于 %s 的 %d", back, name, got)
 		}
 	}
-	if got := lum(lipgloss.NewStyle().Foreground(cFrame).Render("x")); back > got+24 {
+	if got := lum(cFrame); back > got+24 {
 		t.Errorf("底图色亮度 %d 明显高于框线色 %d，开浮层时边框会变亮", back, got)
 	}
 }
 
-func lum(s string) int {
-	m := regexp.MustCompile(`38;2;(\d+);(\d+);(\d+)`).FindStringSubmatch(s)
-	if m == nil {
-		return -1
-	}
-	n := func(i int) int { v, _ := strconv.Atoi(m[i]); return v }
-	return (n(1)*299 + n(2)*587 + n(3)*114) / 1000
+func lum(c color.Color) int {
+	r, g, b, _ := c.RGBA()
+	return (int(r>>8)*299 + int(g>>8)*587 + int(b>>8)*114) / 1000
 }
 
 func TestResumeDialogEditsTitle(t *testing.T) {
@@ -194,8 +206,8 @@ func TestResumeDialogEditsTitle(t *testing.T) {
 	os.WriteFile(rec.TranscriptPath, []byte("{}\n"), 0o644)
 	m.ov.plan, _ = capture.PlanResume(rec, nil, false)
 
-	m.View()
-	x, y := findText(m.View(), "n 改标题")
+	m.screen()
+	x, y := findText(m.screen(), "n 改标题")
 	if x < 0 {
 		t.Fatal("恢复框里没有改标题的入口")
 	}
@@ -205,11 +217,11 @@ func TestResumeDialogEditsTitle(t *testing.T) {
 	}
 
 	m.ov.edit.SetValue("改过的标题")
-	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m.Update(press("enter"))
 	if m.ov.editing {
 		t.Fatal("Enter 没有结束编辑")
 	}
-	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m.Update(press("enter"))
 
 	if !m.quitting || m.Result().Resume == nil {
 		t.Fatal("第二次 Enter 没有触发恢复")
@@ -277,7 +289,7 @@ func TestSessionsViewFavorites(t *testing.T) {
 		}
 	}
 	m.setView(viewSessions)
-	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("f")})
+	m.Update(press("f"))
 	if rec.ID == "" || st.BySession(fav.ProviderClaude, "sess-x") == nil {
 		t.Fatal("按 f 后没有落库")
 	}
@@ -292,17 +304,13 @@ func TestArrowNavigation(t *testing.T) {
 	m := New(demoStore(t), noIndex(t), fav.DefaultConfig(), "")
 	m.Update(tea.WindowSizeMsg{Width: 120, Height: 36})
 	key := func(s string) {
-		if len(s) == 1 {
-			m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(s)})
-			return
-		}
-		m.Update(tea.KeyMsg{Type: map[string]tea.KeyType{"up": tea.KeyUp, "down": tea.KeyDown, "left": tea.KeyLeft, "right": tea.KeyRight, "enter": tea.KeyEnter, "esc": tea.KeyEsc}[s]})
+		m.Update(press(s))
 	}
 	key("up")
 	if m.chipFocus != -1 {
 		t.Fatalf("列表顶上再往上应停住、不进 chip 行，chipFocus=%d", m.chipFocus)
 	}
-	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(";")})
+	m.Update(press(";"))
 	if m.chipFocus != 0 {
 		t.Fatalf("; 应进 chip 行，chipFocus=%d", m.chipFocus)
 	}
@@ -311,7 +319,7 @@ func TestArrowNavigation(t *testing.T) {
 	if m.ov.kind != ovPicker || m.ov.title != "筛选标签" {
 		t.Fatalf("chip 行第二个是标签，Enter 应打开标签选择器：kind=%v title=%q", m.ov.kind, m.ov.title)
 	}
-	m.View()
+	m.screen()
 	key("right")
 	if m.ov.focus != 1 {
 		t.Fatalf("第一下方向键应从主按钮出发，focus=%d", m.ov.focus)
@@ -345,11 +353,11 @@ func TestFavoriteToggle(t *testing.T) {
 		t.Fatal("demo 库的第一条应是收藏")
 	}
 	title, nFav := first.Title, m.nFav
-	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("f")})
+	m.Update(press("f"))
 	if first.Favorite() || m.current() != first || m.nFav != nFav-1 {
 		t.Fatalf("f 应取消收藏、记录留在原地、收藏总数减一：fav=%v cur==first=%v nFav=%d", first.Favorite(), m.current() == first, m.nFav)
 	}
-	if !strings.Contains(ansi.Strip(m.View()), "未收藏 · f 收藏") {
+	if !strings.Contains(ansi.Strip(m.screen()), "未收藏 · f 收藏") {
 		t.Fatal("取消后详情应提示可再收藏")
 	}
 	m.setView(viewFavorites)
@@ -359,7 +367,7 @@ func TestFavoriteToggle(t *testing.T) {
 		}
 	}
 	m.setView(viewSessions)
-	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("f")})
+	m.Update(press("f"))
 	got := st.BySession(first.Provider, first.SessionID)
 	if got == nil || !got.Favorite() || got.Title != title || got.ID != first.ID || m.nFav != nFav {
 		t.Fatalf("再按 f 应原样恢复原记录：%+v", got)
@@ -382,7 +390,7 @@ func TestStateOnPlainSession(t *testing.T) {
 			m.cursor = i
 		}
 	}
-	key := func(k string) { m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(k)}) }
+	key := func(k string) { m.Update(press(k)) }
 	key("a")
 	got := st.BySession("claude", "plain-1")
 	if got != sess || !got.Archived() || got.Favorite() || len(m.unfav) != 0 || m.nAll != nAll {
@@ -391,7 +399,7 @@ func TestStateOnPlainSession(t *testing.T) {
 	if m.current() != sess {
 		t.Fatal("刚归档的应还在光标下")
 	}
-	m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	m.Update(press("down"))
 	m.refresh()
 	for _, r := range m.rows {
 		if r.rec == sess {
@@ -400,7 +408,7 @@ func TestStateOnPlainSession(t *testing.T) {
 	}
 	key("s")
 	m.ov.filter.SetValue("archived")
-	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m.Update(press("enter"))
 	if !strings.Contains(m.search.Value(), "status:archived") {
 		t.Fatalf("s 选已归档：%q", m.search.Value())
 	}
@@ -413,7 +421,7 @@ func TestStateOnPlainSession(t *testing.T) {
 	if !found {
 		t.Fatal("status:archived 下应看到它")
 	}
-	if v := ansi.Strip(m.View()); !strings.Contains(v, "已归档") || !strings.Contains(v, "a 取消归档") {
+	if v := ansi.Strip(m.screen()); !strings.Contains(v, "已归档") || !strings.Contains(v, "a 取消归档") {
 		t.Fatal("卡片和底栏应标出已归档 / a 取消归档")
 	}
 	key("a")
@@ -421,7 +429,7 @@ func TestStateOnPlainSession(t *testing.T) {
 		t.Fatal("再按 a 应取消归档")
 	}
 	key("s")
-	m.Update(tea.KeyMsg{Type: tea.KeyBackspace})
+	m.Update(press("backspace"))
 	if m.search.Value() != "" {
 		t.Fatalf("选择器里退格清空应去掉 status:：%q", m.search.Value())
 	}

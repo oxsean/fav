@@ -4,8 +4,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
+	uv "github.com/charmbracelet/ultraviolet"
 
 	"github.com/oxsean/fav/internal/capture"
 	"github.com/oxsean/fav/internal/fav"
@@ -34,7 +34,14 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.WindowSizeMsg:
 		m.w, m.h = msg.Width, msg.Height
-		m.search.Width = max(10, m.w-6)
+		m.search.SetWidth(max(10, m.w-6))
+
+	case tea.BackgroundColorMsg:
+		setTheme(msg.IsDark())
+		m.themed = true
+
+	case uv.PrimaryDeviceAttributesEvent, themeTimeoutMsg: // no background reply came first: the terminal will not send one
+		m.themed = true
 
 	case tea.MouseMsg:
 		cmd = m.handleMouse(msg)
@@ -57,11 +64,7 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmd = textTick() // redraws the progress in the title
 		}
 
-	case tea.KeyMsg:
-		if isMouseFragment(msg) {
-			tracef("fragment %q", msg.String())
-			break
-		}
+	case tea.KeyPressMsg:
 		m.traceKey(msg)
 		if msg.String() == "ctrl+c" {
 			m.quitting = true
@@ -78,6 +81,10 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		default:
 			cmd = m.navKey(msg)
 		}
+
+	case tea.PasteMsg:
+		m.notice = ""
+		cmd = m.paste(msg)
 
 	case herdrDoneMsg:
 		if msg.err != nil {
@@ -266,14 +273,14 @@ func (m *Model) finish(res Result) {
 }
 
 // searchKey: letters type into the search box; arrows and paging move the list, Enter after a selection resumes.
-func (m *Model) searchKey(msg tea.KeyMsg) tea.Cmd {
-	switch msg.Type {
-	case tea.KeyEsc:
+func (m *Model) searchKey(msg tea.KeyPressMsg) tea.Cmd {
+	switch msg.String() {
+	case "esc":
 		m.typing = false
 		m.search.Blur()
 		m.refresh()
 		return nil
-	case tea.KeyEnter:
+	case "enter":
 		m.typing = false
 		m.search.Blur()
 		m.refresh()
@@ -285,7 +292,7 @@ func (m *Model) searchKey(msg tea.KeyMsg) tea.Cmd {
 			return m.navKey(msg)
 		}
 		return nil
-	case tea.KeyUp, tea.KeyDown, tea.KeyPgUp, tea.KeyPgDown, tea.KeyCtrlN, tea.KeyCtrlP:
+	case "up", "down", "pgup", "pgdown", "ctrl+n", "ctrl+p":
 		m.moved = true
 		return m.navKey(msg)
 	}
@@ -297,7 +304,7 @@ func (m *Model) searchKey(msg tea.KeyMsg) tea.Cmd {
 
 // navKey: list navigation; keys come from the table in keys.go. ⚠️ Every action needs a non-letter key (letters never
 // reach here under a CJK IME).
-func (m *Model) navKey(msg tea.KeyMsg) tea.Cmd {
+func (m *Model) navKey(msg tea.KeyPressMsg) tea.Cmd {
 	a := keyAct(inList, msg.String())
 	if m.inTrash() && m.current() != nil && m.chipFocus < 0 && trashBlocked(a) {
 		m.flash(i18n.T("trash.in_trash_hint"))
@@ -461,7 +468,7 @@ func (m *Model) navKey(msg tea.KeyMsg) tea.Cmd {
 				return nil
 			}
 		}
-		return m.navKey(tea.KeyMsg{Type: tea.KeyEnter})
+		return m.navKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	case actFoldAll:
 		if m.view == viewProjects {
 			m.foldAll(nil)
@@ -563,7 +570,7 @@ func (m *Model) halfPage(dir int) {
 	}
 }
 
-func (m *Model) overlayKey(msg tea.KeyMsg) tea.Cmd {
+func (m *Model) overlayKey(msg tea.KeyPressMsg) tea.Cmd {
 	switch m.ov.kind {
 	case ovHelp:
 		room := max(1, m.h-4-7)
@@ -572,7 +579,7 @@ func (m *Model) overlayKey(msg tea.KeyMsg) tea.Cmd {
 			m.ov.cursor++
 		case "k", "up", "ctrl+p":
 			m.ov.cursor--
-		case "pgdown", "ctrl+f", " ", "ctrl+d":
+		case "pgdown", "ctrl+f", "space", "ctrl+d":
 			m.ov.cursor += room
 		case "pgup", "ctrl+b", "b", "ctrl+u":
 			m.ov.cursor -= room
@@ -606,7 +613,7 @@ func (m *Model) overlayKey(msg tea.KeyMsg) tea.Cmd {
 			m.ov.cursor++
 		case "k", "up", "ctrl+p":
 			m.ov.cursor--
-		case "pgdown", "ctrl+f", " ":
+		case "pgdown", "ctrl+f", "space":
 			m.ov.cursor += room
 		case "pgup", "ctrl+b", "b":
 			m.ov.cursor -= room
@@ -628,11 +635,11 @@ func (m *Model) overlayKey(msg tea.KeyMsg) tea.Cmd {
 		return nil
 	case ovResume:
 		if m.ov.editing {
-			switch msg.Type {
-			case tea.KeyEsc:
+			switch msg.String() {
+			case "esc":
 				m.ov.edit.SetValue(m.ov.rec.Title)
 				fallthrough
-			case tea.KeyEnter:
+			case "enter":
 				m.ov.editing = false
 				m.ov.edit.Blur()
 				return nil
@@ -743,7 +750,7 @@ func (m *Model) overlayKey(msg tea.KeyMsg) tea.Cmd {
 		}
 		m.ov.focus = -1
 		return nil
-	case " ":
+	case "space":
 		if m.ov.multi {
 			m.toggleOrApply()
 			return nil
@@ -757,6 +764,11 @@ func (m *Model) overlayKey(msg tea.KeyMsg) tea.Cmd {
 
 	var cmd tea.Cmd
 	m.ov.filter, cmd = m.ov.filter.Update(msg)
+	m.filterChanged()
+	return cmd
+}
+
+func (m *Model) filterChanged() {
 	m.ov.cursor = 0
 	if m.ov.browse != nil { // dir picker: highlight on a child, Enter descends; focus leaves the buttons
 		m.ov.focus = -1
@@ -764,7 +776,28 @@ func (m *Model) overlayKey(msg tea.KeyMsg) tea.Cmd {
 			m.ov.cursor = 1
 		}
 	}
-	return cmd
+}
+
+// paste: a paste arrives as its own message and only ever types into the focused input (unfocused inputs ignore it).
+func (m *Model) paste(msg tea.PasteMsg) tea.Cmd {
+	var c1, c2, c3 tea.Cmd
+	switch {
+	case m.ov.active():
+		m.ov.edit, c1 = m.ov.edit.Update(msg)
+		m.ov.edit2, c2 = m.ov.edit2.Update(msg)
+		m.ov.area, c3 = m.ov.area.Update(msg)
+		if m.ov.filter.Focused() {
+			m.ov.filter, c1 = m.ov.filter.Update(msg)
+			m.filterChanged()
+		}
+	case m.chat.typing:
+		m.chat.input, c1 = m.chat.input.Update(msg)
+		m.hitsFor = nil
+	case m.typing:
+		m.search, c1 = m.search.Update(msg)
+		m.refresh()
+	}
+	return tea.Batch(c1, c2, c3)
 }
 
 type wheelTickMsg struct{}
@@ -773,39 +806,42 @@ type wheelTickMsg struct{}
 const wheelFrame = 16 * time.Millisecond
 
 func (m *Model) handleMouse(msg tea.MouseMsg) tea.Cmd {
-	switch msg.Button {
-	case tea.MouseButtonWheelUp, tea.MouseButtonWheelDown:
+	mo := msg.Mouse()
+	switch msg.(type) {
+	case tea.MouseWheelMsg:
+		if mo.Button != tea.MouseWheelUp && mo.Button != tea.MouseWheelDown {
+			return nil
+		}
 		dir := 1
-		if msg.Button == tea.MouseButtonWheelUp {
+		if mo.Button == tea.MouseWheelUp {
 			dir = -1
 		}
 		m.lastWheel = time.Now()
 		m.wheelPend += dir
-		m.wheelX = msg.X
+		m.wheelX = mo.X
 		m.reuseFrame = true
 		if m.wheelTick {
 			return nil
 		}
 		m.wheelTick = true
 		return tea.Tick(wheelFrame, func(time.Time) tea.Msg { return wheelTickMsg{} })
-	case tea.MouseButtonLeft:
-		m.mouseSelect(msg)
-		if msg.Action != tea.MouseActionPress {
+	case tea.MouseClickMsg:
+		if mo.Button != tea.MouseLeft {
 			return nil
 		}
+		m.mouseSelect(msg)
 		m.notice = ""
-		if act := m.hit(msg.X, msg.Y); act != nil {
+		if act := m.hit(mo.X, mo.Y); act != nil {
 			act(m)
 		}
-	case tea.MouseButtonNone:
-		if msg.Action == tea.MouseActionRelease || msg.Action == tea.MouseActionMotion {
-			m.mouseSelect(msg) // some terminals report release as key none
+	case tea.MouseMotionMsg, tea.MouseReleaseMsg:
+		if mo.Button == tea.MouseLeft || mo.Button == tea.MouseNone {
+			m.mouseSelect(msg)
 		}
 	}
 	return nil
 }
 
-// isMouseFragment recognises SGR mouse sequences split by bubbletea's 256-byte reads ("[<64;33;12M") that arrive as keys; they are dropped.
 func (m *Model) applyWheel() {
 	n, x := m.wheelPend, m.wheelX
 	m.wheelPend = 0
@@ -821,28 +857,6 @@ func (m *Model) applyWheel() {
 	if traceQ != nil {
 		tracef("wheel %+d x=%d acc=%d moved=%v cursor=%d ov=%d/%d %s", dir*n, x, m.wheelAcc, moved, m.cursor, m.ov.kind, m.ov.cursor, m.traceChat())
 	}
-}
-
-func isMouseFragment(k tea.KeyMsg) bool {
-	if k.Type != tea.KeyRunes {
-		return false
-	}
-	if k.Alt && len(k.Runes) == 1 && k.Runes[0] == '[' {
-		return true
-	}
-	semi, digit := false, false
-	for _, r := range k.Runes {
-		switch {
-		case r == ';':
-			semi = true
-		case r >= '0' && r <= '9':
-			digit = true
-		case r == '[' || r == '<' || r == 'M' || r == 'm':
-		default:
-			return false
-		}
-	}
-	return semi && digit // a lone ; is typed
 }
 
 // wheel: one step per wheelStep events, a direction change steps at once; the right pane scrolls the chat, the list moves the cursor
@@ -943,7 +957,7 @@ func (m *Model) openResume(r *fav.Rec) {
 		m.flash(i18n.T("trash.in_trash_hint"))
 		return
 	}
-	ti := textinput.New()
+	ti := newInput()
 	ti.SetValue(r.Title)
 	ti.CharLimit = 120
 	plan, _ := capture.PlanResume(r, m.live, false) // plan.Spec is empty on error

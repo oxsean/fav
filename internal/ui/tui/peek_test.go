@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/oxsean/fav/internal/capture"
@@ -44,12 +44,12 @@ func TestPeekAndReply(t *testing.T) {
 			}
 		}
 	}
-	key := func(s string) { _, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(s)}); run(cmd) }
+	key := func(s string) { _, cmd := m.Update(press(s)); run(cmd) }
 	key("·")
 	if m.ov.kind != ovPeek {
 		t.Fatalf("` (· under an IME) on a Herdr agent peeks: kind=%d", m.ov.kind)
 	}
-	v := ansi.Strip(m.View())
+	v := ansi.Strip(m.screen())
 	if !strings.Contains(v, "Edit a.go?") || !strings.Contains(v, "1. Yes") {
 		t.Fatalf("the pane's terminal is shown:\n%s", v)
 	}
@@ -59,13 +59,13 @@ func TestPeekAndReply(t *testing.T) {
 		}
 	}
 	key("1")
-	if b, _ := os.ReadFile(log); len(b) != 0 || !strings.Contains(ansi.Strip(m.View()), "再按一次 1") {
+	if b, _ := os.ReadFile(log); len(b) != 0 || !strings.Contains(ansi.Strip(m.screen()), "再按一次 1") {
 		t.Fatalf("the first 1 only arms: calls %q", b)
 	}
 	key("1")
 	key(":")
 	key("继续")
-	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	_, cmd := m.Update(press("enter"))
 	run(cmd)
 	b, _ := os.ReadFile(log)
 	if got := string(b); got != "agent send-keys p1 1\nagent prompt p1 继续\n" {

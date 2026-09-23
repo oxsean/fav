@@ -181,9 +181,7 @@ func Run(initialQuery string, start Tab) (string, error) {
 	}
 
 	cmd := exec.Command("fzf", args...)
-	// CI=1 stops termenv probing the terminal (bubbletea's init does, and inside execute() the reply lands in the y/N prompt);
-	// main drops CI again when FAV_IN_FZF is set so the exec'd claude / codex / $EDITOR never see it.
-	cmd.Env = append(os.Environ(), PickFileEnv+"="+pickFile, bindShellEnv+"="+sh.Name(), shell.Env+"="+shell.User().Name(), "CI=1", "FAV_IN_FZF=1")
+	cmd.Env = append(os.Environ(), PickFileEnv+"="+pickFile, bindShellEnv+"="+sh.Name(), shell.Env+"="+shell.User().Name())
 	cmd.Stderr = os.Stderr
 	out, err := cmd.Output()
 	if err != nil {

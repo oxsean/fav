@@ -3,9 +3,8 @@ package tui
 import (
 	"strings"
 
-	"github.com/charmbracelet/bubbles/textarea"
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/oxsean/fav/internal/fav"
 	"github.com/oxsean/fav/internal/i18n"
@@ -20,16 +19,16 @@ func (m *Model) openEdit() tea.Cmd {
 	if r == nil {
 		return nil
 	}
-	title := textinput.New()
+	title := newInput()
 	title.SetValue(r.Title)
 	title.CharLimit = 120
 	title.Prompt = ""
-	tags := textinput.New()
+	tags := newInput()
 	tags.SetValue(strings.Join(r.Tags, " "))
 	tags.Placeholder = i18n.T("edit.tags_placeholder")
 	tags.CharLimit = 200
 	tags.Prompt = ""
-	sum := textarea.New()
+	sum := newArea()
 	sum.SetValue(r.Summary)
 	sum.Placeholder = i18n.T("edit.summary_placeholder")
 	sum.CharLimit = 4000
@@ -79,7 +78,7 @@ func (m *Model) editDirty() bool {
 	return strings.TrimSpace(m.ov.edit.Value()) != r.Title || strings.Join(tags, " ") != strings.Join(r.Tags, " ") || strings.TrimSpace(m.ov.area.Value()) != r.Summary
 }
 
-func (m *Model) editKey(msg tea.KeyMsg) tea.Cmd {
+func (m *Model) editKey(msg tea.KeyPressMsg) tea.Cmd {
 	switch msg.String() {
 	case "esc":
 		if m.editDirty() && !m.ov.editing {
@@ -160,7 +159,7 @@ func (m *Model) renderEdit() string {
 		if m.ov.field == i {
 			sty = panelSty.BorderForeground(cAccent)
 		}
-		lines := strings.Split(sty.Width(inner-2).Render(view), "\n")
+		lines := strings.Split(sty.Width(inner).Render(view), "\n")
 		body = append(body, dimmed.Render(label))
 		m.markRows(len(body), ovPad, inner, len(lines), func(mm *Model) {
 			mm.pending = mm.focusField(i)
@@ -174,10 +173,11 @@ func (m *Model) renderEdit() string {
 		body = append(body, lines...)
 		body = append(body, "")
 	}
-	m.ov.edit.Width, m.ov.edit2.Width = inner-4, inner-4
+	m.ov.edit.SetWidth(inner - 4)
+	m.ov.edit2.SetWidth(inner - 4)
 	m.ov.area.SetWidth(inner - 4)
-	field(i18n.T("edit.field_title"), m.ov.edit.View(), 0)
-	field(i18n.T("label.tags"), m.ov.edit2.View(), 1)
+	field(i18n.T("edit.field_title"), inputView(m.ov.edit), 0)
+	field(i18n.T("label.tags"), inputView(m.ov.edit2), 1)
 	field(i18n.T("card.summary"), m.ov.area.View(), 2)
 	body = append(body, m.buttons(len(body)+1, []btn{
 		{keyed(keyName("ctrl+s"), i18n.T("edit.btn_save")), true, (*Model).saveEdit},

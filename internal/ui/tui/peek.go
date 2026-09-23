@@ -4,8 +4,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/oxsean/fav/internal/capture"
@@ -47,7 +46,7 @@ func (m *Model) askPeek(r *fav.Rec) {
 		m.flash(i18n.T("live.not_in_herdr"))
 		return
 	}
-	ti := textinput.New()
+	ti := newInput()
 	ti.Placeholder = i18n.T("peek.placeholder")
 	ti.CharLimit = 4000
 	m.ov = overlay{kind: ovPeek, rec: r, title: l.PaneID, edit: ti, focus: -1}
@@ -149,13 +148,13 @@ func (m *Model) renderPeek() string {
 	}
 	body = append(body, frame.Render(strings.Repeat(hRule, inner)))
 
-	m.ov.edit.Width = inner - 6
+	m.ov.edit.SetWidth(inner - 6)
 	m.mark(len(body)+2, ovPad, inner, func(mm *Model) { mm.placeCursor(&mm.ov.edit, 2) })
 	border := cFrame
 	if m.ov.edit.Focused() {
 		border = cAccent
 	}
-	body = append(body, strings.Split(panelSty.BorderForeground(border).Width(inner-2).Render(fit(m.ov.edit.View(), inner-4)), "\n")...)
+	body = append(body, strings.Split(panelSty.BorderForeground(border).Width(inner).Render(fit(inputView(m.ov.edit), inner-4)), "\n")...)
 	switch {
 	case m.ov.armed != "":
 		body = append(body, warnSty.Render(render.Truncate(i18n.F("peek.armed", m.ov.armed, m.ov.armed), inner)))
@@ -168,20 +167,20 @@ func (m *Model) renderPeek() string {
 	return ovRender(body, w)
 }
 
-func (m *Model) peekKey(msg tea.KeyMsg) tea.Cmd {
+func (m *Model) peekKey(msg tea.KeyPressMsg) tea.Cmd {
 	if m.ov.edit.Focused() {
-		switch msg.Type {
-		case tea.KeyEnter:
+		switch msg.String() {
+		case "enter":
 			m.sendPeek()
 			return nil
-		case tea.KeyEsc:
+		case "esc":
 			m.ov.edit.Blur()
 			return nil
-		case tea.KeyTab:
+		case "tab":
 			m.ov.edit.Blur()
 			m.ov.focus = 0
 			return nil
-		case tea.KeyShiftTab:
+		case "shift+tab":
 			m.ov.edit.Blur()
 			m.ov.focus = len(m.ov.btns) - 1
 			return nil

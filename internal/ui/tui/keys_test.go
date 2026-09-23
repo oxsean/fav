@@ -68,7 +68,7 @@ func TestDialogTabAndSpace(t *testing.T) {
 func TestEveryListActionHasAnIMERoute(t *testing.T) {
 	m := sized(t, 140, 40)
 	m.askResume()
-	m.View()
+	m.screen()
 	onButton := map[string]bool{}
 	for _, b := range m.ov.btns {
 		if k, _, ok := labelKey(b.label); ok {
