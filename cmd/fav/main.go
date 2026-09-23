@@ -84,6 +84,8 @@ func run(args []string) error {
 		return cmdFix(args)
 	case "resume":
 		return cmdResume(args)
+	case "today", "week":
+		return cmdReport(cmd, args)
 	case "fzf-pick":
 		return cmdFzfPick(args)
 	case "fzf-list":

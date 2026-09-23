@@ -64,7 +64,7 @@ plus a resume button that lands in the right place.
 
 - **Favorite**: `/fav` inside a session; the AI writes the title / summary / tags in the conversation's language, `fav` itself collects provider, session id, cwd, git branch and Herdr workspace. `/fav` again updates the same record.
 - **Every session**: unfavorited ones are listed too — the whole Claude and Codex history, indexed incrementally by reading heads, tails and new bytes only; a multi-hundred-MB session is never read whole.
-- **Search**: one query syntax across the TUI, fzf and the CLI: keywords, `#tag`, `project:`, `provider:`, `status:`, `last:7d`, `turns:`.
+- **Search**: one query syntax across the TUI, fzf and the CLI: keywords, `#tag`, `project:`, `provider:`, `status:`, `last:7d`, `turns:`, `file:` (sessions whose AI wrote a matching path).
 - **Search keys**: `/` searches sessions (title, summary, project, tags), `>` searches the messages of every session, `\` (or `Ctrl+S`) the messages of the selected session — the same wherever the focus is; `/` typed as `、` by a CJK input method still searches sessions.
 - **Search messages**: press `>` (or start the query with `>`) to search inside every message and command of the sessions the rest of the query picks; results are ranked sessions with hit counts and snippets, the right pane opens on the hit the card shows, `n`/`N` walk the hits, `→` lists every hit of the session with its surrounding text and `Enter` opens the full message at the keyword. Chinese needs no word segmentation.
 - **Read**: the right pane shows the session's chat, paged backwards from the end, searchable; you know whether it is the one before opening it.
@@ -108,7 +108,7 @@ Type `/fav` in a session (or say "favorite this session"). The skill reviews the
 or 6–14 words: the object and what was done to it), a summary (conclusions and next step, not a play-by-play) and 2–5 tags, then hands them to `fav add`.
 Provider, session id, cwd, git and Herdr context are collected by `fav`; the AI never guesses them.
 
-Sessions that were never `/fav`ed are on the Sessions tab too; press `f` to favorite one (the first prompt becomes its title), resume it and `/fav` for a proper summary.
+Sessions that were never `/fav`ed are on the Sessions tab too; press `f` to favorite one (the first prompt becomes its title), resume it and `/fav` for a proper summary. Until then the summary is Claude's own recap (goal · done · next) or Codex's last reply when there is one.
 
 ### Find and resume: `fav` (TUI)
 
@@ -123,7 +123,7 @@ Four tabs, `Tab` / `1`–`4`:
 |---|---|
 | Favorites | `/fav`ed sessions, by last activity (`o` cycles the sort) |
 | Sessions | every session on the machine (fewer than 3 turns hidden by default, `turns:1` shows all) |
-| Projects | grouped by directory: `→` expands, `←` collapses, `→` again shows project info on the right (directory / session count / sources / recent sessions); the group of the directory `fav` was started in opens by itself, scrolled to the top |
+| Projects | grouped by directory (a session in a git worktree goes under its main checkout, its card says `worktree <branch>`; `fav fix` moves the sessions of a removed worktree there): `→` expands, `←` collapses, `→` again shows project info on the right (directory / session count / sources / recent sessions); the group of the directory `fav` was started in opens by itself, scrolled to the top |
 | Agents | who is running now: waiting / working / idle for how long, refreshed every 3 s |
 
 A typical flow: `/` to search (`webapp oauth last:7d`) or `;` for the chip row to filter by project / tag / source / status / time;
@@ -168,6 +168,7 @@ fav list '#notes-api last:7d' --json    # favorites
 fav sessions 'webapp oauth' --json      # every session
 fav show <id> --json
 fav grep '滚轮 加速 project:fav'      # message search: keywords + filters, ranked sessions with snippets (--json, --limit)
+fav today / fav week [query]            # what you worked on, by project: sessions, files the AI wrote, commits; long sessions not yet favorited (--json)
 fav open <id>                           # the TUI on that session, right pane focused (sessions the lists hide too)
 fav resume <id> --dry-run               # print the command and checks only
 fav resume <id> --no-herdr              # resume in this terminal
@@ -203,7 +204,7 @@ fav doctor [--compact]                  # check data files, dead sessions, trash
 ## Query syntax
 
 `#tag`, `project:x`, `provider:claude|codex`, `status:open|active|done|archived|trash|all|live|agent`,
-`after:2026-09-01`, `before:…` (when the session started), `last:7d` / `last:2026-09-01` (active since — a session started last week and used today counts), `turns:3`, plus plain keywords. All ANDed; CJK matches by substring.
+`after:2026-09-01`, `before:…` (when the session started), `last:7d` / `last:2026-09-01` (active since — a session started last week and used today counts), `turns:3`, `file:internal/index` (the AI wrote a path containing it), plus plain keywords. All ANDed; CJK matches by substring.
 Starting the query with `>` (or `》`) searches message text instead: keywords are looked up in every message and tool command, the filter tokens only pick the
 sessions (default `status:all turns:0`). Every keyword must occur somewhere in the session; a keyword matches when 60% of its terms do (Chinese is cut into
 character pairs, so word order inside a Chinese keyword does not matter; quote a keyword — `"…"`, `“…”` or `「…」` — to require it verbatim; `a|b` matches either, `-x` drops messages holding x, `who:me`, `who:ai` or `who:tool` keep one speaker; a misspelt English word the sessions barely use also searches the known words one letter away, and the title says so); ranking is BM25 with bonuses for keywords close together, newer messages, what you said yourself (tool commands, tool output and Claude's context recaps count less) and sessions whose title, summary or tags hold the keywords; sessions with one message holding every keyword come first, `o` switches to the newest hit first.

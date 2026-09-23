@@ -191,3 +191,13 @@ func TestUnmarkedSessionsAreNotActive(t *testing.T) {
 		t.Error("marked doing: status:active finds it")
 	}
 }
+
+func TestFileQualifier(t *testing.T) {
+	r := &Rec{ID: "1", FavoritedAt: ptr(time.Now()), Status: StatusDoing, Files: map[string]int{"/w/Internal/Index/scan.go": 3}}
+	if !Parse("file:internal/index").Match(r) || Parse("file:cmd/").Match(r) {
+		t.Error("file: matches a written path by case-insensitive substring")
+	}
+	if got := TopFiles(map[string]int{"/b": 1, "/a": 1, "/c": 5}, 2); len(got) != 2 || got[0].Path != "/c" || got[1].Path != "/a" {
+		t.Errorf("most written first, then by path: %+v", got)
+	}
+}

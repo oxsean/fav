@@ -3,9 +3,11 @@ package tui
 import (
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/oxsean/fav/internal/fav"
 )
@@ -91,6 +93,28 @@ func TestProjectGroupOrder(t *testing.T) {
 		}
 		if len(groups["alpha"]) != 3 {
 			t.Errorf("%s: the group map must keep every record", tc.mode)
+		}
+	}
+}
+
+func TestProjectBlockShowsThisWeeksFiles(t *testing.T) {
+	m := sized(t, 150, 44)
+	var group string
+	for _, r := range m.store.All() {
+		if r.Project == "notes-api" {
+			r.Cwd, r.LastAt = "/w/notes-api", m.now
+			r.Files = map[string]int{"/w/notes-api/internal/page.go": 4, "/w/notes-api/README.md": 1}
+			group = r.Project
+		}
+	}
+	m.setView(viewProjects)
+	body := ansi.Strip(strings.Join(m.projectBlock(group, 0, 0, 70, 40), "\n"))
+	if !strings.Contains(body, "internal/page.go ×8") || !strings.Contains(body, "README.md ×2") {
+		t.Fatalf("this week's most written files, summed over the group, relative to its directory:\n%s", body)
+	}
+	for i, l := range m.projectBlock(group, 0, 0, 70, 40) {
+		if w := ansi.StringWidth(l); w > 70 {
+			t.Errorf("line %d is %d wide", i, w)
 		}
 	}
 }

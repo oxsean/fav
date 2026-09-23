@@ -90,18 +90,10 @@ func Checks(r *fav.Rec) []Check {
 	} else {
 		out = append(out, Check{Text: providerLabel(r.Provider) + i18n.T("resume.check.not_installed")})
 	}
-
-	switch {
-	case r.Cwd == "":
-		out = append(out, Check{Warn: true, Text: i18n.T("resume.check.no_cwd")})
-	case dirExists(r.Cwd):
-		out = append(out, Check{OK: true, Text: i18n.T("resume.check.dir_ok") + r.Cwd})
-	default:
-		hint := ""
-		if r.GitRemote != "" {
-			hint = i18n.T("resume.check.remote_hint") + r.GitRemote
-		}
-		out = append(out, Check{Text: i18n.T("resume.check.dir_gone") + r.Cwd + hint})
+	if c := dirCheck(r.Cwd, r.GitRemote); !c.OK && !c.Warn && r.Repo != "" && r.Repo != r.Cwd {
+		out = append(out, Check{Text: i18n.F("resume.check.worktree_gone", r.Cwd, r.Repo)})
+	} else {
+		out = append(out, c)
 	}
 
 	if TranscriptAlive(r) {
@@ -146,4 +138,18 @@ func providerLabel(p string) string {
 func dirExists(p string) bool {
 	st, err := os.Stat(p)
 	return err == nil && st.IsDir()
+}
+
+func dirCheck(cwd, remote string) Check {
+	switch {
+	case cwd == "":
+		return Check{Warn: true, Text: i18n.T("resume.check.no_cwd")}
+	case dirExists(cwd):
+		return Check{OK: true, Text: i18n.T("resume.check.dir_ok") + cwd}
+	}
+	hint := ""
+	if remote != "" {
+		hint = i18n.T("resume.check.remote_hint") + remote
+	}
+	return Check{Text: i18n.T("resume.check.dir_gone") + cwd + hint}
 }

@@ -106,6 +106,13 @@ func (m *Model) projectBlock(name string, y0, x0, w, h int) []string {
 	if live > 0 {
 		add(render.GlyphLive+i18n.T("live.suffix_running"), i18n.F("project.live", live))
 	}
+	if hot := m.hotFiles(recs); len(hot) > 0 {
+		base := ""
+		if len(dirs) > 0 {
+			base = dirs[0].key
+		}
+		add(render.GlyphEdit+i18n.T("project.hot_files"), render.FileList(hot, base))
+	}
 	if tags := topN(recs, nil, 8); len(tags) > 0 {
 		parts := make([]string, len(tags))
 		for i, t := range tags {
@@ -238,4 +245,20 @@ func orderGroups(names []string, by map[string][]*fav.Rec, mode string) []string
 		})
 	}
 	return names
+}
+
+const hotWindow = 7 * 24 * time.Hour
+
+// hotFiles: the files written most in the project's sessions active this week.
+func (m *Model) hotFiles(recs []*fav.Rec) []fav.FileCount {
+	sum := map[string]int{}
+	for _, r := range recs {
+		if m.now.Sub(r.ActiveAt()) > hotWindow {
+			continue
+		}
+		for p, n := range r.Files {
+			sum[p] += n
+		}
+	}
+	return fav.TopFiles(sum, 5)
 }

@@ -496,15 +496,17 @@ type Missing struct {
 	Sessions int
 	Remote   string
 	Found    []string // guessed new location; auto-fix only when there is exactly one
+	Repo     string   // Dir was a git worktree of this main checkout: Found is it
 }
 
 // FindMissing lists cwds from sessions / records that no longer exist and looks for the basename under the parents of
-// existing cwds and next to the old dir; a recorded remote must match origin. only limits it to one dir (glob + git exec once).
+// existing cwds and next to the old dir; a recorded remote must match origin; a removed worktree goes to its main checkout.
+// only limits it to one dir (glob + git exec once).
 func (idx *Index) FindMissing(store *fav.Store, only string) []Missing {
 	dead := map[string]*Missing{}
 	parents := map[string]bool{}
 	exists := map[string]bool{} // hundreds of sessions share a cwd: stat once
-	note := func(cwd, remote string) {
+	note := func(cwd, remote, repo string) {
 		if cwd == "" {
 			return
 		}
@@ -529,15 +531,23 @@ func (idx *Index) FindMissing(store *fav.Store, only string) []Missing {
 		if remote != "" {
 			m.Remote = remote
 		}
+		if repo != "" && repo != cwd && dirExists(repo) {
+			m.Repo = repo
+		}
 	}
 	for _, s := range idx.Sessions() {
-		note(s.Cwd, "")
+		note(s.Cwd, "", s.Repo)
 	}
 	for _, r := range store.All() {
-		note(r.Cwd, r.GitRemote)
+		note(r.Cwd, r.GitRemote, r.Repo)
 	}
 	var out []Missing
 	for _, m := range dead {
+		if m.Repo != "" {
+			m.Found = []string{m.Repo}
+			out = append(out, *m)
+			continue
+		}
 		base := filepath.Base(m.Dir)
 		cands := map[string]bool{}
 		for parent := range parents {

@@ -39,6 +39,13 @@ type File struct {
 	// Claude moved the conversation to this session id when the context ran out; the chain is one session (Sessions)
 	ContinuedIn string `json:"continued_in,omitempty"`
 	App         bool   `json:"app,omitempty"` // Codex: started in the desktop app
+	// Recap: Claude's latest away_summary (goal · done · next), Codex's latest task_complete reply, first paragraph; capped
+	Recap string `json:"recap,omitempty"`
+	// WtRepo: Claude entered a git worktree (worktree-state) and this is the checkout it came from; cleared when it left
+	WtRepo string `json:"wt_repo,omitempty"`
+	Remote string `json:"remote,omitempty"` // Codex: session_meta git.repository_url
+	// Files: absolute path → times the AI wrote it (Claude Edit / Write / MultiEdit / NotebookEdit, Codex apply_patch); filesCap paths
+	Files map[string]int `json:"files,omitempty"`
 }
 
 type Session struct {
@@ -55,7 +62,13 @@ type Session struct {
 	Turns     int
 	Replies   int
 	Prompts   string
-	App       bool // started in a desktop app (Codex: from the file; Claude: set by Attach)
+	App       bool   // started in a desktop app (Codex: from the file; Claude: set by Attach)
+	Recap     string // the newest file's Recap
+	// Repo: the main checkout when the session ran in a linked git worktree (worktrees.go)
+	Repo   string
+	Files  map[string]int
+	wtRepo string
+	remote string
 }
 
 // CodexArchived: the rollout sits in ~/.codex/archived_sessions (archived in Codex or the desktop app).
@@ -81,10 +94,17 @@ func (s *Session) Rec() *fav.Rec {
 	r := &fav.Rec{
 		Provider: s.Provider, SessionID: s.SessionID, Cwd: s.Cwd, GitBranch: s.Branch,
 		Title: s.DisplayTitle(), Summary: strings.Join(strings.Fields(s.First), " "), Project: filepath.Base(s.Cwd),
+		Recap: s.Recap != "", Repo: s.Repo, Files: s.Files,
 		TranscriptPath: s.Path, SessionStartedAt: &started, UpdatedAt: s.LastAt, // Status "": not marked until the user does
 	}
-	if s.Cwd == "" {
+	switch {
+	case s.Repo != "":
+		r.Project = filepath.Base(s.Repo)
+	case s.Cwd == "":
 		r.Project = ""
+	}
+	if s.Recap != "" {
+		r.Summary = s.Recap
 	}
 	r.Attach(s.Turns, s.Turns+s.Replies, s.LastAt, s.Prompts)
 	r.App, r.CodexArchived = s.App, s.CodexArchived()
@@ -92,11 +112,12 @@ func (s *Session) Rec() *fav.Rec {
 }
 
 const (
-	scanVer    = 4
+	scanVer    = 8
 	promptsCap = 8 * 1024 // max prompt bytes kept per file
 	promptCap  = 300      // max chars stored per prompt
 	titleMin   = 12       // prompts shorter than this are not titles
 	scanBuf    = 256 * 1024
+	filesCap   = 200 // paths kept per file
 )
 
 // noise is what Claude Code injects into user messages.
@@ -122,7 +143,12 @@ type line struct {
 	CustomTitle string    `json:"customTitle"`
 	AITitle     string    `json:"aiTitle"`
 	ContinuedIn string    `json:"continuedInSessionId"`
-	Message     struct {
+	Worktree    *struct {
+		OriginalCwd string `json:"originalCwd"`
+	} `json:"worktreeSession"`
+	Subtype string          `json:"subtype"`
+	Content json.RawMessage `json:"content"` // Claude system lines (away_summary): a string
+	Message struct {
 		Content json.RawMessage `json:"content"`
 	} `json:"message"`
 	Payload struct {
@@ -132,7 +158,11 @@ type line struct {
 		Cwd            string  `json:"cwd"`
 		Originator     string  `json:"originator"`
 		ParentThreadID *string `json:"parent_thread_id"`
-		Content        []struct {
+		LastAgentMsg   string  `json:"last_agent_message"` // Codex task_complete
+		Git            struct {
+			RepositoryURL string `json:"repository_url"`
+		} `json:"git"`
+		Content []struct {
 			Text string `json:"text"`
 		} `json:"content"`
 	} `json:"payload"`
@@ -168,7 +198,8 @@ func (l *line) userText() string {
 }
 
 // interesting is a cheap pre-filter before JSON parsing.
-var wanted = [][]byte{[]byte(`"type":"user"`), []byte(`"role":"user"`), []byte(`-title"`), []byte(`"session_meta"`), []byte(`"continued-in"`)}
+var wanted = [][]byte{[]byte(`"type":"user"`), []byte(`"role":"user"`), []byte(`-title"`), []byte(`"session_meta"`), []byte(`"continued-in"`),
+	[]byte(`"away_summary"`), []byte(`"task_complete"`), []byte(`"worktree-state"`)}
 
 var replyClaude, replyText, replyCodex = []byte(`"type":"assistant"`), []byte(`"type":"text"`), []byte(`"type":"output_text"`)
 
@@ -216,6 +247,9 @@ func (f *File) scan() {
 			break
 		}
 		off += int64(len(b))
+		if isEdit(b) {
+			f.takeEdits(b)
+		}
 		if isReply(b) {
 			f.Replies++
 			continue
@@ -243,6 +277,13 @@ func (f *File) take(l *line) {
 			f.Skip = true
 		}
 		f.App = capture.CodexFromApp(l.Payload.Originator)
+		f.Remote = l.Payload.Git.RepositoryURL
+		return
+	case "worktree-state":
+		f.WtRepo = ""
+		if l.Worktree != nil {
+			f.WtRepo = l.Worktree.OriginalCwd
+		}
 		return
 	case "custom-title":
 		f.Title, f.Custom = l.CustomTitle, true
@@ -254,6 +295,19 @@ func (f *File) take(l *line) {
 		return
 	case "continued-in":
 		f.ContinuedIn = l.ContinuedIn
+		return
+	case "system":
+		if l.Subtype == "away_summary" {
+			var text string
+			if json.Unmarshal(l.Content, &text) == nil {
+				f.Recap = recap(text)
+			}
+		}
+		return
+	case "event_msg":
+		if l.Payload.Type == "task_complete" && l.Payload.LastAgentMsg != "" {
+			f.Recap = recap(l.Payload.LastAgentMsg)
+		}
 		return
 	}
 	if l.Entrypoint != "" && l.Entrypoint != "cli" {
@@ -291,6 +345,7 @@ type Index struct {
 	files map[string]*File
 	dirty []*File // changed by this Refresh; Save writes only these
 	raw   int
+	wt    worktrees
 }
 
 func Path() string { return filepath.Join(fav.Home(), "sessions.jsonl") }
@@ -298,7 +353,7 @@ func Path() string { return filepath.Join(fav.Home(), "sessions.jsonl") }
 func Open() (*Index, error) { return OpenAt(Path()) }
 
 func OpenAt(path string) (*Index, error) {
-	idx := &Index{path: path, files: map[string]*File{}}
+	idx := &Index{path: path, files: map[string]*File{}, wt: loadWorktrees(worktreesPath(path))}
 	fh, err := os.Open(path)
 	if os.IsNotExist(err) {
 		return idx, nil
@@ -425,7 +480,7 @@ func (idx *Index) Refresh() (*Index, bool) { return idx.Rescan(nil) }
 
 // Rescan is Refresh, but force files skip the incremental path and start over: they were rewritten in place (cwd changed by a move), size and mtime lie.
 func (idx *Index) Rescan(force map[string]bool) (*Index, bool) {
-	next := &Index{path: idx.path, files: make(map[string]*File, len(idx.files)), raw: idx.raw}
+	next := &Index{path: idx.path, files: make(map[string]*File, len(idx.files)), raw: idx.raw, wt: idx.wt}
 	seen := 0
 	threads := codexThreadNames()
 	for _, c := range candidates() {
@@ -457,6 +512,7 @@ func (idx *Index) Rescan(force map[string]bool) (*Index, bool) {
 		next.files[c.path] = f
 		next.dirty = append(next.dirty, f)
 	}
+	next.wt = idx.wt.learn(next.files, worktreesPath(idx.path))
 	return next, len(next.dirty) > 0 || seen != len(idx.files)
 }
 
@@ -573,6 +629,21 @@ func (idx *Index) Sessions() []*Session {
 		if f.Title != "" && (s.Title == "" || !f.ModTime.Before(s.LastAt)) {
 			s.Title = f.Title
 		}
+		if f.Recap != "" && (s.Recap == "" || !f.ModTime.Before(s.LastAt)) {
+			s.Recap = f.Recap
+		}
+		if !f.ModTime.Before(s.LastAt) {
+			s.wtRepo = f.WtRepo
+		}
+		if f.Remote != "" {
+			s.remote = f.Remote
+		}
+		for p, n := range f.Files {
+			if s.Files == nil {
+				s.Files = map[string]int{}
+			}
+			s.Files[p] += n
+		}
 		if f.ModTime.After(s.LastAt) {
 			s.LastAt = f.ModTime
 		}
@@ -582,6 +653,7 @@ func (idx *Index) Sessions() []*Session {
 	}
 	out := make([]*Session, 0, len(byKey))
 	for _, s := range byKey {
+		s.Repo = idx.wt.repoOf(s.Cwd, s.wtRepo, s.remote)
 		out = append(out, s)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].LastAt.After(out[j].LastAt) })
@@ -694,7 +766,7 @@ func (idx *Index) Attach(store *fav.Store, prev []*fav.Rec) []*fav.Rec {
 				r.TranscriptPath = s.Path
 			}
 			r.Attach(s.Turns, s.Turns+s.Replies, s.LastAt, s.Prompts)
-			r.App, r.CodexArchived = s.App, s.CodexArchived()
+			r.App, r.CodexArchived, r.Repo, r.Files = s.App, s.CodexArchived(), s.Repo, s.Files
 			continue
 		}
 		r = s.Rec()
@@ -755,4 +827,16 @@ func AgentScratch(cwd string) bool {
 		}
 	}
 	return false
+}
+
+const recapCap = 300 // chars kept of a recap
+
+// recap: the first paragraph, without Claude's "(disable recaps in /config)" tail, capped.
+func recap(text string) string {
+	text = strings.TrimSpace(text)
+	if i := strings.Index(text, "\n\n"); i > 0 {
+		text = text[:i]
+	}
+	text = strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(text), "(disable recaps in /config)"))
+	return truncate(strings.Join(strings.Fields(text), " "), recapCap)
 }

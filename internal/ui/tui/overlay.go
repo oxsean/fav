@@ -801,7 +801,11 @@ func (m *Model) resumeGroups() []btnGroup {
 	project := btnGroup{label: i18n.T("resume.group.project"), bs: []btn{{"i IDE", false, (*Model).openIDE}, {"c VS Code", false, (*Model).openCode}, {"o " + fileManagerName(), false, (*Model).openFiles}}}
 	cancel := btn{i18n.T("btn.cancel"), false, (*Model).closeOverlay}
 	if dirGone, tGone := m.broken(m.ov.rec); dirGone || tGone { // unrecoverable: move / delete instead of resume
-		gs := []btnGroup{{label: i18n.T("resume.group.repair"), bs: []btn{{i18n.T("resume.btn_move"), dirGone, (*Model).askMove}, {i18n.T("resume.btn_delete"), !dirGone, (*Model).askDelete}}}}
+		move := i18n.T("resume.btn_move")
+		if dirGone && m.ov.rec.Repo != "" {
+			move = i18n.T("resume.btn_move_repo")
+		}
+		gs := []btnGroup{{label: i18n.T("resume.group.repair"), bs: []btn{{move, dirGone, (*Model).askMove}, {i18n.T("resume.btn_delete"), !dirGone, (*Model).askDelete}}}}
 		if !dirGone {
 			gs = append(gs, project)
 		}

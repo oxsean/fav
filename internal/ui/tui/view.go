@@ -490,6 +490,9 @@ func (m *Model) cardBox(r *fav.Rec, sel bool, w int) []string {
 	if r.Project != "" {
 		meta += "  ·  " + r.Project
 	}
+	if r.Repo != "" {
+		meta += "  ·  " + strings.TrimSpace(i18n.T("card.worktree")+" "+r.GitBranch)
+	}
 	if r.Turns > 0 {
 		meta += "  ·  " + i18n.F("card.turns", r.Turns)
 	}
@@ -587,7 +590,12 @@ func (m *Model) detailBlock(y0, x0, w, h int) []string {
 	searching := m.msgMode() || m.hitsOpen() // message search wants the room for the chat
 	if r.Summary != "" && !searching {
 		label := i18n.T("card.summary")
-		if r.ID == "" {
+		switch {
+		case r.ID == "" && r.Recap && r.Provider == fav.ProviderCodex:
+			label = i18n.T("detail.recap_codex")
+		case r.ID == "" && r.Recap:
+			label = i18n.T("detail.recap_claude")
+		case r.ID == "":
 			label = i18n.T("detail.first_message") // unfavorited sessions have no summary: show the first prompt
 		}
 		body = append(body, accent.Render(label))
@@ -669,6 +677,10 @@ func (m *Model) fieldLines(r *fav.Rec, w int) []string {
 	add(render.GlyphTerm+i18n.T("card.type"), r.WorkType)
 	add(render.GlyphBranch+i18n.T("card.branch"), r.GitBranch)
 	add(render.GlyphDir+i18n.T("card.directory"), shortenHome(r.Cwd))
+	if r.Repo != r.Cwd {
+		add(render.GlyphDir+i18n.T("card.repo"), shortenHome(r.Repo))
+	}
+	add(render.GlyphEdit+i18n.T("card.files"), render.FilesField(r, 6))
 	add(render.GlyphSession+i18n.T("card.session"), r.SessionID)
 	if r.Turns > 0 {
 		add(render.GlyphClock+i18n.T("card.turns_label"), i18n.F("card.turns_last_write", r.Turns, render.WhenFull(r.LastAt)))

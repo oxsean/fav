@@ -19,6 +19,7 @@ type Query struct {
 	After   time.Time // after: / before: — when the session started
 	Before  time.Time
 	Active  time.Time // last: — active since (a session started last week and continued today counts)
+	File    string    // file: — the AI wrote a file whose path contains this (lowercase)
 	Unknown []string  // unknown qualifiers, already matched as plain keywords
 }
 
@@ -45,6 +46,8 @@ func Parse(s string) Query {
 			q.Project = v
 		case "provider", "source":
 			q.Provider = v
+		case "file":
+			q.File = v
 		case "status":
 			q.Status = normalizeStatus(v)
 		case "turns":
@@ -185,6 +188,9 @@ func (q Query) Match(r *Rec) bool {
 		return false
 	}
 	if !q.Active.IsZero() && r.ActiveAt().Before(q.Active) {
+		return false
+	}
+	if q.File != "" && !r.wrote(q.File) {
 		return false
 	}
 	for _, w := range q.Words {

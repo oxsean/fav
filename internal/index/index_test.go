@@ -353,3 +353,26 @@ func TestScratchSessionsOnlyInAgents(t *testing.T) {
 		t.Fatalf("status:agent lists it: %v", agent)
 	}
 }
+
+func TestRecapBecomesTheSummary(t *testing.T) {
+	claude, codex := setup(t)
+	write(t, filepath.Join(claude, "projects", "-Users-me-work", "rrrr.jsonl"),
+		claudeLines("帮我看看登录为什么收不到邮件", "继续", "好")+
+			`{"type":"system","subtype":"away_summary","content":"旧的回顾","timestamp":"2026-09-10T01:00:10Z"}`+"\n"+
+			`{"type":"system","subtype":"away_summary","content":"修登录邮件：加了 SPF。下一步等 DNS 生效。 (disable recaps in /config)","timestamp":"2026-09-10T01:00:20Z"}`+"\n")
+	meta := `{"timestamp":"2026-09-11T02:00:00Z","type":"session_meta","payload":{"session_id":"xxxx","cwd":"/Users/me/work/env","originator":"codex-tui"}}` + "\n"
+	msg := `{"timestamp":"2026-09-11T02:00:01Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"把 env 仓库的 CI 修好"}]}}` + "\n"
+	done := `{"timestamp":"2026-09-11T02:00:09Z","type":"event_msg","payload":{"type":"task_complete","last_agent_message":"CI 修好了：缓存键写错。\n\n细节：……"}}` + "\n"
+	write(t, filepath.Join(codex, "sessions", "2026", "09", "11", "rollout-2026-09-11T02-00-00-xxxx.jsonl"), meta+msg+msg+msg+done)
+	idx, _ := (&Index{files: map[string]*File{}}).Refresh()
+	got := map[string]*fav.Rec{}
+	for _, s := range idx.Sessions() {
+		got[s.SessionID] = s.Rec()
+	}
+	if r := got["rrrr"]; r == nil || !r.Recap || r.Summary != "修登录邮件：加了 SPF。下一步等 DNS 生效。" {
+		t.Fatalf("Claude: the newest recap, without the settings hint: %+v", r)
+	}
+	if r := got["xxxx"]; r == nil || !r.Recap || r.Summary != "CI 修好了：缓存键写错。" {
+		t.Fatalf("Codex: the first paragraph of the last reply: %+v", r)
+	}
+}

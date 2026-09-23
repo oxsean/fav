@@ -2,6 +2,7 @@ package render
 
 import (
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -197,7 +198,14 @@ func Preview(r *fav.Rec, width int, now time.Time) string {
 	line("")
 
 	if r.Summary != "" {
-		line(cyan.p(i18n.T("card.summary")))
+		label := i18n.T("card.summary")
+		switch {
+		case r.ID == "" && r.Recap && r.Provider == fav.ProviderCodex:
+			label = i18n.T("detail.recap_codex")
+		case r.ID == "" && r.Recap:
+			label = i18n.T("detail.recap_claude")
+		}
+		line(cyan.p(label))
 		for _, l := range Wrap(r.Summary, width) {
 			line(l)
 		}
@@ -214,6 +222,10 @@ func Preview(r *fav.Rec, width int, now time.Time) string {
 	field(GlyphTerm+i18n.T("card.type"), r.WorkType)
 	field(GlyphBranch+i18n.T("card.branch"), r.GitBranch)
 	field(GlyphDir+i18n.T("card.directory"), shortenHome(r.Cwd))
+	if r.Repo != r.Cwd {
+		field(GlyphDir+i18n.T("card.repo"), shortenHome(r.Repo))
+	}
+	field(GlyphEdit+i18n.T("card.files"), FilesField(r, 6))
 	field(GlyphSession+i18n.T("card.session"), r.SessionID)
 	if r.HerdrWorkspace != "" {
 		herdr := r.HerdrWorkspace
@@ -334,6 +346,36 @@ func providerLabel(p string) string {
 }
 
 var home, _ = os.UserHomeDir()
+
+// FileList: "a.go ×3  ·  b.go" with paths under base written relative to it.
+func FileList(fs []fav.FileCount, base string) string {
+	parts := make([]string, len(fs))
+	for i, f := range fs {
+		p := shortenHome(f.Path)
+		if base != "" {
+			if rel, err := filepath.Rel(base, f.Path); err == nil && !strings.HasPrefix(rel, "..") {
+				p = rel
+			}
+		}
+		if f.N > 1 {
+			p += " ×" + strconv.Itoa(f.N)
+		}
+		parts[i] = p
+	}
+	return strings.Join(parts, "  ·  ")
+}
+
+// FilesField is the detail line for the files r's AI wrote: how many, the most written first.
+func FilesField(r *fav.Rec, n int) string {
+	if len(r.Files) == 0 {
+		return ""
+	}
+	base := r.Cwd
+	if base == "" {
+		base = r.Repo
+	}
+	return i18n.F("card.files_value", len(r.Files), FileList(fav.TopFiles(r.Files, n), base))
+}
 
 func shortenHome(p string) string {
 	if p != "" && home != "" && strings.HasPrefix(p, home) {

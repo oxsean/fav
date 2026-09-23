@@ -3,6 +3,7 @@ package fav
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"sort"
 	"strings"
 	"time"
 )
@@ -76,7 +77,13 @@ type Rec struct {
 	App    bool      `json:"-"` // started in a desktop app (Claude or ChatGPT): opening it there is the default when set so
 	// CodexArchived: the rollout is in ~/.codex/archived_sessions.
 	CodexArchived bool `json:"-"`
-	extra         string
+	// Recap: Summary is the agent's own recap (unfavorited sessions), not a /fav summary or the first prompt.
+	Recap bool `json:"-"`
+	// Repo: the main checkout when the session ran in a linked git worktree.
+	Repo string `json:"-"`
+	// Files: absolute path → times the AI wrote it in this session.
+	Files map[string]int `json:"-"`
+	extra string
 
 	hay string
 }
@@ -153,4 +160,33 @@ func (r *Rec) When() time.Time {
 		return *r.FavoritedAt
 	}
 	return r.UpdatedAt
+}
+
+func (r *Rec) wrote(sub string) bool {
+	for p := range r.Files {
+		if strings.Contains(strings.ToLower(p), sub) {
+			return true
+		}
+	}
+	return false
+}
+
+type FileCount struct {
+	Path string
+	N    int
+}
+
+// TopFiles: the n most written files, most first, then by path.
+func TopFiles(files map[string]int, n int) []FileCount {
+	out := make([]FileCount, 0, len(files))
+	for p, c := range files {
+		out = append(out, FileCount{p, c})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].N != out[j].N {
+			return out[i].N > out[j].N
+		}
+		return out[i].Path < out[j].Path
+	})
+	return out[:min(n, len(out))]
 }

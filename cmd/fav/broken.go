@@ -99,7 +99,10 @@ func printBroken(list []broken) {
 	for _, b := range list {
 		r := b.rec
 		kind := i18n.T("cli.broken.transcript_gone")
-		if b.dirGone {
+		switch {
+		case b.dirGone && r.Repo != "":
+			kind = i18n.T("cli.broken.worktree_gone")
+		case b.dirGone:
 			kind = i18n.T("cli.broken.dir_gone")
 		}
 		if b.live {
@@ -131,11 +134,12 @@ func printBrokenJSON(list []broken) error {
 		DirGone        bool     `json:"dir_gone"`
 		TranscriptGone bool     `json:"transcript_gone"`
 		Found          []string `json:"found,omitempty"`
+		WorktreeOf     string   `json:"worktree_of,omitempty"` // the cwd was a git worktree of this main checkout
 		Live           bool     `json:"live"`
 	}
 	rows := make([]row, 0, len(list))
 	for _, b := range list {
-		rows = append(rows, row{b.n, b.rec.Provider, b.rec.SessionID, b.rec.ID, b.rec.Title, b.rec.Cwd, b.dirGone, !b.dirGone, b.found, b.live})
+		rows = append(rows, row{b.n, b.rec.Provider, b.rec.SessionID, b.rec.ID, b.rec.Title, b.rec.Cwd, b.dirGone, !b.dirGone, b.found, b.rec.Repo, b.live})
 	}
 	enc := json.NewEncoder(os.Stdout)
 	enc.SetIndent("", "  ")

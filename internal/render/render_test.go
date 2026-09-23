@@ -174,3 +174,10 @@ func TestWrapKeepsPunctuationOffLineStarts(t *testing.T) {
 		}
 	}
 }
+
+func TestFileList(t *testing.T) {
+	fs := []fav.FileCount{{Path: "/w/app/internal/a.go", N: 3}, {Path: "/other/b.md", N: 1}}
+	if got := FileList(fs, "/w/app"); got != "internal/a.go ×3  ·  /other/b.md" {
+		t.Errorf("relative under base, count after: %q", got)
+	}
+}
