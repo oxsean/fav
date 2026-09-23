@@ -15,6 +15,9 @@ func TestMatchWorkspacesNeverPicksOne(t *testing.T) {
 	if got := matchWorkspaces(both, ws, "/w/app"); len(got) != 2 {
 		t.Fatalf("two workspaces in the same directory: both come back for the user to pick: %+v", got)
 	}
+	if got := matchWorkspaces([]Pane{{WorkspaceID: "a", Cwd: "/w/app/"}, {WorkspaceID: "b", Cwd: "/w/app/web"}}, ws, "/w/app"); len(got) != 1 || got[0].Label != "api" {
+		t.Fatalf("the same directory spelled differently is still exact: %+v", got)
+	}
 	if got := matchWorkspaces(panes, ws, "/elsewhere"); len(got) != 0 {
 		t.Fatalf("nothing there: %+v", got)
 	}

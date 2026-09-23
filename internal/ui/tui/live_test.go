@@ -5,11 +5,11 @@ import (
 	"testing"
 	"time"
 
-	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/oxsean/fav/internal/capture"
 	"github.com/oxsean/fav/internal/fav"
+	"github.com/oxsean/fav/internal/i18n"
 )
 
 func TestLiveChatRefreshHoldsWhileReading(t *testing.T) {
@@ -103,31 +103,6 @@ func TestLiveView(t *testing.T) {
 	}
 }
 
-func TestIndexHeldWhileScrolling(t *testing.T) {
-	m := sized(t, 140, 40)
-	idx := m.idx
-	m.Update(tea.MouseWheelMsg{Button: tea.MouseWheelDown, X: 5, Y: 20})
-	m.Update(indexMsg{idx: idx, changed: true})
-	if m.heldIdx == nil {
-		t.Fatal("滚动中收到的索引应先攥着")
-	}
-	m.lastWheel = time.Now().Add(-2 * time.Second)
-	m.Update(storeTickMsg{})
-	if m.heldIdx != nil {
-		t.Fatal("停下来后应换上")
-	}
-}
-
-func TestCtrlGJumps(t *testing.T) {
-	m := sized(t, 140, 40)
-	r := m.current()
-	m.Update(liveMsg{herdr: map[string]capture.Live{r.SessionID: {TabID: "t1", Status: "working", Since: time.Now()}}})
-	m.Update(press("space"))
-	if m.ov.active() || m.pending == nil && !strings.Contains(m.notice, "切到") {
-		t.Fatalf("Space 应直接切过去、不留框：ov=%v notice=%q", m.ov.kind, m.notice)
-	}
-}
-
 // a live session whose transcript has no message yet must not crash the refresh
 func TestStashEmptyPages(t *testing.T) {
 	m := sized(t, 140, 40)
@@ -137,5 +112,48 @@ func TestStashEmptyPages(t *testing.T) {
 	m.applyFresh()
 	if p := m.probes[r]; len(p.msgs) != 0 || p.fresh != nil {
 		t.Fatalf("空页不该留下东西：%+v", p)
+	}
+}
+
+func TestPulseText(t *testing.T) {
+	now := time.Now()
+	p := capture.Pulse{Reply: "先看排序键", TurnAt: now.Add(-12 * time.Minute), Context: 104425, Window: 258400}
+	got := pulseText(p, capture.Live{Status: "working"}, now)
+	for _, want := range []string{"12", "40%", "先看排序键"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("%q misses %q", got, want)
+		}
+	}
+	p.Window = 0
+	if got := pulseText(p, capture.Live{Status: "idle"}, now); !strings.Contains(got, "104k") || strings.Contains(got, i18n.F("live.turn", "")) {
+		t.Errorf("Claude shows tokens, an idle session no turn time: %q", got)
+	}
+	if tokens(1_234_567) != "1.2M" || tokens(950) != "950" {
+		t.Error("token format")
+	}
+}
+
+func TestCloseIdleTabs(t *testing.T) {
+	m := sized(t, 140, 40)
+	recs := m.store.All()
+	old, fresh, unseen := recs[0], recs[1], recs[2]
+	for _, r := range recs[:3] {
+		r.LastAt = m.now.Add(-5 * time.Hour)
+	}
+	fresh.LastAt = m.now
+	m.live = map[string]capture.Live{
+		old.SessionID:    {TabID: "t-old", Status: "idle"},
+		fresh.SessionID:  {TabID: "t-fresh", Status: "idle"},
+		unseen.SessionID: {TabID: "t-unseen", Status: "idle"},
+	}
+	m.pulse = pulseMsg{unseen.SessionID: {Size: 10, Finished: true}}
+	m.setView(viewLive)
+	m.Update(press("Z"))
+	if m.ov.kind != ovConfirm || m.ov.focus != 1 {
+		t.Fatalf("Z asks first, focus on Cancel: kind=%d focus=%d", m.ov.kind, m.ov.focus)
+	}
+	body := strings.Join(m.ov.lines, "\n")
+	if !strings.Contains(body, old.Title[:6]) || strings.Contains(body, fresh.Title[:6]) || strings.Contains(body, unseen.Title[:6]) {
+		t.Fatalf("only tabs quiet for hours with nothing unseen:\n%s", body)
 	}
 }

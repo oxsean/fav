@@ -211,3 +211,78 @@ func TestCompactKeepsOtherWriters(t *testing.T) {
 		t.Fatalf("压实后应两条都在：%d", len(again.All()))
 	}
 }
+
+func TestUpdateSeesAnotherProcessesWrites(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "records.jsonl")
+	a, b := &Store{Path: path}, &Store{Path: path}
+	for _, s := range []*Store{a, b} {
+		if err := s.load(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	now := time.Now()
+	ra, err := a.Update(&Rec{Provider: ProviderClaude, SessionID: "s1"}, func(r *Rec) { r.ToggleFavorite(now) })
+	if err != nil {
+		t.Fatal(err)
+	}
+	rb, err := b.Update(&Rec{Provider: ProviderClaude, SessionID: "s1"}, func(r *Rec) { r.Tags = []string{"x"} })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rb.ID != ra.ID || !rb.Favorite() {
+		t.Fatalf("second process made its own record or lost the first's change: %+v vs %+v", rb, ra)
+	}
+	if _, err := a.Update(ra, func(r *Rec) { r.ToggleArchived(now) }); err != nil {
+		t.Fatal(err)
+	}
+	c := &Store{Path: path}
+	c.load()
+	if got := c.All(); len(got) != 1 || !got[0].Favorite() || !got[0].Archived() || len(got[0].Tags) != 1 {
+		t.Fatalf("a stale object overwrote another process's change: %+v", got)
+	}
+}
+
+func TestUpdateTakesBackTheIDWhenTheWriteFails(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "records.jsonl")
+	os.Mkdir(path, 0o755) // appending to a directory fails after the change ran
+	s := &Store{Path: path}
+	s.seen = s.stamp()
+	r := &Rec{Provider: ProviderClaude, SessionID: "s1"}
+	during := ""
+	if _, err := s.Update(r, func(r *Rec) { during = r.ID }); err == nil || during == "" || r.ID != "" {
+		t.Fatalf("err %v, id during %q, after %q", err, during, r.ID)
+	}
+}
+
+func TestPutDoesNotHideAnotherProcesssWrite(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "records.jsonl")
+	a, b := &Store{Path: path}, &Store{Path: path}
+	x, _ := a.Update(&Rec{Provider: ProviderClaude, SessionID: "x"}, func(*Rec) {})
+	y, _ := a.Update(&Rec{Provider: ProviderClaude, SessionID: "y"}, func(*Rec) {})
+	b.load()
+	if _, err := b.Update(x, func(r *Rec) { r.Title = "from b" }); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.Put(y); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := a.Update(x, func(r *Rec) { r.Tags = []string{"a"} }); got.Title != "from b" {
+		t.Fatalf("a stale copy overwrote b's write: %+v", got)
+	}
+}
+
+func TestUpdateRefusesARecordDeletedElsewhere(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "records.jsonl")
+	a, b := &Store{Path: path}, &Store{Path: path}
+	x, _ := a.Update(&Rec{Provider: ProviderClaude, SessionID: "x"}, func(*Rec) {})
+	b.load()
+	gone := *b.Get(x.ID)
+	gone.Deleted = true
+	b.Put(&gone)
+	if _, err := a.Update(x, func(r *Rec) { r.Title = "t" }); err == nil {
+		t.Fatal("editing a record another process deleted brings it back")
+	}
+	if c := (&Store{Path: path}); c.load() == nil && len(c.All()) != 0 {
+		t.Fatalf("resurrected: %+v", c.All())
+	}
+}

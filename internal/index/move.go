@@ -10,12 +10,14 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/oxsean/fav/internal/capture"
 	"github.com/oxsean/fav/internal/fav"
+	"github.com/oxsean/fav/internal/fileio"
 	"github.com/oxsean/fav/internal/paths"
 )
 
@@ -81,7 +83,7 @@ func (idx *Index) PlanMove(store *fav.Store, live map[string]capture.Live, old, 
 		if f.SessionID == "" || !paths.Under(f.Cwd, old) {
 			continue
 		}
-		k := f.Provider + ":" + f.SessionID
+		k := fav.SessionKey(f.Provider, f.SessionID)
 		s := byKey[k]
 		if s == nil {
 			title := f.Title
@@ -102,11 +104,11 @@ func (idx *Index) PlanMove(store *fav.Store, live map[string]capture.Live, old, 
 	for _, r := range store.All() {
 		if paths.Under(r.Cwd, old) || paths.Under(r.GitRoot, old) {
 			plan.Records = append(plan.Records, r)
-			if paths.Under(r.Cwd, old) && r.SessionID != "" && byKey[r.Provider+":"+r.SessionID] == nil && r.TranscriptPath != "" && paths.IsDir(filepath.Dir(r.TranscriptPath)) {
+			if paths.Under(r.Cwd, old) && r.SessionID != "" && byKey[r.Key()] == nil && r.TranscriptPath != "" && paths.IsDir(filepath.Dir(r.TranscriptPath)) {
 				if _, err := os.Stat(r.TranscriptPath); err == nil {
 					s := &MoveSession{Provider: r.Provider, SessionID: r.SessionID, Title: r.Title, Cwd: r.Cwd, NewCwd: paths.Rebase(r.Cwd, old, new), Files: []string{r.TranscriptPath}}
-					byKey[r.Provider+":"+r.SessionID] = s
-					order = append(order, r.Provider+":"+r.SessionID)
+					byKey[r.Key()] = s
+					order = append(order, r.Key())
 				}
 			}
 		}
@@ -163,9 +165,8 @@ func (p *MovePlan) Replan(idx *Index, store *fav.Store, live map[string]capture.
 	return fresh, nil
 }
 
-// RescanAfterRestore: after a trash restore of a moved entry the original is back at the same path,
-// possibly with the same size and mtime as the rewrite, so the index must rescan it from scratch.
-func RescanAfterRestore(e fav.TrashEntry) map[string]bool {
+// ⚠️ rescanAfterRestore: a restored original may match the rewrite's size and mtime, so it is read from scratch.
+func rescanAfterRestore(e fav.TrashEntry) map[string]bool {
 	force := map[string]bool{}
 	for _, f := range e.Files {
 		if f.Replaced != "" {
@@ -204,6 +205,9 @@ func (p *MovePlan) Apply(store *fav.Store) (MoveReport, error) {
 	}
 	oldDirs := map[string]bool{}
 	for _, s := range p.Sessions {
+		if !slices.ContainsFunc(s.Files, paths.Exists) { // gone since the plan: MoveToTrash would hand back an older entry
+			continue
+		}
 		// Originals go to trash first and the rewrite reads from there: Codex rewrites in place and would clobber the original.
 		// The trash entry records the rewritten files, the moved dirs and the pre-move record so the whole move can be undone.
 		e := fav.TrashEntry{Provider: s.Provider, SessionID: s.SessionID, Title: s.Title + " (moved " + p.Old + " → " + p.New + ")", Cwd: s.Cwd}
@@ -252,10 +256,7 @@ func (p *MovePlan) Apply(store *fav.Store) (MoveReport, error) {
 			if r.Provider == s.Provider && r.SessionID == s.SessionID && len(moved) > 0 {
 				r.TranscriptPath = moved[0]
 				if r.PinnedPath != "" {
-					os.Remove(r.PinnedPath)
-					if err := os.Link(moved[0], r.PinnedPath); err != nil {
-						r.PinnedPath = ""
-					}
+					r.Relink(moved[0])
 				}
 			}
 		}
@@ -319,7 +320,7 @@ func sweepProjectDir(old, new string) {
 
 var cwdKey = []byte(`"cwd":"`)
 
-// rewriteCwd rewrites "cwd":"<old…>" and "cwd":"file://<old…>" line by line into dst (tmp + rename).
+// rewriteCwd rewrites "cwd":"<old…>" and "cwd":"file://<old…>" line by line into dst, keeping the source's mtime.
 // ⚠️ Only the cwd field: paths in message bodies are history and must match what happened.
 func rewriteCwd(src, dst, old, new string) error {
 	in, err := os.Open(src)
@@ -327,48 +328,31 @@ func rewriteCwd(src, dst, old, new string) error {
 		return err
 	}
 	defer in.Close()
-	if err := os.MkdirAll(filepath.Dir(dst), 0o700); err != nil {
-		return err
-	}
-	tmp := dst + ".fav-mv"
-	out, err := os.OpenFile(tmp, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
+	oldQ, newQ := paths.JSON(old), paths.JSON(new)
+	err = fileio.WriteAtomic(dst, 0o600, func(w io.Writer) error {
+		r := bufio.NewReaderSize(in, 1<<20)
+		for {
+			line, err := r.ReadBytes('\n')
+			if len(line) > 0 {
+				if _, werr := w.Write(replaceCwd(line, oldQ, newQ)); werr != nil {
+					return werr
+				}
+			}
+			if err == io.EOF {
+				return nil
+			}
+			if err != nil { // a read error must not look like EOF: renaming a partial file loses data
+				return err
+			}
+		}
+	})
 	if err != nil {
 		return err
 	}
-	w := bufio.NewWriterSize(out, 1<<20)
-	oldQ, newQ := paths.JSON(old), paths.JSON(new)
-	r := bufio.NewReaderSize(in, 1<<20)
-	for {
-		line, err := r.ReadBytes('\n')
-		if len(line) > 0 {
-			if _, werr := w.Write(replaceCwd(line, oldQ, newQ)); werr != nil {
-				out.Close()
-				os.Remove(tmp)
-				return werr
-			}
-		}
-		if err == io.EOF {
-			break
-		}
-		if err != nil { // a read error must not look like EOF: renaming a partial file loses data
-			out.Close()
-			os.Remove(tmp)
-			return err
-		}
-	}
-	if err := w.Flush(); err != nil {
-		out.Close()
-		os.Remove(tmp)
-		return err
-	}
-	if err := out.Close(); err != nil {
-		os.Remove(tmp)
-		return err
-	}
 	if st, err := os.Stat(src); err == nil {
-		os.Chtimes(tmp, time.Now(), st.ModTime())
+		os.Chtimes(dst, time.Now(), st.ModTime())
 	}
-	return os.Rename(tmp, dst)
+	return nil
 }
 
 func replaceCwd(line []byte, old, new string) []byte {
@@ -459,11 +443,7 @@ func moveClaudeSettings(old, new string) error {
 	if err := os.WriteFile(path+".bak-"+time.Now().Format("20060102-150405"), b, 0o600); err != nil {
 		return err
 	}
-	tmp := path + ".fav-mv"
-	if err := os.WriteFile(tmp, append(out, '\n'), 0o600); err != nil {
-		return err
-	}
-	return os.Rename(tmp, path)
+	return fileio.WriteFile(path, append(out, '\n'), 0o600)
 }
 
 // Missing is a cwd no longer on disk, with its session count and the recorded remote.
@@ -538,7 +518,7 @@ func (idx *Index) FindMissing(store *fav.Store, only string) []Missing {
 			if !paths.IsDir(cand) || cand == m.Dir || paths.Under(cand, m.Dir) {
 				continue
 			}
-			if m.Remote != "" && capture.GitOut(cand, "remote", "get-url", "origin") != m.Remote {
+			if m.Remote != "" && !sameRemote(m.Remote, capture.GitOut(cand, "remote", "get-url", "origin")) {
 				continue
 			}
 			m.Found = append(m.Found, cand)

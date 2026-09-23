@@ -2,7 +2,6 @@ package tui
 
 import (
 	"cmp"
-	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -157,38 +156,6 @@ func liveLabel(l capture.Live, now time.Time) (string, int) {
 	return render.LiveText(l, now), tone
 }
 
-func (m *Model) synthLive(q fav.Query) []*fav.Rec {
-	var out []*fav.Rec
-	for id, l := range m.live {
-		if m.bySession(id) != nil {
-			continue
-		}
-		r := m.synth[id]
-		if r == nil {
-			if m.synth == nil {
-				m.synth = map[string]*fav.Rec{}
-			}
-			r = &fav.Rec{Provider: l.Agent, SessionID: id}
-			m.synth[id] = r
-		}
-		r.Title, r.Cwd, r.Project = l.Title, l.Cwd, ""
-		if l.Cwd != "" {
-			r.Project = filepath.Base(l.Cwd)
-		}
-		if r.Title == "" {
-			r.Title = i18n.F("live.just_started", id[:min(8, len(id))])
-		}
-		if r.TranscriptPath == "" {
-			r.TranscriptPath = m.idx.Transcript(id)
-		}
-		r.Prepare()
-		if q.Match(r) {
-			out = append(out, r)
-		}
-	}
-	return out
-}
-
 const (
 	liveSortStarted = "started"
 	liveSortGroup   = "group"
@@ -202,13 +169,7 @@ func (m *Model) liveRows(recs []*fav.Rec) []row {
 	if m.cfg.LiveSort == liveSortActive {
 		recs, _ = sortActive.sorted(recs)
 	} else {
-		sort.SliceStable(recs, func(i, j int) bool {
-			a, b := recs[i].When(), recs[j].When()
-			if a.IsZero() != b.IsZero() {
-				return a.IsZero()
-			}
-			return a.After(b)
-		})
+		fav.SortByStart(recs)
 	}
 	if m.cfg.LiveSort != liveSortGroup {
 		out := make([]row, len(recs))
@@ -376,8 +337,7 @@ func (m *Model) applyFresh() {
 	m.hitsFor = nil
 }
 
-func (m *Model) closeLive() {
-	r := m.current()
+func (m *Model) closeLive(r *fav.Rec) {
 	l, ok := m.liveOf(r)
 	if !ok || l.TabID == "" {
 		m.flash(i18n.T("live.not_in_herdr"))
@@ -385,17 +345,15 @@ func (m *Model) closeLive() {
 	}
 	label, _ := liveLabel(l, time.Now())
 	tab := l.TabID
-	// irreversible: focus starts on Cancel, y or ← Enter closes
-	m.ov = overlay{kind: ovConfirm, title: i18n.T("live.close_title"), focus: 1, okLabel: i18n.T("live.btn_close"),
-		lines: []string{i18n.F("live.close_item", render.Truncate(r.Title, 40)), label + i18n.T("live.close_hint")},
-		confirm: func(m *Model) {
-			m.pending = func() tea.Msg {
-				if err := herdr.CloseTab(tab); err != nil {
-					return herdrDoneMsg{rec: r, err: err}
-				}
-				return herdrDoneMsg{rec: r, msg: i18n.T("live.closed") + r.Title}
+	lines := []string{i18n.F("live.close_item", render.Truncate(r.Title, 40)), label + i18n.T("live.close_hint")}
+	m.openConfirm(i18n.T("live.close_title"), i18n.T("live.btn_close"), lines, func(m *Model) {
+		m.pending = func() tea.Msg {
+			if err := herdr.CloseTab(tab); err != nil {
+				return herdrDoneMsg{rec: r, err: err}
 			}
-		}}
+			return herdrDoneMsg{rec: r, msg: i18n.F("live.closed", r.Title)}
+		}
+	}, nil)
 }
 
 // closeIdle (Z, Agents): close every Herdr tab whose session has been quiet for capture.IdleAfter and has nothing the user
@@ -434,19 +392,18 @@ func (m *Model) closeIdle() {
 	for i, it := range list {
 		tabs[i] = it.tab
 	}
-	m.ov = overlay{kind: ovConfirm, title: i18n.T("live.close_idle_title"), focus: 1, okLabel: i18n.F("live.btn_close_n", len(list)), lines: lines,
-		confirm: func(m *Model) {
-			m.pending = func() tea.Msg {
-				closed := 0
-				var first error
-				for _, t := range tabs {
-					if err := herdr.CloseTab(t); err != nil {
-						first = cmp.Or(first, err)
-						continue
-					}
-					closed++
+	m.openConfirm(i18n.T("live.close_idle_title"), i18n.F("live.btn_close_n", len(list)), lines, func(m *Model) {
+		m.pending = func() tea.Msg {
+			closed := 0
+			var first error
+			for _, t := range tabs {
+				if err := herdr.CloseTab(t); err != nil {
+					first = cmp.Or(first, err)
+					continue
 				}
-				return herdrDoneMsg{msg: i18n.F("live.closed_idle", closed), err: first}
+				closed++
 			}
-		}}
+			return herdrDoneMsg{msg: i18n.F("live.closed_idle", closed), err: first}
+		}
+	}, nil)
 }

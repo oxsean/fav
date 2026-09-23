@@ -5,7 +5,9 @@ package index
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -15,6 +17,7 @@ import (
 
 	"github.com/oxsean/fav/internal/capture"
 	"github.com/oxsean/fav/internal/fav"
+	"github.com/oxsean/fav/internal/fileio"
 	"github.com/oxsean/fav/internal/paths"
 )
 
@@ -77,10 +80,10 @@ type Session struct {
 
 // CodexArchived: the rollout sits in ~/.codex/archived_sessions (archived in Codex or the desktop app).
 func (s *Session) CodexArchived() bool {
-	return s.Provider == fav.ProviderCodex && strings.HasPrefix(s.Path, codexArchivedDir()+string(filepath.Separator))
+	return s.Provider == fav.ProviderCodex && paths.Under(s.Path, capture.CodexArchivedDir())
 }
 
-func (s *Session) Key() string { return s.Provider + ":" + s.SessionID }
+func (s *Session) Key() string { return fav.SessionKey(s.Provider, s.SessionID) }
 
 func (s *Session) DisplayTitle() string {
 	if s.Title != "" {
@@ -97,15 +100,12 @@ func (s *Session) Rec() *fav.Rec {
 	started := s.StartedAt
 	r := &fav.Rec{
 		Provider: s.Provider, SessionID: s.SessionID, Cwd: s.Cwd, GitBranch: s.Branch,
-		Title: s.DisplayTitle(), Summary: strings.Join(strings.Fields(s.First), " "), Project: filepath.Base(s.Cwd),
+		Title: s.DisplayTitle(), Summary: strings.Join(strings.Fields(s.First), " "), Project: projectOf(s.Cwd),
 		Recap: s.Recap != "", Repo: s.Repo, Files: s.Files,
 		TranscriptPath: s.Path, SessionStartedAt: &started, UpdatedAt: s.LastAt, // Status "": not marked until the user does
 	}
-	switch {
-	case s.Repo != "":
+	if s.Repo != "" {
 		r.Project = filepath.Base(s.Repo)
-	case s.Cwd == "":
-		r.Project = ""
 	}
 	if s.Recap != "" {
 		r.Summary = s.Recap
@@ -123,19 +123,6 @@ const (
 	scanBuf    = 256 * 1024
 	filesCap   = 200 // paths kept per file
 )
-
-// noise is what Claude Code injects into user messages.
-var noise = []string{"<", "This session is being continued", "[Image:", "Base directory for this skill",
-	"Launching skill", "Stop hook feedback", "A session-scoped Stop hook", "[Request interrupted"}
-
-func isNoise(s string) bool {
-	for _, n := range noise {
-		if strings.HasPrefix(s, n) {
-			return true
-		}
-	}
-	return false
-}
 
 type line struct {
 	Type        string    `json:"type"`
@@ -166,36 +153,19 @@ type line struct {
 		Git            struct {
 			RepositoryURL string `json:"repository_url"`
 		} `json:"git"`
-		Content []struct {
-			Text string `json:"text"`
-		} `json:"content"`
+		Content json.RawMessage `json:"content"`
 	} `json:"payload"`
 }
 
 func (l *line) userText() string {
 	var text string
 	switch {
-	case l.Type == "user":
-		if len(l.Message.Content) > 0 && l.Message.Content[0] == '"' {
-			json.Unmarshal(l.Message.Content, &text)
-		} else {
-			var blocks []struct{ Type, Text string }
-			json.Unmarshal(l.Message.Content, &blocks)
-			var parts []string
-			for _, b := range blocks {
-				if b.Type == "text" && strings.TrimSpace(b.Text) != "" {
-					parts = append(parts, b.Text)
-				}
-			}
-			text = strings.Join(parts, " ")
-		}
+	case l.Type == "user" && !l.IsMeta:
+		text = capture.ContentText(l.Message.Content)
 	case l.Type == "response_item" && l.Payload.Type == "message" && l.Payload.Role == "user":
-		for _, c := range l.Payload.Content {
-			text += c.Text + " "
-		}
+		text = capture.ContentText(l.Payload.Content)
 	}
-	text = capture.Unwrap(text)
-	if l.IsMeta || isNoise(text) {
+	if text = capture.Unwrap(text); capture.Injected(text) {
 		return ""
 	}
 	return text
@@ -220,54 +190,25 @@ func interesting(b []byte) bool {
 	return false
 }
 
-// scan reads from f.Size to EOF; a trailing partial line is not counted.
+// scan reads from f.Size to EOF; a trailing partial line is not counted, lines longer than scanBuf are skipped.
 func (f *File) scan() {
-	fh, err := os.Open(f.Path)
-	if err != nil {
-		return
-	}
-	defer fh.Close()
-	if _, err := fh.Seek(f.Size, 0); err != nil {
-		return
-	}
-	br := bufio.NewReaderSize(fh, scanBuf)
-	off := f.Size
-	for {
-		b, err := br.ReadSlice('\n')
-		if err == bufio.ErrBufferFull {
-			// lines longer than the buffer are skipped
-			n := len(b)
-			for err == bufio.ErrBufferFull {
-				b, err = br.ReadSlice('\n')
-				n += len(b)
-			}
-			if err != nil {
-				break
-			}
-			off += int64(n)
-			continue
-		}
-		if err != nil {
-			break
-		}
-		off += int64(len(b))
+	f.Size, _ = fileio.Lines(context.Background(), f.Path, f.Size, scanBuf, func(_ int64, b []byte) bool {
 		if isEdit(b) {
 			f.takeEdits(b)
 		}
 		if isReply(b) {
 			f.Replies++
-			continue
+			return true
 		}
 		if !interesting(b) {
-			continue
+			return true
 		}
 		var l line
-		if json.Unmarshal(b, &l) != nil {
-			continue
+		if json.Unmarshal(b, &l) == nil {
+			f.take(&l)
 		}
-		f.take(&l)
-	}
-	f.Size = off
+		return true
+	})
 }
 
 func (f *File) take(l *line) {
@@ -349,6 +290,7 @@ type Index struct {
 	files map[string]*File
 	dirty []*File // changed by this Refresh; Save writes only these
 	size  int     // bytes of the cache file, stale lines included
+	torn  bool    // the cache has a line it could not read: the next Save rewrites it
 	wt    worktrees
 }
 
@@ -380,28 +322,34 @@ func OpenAt(path string) (*Index, error) {
 			idx.files[f.Path] = &f
 		}
 	}
-	return idx, sc.Err()
+	idx.torn = sc.Err() != nil // ⚠️ a cache: an unreadable tail is rescanned, never fatal
+	return idx, nil
 }
 
 func (idx *Index) Len() int { return len(idx.files) }
 
 // Transcript is the newest file of a session, Skip files included (an SDK-launched agent still has a readable transcript).
 func (idx *Index) Transcript(sessionID string) string {
-	if f := idx.FileByPrefix(sessionID); f != nil {
+	if f, _ := idx.FileByPrefix(sessionID); f != nil {
 		return f.Path
 	}
 	return ""
 }
 
-// FileByPrefix: the newest file whose session id starts with ref, Skip files included.
-func (idx *Index) FileByPrefix(ref string) *File {
+// FileByPrefix: the newest file whose session id starts with ref, Skip and silent files included, and how many
+// sessions match.
+func (idx *Index) FileByPrefix(ref string) (*File, int) {
 	var hit *File
+	ids := map[string]bool{}
 	for _, f := range idx.files {
-		if strings.HasPrefix(f.SessionID, ref) && (hit == nil || f.ModTime.After(hit.ModTime)) {
-			hit = f
+		if strings.HasPrefix(f.SessionID, ref) {
+			ids[fav.SessionKey(f.Provider, f.SessionID)] = true
+			if hit == nil || f.ModTime.After(hit.ModTime) {
+				hit = f
+			}
 		}
 	}
-	return hit
+	return hit, len(ids)
 }
 
 // Paths is every transcript the index knows, one-shot runs included: the full-text store follows this list.
@@ -419,7 +367,7 @@ func (idx *Index) PathsBySession() map[string][]string {
 	canon := map[string]string{}
 	for _, s := range idx.Sessions() {
 		for _, a := range s.Aliases {
-			canon[s.Provider+":"+a] = s.Key()
+			canon[fav.SessionKey(s.Provider, a)] = s.Key()
 		}
 	}
 	out := map[string][]string{}
@@ -427,7 +375,7 @@ func (idx *Index) PathsBySession() map[string][]string {
 		if f.SessionID == "" {
 			continue
 		}
-		k := f.Provider + ":" + f.SessionID
+		k := fav.SessionKey(f.Provider, f.SessionID)
 		if c, ok := canon[k]; ok {
 			k = c
 		}
@@ -445,7 +393,7 @@ func (idx *Index) AgentSessions() []*Session {
 		if !f.Skip && !AgentScratch(f.Cwd) || f.SessionID == "" {
 			continue
 		}
-		s := byKey[f.Provider+":"+f.SessionID]
+		s := byKey[fav.SessionKey(f.Provider, f.SessionID)]
 		if s == nil {
 			s = &Session{Provider: f.Provider, SessionID: f.SessionID, Path: f.Path, Cwd: f.Cwd, Branch: f.Branch,
 				StartedAt: f.StartedAt, First: f.First}
@@ -471,11 +419,8 @@ func (idx *Index) AgentSessions() []*Session {
 // Rec is a bare record for a file outside Sessions() (Skip): enough to preview and resume it.
 func (f *File) Rec() *fav.Rec {
 	r := &fav.Rec{Provider: f.Provider, SessionID: f.SessionID, Cwd: f.Cwd, GitBranch: f.Branch, Title: f.Title,
-		Summary: strings.Join(strings.Fields(f.First), " "), Project: filepath.Base(f.Cwd), TranscriptPath: f.Path,
+		Summary: strings.Join(strings.Fields(f.First), " "), Project: projectOf(f.Cwd), TranscriptPath: f.Path,
 		SessionStartedAt: &f.StartedAt, UpdatedAt: f.ModTime}
-	if f.Cwd == "" {
-		r.Project = ""
-	}
 	if r.Title == "" {
 		r.Title = r.Summary
 	}
@@ -486,7 +431,7 @@ func (idx *Index) Refresh() (*Index, bool) { return idx.Rescan(nil) }
 
 // Rescan is Refresh, but force files skip the incremental path and start over: they were rewritten in place (cwd changed by a move), size and mtime lie.
 func (idx *Index) Rescan(force map[string]bool) (*Index, bool) {
-	next := &Index{path: idx.path, files: make(map[string]*File, len(idx.files)), size: idx.size, wt: idx.wt}
+	next := &Index{path: idx.path, files: make(map[string]*File, len(idx.files)), size: idx.size, torn: idx.torn, wt: idx.wt}
 	seen := 0
 	threads := codexThreadNames()
 	for _, c := range candidates() {
@@ -542,7 +487,7 @@ func (idx *Index) Save() error {
 	for _, f := range idx.files {
 		live += f.line
 	}
-	if idx.size+buf.Len() > 2*live+64<<10 {
+	if idx.torn || idx.size+buf.Len() > 2*live+64<<10 {
 		return idx.rewrite()
 	}
 	fh, err := os.OpenFile(idx.path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
@@ -559,35 +504,26 @@ func (idx *Index) Save() error {
 }
 
 func (idx *Index) rewrite() error {
-	tmp := idx.path + ".tmp"
-	fh, err := os.Create(tmp)
+	size := 0
+	err := fileio.WriteAtomic(idx.path, 0o644, func(w io.Writer) error {
+		var line bytes.Buffer
+		for _, f := range idx.files {
+			line.Reset()
+			if err := json.NewEncoder(&line).Encode(f); err != nil {
+				return err
+			}
+			if _, err := w.Write(line.Bytes()); err != nil {
+				return err
+			}
+			f.line = line.Len()
+			size += line.Len()
+		}
+		return nil
+	})
 	if err != nil {
 		return err
 	}
-	w := bufio.NewWriter(fh)
-	var line bytes.Buffer
-	size := 0
-	for _, f := range idx.files {
-		line.Reset()
-		if err := json.NewEncoder(&line).Encode(f); err != nil {
-			fh.Close()
-			return err
-		}
-		w.Write(line.Bytes())
-		f.line = line.Len()
-		size += line.Len()
-	}
-	if err := w.Flush(); err != nil {
-		fh.Close()
-		return err
-	}
-	if err := fh.Close(); err != nil {
-		return err
-	}
-	if err := os.Rename(tmp, idx.path); err != nil {
-		return err
-	}
-	idx.size, idx.dirty = size, nil
+	idx.size, idx.dirty, idx.torn = size, nil, false
 	return nil
 }
 
@@ -629,7 +565,7 @@ func (idx *Index) Sessions() []*Session {
 		if f.Provider == fav.ProviderClaude {
 			id = newest(id)
 		}
-		k := f.Provider + ":" + id
+		k := fav.SessionKey(f.Provider, id)
 		s := byKey[k]
 		if s == nil {
 			s = &Session{Provider: f.Provider, SessionID: id, Path: f.Path, Cwd: f.Cwd,
@@ -686,32 +622,14 @@ type candidate struct{ path, provider, sessionID string }
 
 func candidates() []candidate {
 	var out []candidate
-	hits, _ := filepath.Glob(filepath.Join(capture.ClaudeHome(), "projects", "*", "*.jsonl"))
-	for _, p := range hits {
+	for _, p := range capture.ClaudeTranscripts("") {
 		out = append(out, candidate{p, fav.ProviderClaude, strings.TrimSuffix(filepath.Base(p), ".jsonl")})
 	}
-	// Codex only nests YYYY/MM/DD
-	root := codexSessionsDir()
-	years, _ := os.ReadDir(root)
-	for _, y := range years {
-		if !y.IsDir() || len(y.Name()) != 4 {
-			continue
-		}
-		hits, _ := filepath.Glob(filepath.Join(root, y.Name(), "[0-9][0-9]", "[0-9][0-9]", "rollout-*.jsonl"))
-		for _, p := range hits {
-			out = append(out, candidate{p, fav.ProviderCodex, ""})
-		}
-	}
-	hits, _ = filepath.Glob(filepath.Join(codexArchivedDir(), "rollout-*.jsonl")) // flat: archiving moves the file here
-	for _, p := range hits {
+	for _, p := range capture.CodexRollouts("") {
 		out = append(out, candidate{p, fav.ProviderCodex, ""})
 	}
 	return out
 }
-
-func codexSessionsDir() string { return filepath.Join(capture.CodexHome(), "sessions") }
-
-func codexArchivedDir() string { return filepath.Join(capture.CodexHome(), "archived_sessions") }
 
 // session_index.jsonl: {"id":…,"thread_name":…}
 func codexThreadNames() map[string]string {
@@ -738,7 +656,7 @@ func codexThreadNames() map[string]string {
 func (idx *Index) Attach(store *fav.Store, prev []*fav.Rec) []*fav.Rec {
 	keep := make(map[string]*fav.Rec, len(prev))
 	for _, r := range prev {
-		keep[r.Provider+":"+r.SessionID] = r
+		keep[r.Key()] = r
 	}
 	var out []*fav.Rec
 	desktop := capture.ClaudeDesktopIDs()
@@ -790,23 +708,19 @@ func SessionFiles(provider, sessionID string) []string {
 	if sessionID == "" {
 		return nil
 	}
-	var out []string
-	add := func(pattern string) {
-		hits, _ := filepath.Glob(pattern)
-		out = append(out, hits...)
-	}
 	switch provider {
 	case fav.ProviderClaude:
-		h := capture.ClaudeHome()
-		add(filepath.Join(h, "projects", "*", sessionID+".jsonl"))
-		add(filepath.Join(h, "projects", "*", sessionID))
-		add(filepath.Join(h, "todos", sessionID+"*"))
-		add(filepath.Join(h, "file-history", sessionID))
+		out, h := capture.ClaudeTranscripts(sessionID), capture.ClaudeHome()
+		for _, pattern := range []string{filepath.Join(h, "projects", "*", sessionID), filepath.Join(h, "todos", sessionID+"*"),
+			filepath.Join(h, "file-history", sessionID)} {
+			hits, _ := filepath.Glob(pattern)
+			out = append(out, hits...)
+		}
+		return out
 	case fav.ProviderCodex:
-		add(filepath.Join(codexSessionsDir(), "*", "[0-9][0-9]", "[0-9][0-9]", "rollout-*-"+sessionID+".jsonl"))
-		add(filepath.Join(codexArchivedDir(), "rollout-*-"+sessionID+".jsonl"))
+		return capture.CodexRollouts(sessionID)
 	}
-	return out
+	return nil
 }
 
 // AgentScratch: cwd is a tool's scratch directory — inside a temp directory (paths.InTemp) under a path element named

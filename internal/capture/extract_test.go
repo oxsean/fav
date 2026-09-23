@@ -89,7 +89,7 @@ func TestExtractCodexApplyPatch(t *testing.T) {
 		t.Fatalf("an apply_patch is indexed by the files it touches:\n got %q\nwant %q", texts, want)
 	}
 
-	msgs := RecentMessages(path, 10)
+	msgs := recentMessages(path, 10)
 	if len(msgs) != 1 || len(msgs[0].Steps) != 2 || msgs[0].Steps[0].Tool != "apply_patch" || !strings.HasPrefix(msgs[0].Steps[0].Text, "/src/page.go /src/cursor.go\n") {
 		t.Fatalf("the right pane shows the patch step: %+v", msgs)
 	}

@@ -10,7 +10,6 @@ import (
 	"github.com/oxsean/fav/internal/capture"
 	"github.com/oxsean/fav/internal/fav"
 	"github.com/oxsean/fav/internal/i18n"
-	"github.com/oxsean/fav/internal/render"
 )
 
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -93,7 +92,7 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if msg.resumed {
 			if err := capture.MarkResumed(m.store, msg.rec); err != nil {
-				m.flash(i18n.T("flash.count_not_saved") + err.Error())
+				m.flash(i18n.F("flash.count_not_saved", err))
 			}
 		}
 		m.refresh()
@@ -139,7 +138,7 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			break
 		}
 		if err := capture.MarkResumed(m.store, msg.rec); err != nil {
-			m.flash(i18n.T("flash.count_not_saved") + err.Error())
+			m.flash(i18n.F("flash.count_not_saved", err))
 			break
 		}
 		m.refresh()
@@ -174,7 +173,9 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.notice = ""
 			}
 		}
-		cmd = tea.Tick(indexEvery, func(time.Time) tea.Msg { return indexTickMsg{} })
+		if !msg.once {
+			cmd = tea.Tick(indexEvery, func(time.Time) tea.Msg { return indexTickMsg{} })
+		}
 		if msg.changed && msg.gen == m.idxGen {
 			cmd = tea.Batch(cmd, m.syncText(msg.idx))
 		}
@@ -219,7 +220,7 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if m.heldIdx != nil && time.Since(m.lastWheel) > time.Second {
 		tracef("index apply")
 		m.applyIndex(m.heldIdx)
-		m.heldIdx = nil
+		m.heldIdx, m.forced = nil, nil
 	}
 	m.applyFresh()
 	// nearing the loaded end (under 10 left or the pane not full): fetch an older page
@@ -227,7 +228,7 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if p := m.probes[r]; p != nil && p.done && !p.full && !p.loading &&
 			(m.chatScroll+m.chatShown >= len(p.msgs)-10 || !m.chatFills(m.chatScroll, m.chatSkip)) {
 			tracef("older %s %s", r.SessionID, m.traceChat())
-			cmd = tea.Batch(cmd, m.ensureOlder(r))
+			cmd = tea.Batch(cmd, m.load(r, olderMsgs))
 		}
 	}
 	if m.pending != nil {
@@ -417,25 +418,25 @@ func (m *Model) navKey(msg tea.KeyPressMsg) tea.Cmd {
 		if m.pane == paneChat {
 			m.moveChat(5)
 		} else {
-			m.page(1)
+			m.page(1, 1)
 		}
 	case actPageUp:
 		if m.pane == paneChat {
 			m.moveChat(-5)
 		} else {
-			m.page(-1)
+			m.page(-1, 1)
 		}
 	case actHalfDown:
 		if m.pane == paneChat {
 			m.moveChat(3)
 		} else {
-			m.halfPage(1)
+			m.page(1, 2)
 		}
 	case actHalfUp:
 		if m.pane == paneChat {
 			m.moveChat(-3)
 		} else {
-			m.halfPage(-1)
+			m.page(-1, 2)
 		}
 	case actNextView:
 		// switching views keeps the query
@@ -451,11 +452,11 @@ func (m *Model) navKey(msg tea.KeyPressMsg) tea.Cmd {
 			m.chipFocus = 0
 		}
 	case actFavorite:
-		m.toggleFavorite()
+		m.toggleFavorite(m.current())
 	case actHandled:
-		m.handleAttn(false)
+		m.handleAttn(m.current(), false)
 	case actSnooze:
-		m.handleAttn(true)
+		m.handleAttn(m.current(), true)
 	case actSpace: // switches to a session already in a Herdr tab; anything that would start a process goes through the dialog
 		if m.pane == paneChat && m.current() != nil {
 			m.moveChat(5)
@@ -503,7 +504,7 @@ func (m *Model) navKey(msg tea.KeyPressMsg) tea.Cmd {
 		}
 		m.askResume()
 	case actCloseTab:
-		m.closeLive()
+		m.closeLive(m.current())
 	case actCloseIdle:
 		if m.view == viewLive {
 			m.closeIdle()
@@ -515,7 +516,7 @@ func (m *Model) navKey(msg tea.KeyPressMsg) tea.Cmd {
 	case actProjects:
 		m.pickProjects()
 	case actNew:
-		m.askStart()
+		m.askStart(m.current())
 	case actProvider:
 		m.cycleProvider()
 	case actPeek:
@@ -523,9 +524,9 @@ func (m *Model) navKey(msg tea.KeyPressMsg) tea.Cmd {
 	case actStatus:
 		m.pickStatus()
 	case actDelete:
-		m.askDelete()
+		m.askDelete(m.current())
 	case actMove:
-		m.askMove()
+		m.askMove(m.current())
 	case actDate:
 		m.pickDate()
 	case actSort:
@@ -543,29 +544,22 @@ func (m *Model) navKey(msg tea.KeyPressMsg) tea.Cmd {
 		}
 		m.refresh()
 	case actArchive:
-		m.toggleArchive()
+		m.toggleArchive(m.current())
 	case actDone:
-		m.toggleStatus(fav.StatusDone)
+		m.toggleStatus(m.current(), fav.StatusDone)
 	case actEdit:
-		return m.openEdit()
+		return m.openEdit(m.current())
 	case actHelp:
-		m.ov = overlay{kind: ovHelp}
+		m.ov = overlay{kind: ovHelp, focus: -1}
 	case actSettings:
 		m.openSettings()
 	}
 	return nil
 }
 
-func (m *Model) page(dir int) {
-	step := max(1, m.listHeight()/max(1, cardRows+1))
-	for range step {
-		m.move(dir)
-	}
-}
-
-func (m *Model) halfPage(dir int) {
-	step := max(1, m.listHeight()/max(1, cardRows+1)/2)
-	for range step {
+// page moves the list cursor a screen of cards (div 2: half a screen).
+func (m *Model) page(dir, div int) {
+	for range max(1, m.listHeight()/(cardRows+1)/div) {
 		m.move(dir)
 	}
 }
@@ -573,26 +567,15 @@ func (m *Model) halfPage(dir int) {
 func (m *Model) overlayKey(msg tea.KeyPressMsg) tea.Cmd {
 	switch m.ov.kind {
 	case ovHelp:
-		room := max(1, m.h-4-7)
-		switch msg.String() {
-		case "j", "down", "ctrl+n":
-			m.ov.cursor++
-		case "k", "up", "ctrl+p":
-			m.ov.cursor--
-		case "pgdown", "ctrl+f", "space", "ctrl+d":
-			m.ov.cursor += room
-		case "pgup", "ctrl+b", "b", "ctrl+u":
-			m.ov.cursor -= room
-		case "g", "home":
-			m.ov.cursor = 0
-		case "G", "end":
-			m.ov.cursor = 1 << 30
-		case "tab", "right", "l":
+		switch a := keyAct(inReader, msg.String()); a {
+		case actTabNext:
 			m.turnHelpPage(1)
-		case "shift+tab", "left", "h":
+		case actTabPrev:
 			m.turnHelpPage(-1)
 		default:
-			m.closeOverlay()
+			if !m.scrollKey(a) {
+				m.closeOverlay()
+			}
 		}
 		return nil
 	case ovSettings:
@@ -609,32 +592,17 @@ func (m *Model) overlayKey(msg tea.KeyPressMsg) tea.Cmd {
 	case ovPeek:
 		return m.peekKey(msg)
 	case ovMessage:
-		room := max(1, m.h-4-6)
-		switch msg.String() {
-		case "esc", "q", "enter":
+		switch a := keyAct(inReader, msg.String()); a {
+		case actClose:
 			m.closeOverlay()
-		case "j", "down", "ctrl+n":
-			m.ov.cursor++
-		case "k", "up", "ctrl+p":
-			m.ov.cursor--
-		case "pgdown", "ctrl+f", "space":
-			m.ov.cursor += room
-		case "pgup", "ctrl+b", "b":
-			m.ov.cursor -= room
-		case "ctrl+d":
-			m.ov.cursor += room / 2
-		case "ctrl+u":
-			m.ov.cursor -= room / 2
-		case "g", "home":
-			m.ov.cursor = 0
-		case "G", "end":
-			m.ov.cursor = len(m.ov.lines)
-		case "left", "h", "K", "ctrl+k":
+		case actTabPrev:
 			return m.stepMessage(-1)
-		case "right", "l", "J", "ctrl+j":
+		case actTabNext:
 			return m.stepMessage(1)
-		case "y", "ctrl+y":
+		case actCopy:
 			m.copyMessage()
+		default:
+			m.scrollKey(a)
 		}
 		return nil
 	case ovResume:
@@ -658,46 +626,12 @@ func (m *Model) overlayKey(msg tea.KeyPressMsg) tea.Cmd {
 			return nil
 		}
 		switch a {
-		case actEnter:
-			if m.pressFocused() {
-				return nil
-			}
-			if d, t := m.broken(m.ov.rec); d || t {
-				if d {
-					m.askMove()
-				} else {
-					m.askDelete()
-				}
-				return nil
-			}
-			if m.ov.app {
-				m.doApp()
-				return nil
-			}
-			m.doResume(false)
 		case actResume:
 			m.doResume(false)
-		case actFocusPrev:
-			m.moveFocus(-1)
-		case actFocusNext:
-			m.moveFocus(1)
-		case actMove:
-			m.askMove()
-		case actDelete:
-			m.askDelete()
-		case actFavorite:
-			m.closeOverlay()
-			m.toggleFavorite()
-		case actDone:
-			m.closeOverlay()
-			m.toggleStatus(fav.StatusDone)
-		case actArchive:
-			m.closeOverlay()
-			m.toggleArchive()
+		case actMove, actDelete, actFavorite, actDone, actArchive, actEdit:
+			m.recordAction(a)
 		case actCopy:
 			m.copyResume()
-		case actEdit:
-			m.pending = m.openEdit()
 		case actTitle:
 			m.editTitle()
 		case actNew:
@@ -708,8 +642,8 @@ func (m *Model) overlayKey(msg tea.KeyPressMsg) tea.Cmd {
 			}
 		case actHandled, actSnooze, actCloseTab:
 			m.agentAction(a)
-		case actClose:
-			m.closeOverlay()
+		default:
+			m.dialogKey(a, m.resumeEnter)
 		}
 		return nil
 	}
@@ -784,14 +718,14 @@ func (m *Model) filterChanged() {
 
 // paste: a paste arrives as its own message and only ever types into the focused input (unfocused inputs ignore it).
 func (m *Model) paste(msg tea.PasteMsg) tea.Cmd {
-	var c1, c2, c3 tea.Cmd
+	var c1, c2, c3, c4 tea.Cmd
 	switch {
 	case m.ov.active():
 		m.ov.edit, c1 = m.ov.edit.Update(msg)
 		m.ov.edit2, c2 = m.ov.edit2.Update(msg)
 		m.ov.area, c3 = m.ov.area.Update(msg)
 		if m.ov.filter.Focused() {
-			m.ov.filter, c1 = m.ov.filter.Update(msg)
+			m.ov.filter, c4 = m.ov.filter.Update(msg)
 			m.filterChanged()
 		}
 	case m.chat.typing:
@@ -801,7 +735,7 @@ func (m *Model) paste(msg tea.PasteMsg) tea.Cmd {
 		m.search, c1 = m.search.Update(msg)
 		m.refresh()
 	}
-	return tea.Batch(c1, c2, c3)
+	return tea.Batch(c1, c2, c3, c4)
 }
 
 type wheelTickMsg struct{}
@@ -953,6 +887,21 @@ func (m *Model) chatFills(scroll, skip int) bool {
 
 func (m *Model) askResume() { m.openResume(m.current()) }
 
+// resumeEnter: a broken session goes to move / delete, else resume (in the desktop app when that leads).
+func (m *Model) resumeEnter() {
+	r := m.ovRec()
+	switch d, t := m.broken(r); {
+	case d:
+		m.askMove(r)
+	case t:
+		m.askDelete(r)
+	case m.ov.app:
+		m.doApp()
+	default:
+		m.doResume(false)
+	}
+}
+
 func (m *Model) openResume(r *fav.Rec) {
 	if r == nil {
 		return
@@ -971,20 +920,7 @@ func (m *Model) openResume(r *fav.Rec) {
 	}
 }
 
-func (m *Model) visibleRecs() []*fav.Rec {
-	// candidates come from the whole scope, not the keyword-filtered list
-	q := m.query()
-	q.Tags, q.Words, q.Project, q.Provider = nil, nil, "", ""
-	recs := m.store.Query(q)
-	if q.All {
-		for _, r := range m.unfav {
-			if q.Match(r) {
-				recs = append(recs, r)
-			}
-		}
-	}
-	return recs
-}
+func (m *Model) visibleRecs() []*fav.Rec { return m.list(m.query().Scope()) }
 
 func (m *Model) pickTags() {
 	q := fav.Parse(m.search.Value())
@@ -994,7 +930,7 @@ func (m *Model) pickTags() {
 			for i, c := range chosen {
 				toks[i] = "#" + c
 			}
-			m.setQuery(toks, func(t string) bool { return strings.HasPrefix(t, "#") })
+			m.setQuery(toks, fav.HasPrefix("#"))
 		})
 }
 
@@ -1007,13 +943,13 @@ func (m *Model) pickProjects() {
 			if len(chosen) > 0 && chosen[0] != "" {
 				toks = []string{"project:" + chosen[0]}
 			}
-			m.setQuery(toks, hasPrefix("project:"))
+			m.setQuery(toks, fav.HasPrefix("project:"))
 		})
 }
 
 func (m *Model) saveConfig() {
 	if err := m.cfg.Save(); err != nil {
-		m.flash(i18n.T("flash.settings_not_saved") + err.Error())
+		m.flash(i18n.F("flash.settings_not_saved", err))
 	}
 }
 
@@ -1028,7 +964,7 @@ func (m *Model) cycleProvider() {
 	if next != "" {
 		toks = []string{"provider:" + next}
 	}
-	m.setQuery(toks, hasPrefix("provider:"))
+	m.setQuery(toks, fav.HasPrefix("provider:"))
 	m.refresh()
 }
 
@@ -1036,7 +972,7 @@ func (m *Model) pickDate() {
 	q := fav.Parse(m.search.Value())
 	var cur []string
 	for t := range strings.FieldsSeq(m.search.Value()) {
-		if hasPrefix("last:", "after:", "before:")(t) {
+		if fav.HasPrefix("last:", "after:", "before:")(t) {
 			cur = append(cur, t)
 		}
 	}
@@ -1047,7 +983,7 @@ func (m *Model) pickDate() {
 		known = known || it.name == current
 	}
 	if !known && current != "" {
-		items = append([]item{{name: current, label: i18n.T("picker.current") + timeLabel(q)}}, items...)
+		items = append([]item{{name: current, label: i18n.F("picker.current", timeLabel(q))}}, items...)
 	}
 	m.openPicker(i18n.T("picker.time_title"), i18n.T("picker.time_hint"), items, false, []string{current},
 		func(m *Model, chosen []string) {
@@ -1055,7 +991,7 @@ func (m *Model) pickDate() {
 			if len(chosen) > 0 {
 				toks = strings.Fields(chosen[0])
 			}
-			m.setQuery(toks, hasPrefix("last:", "after:", "before:"))
+			m.setQuery(toks, fav.HasPrefix("last:", "after:", "before:"))
 		})
 	m.ov.parse = func(s string) (item, bool) { return dateItem(s, time.Now()) }
 	m.ov.filter.Placeholder = i18n.T("picker.time_placeholder")
@@ -1123,78 +1059,14 @@ func dateItem(s string, now time.Time) (item, bool) {
 		return item{name: strings.Join(toks, " "), label: label}, true
 	}
 	if t, ok := fav.ParseDay(s, now); ok {
-		return item{name: "last:" + t.Format("2006-01-02"), label: i18n.T("date.active_from") + t.Format("01-02")}, true
+		return item{name: "last:" + t.Format("2006-01-02"), label: i18n.F("date.active_from", t.Format("01-02"))}, true
 	}
 	if _, ok := fav.ParseWhen(s, now); ok && !strings.Contains(s, "-") {
-		return item{name: "last:" + s, label: i18n.T("date.last") + s}, true
+		return item{name: "last:" + s, label: i18n.F("date.last", s)}, true
 	}
 	return item{}, false
 }
 
 func (m *Model) setQuery(add []string, sameKind func(string) bool) {
-	var kept []string
-	for t := range strings.FieldsSeq(m.search.Value()) {
-		if !sameKind(t) {
-			kept = append(kept, t)
-		}
-	}
-	m.search.SetValue(strings.TrimSpace(strings.Join(append(kept, add...), " ")))
-}
-
-func hasPrefix(prefixes ...string) func(string) bool {
-	return func(t string) bool {
-		low := strings.ToLower(t)
-		for _, p := range prefixes {
-			if strings.HasPrefix(low, p) {
-				return true
-			}
-		}
-		return false
-	}
-}
-
-// toggleArchive: archive ⇄ unarchive, board status untouched.
-func (m *Model) toggleArchive() {
-	r := m.current()
-	if r == nil {
-		return
-	}
-	ok := m.edit(func(r *fav.Rec) {
-		if r.Archived() {
-			r.ArchivedAt = nil
-			return
-		}
-		now := time.Now()
-		r.ArchivedAt = &now
-	})
-	if !ok {
-		return
-	}
-	if r.Archived() {
-		m.flash(i18n.F("flash.archived", r.Title))
-	} else {
-		m.flash(i18n.T("flash.unarchived") + r.Title)
-	}
-}
-
-func (m *Model) toggleStatus(target string) {
-	r := m.current()
-	if r == nil {
-		return
-	}
-	ok := m.edit(func(r *fav.Rec) {
-		if r.Status == target {
-			r.Status = fav.StatusDoing
-			return
-		}
-		r.Status = target
-	})
-	if !ok {
-		return
-	}
-	if r.Status == target {
-		m.flash(i18n.F("flash.status_set", render.StatusLabel(target), r.Title))
-	} else {
-		m.flash(i18n.T("flash.back_to_doing") + r.Title)
-	}
+	m.search.SetValue(fav.ReplaceTokens(m.search.Value(), add, sameKind))
 }

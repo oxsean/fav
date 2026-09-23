@@ -13,6 +13,7 @@ import (
 	"github.com/oxsean/fav/internal/i18n"
 	"github.com/oxsean/fav/internal/paths"
 	"github.com/oxsean/fav/internal/render"
+	"github.com/oxsean/fav/internal/shell"
 )
 
 // ovRec is the dialog's record, re-read from the store (ov.rec is stale after a store reload).
@@ -39,7 +40,7 @@ func (m *Model) doFork() {
 // startPlan opens a new session (fork, handoff): a new Herdr tab, or this terminal once the TUI quits.
 func (m *Model) startPlan(r *fav.Rec, p capture.Plan, _ bool) {
 	if c := p.Blocking(); c != nil {
-		m.flash(i18n.T("start.failed") + c.Text)
+		m.flash(i18n.F("start.failed", c.Text))
 		return
 	}
 	if p.Ws == nil && len(p.WsChoices) > 1 {
@@ -103,32 +104,15 @@ func (m *Model) loadHandoff() {
 func handoffProviders(r *fav.Rec) []string {
 	var out []string
 	for _, p := range []string{r.Provider, fav.ProviderClaude, fav.ProviderCodex} {
-		if capture.Installed(p) && !contains(out, p) {
+		if capture.Installed(p) && !slices.Contains(out, p) {
 			out = append(out, p)
 		}
 	}
 	return out
 }
 
-func contains(ss []string, s string) bool {
-	return slices.Contains(ss, s)
-}
-
 func (m *Model) startHandoff(provider string) {
-	r := m.ov.rec
-	if !capture.Installed(provider) {
-		m.flash(providerLabel(provider) + i18n.T("resume.check.not_installed"))
-		return
-	}
-	p := m.ov.plan
-	if len(m.ov.providers) == 0 || provider != m.ov.providers[0] {
-		var err error
-		if p, err = capture.PlanStart(r, provider, capture.HandoffPrompt(m.ov.title), false); err != nil {
-			m.flash(err.Error())
-			return
-		}
-	}
-	m.startPlan(r, p, false)
+	m.startWith(provider, capture.HandoffPrompt(m.ov.title))
 }
 
 func (m *Model) copyHandoff() {
@@ -146,15 +130,11 @@ func (m *Model) copyHandoff() {
 // editHandoff opens the pack in $VISUAL / $EDITOR (the TUI waits), else in VS Code (it does not).
 func (m *Model) editHandoff() tea.Cmd {
 	path := m.ov.title
-	ed := os.Getenv("VISUAL")
-	if ed == "" {
-		ed = os.Getenv("EDITOR")
-	}
-	if parts := strings.Fields(ed); len(parts) > 0 {
+	if parts := shell.Editor(); len(parts) > 0 {
 		c := exec.Command(parts[0], append(parts[1:], path)...)
 		return tea.ExecProcess(c, func(err error) tea.Msg { return handoffEditedMsg{err} })
 	}
-	if lookPath("code") != "" && exec.Command("code", path).Start() == nil {
+	if exec.Command("code", path).Start() == nil {
 		m.flash(i18n.T("handoff.opened_code"))
 		return nil
 	}
@@ -165,7 +145,7 @@ func (m *Model) editHandoff() tea.Cmd {
 func (m *Model) handoffGroups() []btnGroup {
 	var start []btn
 	for i, p := range m.ov.providers {
-		start = append(start, btn{keyed(keyOf(inHandoff, providerAct(p)), providerLabel(p)), i == 0, func(mm *Model) { mm.startHandoff(p) }})
+		start = append(start, btn{keyed(keyOf(inHandoff, providerAct(p)), fav.ProviderLabel(p)), i == 0, func(mm *Model) { mm.startHandoff(p) }})
 	}
 	return []btnGroup{
 		{label: i18n.T("handoff.group.start"), bs: start},
@@ -194,10 +174,7 @@ func (m *Model) renderHandoff() string {
 			text = append(text, wl)
 		}
 	}
-	room := max(3, m.h-18)
-	m.ov.scrollMax = max(0, len(text)-room)
-	m.ov.cursor = min(max(m.ov.cursor, 0), m.ov.scrollMax)
-	end := min(len(text), m.ov.cursor+room)
+	end := m.scrollWindow(len(text), max(3, m.h-18))
 	body = append(body, text[m.ov.cursor:end]...)
 	if rest := len(text) - end; rest > 0 {
 		body = append(body, dimmed.Render(i18n.F("handoff.more", rest)))
@@ -217,35 +194,21 @@ func (m *Model) renderHandoff() string {
 }
 
 func (m *Model) handoffKey(msg tea.KeyPressMsg) tea.Cmd {
-	room := max(3, m.h-18)
 	switch a := keyAct(inHandoff, msg.String()); a {
-	case actEnter:
-		if m.pressFocused() {
-			return nil
-		}
-		if len(m.ov.providers) > 0 {
-			m.startHandoff(m.ov.providers[0])
-		}
 	case actClaude, actCodex:
 		m.selectProvider(providerOf(a))
 	case actEdit:
 		return m.editHandoff()
 	case actCopy:
 		m.copyHandoff()
-	case actDown:
-		m.ov.cursor++
-	case actUp:
-		m.ov.cursor--
-	case actPageDown:
-		m.ov.cursor += room
-	case actPageUp:
-		m.ov.cursor -= room
-	case actFocusPrev:
-		m.moveFocus(-1)
-	case actFocusNext:
-		m.moveFocus(1)
-	case actClose:
-		m.closeOverlay()
+	default:
+		if !m.scrollKey(a) {
+			m.dialogKey(a, func() {
+				if len(m.ov.providers) > 0 {
+					m.startHandoff(m.ov.providers[0])
+				}
+			})
+		}
 	}
 	return nil
 }

@@ -114,3 +114,32 @@ func TestHookEventMarksWaitingUntilTheTranscriptMoves(t *testing.T) {
 		t.Fatal("Stop clears it")
 	}
 }
+
+func TestInstallSkillHonoursConfigDirs(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlinks need developer mode")
+	}
+	root := t.TempDir()
+	for _, k := range []string{"FAV_HOME", "CLAUDE_CONFIG_DIR", "CODEX_HOME", "HOME"} {
+		t.Setenv(k, filepath.Join(root, k))
+	}
+	src := filepath.Join(root, "src")
+	os.MkdirAll(src, 0o755)
+	os.WriteFile(filepath.Join(src, "SKILL.md"), []byte("x"), 0o644)
+	stdoutOf(t, func() {
+		if err := run([]string{"install-skill", "--from", src}); err != nil {
+			t.Fatal(err)
+		}
+	})
+	for _, k := range []string{"CLAUDE_CONFIG_DIR", "CODEX_HOME"} {
+		if dst, err := os.Readlink(filepath.Join(root, k, "skills", "fav")); err != nil || dst != src {
+			t.Errorf("%s: %q %v", k, dst, err)
+		}
+	}
+	stdoutOf(t, func() { run([]string{"uninstall-skill"}) })
+	for _, k := range []string{"CLAUDE_CONFIG_DIR", "CODEX_HOME"} {
+		if _, err := os.Lstat(filepath.Join(root, k, "skills", "fav")); err == nil {
+			t.Errorf("%s: uninstall removes the link", k)
+		}
+	}
+}

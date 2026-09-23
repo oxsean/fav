@@ -1,6 +1,7 @@
 package fav
 
 import (
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -24,6 +25,12 @@ type Query struct {
 }
 
 var DefaultTurns = 3
+
+// Scope is q without its tag, project, source and keyword filters: what a picker counts.
+func (q Query) Scope() Query {
+	q.Tags, q.Words, q.Project, q.Provider = nil, nil, "", ""
+	return q
+}
 
 func Parse(s string) Query {
 	q := Query{Status: StatusOpen, Turns: DefaultTurns}
@@ -92,6 +99,7 @@ const (
 	StatusOpen   = "open"
 	StatusTrash  = "trash" // trash rows do not live in the store; the UI reads them from the manifest
 	StatusAgent  = "agent" // one-shot SDK / exec / sub-agent sessions, kept out of every other listing
+	StatusLive   = "live"  // running now: Query.Live decides
 )
 
 func normalizeStatus(v string) string {
@@ -104,8 +112,8 @@ func normalizeStatus(v string) string {
 		return StatusDone
 	case "all", "any", "*":
 		return "all"
-	case "live", "running":
-		return "live"
+	case StatusLive, "running":
+		return StatusLive
 	case StatusActive:
 		return StatusActive
 	case StatusOpen, "unarchived":
@@ -178,7 +186,7 @@ func (q Query) Match(r *Rec) bool {
 	if q.Provider != "" && !strings.EqualFold(r.Provider, q.Provider) {
 		return false
 	}
-	if r.ID == "" && r.Turns < q.Turns && q.Status != "live" && q.Status != StatusAgent {
+	if r.ID == "" && r.Turns < q.Turns && q.Status != StatusLive && q.Status != StatusAgent {
 		return false
 	}
 	if !q.After.IsZero() && r.When().Before(q.After) {
@@ -208,7 +216,7 @@ func (q Query) matchStatus(r *Rec) bool {
 	switch q.Status {
 	case "all":
 		return true
-	case "live":
+	case StatusLive:
 		return q.Live != nil && q.Live(r.SessionID)
 	case "archived":
 		return r.Archived()
@@ -230,6 +238,30 @@ func (q Query) matchStatus(r *Rec) bool {
 	}
 }
 
+// ReplaceTokens drops the tokens of query that same picks out and appends add.
+func ReplaceTokens(query string, add []string, same func(string) bool) string {
+	var kept []string
+	for t := range strings.FieldsSeq(query) {
+		if !same(t) {
+			kept = append(kept, t)
+		}
+	}
+	return strings.TrimSpace(strings.Join(append(kept, add...), " "))
+}
+
+// HasPrefix matches a token starting with one of the lowercase prefixes, in any case.
+func HasPrefix(prefixes ...string) func(string) bool {
+	return func(t string) bool {
+		low := strings.ToLower(t)
+		for _, p := range prefixes {
+			if strings.HasPrefix(low, p) {
+				return true
+			}
+		}
+		return false
+	}
+}
+
 func hasTag(tags []string, want string) bool {
 	for _, t := range tags {
 		if strings.EqualFold(t, want) {
@@ -246,5 +278,33 @@ func (s *Store) Query(q Query) []*Rec {
 			out = append(out, r)
 		}
 	}
+	return out
+}
+
+type Count struct {
+	Name string
+	N    int
+}
+
+// CountBy counts the non-empty keys of recs, most frequent first, then by name.
+func CountBy(recs []*Rec, keys func(*Rec) []string) []Count {
+	counts := map[string]int{}
+	for _, r := range recs {
+		for _, k := range keys(r) {
+			if k != "" {
+				counts[k]++
+			}
+		}
+	}
+	out := make([]Count, 0, len(counts))
+	for k, n := range counts {
+		out = append(out, Count{k, n})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].N != out[j].N {
+			return out[i].N > out[j].N
+		}
+		return out[i].Name < out[j].Name
+	})
 	return out
 }

@@ -104,7 +104,11 @@ func TestExistsAndIsDir(t *testing.T) {
 	if !Exists(f) || IsDir(f) || !IsDir(dir) || Exists(filepath.Join(dir, "nope")) || Exists("") {
 		t.Error("Exists / IsDir")
 	}
-	if !SameFile(f, f) {
+	link := filepath.Join(dir, "link")
+	if err := os.Link(f, link); err != nil {
+		t.Skip(err)
+	}
+	if !SameFile(f, link) || SameFile(f, dir) {
 		t.Error("SameFile")
 	}
 }

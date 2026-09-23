@@ -24,7 +24,7 @@ func cmdResume(args []string) error {
 	if err != nil {
 		return err
 	}
-	s, err := openStore()
+	s, err := fav.Open()
 	if err != nil {
 		return err
 	}
@@ -66,7 +66,7 @@ func openInApp(s *fav.Store, r *fav.Rec) error {
 		return err
 	}
 	if err := capture.MarkResumed(s, r); err != nil {
-		fmt.Fprintf(os.Stderr, i18n.T("cli.resume.count_not_saved"), err)
+		fmt.Fprint(os.Stderr, i18n.F("cli.resume.count_not_saved", err))
 	}
 	fmt.Println(i18n.F("resume.opened_app", capture.AppName(r.Provider)))
 	return nil
@@ -105,14 +105,14 @@ func runPlan(s *fav.Store, r *fav.Rec, plan capture.Plan, dryRun bool, workspace
 
 	if plan.Live.TabID == "" && resume {
 		if err := capture.MarkResumed(s, r); err != nil {
-			fmt.Fprintf(os.Stderr, i18n.T("cli.resume.count_not_saved"), err)
+			fmt.Fprint(os.Stderr, i18n.F("cli.resume.count_not_saved", err))
 		}
 	}
 	if plan.Live.TabID != "" || plan.Ws != nil {
 		msg, warn, err := plan.RunInHerdr(r)
 		if err == nil {
 			if warn != nil {
-				fmt.Fprintf(os.Stderr, i18n.T("cli.resume.warn"), warn)
+				fmt.Fprint(os.Stderr, i18n.F("cli.resume.warn", warn))
 			}
 			if !resume {
 				msg = i18n.F("start.opened_tab", plan.Ws.Label, capture.TabLabel(r))
@@ -120,7 +120,7 @@ func runPlan(s *fav.Store, r *fav.Rec, plan capture.Plan, dryRun bool, workspace
 			fmt.Println(msg)
 			return nil
 		}
-		fmt.Fprintf(os.Stderr, i18n.T("cli.resume.herdr_failed"), err)
+		fmt.Fprint(os.Stderr, i18n.F("cli.resume.herdr_failed", err))
 	}
 	return resumeHere(plan.Spec)
 }
@@ -172,7 +172,7 @@ func cmdHandoff(args []string) error {
 	if err != nil {
 		return err
 	}
-	s, err := openStore()
+	s, err := fav.Open()
 	if err != nil {
 		return err
 	}
@@ -184,7 +184,7 @@ func cmdHandoff(args []string) error {
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(os.Stderr, i18n.T("cli.handoff.written"), path)
+	fmt.Fprint(os.Stderr, i18n.F("cli.handoff.written", path))
 	if *to == "" {
 		b, err := os.ReadFile(path)
 		if err != nil {

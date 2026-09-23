@@ -3,6 +3,7 @@ package capture
 import (
 	"errors"
 	"os/exec"
+	"slices"
 
 	"github.com/oxsean/fav/internal/fav"
 	"github.com/oxsean/fav/internal/i18n"
@@ -10,14 +11,16 @@ import (
 	"github.com/oxsean/fav/internal/shell"
 )
 
-func lookPath(provider string) (string, error) {
-	switch provider {
-	case fav.ProviderClaude:
-		return exec.LookPath("claude")
-	case fav.ProviderCodex:
-		return exec.LookPath("codex")
+func known(provider string) bool {
+	return provider == fav.ProviderClaude || provider == fav.ProviderCodex
+}
+
+func Installed(provider string) bool {
+	if !known(provider) {
+		return false
 	}
-	return "", i18n.E("resume.unknown_provider", provider)
+	_, err := exec.LookPath(provider)
+	return err == nil
 }
 
 // CommandSpec is a structured command. ⚠️ Never hand an unescaped string to a shell.
@@ -38,8 +41,8 @@ func (c CommandSpec) TerminalLine() string { return shell.User().Line(c.Cwd, c.A
 // ShellLine is the line typed into a Herdr pane (herdr pane run goes through a POSIX shell, not argv).
 func (c CommandSpec) ShellLine() string { return shell.POSIX.Line(c.Cwd, c.Argv()) }
 
-// Claude keeps the original session id (no --fork-session).
-func BuildResume(r *fav.Rec) (CommandSpec, error) {
+// buildResume: Claude keeps the original session id (no --fork-session).
+func buildResume(r *fav.Rec) (CommandSpec, error) {
 	if r.SessionID == "" {
 		return CommandSpec{}, errors.New(i18n.T("resume.check.no_session"))
 	}
@@ -70,18 +73,18 @@ const contextNearlyFull = 80
 func Checks(r *fav.Rec) []Check {
 	var out []Check
 
-	if _, err := lookPath(r.Provider); err == nil {
-		out = append(out, Check{OK: true, Text: i18n.T("resume.check.source") + sourceLabel(r)})
+	if Installed(r.Provider) {
+		out = append(out, Check{OK: true, Text: i18n.F("resume.check.source", sourceLabel(r))})
 	} else {
-		out = append(out, Check{Text: providerLabel(r.Provider) + i18n.T("resume.check.not_installed")})
+		out = append(out, Check{Text: i18n.F("resume.check.not_installed", fav.ProviderLabel(r.Provider))})
 	}
-	if c := dirCheck(r.Cwd, r.GitRemote); !c.OK && !c.Warn && r.Repo != "" && r.Repo != r.Cwd {
+	if c := dirCheck(r.Cwd, r.GitRemote); !c.OK && !c.Warn && r.Repo != "" && !paths.Same(r.Repo, r.Cwd) {
 		out = append(out, Check{Text: i18n.F("resume.check.worktree_gone", r.Cwd, r.Repo)})
 	} else {
 		out = append(out, c)
 	}
 
-	if TranscriptAlive(r) {
+	if slices.ContainsFunc(r.Transcripts(), paths.Exists) {
 		out = append(out, Check{OK: true, Text: i18n.T("resume.check.transcript_ok")})
 	} else {
 		out = append(out, Check{Text: i18n.T("resume.check.transcript_gone")})
@@ -105,9 +108,9 @@ func Checks(r *fav.Rec) []Check {
 
 // startChecks: a new session only needs its CLI and the directory.
 func startChecks(provider, cwd string) []Check {
-	c := Check{OK: true, Text: i18n.T("resume.check.cli_ok") + providerLabel(provider)}
+	c := Check{OK: true, Text: i18n.F("resume.check.cli_ok", fav.ProviderLabel(provider))}
 	if !Installed(provider) {
-		c = Check{Text: providerLabel(provider) + i18n.T("resume.check.not_installed")}
+		c = Check{Text: i18n.F("resume.check.not_installed", fav.ProviderLabel(provider))}
 	}
 	return []Check{c, dirCheck(cwd, "")}
 }
@@ -117,32 +120,21 @@ func dirCheck(cwd, remote string) Check {
 	case cwd == "":
 		return Check{Warn: true, Text: i18n.T("resume.check.no_cwd")}
 	case paths.IsDir(cwd):
-		return Check{OK: true, Text: i18n.T("resume.check.dir_ok") + cwd}
+		return Check{OK: true, Text: i18n.F("resume.check.dir_ok", cwd)}
 	}
-	hint := ""
 	if remote != "" {
-		hint = i18n.T("resume.check.remote_hint") + remote
+		return Check{Text: i18n.F("resume.check.dir_gone_remote", cwd, remote)}
 	}
-	return Check{Text: i18n.T("resume.check.dir_gone") + cwd + hint}
+	return Check{Text: i18n.F("resume.check.dir_gone", cwd)}
 }
 
 // sourceLabel names where r was started: the desktop app or the CLI.
 func sourceLabel(r *fav.Rec) string {
 	if !r.App {
-		return providerLabel(r.Provider)
+		return fav.ProviderLabel(r.Provider)
 	}
 	if r.Provider == fav.ProviderCodex {
 		return "Codex App"
 	}
 	return "Claude App"
-}
-
-func providerLabel(p string) string {
-	switch p {
-	case fav.ProviderClaude:
-		return "Claude Code"
-	case fav.ProviderCodex:
-		return "Codex CLI"
-	}
-	return p
 }

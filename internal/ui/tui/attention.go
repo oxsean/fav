@@ -9,6 +9,7 @@ import (
 
 	"github.com/oxsean/fav/internal/capture"
 	"github.com/oxsean/fav/internal/fav"
+	"github.com/oxsean/fav/internal/fileio"
 	"github.com/oxsean/fav/internal/i18n"
 	"github.com/oxsean/fav/internal/render"
 )
@@ -47,13 +48,8 @@ func (m *Model) saveAttn() {
 			keep[id] = e
 		}
 	}
-	b, err := json.Marshal(keep)
-	if err != nil {
-		return
-	}
-	tmp := attnPath() + ".tmp"
-	if os.WriteFile(tmp, b, 0o644) == nil {
-		os.Rename(tmp, attnPath())
+	if b, err := json.Marshal(keep); err == nil {
+		fileio.WriteFile(attnPath(), b, 0o644)
 	}
 }
 
@@ -152,9 +148,7 @@ func (m *Model) markSeen(id string, quiet bool) {
 	m.saveAttn()
 }
 
-// handleAttn: "." marks the session under the cursor handled; H snoozes it for an hour.
-func (m *Model) handleAttn(snooze bool) {
-	r := m.current()
+func (m *Model) handleAttn(r *fav.Rec, snooze bool) {
 	if r == nil {
 		return
 	}

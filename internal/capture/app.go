@@ -1,7 +1,6 @@
 package capture
 
 import (
-	"bufio"
 	"encoding/json"
 	"net/url"
 	"os"
@@ -192,22 +191,8 @@ func StartedInApp(r *fav.Rec) bool {
 	case fav.ProviderClaude:
 		return ClaudeDesktopIDs()[r.SessionID]
 	case fav.ProviderCodex:
-		f, err := os.Open(r.TranscriptPath)
-		if err != nil {
-			return false
-		}
-		defer f.Close()
-		var meta struct {
-			Payload struct {
-				Originator string `json:"originator"`
-			} `json:"payload"`
-		}
-		sc := bufio.NewScanner(f)
-		sc.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
-		if sc.Scan() {
-			json.Unmarshal(sc.Bytes(), &meta)
-		}
-		return CodexFromApp(meta.Payload.Originator)
+		m, err := readSessionMeta(r.TranscriptPath)
+		return err == nil && CodexFromApp(m.Originator)
 	}
 	return false
 }

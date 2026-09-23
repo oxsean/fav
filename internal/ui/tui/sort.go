@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"os"
 	"sort"
 	"time"
 
@@ -13,7 +12,7 @@ import (
 type sortBy int
 
 const (
-	sortActive sortBy = iota // transcript mtime; favorited time when the file is gone
+	sortActive sortBy = iota // Rec.ActiveAt
 	sortStarted
 	sortFavorited
 	sortTurns // most turns first, ties by last activity; the time column and groups still use last activity
@@ -43,21 +42,7 @@ func (s sortBy) at(r *fav.Rec) time.Time {
 		}
 		return r.When()
 	}
-	if !r.LastAt.IsZero() {
-		return r.LastAt
-	}
-	for _, p := range []string{r.PinnedPath, r.TranscriptPath} {
-		if p == "" {
-			continue
-		}
-		if st, err := os.Stat(p); err == nil {
-			return st.ModTime()
-		}
-	}
-	if r.FavoritedAt != nil {
-		return *r.FavoritedAt
-	}
-	return r.When()
+	return r.ActiveAt()
 }
 
 func (s sortBy) sorted(recs []*fav.Rec) ([]*fav.Rec, map[*fav.Rec]time.Time) {

@@ -14,12 +14,11 @@ import (
 	"github.com/oxsean/fav/internal/render"
 )
 
-// askMove (M): on a group header moves the whole project (subdirs included), on a session just that one; live sessions block it.
-func (m *Model) askMove() {
+// askMove: r's session, or with r nil on a group header the whole project (subdirs included); live sessions block it.
+func (m *Model) askMove(r *fav.Rec) {
 	if m.view == viewLive || m.inTrash() {
 		return
 	}
-	r := m.current()
 	old := ""
 	var only *fav.Rec
 	switch {
@@ -84,7 +83,7 @@ func (m *Model) confirmMove(old, dst string, only *fav.Rec) {
 	dst = filepath.Clean(dst)
 	plan, err := m.idx.PlanMove(m.store, m.live, old, dst)
 	if err != nil {
-		m.flash(i18n.T("move.failed") + err.Error())
+		m.flash(i18n.F("move.failed", err))
 		return
 	}
 	if only != nil {
@@ -116,17 +115,15 @@ func (m *Model) confirmMove(old, dst string, only *fav.Rec) {
 		lines = append(lines, i18n.T("move.settings"))
 	}
 	lines = append(lines, "", i18n.T("move.note"), i18n.T("move.restart_hint"), "", i18n.T("move.confirm_hint"))
-	// irreversible: focus starts on Cancel and Enter returns to the picker; y or ← Enter moves
-	m.ov = overlay{kind: ovConfirm, title: i18n.T("move.confirm_title"), lines: lines, focus: 1, okLabel: i18n.T("move.btn_move"),
-		confirm: func(m *Model) { m.doMove(plan) },
-		back:    func(m *Model) { m.pickMoveTarget(old, dst+string(filepath.Separator), only) }}
+	m.openConfirm(i18n.T("move.confirm_title"), i18n.T("move.btn_move"), lines, func(m *Model) { m.doMove(plan) },
+		func(m *Model) { m.pickMoveTarget(old, dst+string(filepath.Separator), only) })
 }
 
 func (m *Model) doMove(plan *index.MovePlan) {
 	// a session may have started while the dialog was open: replan with the latest live set
 	fresh, err := plan.Replan(m.idx, m.store, capture.MergeLive(m.live, capture.LiveSessions()))
 	if err != nil {
-		m.flash(i18n.T("move.failed") + err.Error())
+		m.flash(i18n.F("move.failed", err))
 		return
 	}
 	if len(fresh.Live) > 0 {
@@ -135,7 +132,7 @@ func (m *Model) doMove(plan *index.MovePlan) {
 	}
 	rep, err := fresh.Apply(m.store)
 	if err != nil {
-		m.flash(i18n.T("move.failed") + err.Error())
+		m.flash(i18n.F("move.failed", err))
 	}
 	m.rescan(rep.Touched)
 	if err == nil {
@@ -143,10 +140,17 @@ func (m *Model) doMove(plan *index.MovePlan) {
 	}
 }
 
-// rescan: files moved or rewritten in place, so the index catches up now (force files from scratch); refreshes started before the move are stale.
+// rescan updates the index now after files were moved, trashed, restored or rewritten (force: read from scratch).
 func (m *Model) rescan(force map[string]bool) {
-	next, _ := m.idx.Rescan(force)
-	next.Save()
+	next, err := m.idx.RescanSave(force)
+	m.adopt(next)
+	if err != nil {
+		m.flash(i18n.F("flash.index_not_written", err))
+	}
+}
+
+// adopt takes an index rescanned on the main loop; refreshes started before it are stale.
+func (m *Model) adopt(next *index.Index) {
 	m.probes, m.probeWant = nil, nil
 	m.heldIdx, m.idxGen = nil, m.idxGen+1
 	m.applyIndex(next)
@@ -186,13 +190,7 @@ func (m *Model) pickDir() {
 	if len(vis) == 0 || vis[0].count != -1 {
 		return
 	}
-	dst := vis[0].name
-	apply := m.ov.apply
-	m.closeOverlay()
-	if apply != nil {
-		apply(m, []string{dst})
-	}
-	m.refresh()
+	m.finishPicker([]string{vis[0].name})
 }
 
 // listDirs: a directory lists its children (itself first); otherwise the parent filtered by the typed prefix.

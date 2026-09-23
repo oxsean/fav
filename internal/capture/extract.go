@@ -1,14 +1,12 @@
 package capture
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
-	"io"
-	"os"
 	"strings"
+
+	"github.com/oxsean/fav/internal/fileio"
 )
 
 // Entry is one searchable piece of a transcript: a message ('u' / 'a', 's' for Claude's context recap), a tool call's input
@@ -32,47 +30,13 @@ const (
 // It never holds more than one line in memory; when ctx ends it stops early, the offsets saying how far it got.
 // outLines is how many lines of each tool output to emit (0 = none).
 func Extract(ctx context.Context, path string, from, owner int64, outLines int, emit func(Entry)) (int64, int64, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return from, owner, err
-	}
-	defer f.Close()
-	if _, err := f.Seek(from, io.SeekStart); err != nil {
-		return from, owner, err
-	}
-	r := bufio.NewReaderSize(f, extractLineCap)
-	off := from
-	for n := 1; ; n++ {
-		if n%4096 == 0 && ctx.Err() != nil {
-			return off, owner, nil
-		}
-		line, err := r.ReadSlice('\n')
-		if errors.Is(err, bufio.ErrBufferFull) { // an over-long line: skip to its end
-			n := int64(len(line))
-			for errors.Is(err, bufio.ErrBufferFull) {
-				line, err = r.ReadSlice('\n')
-				n += int64(len(line))
-			}
-			if err != nil { // no newline yet: the writer is mid-line, resume here next time
-				return off, owner, nil
-			}
-			off += n
-			continue
-		}
-		if err != nil {
-			if errors.Is(err, io.EOF) {
-				return off, owner, nil // a trailing partial line is left for the next call
-			}
-			return off, owner, err
-		}
-		lineOff := off
-		off += int64(len(line))
+	end, err := fileio.Lines(ctx, path, from, extractLineCap, func(lineOff int64, line []byte) bool {
 		if !interesting(line) {
-			continue
+			return true
 		}
 		var l transcriptLine
 		if json.Unmarshal(bytes.TrimSpace(line), &l) != nil {
-			continue
+			return true
 		}
 		at := l.Timestamp.Unix()
 		if l.Timestamp.IsZero() {
@@ -87,7 +51,7 @@ func Extract(ctx context.Context, path string, from, owner int64, outLines int, 
 			emit(Entry{Off: lineOff, Role: role, At: at, Text: capText(m.Text, extractTextCap)})
 		}
 		if owner < 0 {
-			continue
+			return true
 		}
 		for _, st := range l.steps(lineOff, outLines > 0) {
 			switch {
@@ -101,7 +65,9 @@ func Extract(ctx context.Context, path string, from, owner int64, outLines int, 
 				emit(Entry{Off: owner, Role: 't', At: at, Text: capText(text, toolInputCap)})
 			}
 		}
-	}
+		return true
+	})
+	return end, owner, err
 }
 
 // outputHead is the first n non-blank lines of a tool output, each capped, joined by " | ".

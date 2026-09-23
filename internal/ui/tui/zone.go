@@ -1,6 +1,9 @@
 package tui
 
-import "slices"
+import (
+	"slices"
+	"time"
+)
 
 // Click zones are registered while rendering and looked up on mouse events; they describe the current frame.
 type zone struct {
@@ -23,7 +26,6 @@ func (m *Model) markRows(y0, x, w, rows int, act func(*Model)) {
 // hit searches from the end: last registered is drawn on top.
 func (m *Model) hit(x, y int) func(*Model) {
 	for _, z := range slices.Backward(m.zones) {
-
 		if y == z.y && x >= z.x1 && x < z.x2 {
 			m.clickX = x - z.x1
 			return z.act
@@ -32,10 +34,29 @@ func (m *Model) hit(x, y int) func(*Model) {
 	return nil
 }
 
-func (m *Model) shiftZones(from, dx, dy int) {
-	for i := from; i < len(m.zones); i++ {
+func (m *Model) shiftZones(dx, dy int) {
+	for i := range m.zones {
 		m.zones[i].y += dy
 		m.zones[i].x1 += dx
 		m.zones[i].x2 += dx
 	}
+}
+
+// doubleClick: a second click on the same thing within this is a double click.
+const doubleClick = 500 * time.Millisecond
+
+type clicks struct {
+	i  int
+	at time.Time
+}
+
+// double records a click on i: true when it is the second one on i within doubleClick (and the next one starts over).
+func (c *clicks) double(i int) bool {
+	now := time.Now()
+	if c.i == i && now.Sub(c.at) < doubleClick {
+		*c = clicks{}
+		return true
+	}
+	c.i, c.at = i, now
+	return false
 }

@@ -1,10 +1,8 @@
 package fulltext
 
 import (
-	"bufio"
 	"bytes"
 	"context"
-	"errors"
 	"math"
 	"math/bits"
 	"os"
@@ -18,13 +16,14 @@ import (
 	"unicode/utf8"
 
 	"github.com/oxsean/fav/internal/fav"
+	"github.com/oxsean/fav/internal/fileio"
 )
 
 // Cands turns records into candidates: every transcript of the session, else the record's own file.
 func Cands(recs []*fav.Rec, bySession map[string][]string) []Cand {
 	out := make([]Cand, len(recs))
 	for i, r := range recs {
-		ps := bySession[r.Provider+":"+r.SessionID]
+		ps := bySession[r.Key()]
 		if len(ps) == 0 {
 			if p := pinnedOnly(r); p != "" {
 				ps = []string{p}
@@ -269,31 +268,12 @@ func Search(ctx context.Context, dir string, cands []Cand, q string) []Result {
 				if ctx.Err() != nil {
 					continue
 				}
-				f, err := os.Open(filepath.Join(dir, textName(j.path)))
-				if err != nil {
-					continue
-				}
-				rd := bufio.NewReaderSize(f, 64*1024)
 				fs := fileScan{df: make([]int, len(all)), cands: map[int]*candScan{}}
 				tfBuf := make([]uint16, len(all))
-				for n := 0; ; n++ {
-					if n%4096 == 0 && ctx.Err() != nil {
-						break
-					}
-					line, err := rd.ReadSlice('\n')
-					if errors.Is(err, bufio.ErrBufferFull) { // entries are capped far below the buffer: a damaged line
-						for errors.Is(err, bufio.ErrBufferFull) {
-							_, err = rd.ReadSlice('\n')
-						}
-						continue
-					}
-					if err != nil {
-						break // EOF, or a line still being written
-					}
-					line = line[:len(line)-1]
-					off, role, at, text, ok := fields(line)
+				fileio.Lines(ctx, filepath.Join(dir, textName(j.path)), 0, textBuf, func(_ int64, line []byte) bool {
+					off, role, at, text, ok := fields(line[:len(line)-1])
 					if !ok {
-						continue
+						return true
 					}
 					fs.docs++
 					fs.totalLen += len(text)
@@ -306,7 +286,7 @@ func Search(ctx context.Context, dir string, cands []Cand, q string) []Result {
 						}
 					}
 					if present == 0 {
-						continue
+						return true
 					}
 					var mask, real uint64
 					exact := 0
@@ -333,7 +313,7 @@ func Search(ctx context.Context, dir string, cands []Cand, q string) []Result {
 						}
 					}
 					if mask == 0 || !query.Allows(role) || len(query.Neg) > 0 && query.Excluded(string(buf)) {
-						continue
+						return true
 					}
 					h := hit{mask: mask, keys: bits.OnesCount64(mask), n: len(text), w: weight(role, at, now), at: at, exact: exact}
 					if mask&^real != 0 { // matched only through a spelling fix
@@ -362,8 +342,8 @@ func Search(ctx context.Context, dir string, cands []Cand, q string) []Result {
 						h.path, h.off, h.snip = j.path, off, snippet(kws, string(text))
 						cs.add(h)
 					}
-				}
-				f.Close()
+					return true
+				})
 				out <- fs
 			}
 		})
@@ -450,6 +430,9 @@ func Search(ctx context.Context, dir string, cands []Cand, q string) []Result {
 	return res
 }
 
+// textBuf is the read buffer for text files: entries are capped far below it, a longer line is damaged and skipped.
+const textBuf = 64 * 1024
+
 // fields splits "off\trole\tunix\ttext".
 func fields(line []byte) (off int64, role byte, at int64, text []byte, ok bool) {
 	f := bytes.SplitN(line, []byte{'\t'}, 4)
@@ -483,18 +466,6 @@ func metaBonus(kws []Keyword, meta string) float64 {
 		}
 	}
 	return 1 + 0.3*float64(n)/float64(len(kws))
-}
-
-// field4 is the text column of "off\trole\tunix\ttext"; nil for a malformed line.
-func field4(line []byte) []byte {
-	for range 3 {
-		t := bytes.IndexByte(line, '\t')
-		if t < 0 {
-			return nil
-		}
-		line = line[t+1:]
-	}
-	return line
 }
 
 // TooLong: the query has more keywords or distinct terms than one search matches (64 each); Search returns nothing for it.
@@ -569,18 +540,6 @@ func window(buf []byte, mask uint64, kwTerms [][]int, termB [][]byte, present ui
 	return best
 }
 
-func lineOff(line []byte) int64 {
-	before, _, ok := bytes.Cut(line, []byte{'\t'})
-	if !ok {
-		return -1
-	}
-	n, err := strconv.ParseInt(string(before), 10, 64)
-	if err != nil {
-		return -1
-	}
-	return n
-}
-
 // Hit is one entry of a session matching at least one keyword.
 type Hit struct {
 	Path string
@@ -600,37 +559,17 @@ func Hits(ctx context.Context, dir string, paths []string, q string, limit int, 
 	var out []Hit
 	var pinned *Hit
 	for _, p := range paths {
-		f, err := os.Open(filepath.Join(dir, textName(p)))
-		if err != nil {
-			continue
+		if ctx.Err() != nil {
+			return nil, 0
 		}
 		var ring []Hit // the newest limit of this file (text files run oldest first); next is the slot to overwrite
 		next := 0
-		rd := bufio.NewReaderSize(f, 64*1024)
-		for n := 1; ; n++ {
-			if n%4096 == 0 && ctx.Err() != nil {
-				f.Close()
-				return nil, 0
+		fileio.Lines(ctx, filepath.Join(dir, textName(p)), 0, textBuf, func(_ int64, line []byte) bool {
+			off, role, at, text, ok := fields(line[:len(line)-1])
+			if !ok || !query.MatchEntry(role, string(text)) {
+				return true
 			}
-			line, err := rd.ReadSlice('\n')
-			if errors.Is(err, bufio.ErrBufferFull) {
-				for errors.Is(err, bufio.ErrBufferFull) {
-					_, err = rd.ReadSlice('\n')
-				}
-				continue
-			}
-			if err != nil {
-				break
-			}
-			fl := bytes.SplitN(line[:len(line)-1], []byte{'\t'}, 4)
-			if len(fl) != 4 || len(fl[1]) != 1 || !query.MatchEntry(fl[1][0], string(fl[3])) {
-				continue
-			}
-			at, _ := strconv.ParseInt(string(fl[2]), 10, 64)
-			h := Hit{Path: p, Off: lineOff(line), Role: fl[1][0], Text: string(fl[3])}
-			if at > 0 {
-				h.At = time.Unix(at, 0)
-			}
+			h := Hit{Path: p, Off: off, Role: role, At: unixTime(at), Text: string(text)}
 			if h.Path == pin.Path && h.Off == pin.Off && pinned == nil {
 				pinned = &h
 			}
@@ -641,8 +580,8 @@ func Hits(ctx context.Context, dir string, paths []string, q string, limit int, 
 			} else {
 				ring = append(ring, h)
 			}
-		}
-		f.Close()
+			return true
+		})
 		out = append(out, ring...)
 	}
 	if ctx.Err() != nil {
@@ -712,10 +651,7 @@ func snippet(kws []Keyword, text string) string {
 	return s
 }
 
-// Cands turns records into candidates: every transcript of the session, else the records
-
-// Sources are the transcripts to keep text for: the index's, plus the pinned hard links of favorites whose original is gone.
-func Sources(indexed []string, recs []*fav.Rec) []string {
+func sources(indexed []string, recs []*fav.Rec) []string {
 	out := indexed
 	for _, r := range recs {
 		if p := pinnedOnly(r); p != "" {

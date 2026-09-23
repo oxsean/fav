@@ -14,8 +14,7 @@ import (
 // e edits title, tags and summary in place: Tab moves between fields; Enter saves in title / tags, inserts a newline in summary
 // (Ctrl+S saves); Esc discards. An unsaved session gets a record (not a favorite).
 
-func (m *Model) openEdit() tea.Cmd {
-	r := m.current()
+func (m *Model) openEdit(r *fav.Rec) tea.Cmd {
 	if r == nil {
 		return nil
 	}
@@ -144,10 +143,9 @@ func (m *Model) saveEdit() {
 		return
 	}
 	m.closeOverlay()
-	if !m.editRec(r, func(r *fav.Rec) { r.Title, r.Tags, r.Summary = title, tags, summary }) {
-		return
+	if m.editRec(r, func(r *fav.Rec) { r.Title, r.Tags, r.Summary = title, tags, summary }) != nil {
+		m.flash(i18n.F("edit.saved", render.Truncate(title, 40)))
 	}
-	m.flash(i18n.T("edit.saved") + render.Truncate(title, 40))
 }
 
 func (m *Model) renderEdit() string {

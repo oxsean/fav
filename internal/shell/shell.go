@@ -65,6 +65,15 @@ func OfExe(exe string) (Kind, bool) {
 	return POSIX, false
 }
 
+// Editor: $VISUAL else $EDITOR, split on whitespace ("code -w"); nil when neither is set.
+func Editor() []string {
+	ed := os.Getenv("VISUAL")
+	if ed == "" {
+		ed = os.Getenv("EDITOR")
+	}
+	return strings.Fields(ed)
+}
+
 // Line is argv run in dir: a cd first when dir is set.
 func (k Kind) Line(dir string, argv []string) string {
 	line := k.Join(argv)

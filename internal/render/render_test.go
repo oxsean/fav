@@ -10,9 +10,6 @@ import (
 	"github.com/oxsean/fav/internal/fav"
 )
 
-//go:fix inline
-func ptr(t time.Time) *time.Time { return new(t) }
-
 func init() { noColor = true }
 
 func TestCardRightColumnAlignsAcrossScripts(t *testing.T) {

@@ -17,9 +17,7 @@ func TestMoveProject(t *testing.T) {
 	claude, codex := setup(t)
 	t.Setenv("FAV_HOME", t.TempDir())
 	old, new := "/Users/me/work/webapp", "/Users/me/dev/webapp"
-	enc := func(cwd string) string {
-		return filepath.Join(claude, "projects", claudeEnc.ReplaceAllString(cwd, "-"))
-	}
+	enc := ClaudeProjectDir
 
 	// Claude: one session in the root, one in a worktree subdir, one live; the old project dir also holds memory/
 	a := filepath.Join(enc(old), "aaaa.jsonl")
@@ -31,13 +29,11 @@ func TestMoveProject(t *testing.T) {
 	live := filepath.Join(enc(old), "cccc.jsonl")
 	write(t, live, claudeLines("还在跑", "别动"))
 	// Codex: one under old, one elsewhere
-	meta := `{"timestamp":"2026-09-11T02:00:00Z","type":"session_meta","payload":{"session_id":"%s","cwd":"%s","originator":"codex_cli_rs"}}` + "\n"
-	msg := `{"timestamp":"2026-09-11T02:00:01Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"%s"}]}}` + "\n"
 	turn := `{"type":"turn_context","payload":{"cwd":"%s"}}` + "\n"
-	c1 := filepath.Join(codex, "sessions", "2026", "09", "11", "rollout-2026-09-11T02-00-00-c1c1.jsonl")
-	write(t, c1, sprintf(meta, "c1c1", old)+sprintf(msg, "codex 在 webapp")+sprintf(turn, old))
-	c2 := filepath.Join(codex, "sessions", "2026", "09", "11", "rollout-2026-09-11T02-00-00-c2c2.jsonl")
-	write(t, c2, sprintf(meta, "c2c2", "/Users/me/work/other")+sprintf(msg, "别的项目"))
+	c1 := rolloutPath(codex, 11, "c1c1")
+	write(t, c1, codexLines("c1c1", old, "codex_cli_rs", "codex 在 webapp")+sprintf(turn, old))
+	c2 := rolloutPath(codex, 11, "c2c2")
+	write(t, c2, codexLines("c2c2", "/Users/me/work/other", "codex_cli_rs", "别的项目"))
 	write(t, filepath.Join(claude, ".claude.json"), `{"numStartups":3,"projects":{"/Users/me/work/webapp":{"allowedTools":["Bash"]},"/Users/me/work/other":{}}}`)
 
 	idx, _ := OpenAt(filepath.Join(t.TempDir(), "sessions.jsonl"))
@@ -161,16 +157,14 @@ func TestMoveProject(t *testing.T) {
 	}
 }
 
-// after undo the original is back at the same path with possibly identical size/mtime; RescanAfterRestore must force it
+// after undo the original is back at the same path with possibly identical size/mtime; rescanAfterRestore must force it
 func TestRescanAfterRestore(t *testing.T) {
 	testkit.PosixOnly(t)
 	_, codex := setup(t)
 	t.Setenv("FAV_HOME", t.TempDir())
 	old, new := "/Users/me/work/p", "/Users/me/work/q" // same length: size unchanged by the rewrite
-	meta := `{"timestamp":"2026-09-11T02:00:00Z","type":"session_meta","payload":{"session_id":"c1c1","cwd":"%s","originator":"codex_cli_rs"}}` + "\n"
-	msg := `{"timestamp":"2026-09-11T02:00:01Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"活"}]}}` + "\n"
-	c1 := filepath.Join(codex, "sessions", "2026", "09", "11", "rollout-2026-09-11T02-00-00-c1c1.jsonl")
-	write(t, c1, sprintf(meta, old)+msg)
+	c1 := rolloutPath(codex, 11, "c1c1")
+	write(t, c1, codexLines("c1c1", old, "codex_cli_rs", "活"))
 	idx, _ := OpenAt(filepath.Join(t.TempDir(), "sessions.jsonl"))
 	idx, _ = idx.Refresh()
 	store, _ := fav.OpenAt(filepath.Join(t.TempDir(), "records.jsonl"))
@@ -190,7 +184,7 @@ func TestRescanAfterRestore(t *testing.T) {
 	if plain, _ := idx.Refresh(); plain.files[c1].Cwd != new {
 		t.Fatal("（前提）普通 Refresh 认不出撤销：等长等 mtime 复用旧条目")
 	}
-	idx, _ = idx.Rescan(RescanAfterRestore(e))
+	idx, _ = idx.Rescan(rescanAfterRestore(e))
 	if idx.files[c1].Cwd != old {
 		t.Fatalf("撤销后强制重扫应回到旧目录：%q", idx.files[c1].Cwd)
 	}
@@ -211,10 +205,10 @@ func TestPlanMoveSeesWorktreeSettings(t *testing.T) {
 
 func TestMoveSweepsEmptyProjectDir(t *testing.T) {
 	testkit.PosixOnly(t)
-	claude, _ := setup(t)
+	setup(t)
 	t.Setenv("FAV_HOME", t.TempDir())
 	old, new := "/Users/me/work/p", "/Users/me/dev/p"
-	dir := filepath.Join(claude, "projects", claudeEnc.ReplaceAllString(old, "-"))
+	dir := ClaudeProjectDir(old)
 	write(t, filepath.Join(dir, "aaaa.jsonl"), strings.ReplaceAll(claudeLines("活", "继续"), "/Users/me/work/webapp", old))
 	write(t, filepath.Join(dir, "memory", "MEMORY.md"), "# m\n")
 	idx, _ := OpenAt(filepath.Join(t.TempDir(), "sessions.jsonl"))
@@ -227,7 +221,7 @@ func TestMoveSweepsEmptyProjectDir(t *testing.T) {
 	if _, err := plan.Apply(store); err != nil {
 		t.Fatal(err)
 	}
-	ndir := filepath.Join(claude, "projects", claudeEnc.ReplaceAllString(new, "-"))
+	ndir := ClaudeProjectDir(new)
 	if _, err := os.Stat(filepath.Join(ndir, "memory", "MEMORY.md")); err != nil {
 		t.Fatal("腾空后 memory/ 应搬到新项目目录")
 	}
@@ -238,12 +232,10 @@ func TestMoveSweepsEmptyProjectDir(t *testing.T) {
 
 func TestMoveRefusesDestinationConflictAndGitRootOnlyRecord(t *testing.T) {
 	testkit.PosixOnly(t)
-	claude, _ := setup(t)
+	setup(t)
 	t.Setenv("FAV_HOME", t.TempDir())
 	old, new := "/Users/me/work/p", "/Users/me/dev/p"
-	enc := func(cwd string) string {
-		return filepath.Join(claude, "projects", claudeEnc.ReplaceAllString(cwd, "-"))
-	}
+	enc := ClaudeProjectDir
 	write(t, filepath.Join(enc(old), "aaaa.jsonl"), strings.ReplaceAll(claudeLines("活", "继续"), "/Users/me/work/webapp", old))
 	write(t, filepath.Join(enc(new), "aaaa.jsonl"), "{}\n") // target already has a file of that name
 	idx, _ := OpenAt(filepath.Join(t.TempDir(), "sessions.jsonl"))
@@ -272,12 +264,10 @@ func TestMoveRefusesDestinationConflictAndGitRootOnlyRecord(t *testing.T) {
 
 func TestRestoreRefusedAfterUse(t *testing.T) {
 	testkit.PosixOnly(t)
-	claude, _ := setup(t)
+	setup(t)
 	t.Setenv("FAV_HOME", t.TempDir())
 	old, new := "/Users/me/work/p", "/Users/me/dev/p"
-	enc := func(cwd string) string {
-		return filepath.Join(claude, "projects", claudeEnc.ReplaceAllString(cwd, "-"))
-	}
+	enc := ClaudeProjectDir
 	write(t, filepath.Join(enc(old), "aaaa.jsonl"), strings.ReplaceAll(claudeLines("活", "继续"), "/Users/me/work/webapp", old))
 	idx, _ := OpenAt(filepath.Join(t.TempDir(), "sessions.jsonl"))
 	idx, _ = idx.Refresh()
@@ -298,20 +288,16 @@ func TestRestoreRefusedAfterUse(t *testing.T) {
 
 func TestRestoreRetryAndPin(t *testing.T) {
 	testkit.PosixOnly(t)
-	claude, codex := setup(t)
+	_, codex := setup(t)
 	t.Setenv("FAV_HOME", t.TempDir())
 	old, new := "/Users/me/work/p", "/Users/me/dev/p"
-	enc := func(cwd string) string {
-		return filepath.Join(claude, "projects", claudeEnc.ReplaceAllString(cwd, "-"))
-	}
+	enc := ClaudeProjectDir
 	a := filepath.Join(enc(old), "aaaa.jsonl")
 	write(t, a, strings.ReplaceAll(claudeLines("活", "继续"), "/Users/me/work/webapp", old))
-	meta := `{"timestamp":"2026-09-11T02:00:00Z","type":"session_meta","payload":{"session_id":"c1c1","cwd":"%s","originator":"codex_cli_rs"}}` + "\n"
-	msg := `{"timestamp":"2026-09-11T02:00:01Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"活"}]}}` + "\n"
-	c1 := filepath.Join(codex, "sessions", "2026", "09", "11", "rollout-2026-09-11T02-00-00-c1c1.jsonl")
-	c2 := filepath.Join(codex, "sessions", "2026", "09", "12", "rollout-2026-09-12T02-00-00-c1c1.jsonl")
-	write(t, c1, sprintf(meta, old)+msg)
-	write(t, c2, sprintf(meta, old)+msg)
+	c1 := rolloutPath(codex, 11, "c1c1")
+	c2 := rolloutPath(codex, 12, "c1c1")
+	write(t, c1, codexLines("c1c1", old, "codex_cli_rs", "活"))
+	write(t, c2, codexLines("c1c1", old, "codex_cli_rs", "活"))
 	pin := filepath.Join(t.TempDir(), "pin.jsonl")
 	os.Link(a, pin)
 	idx, _ := OpenAt(filepath.Join(t.TempDir(), "sessions.jsonl"))
@@ -365,10 +351,8 @@ func TestRestoreIdempotentAfterPartialFailure(t *testing.T) {
 	_, codex := setup(t)
 	t.Setenv("FAV_HOME", t.TempDir())
 	old, new := "/Users/me/work/p", "/Users/me/dev/p"
-	meta := `{"timestamp":"2026-09-11T02:00:00Z","type":"session_meta","payload":{"session_id":"c1c1","cwd":"%s","originator":"codex_cli_rs"}}` + "\n"
-	msg := `{"timestamp":"2026-09-11T02:00:01Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"活"}]}}` + "\n"
-	c1 := filepath.Join(codex, "sessions", "2026", "09", "11", "rollout-2026-09-11T02-00-00-c1c1.jsonl")
-	write(t, c1, sprintf(meta, old)+msg)
+	c1 := rolloutPath(codex, 11, "c1c1")
+	write(t, c1, codexLines("c1c1", old, "codex_cli_rs", "活"))
 	idx, _ := OpenAt(filepath.Join(t.TempDir(), "sessions.jsonl"))
 	idx, _ = idx.Refresh()
 	store, _ := fav.OpenAt(filepath.Join(t.TempDir(), "records.jsonl"))

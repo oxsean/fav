@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"sort"
 	"time"
+
+	"github.com/oxsean/fav/internal/paths"
 )
 
 // Codex has no session id env var: the first rollout line (session_meta) carries session_id and cwd, mtime is recency.
@@ -18,8 +20,6 @@ type Candidate struct {
 	Path      string
 	ModTime   time.Time
 }
-
-func codexSessionsDir() string { return filepath.Join(CodexHome(), "sessions") }
 
 func detectCodex(cwd string) (*Candidate, error) {
 	cands := activeCodexSessions(cwd, time.Now())
@@ -56,7 +56,7 @@ func activeCodexSessions(cwd string, now time.Time) []Candidate {
 			}
 			path := filepath.Join(dir, e.Name())
 			meta, err := readSessionMeta(path)
-			if err != nil || meta.Cwd != cwd {
+			if err != nil || !paths.Same(meta.Cwd, cwd) {
 				continue
 			}
 			out = append(out, Candidate{
@@ -70,13 +70,13 @@ func activeCodexSessions(cwd string, now time.Time) []Candidate {
 }
 
 type sessionMeta struct {
-	SessionID  string `json:"session_id"`
-	Cwd        string `json:"cwd"`
-	Originator string `json:"originator"`
-	CLIVersion string `json:"cli_version"`
+	SessionID      string  `json:"session_id"`
+	Cwd            string  `json:"cwd"`
+	Originator     string  `json:"originator"`
+	ParentThreadID *string `json:"parent_thread_id"`
 }
 
-// first line only; rollouts reach hundreds of MB
+// ⚠️ readSessionMeta reads only the first line (session_meta): rollouts reach hundreds of MB.
 func readSessionMeta(path string) (*sessionMeta, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -90,28 +90,10 @@ func readSessionMeta(path string) (*sessionMeta, error) {
 		return nil, err
 	}
 	var env struct {
-		Type    string      `json:"type"`
 		Payload sessionMeta `json:"payload"`
 	}
 	if err := json.Unmarshal(line, &env); err != nil {
 		return nil, err
 	}
 	return &env.Payload, nil
-}
-
-func findCodexRollout(sessionID string) string {
-	root := codexSessionsDir()
-	if root == "" || sessionID == "" {
-		return ""
-	}
-	now := time.Now()
-	for i := range 400 {
-		day := now.AddDate(0, 0, -i)
-		dir := filepath.Join(root, day.Format("2006"), day.Format("01"), day.Format("02"))
-		hits, _ := filepath.Glob(filepath.Join(dir, "rollout-*-"+sessionID+".jsonl"))
-		if len(hits) > 0 {
-			return hits[0]
-		}
-	}
-	return ""
 }

@@ -26,7 +26,7 @@ import (
 const msgDebounce = 150 * time.Millisecond
 
 type msgState struct {
-	res     map[string]fulltext.Result // hits of the finished search, by msgKey (records are rebuilt on a store reload)
+	res     map[string]fulltext.Result // hits of the finished search, by Rec.Key (records are rebuilt on a store reload)
 	order   []string                   // ranked
 	key     string                     // search the results belong to
 	want    string                     // search asked for (debounced / running)
@@ -99,7 +99,7 @@ func (m *Model) findQuery() string {
 func (m *Model) msgRows(recs []*fav.Rec) []row {
 	in := make(map[string]*fav.Rec, len(recs))
 	for _, r := range recs {
-		in[msgKey(r)] = r
+		in[r.Key()] = r
 	}
 	var out []row
 	for _, k := range m.msg.order {
@@ -117,10 +117,8 @@ func (m *Model) msgRows(recs []*fav.Rec) []row {
 	return out
 }
 
-func msgKey(r *fav.Rec) string { return r.Provider + ":" + r.SessionID }
-
 func (m *Model) msgHit(r *fav.Rec) (fulltext.Result, bool) {
-	x, ok := m.msg.res[msgKey(r)]
+	x, ok := m.msg.res[r.Key()]
 	return x, ok
 }
 
@@ -176,7 +174,7 @@ func (m *Model) applyMsgResult(msg msgResultMsg) tea.Cmd {
 	m.msg.res = make(map[string]fulltext.Result, len(msg.res))
 	m.msg.order = m.msg.order[:0]
 	for _, x := range msg.res {
-		k := msgKey(msg.recs[x.Cand])
+		k := msg.recs[x.Cand].Key()
 		m.msg.res[k] = x
 		m.msg.order = append(m.msg.order, k)
 	}
@@ -193,7 +191,7 @@ func (m *Model) applyMsgResult(msg msgResultMsg) tea.Cmd {
 func candKey(recs []*fav.Rec) string {
 	h := fnv.New64a()
 	for _, r := range recs {
-		h.Write([]byte(msgKey(r)))
+		h.Write([]byte(r.Key()))
 		h.Write([]byte{0})
 	}
 	return strconv.FormatUint(h.Sum64(), 16)
@@ -201,18 +199,21 @@ func candKey(recs []*fav.Rec) string {
 
 // syncText runs an incremental full-text update in the background; a second call while one runs queues one more.
 func (m *Model) syncText(idx *index.Index) tea.Cmd {
-	paths := fulltext.Sources(idx.Paths(), m.store.All())
-	if len(idx.Paths()) == 0 { // ⚠️ an index not built yet would make Update drop every text file
-		return nil
-	}
 	if m.msg.textRun {
 		m.msg.textAgain = true
 		return nil
 	}
 	m.msg.textRun, m.msg.textAgain = true, false
-	dir, prog, opt := fulltext.Dir(), &m.msg.textProg, fulltext.Options{OutLines: m.cfg.ToolOutput}
+	indexed, prog, outLines := idx.Paths(), &m.msg.textProg, m.cfg.ToolOutput
+	var pinned []*fav.Rec // ⚠️ copies: the update runs off the main loop, which keeps editing the records
+	for _, r := range m.store.All() {
+		if r.PinnedPath != "" {
+			cp := *r
+			pinned = append(pinned, &cp)
+		}
+	}
 	update := func() tea.Msg {
-		p, err := fulltext.UpdateWith(context.Background(), dir, paths, opt, func(p fulltext.Progress) {
+		p, err := fulltext.Sync(context.Background(), indexed, pinned, outLines, func(p fulltext.Progress) {
 			prog.Store(int64(p.Done)<<32 | int64(p.Total))
 		})
 		return textDoneMsg{p, err}

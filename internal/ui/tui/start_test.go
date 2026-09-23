@@ -1,15 +1,15 @@
 package tui
 
 import (
-	"os"
 	"slices"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/oxsean/fav/internal/capture"
+	"github.com/oxsean/fav/internal/fav"
+	"github.com/oxsean/fav/internal/i18n"
 )
 
 func TestStartFromProjectShowsWhatRuns(t *testing.T) {
@@ -60,63 +60,42 @@ func TestStartFromProjectShowsWhatRuns(t *testing.T) {
 	}
 }
 
-func TestCloseIdleTabs(t *testing.T) {
-	m := sized(t, 140, 40)
-	recs := m.store.All()
-	old, fresh, unseen := recs[0], recs[1], recs[2]
-	for _, r := range recs[:3] {
-		r.LastAt = m.now.Add(-5 * time.Hour)
+func TestRunningSessionDialogActsOnItsOwnRecord(t *testing.T) {
+	fakeCLIs(t)
+	m := sized(t, 140, 44)
+	cur := m.current()
+	var other *fav.Rec
+	for _, r := range m.store.All() {
+		if r != cur {
+			other = r
+			break
+		}
 	}
-	fresh.LastAt = m.now
-	m.live = map[string]capture.Live{
-		old.SessionID:    {TabID: "t-old", Status: "idle"},
-		fresh.SessionID:  {TabID: "t-fresh", Status: "idle"},
-		unseen.SessionID: {TabID: "t-unseen", Status: "idle"},
+	dir := t.TempDir()
+	cur.Cwd, other.Cwd = dir, dir
+	m.live = map[string]capture.Live{other.SessionID: {Status: "working", Cwd: dir}}
+	openOther := func() {
+		m.closeOverlay()
+		m.Update(press("w"))
+		m.Update(press("down"))
+		m.Update(press("enter"))
+		if m.ov.kind != ovResume || m.ov.rec != other {
+			t.Fatalf("↓ Enter opens the running session's dialog: kind=%d", m.ov.kind)
+		}
 	}
-	m.pulse = pulseMsg{unseen.SessionID: {Size: 10, Finished: true}}
-	m.setView(viewLive)
-	m.Update(press("Z"))
-	if m.ov.kind != ovConfirm || m.ov.focus != 1 {
-		t.Fatalf("Z asks first, focus on Cancel: kind=%d focus=%d", m.ov.kind, m.ov.focus)
+	openOther()
+	m.Update(press("f"))
+	if other.Favorite() || !cur.Favorite() {
+		t.Fatalf("f in that dialog unfavorites its session, not the cursor's: other=%v cur=%v", other.Favorite(), cur.Favorite())
 	}
-	body := strings.Join(m.ov.lines, "\n")
-	if !strings.Contains(body, old.Title[:6]) || strings.Contains(body, fresh.Title[:6]) || strings.Contains(body, unseen.Title[:6]) {
-		t.Fatalf("only tabs quiet for hours with nothing unseen:\n%s", body)
+	openOther()
+	m.Update(press("e"))
+	if m.ov.kind != ovEdit || m.ov.rec != other {
+		t.Fatal("e edits the dialog's session")
 	}
-}
-
-func TestResumeRefusedWhileRunningElsewhere(t *testing.T) {
-	m := sized(t, 140, 40)
-	r := m.current()
-	r.Cwd = t.TempDir()
-	r.TranscriptPath = r.Cwd + "/s.jsonl"
-	os.WriteFile(r.TranscriptPath, []byte("{}\n"), 0o644)
-	m.live = map[string]capture.Live{r.SessionID: {Status: "idle"}} // another terminal, not Herdr
-	m.askResume()
-	v := ansi.Strip(m.screen())
-	if !strings.Contains(v, "在别的终端里运行") || !strings.Contains(v, "在跑") || !strings.Contains(v, "H 暂缓") || strings.Contains(v, "X 关掉 tab") {
-		t.Fatalf("the check says why, and the running row has the actions that apply:\n%s", v)
-	}
-	m.Update(press("enter"))
-	if m.quitting || !strings.Contains(m.notice, "别的终端") {
-		t.Fatalf("resuming a second copy is refused: quitting=%v notice=%q", m.quitting, m.notice)
-	}
-}
-
-func TestPeekForgetsTheArmedDigitWhenTheScreenChanges(t *testing.T) {
-	m := sized(t, 140, 40)
-	m.ov = overlay{kind: ovPeek, rec: m.current(), title: "p1", lines: []string{"1. Yes"}, armed: "1", armedAt: time.Now()}
-	m.applyPeek(peekMsg{pane: "p1", text: "1. Yes\n"})
-	if m.ov.armed != "1" {
-		t.Fatal("same screen: still armed")
-	}
-	m.applyPeek(peekMsg{pane: "p1", text: "Another question?\n1. Yes\n"})
-	if m.ov.armed != "" {
-		t.Fatal("a changed screen forgets the armed digit")
-	}
-	m.ov.armed, m.ov.armedAt = "2", time.Now().Add(-peekArmFor-time.Second)
-	m.applyPeek(peekMsg{pane: "p1", text: "Another question?\n1. Yes\n"})
-	if m.ov.armed != "" {
-		t.Fatal("an old armed digit expires")
+	openOther()
+	m.Update(press("D"))
+	if m.ov.kind == ovConfirm || m.notice != i18n.T("trash.running") {
+		t.Fatalf("D is refused because the dialog's session runs (the cursor's does not): kind=%d notice=%q", m.ov.kind, m.notice)
 	}
 }

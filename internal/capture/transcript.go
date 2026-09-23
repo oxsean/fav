@@ -4,14 +4,14 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
-	"github.com/oxsean/fav/internal/i18n"
 	"io"
 	"os"
 	"slices"
 	"strings"
-	"sync"
 	"time"
 	"unicode/utf8"
+
+	"github.com/oxsean/fav/internal/i18n"
 )
 
 // Claude line: {"type":"user","message":{"content":"text"}}, an array content is a tool_result;
@@ -32,11 +32,9 @@ type transcriptLine struct {
 		} `json:"usage"` // Claude assistant lines: what this request sent, i.e. the context
 	} `json:"message"`
 	Payload struct {
-		Type    string `json:"type"`
-		Role    string `json:"role"`
-		Content []struct {
-			Text string `json:"text"`
-		} `json:"content"`
+		Type      string          `json:"type"`
+		Role      string          `json:"role"`
+		Content   json.RawMessage `json:"content"`
 		Name      string          `json:"name"`      // Codex function_call
 		Arguments string          `json:"arguments"` // Codex function_call: JSON string
 		Output    json.RawMessage `json:"output"`    // Codex function_call_output / custom_tool_call_output: string or block array
@@ -54,6 +52,7 @@ type transcriptLine struct {
 type Step struct {
 	Tool   string
 	Text   string
+	Files  []string // what an edit tool or apply_patch wrote
 	Result bool
 	Off    int64
 	Idx    int
@@ -85,41 +84,62 @@ func (l *transcriptLine) steps(off int64, full bool) []Step {
 		for i, b := range blocks {
 			switch b.Type {
 			case "tool_use":
-				out = append(out, Step{Tool: b.Name, Text: toolArg(b.Name, b.Input, argLines), Off: off, Idx: i})
+				st := Step{Tool: b.Name, Text: toolArg(b.Name, b.Input, argLines), Off: off, Idx: i}
+				if p := EditedPath(b.Name, b.Input); p != "" {
+					st.Files = []string{p}
+				}
+				out = append(out, st)
 			case "tool_result":
-				out = append(out, Step{Result: true, Text: head(blockText(b.Content), resLines), Off: off, Idx: i})
+				out = append(out, Step{Result: true, Text: head(ContentText(b.Content), resLines), Off: off, Idx: i})
 			}
 		}
 	case l.Type == "response_item" && l.Payload.Type == "function_call":
 		out = append(out, Step{Tool: l.Payload.Name, Text: toolArg(l.Payload.Name, json.RawMessage(l.Payload.Arguments), argLines), Off: off})
 	case l.Type == "response_item" && l.Payload.Type == "custom_tool_call":
-		out = append(out, Step{Tool: l.Payload.Name, Text: customArg(l.Payload.Name, l.Payload.Input, argLines), Off: off})
+		st := Step{Tool: l.Payload.Name, Text: head(l.Payload.Input, argLines), Off: off}
+		if l.Payload.Name == "apply_patch" {
+			if st.Files = PatchFiles(l.Payload.Input); len(st.Files) > 0 {
+				st.Text = strings.Join(st.Files, " ") + "\n" + head(l.Payload.Input, max(1, argLines-1))
+			}
+		}
+		out = append(out, st)
 	case l.Type == "response_item" && (l.Payload.Type == "function_call_output" || l.Payload.Type == "custom_tool_call_output"):
-		out = append(out, Step{Result: true, Text: head(blockText(l.Payload.Output), resLines), Off: off})
+		out = append(out, Step{Result: true, Text: head(ContentText(l.Payload.Output), resLines), Off: off})
 	}
 	return out
 }
 
-// patchFileMarks are apply_patch's file headers.
+// patchFileMarks are apply_patch's file headers ("*** Move to:" names the new path of an update).
 var patchFileMarks = []string{"*** Add File: ", "*** Update File: ", "*** Delete File: ", "*** Move to: "}
 
-// customArg: an apply_patch puts the files it touches on the first line (what search and the step header show), then the patch.
-func customArg(name, input string, n int) string {
-	if name != "apply_patch" {
-		return head(input, n)
-	}
+// PatchFiles are the files an apply_patch input touches, as written (relative paths stay relative).
+func PatchFiles(input string) []string {
 	var files []string
 	for l := range strings.SplitSeq(input, "\n") {
 		for _, m := range patchFileMarks {
-			if strings.HasPrefix(l, m) {
-				files = append(files, strings.TrimSpace(l[len(m):]))
+			if p, ok := strings.CutPrefix(l, m); ok {
+				files = append(files, strings.TrimSpace(p))
 			}
 		}
 	}
-	if len(files) == 0 {
-		return head(input, n)
+	return files
+}
+
+// EditedPath is the file an edit tool call writes (Edit, Write, MultiEdit, NotebookEdit); "" for any other tool.
+func EditedPath(tool string, input json.RawMessage) string {
+	var in struct {
+		FilePath     string `json:"file_path"`
+		NotebookPath string `json:"notebook_path"`
 	}
-	return strings.Join(files, " ") + "\n" + head(input, max(1, n-1))
+	switch tool {
+	case "Edit", "Write", "MultiEdit":
+		json.Unmarshal(input, &in)
+		return in.FilePath
+	case "NotebookEdit":
+		json.Unmarshal(input, &in)
+		return in.NotebookPath
+	}
+	return ""
 }
 
 const (
@@ -127,26 +147,37 @@ const (
 	truncMark  = " …"
 )
 
-// TextFull re-reads the full text at Message.Off (memory keeps msgTextCap); falls back when unreadable.
-func TextFull(path string, off int64, fallback string) string {
-	f, err := os.Open(path)
-	if err != nil {
-		return fallback
+func lineAt(f *os.File, br *bufio.Reader, off int64) (*transcriptLine, bool) {
+	if _, err := f.Seek(off, io.SeekStart); err != nil {
+		return nil, false
 	}
-	defer f.Close()
-	if _, err := f.Seek(off, 0); err != nil {
-		return fallback
-	}
-	b, err := bufio.NewReaderSize(f, 1<<20).ReadBytes('\n')
+	br.Reset(f)
+	b, err := br.ReadBytes('\n')
 	if err != nil && len(b) == 0 {
-		return fallback
+		return nil, false
 	}
 	var l transcriptLine
 	if json.Unmarshal(b, &l) != nil {
-		return fallback
+		return nil, false
 	}
-	if m := l.speech(); m.Text != "" {
-		return m.Text
+	return &l, true
+}
+
+func readLineAt(path string, off int64) (*transcriptLine, bool) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, false
+	}
+	defer f.Close()
+	return lineAt(f, bufio.NewReaderSize(f, 1<<20), off)
+}
+
+// TextFull re-reads the full text at Message.Off (memory keeps msgTextCap); falls back when unreadable.
+func TextFull(path string, off int64, fallback string) string {
+	if l, ok := readLineAt(path, off); ok {
+		if m := l.speech(); m.Text != "" {
+			return m.Text
+		}
 	}
 	return fallback
 }
@@ -169,16 +200,8 @@ func StepsFull(path string, steps []Step) []string {
 		byOff[st.Off] = append(byOff[st.Off], st)
 	}
 	for off := range byOff {
-		if _, err := f.Seek(off, 0); err != nil {
-			continue
-		}
-		br.Reset(f)
-		b, err := br.ReadBytes('\n')
-		if err != nil && len(b) == 0 {
-			continue
-		}
-		var l transcriptLine
-		if json.Unmarshal(b, &l) != nil {
+		l, ok := lineAt(f, br, off)
+		if !ok {
 			continue
 		}
 		full := l.steps(off, true)
@@ -247,8 +270,8 @@ func firstLine(s string) string {
 	return clip(l, stepCharCap)
 }
 
-// tool_result content is a string or [{type:text,text}]
-func blockText(raw json.RawMessage) string {
+// ContentText: message, tool result or Codex tool output content, a string or blocks whose texts join as paragraphs.
+func ContentText(raw json.RawMessage) string {
 	var s string
 	if json.Unmarshal(raw, &s) == nil {
 		return s
@@ -259,11 +282,11 @@ func blockText(raw json.RawMessage) string {
 	json.Unmarshal(raw, &blocks)
 	var parts []string
 	for _, b := range blocks {
-		if b.Text != "" {
+		if strings.TrimSpace(b.Text) != "" {
 			parts = append(parts, b.Text)
 		}
 	}
-	return strings.Join(parts, "\n")
+	return strings.Join(parts, "\n\n")
 }
 
 func clip(s string, n int) string {
@@ -289,75 +312,33 @@ func Unwrap(s string) string {
 	return strings.TrimSpace(s)
 }
 
+// injected: prefixes of user-message text Claude Code writes itself (tags, recaps, images, skills, hooks, interrupts).
+var injected = []string{"<", "This session is being continued", "[Image:", "Base directory for this skill",
+	"Launching skill", "Stop hook feedback", "A session-scoped Stop hook", "[Request interrupted"}
+
+// Injected: user-message text the agent wrote, not the user.
+func Injected(s string) bool {
+	for _, n := range injected {
+		if strings.HasPrefix(s, n) {
+			return true
+		}
+	}
+	return false
+}
+
+// prompt is what the user typed on this line; "" for anything else.
 func (l *transcriptLine) prompt() string {
 	var s string
 	switch {
-	case l.Type == "user" && len(l.Message.Content) > 0 && l.Message.Content[0] == '"':
-		json.Unmarshal(l.Message.Content, &s)
-	case l.Type == "response_item" && l.Payload.Type == "message" && l.Payload.Role == "user" && len(l.Payload.Content) > 0:
-		s = l.Payload.Content[0].Text
+	case l.Type == "user" && !l.IsMeta:
+		s = ContentText(l.Message.Content)
+	case l.Type == "response_item" && l.Payload.Type == "message" && l.Payload.Role == "user":
+		s = ContentText(l.Payload.Content)
 	}
-	s = Unwrap(s)
-	if strings.HasPrefix(s, "<") {
+	if s = Unwrap(s); Injected(s) {
 		return ""
 	}
 	return s
-}
-
-type Prompt struct {
-	Text string
-	At   time.Time
-}
-
-// only the last 512KB of the file
-func LastPrompt(path string) Prompt {
-	const tail = 512 * 1024
-	f, err := os.Open(path)
-	if err != nil {
-		return Prompt{}
-	}
-	defer f.Close()
-	st, err := f.Stat()
-	if err != nil {
-		return Prompt{}
-	}
-	off := max(st.Size()-tail, 0)
-	buf, err := io.ReadAll(io.NewSectionReader(f, off, st.Size()-off))
-	if err != nil {
-		return Prompt{}
-	}
-	lines := bytes.Split(buf, []byte{'\n'})
-	for _, line := range slices.Backward(lines) {
-		var l transcriptLine
-		if json.Unmarshal(line, &l) != nil {
-			continue
-		}
-		if s := l.prompt(); s != "" {
-			return Prompt{Text: s, At: l.Timestamp.Local()}
-		}
-	}
-	return Prompt{}
-}
-
-type Activity struct {
-	ModTime time.Time
-	Last    Prompt
-}
-
-var activityCache sync.Map
-
-func LastActivity(path string) (Activity, bool) {
-	st, err := os.Stat(path)
-	if err != nil {
-		return Activity{}, false
-	}
-	key := path + "@" + st.ModTime().String()
-	if v, ok := activityCache.Load(key); ok {
-		return v.(Activity), true
-	}
-	a := Activity{ModTime: st.ModTime(), Last: LastPrompt(path)}
-	activityCache.Store(key, a)
-	return a, true
 }
 
 type Message struct {
@@ -382,54 +363,18 @@ func (l *transcriptLine) speech() Message {
 func (l *transcriptLine) rawSpeech() (role, text string) {
 	switch {
 	case l.Type == "user" || l.Type == "assistant":
-		role = l.Type
-		if len(l.Message.Content) > 0 && l.Message.Content[0] == '"' {
-			json.Unmarshal(l.Message.Content, &text)
-		} else {
-			var blocks []struct {
-				Type string `json:"type"`
-				Text string `json:"text"`
-			}
-			json.Unmarshal(l.Message.Content, &blocks)
-			var parts []string
-			for _, b := range blocks {
-				if b.Type == "text" && strings.TrimSpace(b.Text) != "" {
-					parts = append(parts, b.Text)
-				}
-			}
-			text = strings.Join(parts, "\n\n")
-		}
+		role, text = l.Type, ContentText(l.Message.Content)
 	case l.Type == "response_item" && l.Payload.Type == "message":
-		role = l.Payload.Role
-		var parts []string
-		for _, c := range l.Payload.Content {
-			parts = append(parts, c.Text)
-		}
-		text = strings.Join(parts, "\n\n")
+		role, text = l.Payload.Role, ContentText(l.Payload.Content)
 	}
 	return role, strings.TrimSpace(Unwrap(text))
 }
 
-// RawText re-reads the prose at Message.Off keeping its line breaks; falls back when unreadable.
-func RawText(path string, off int64, fallback string) string {
-	f, err := os.Open(path)
-	if err != nil {
-		return fallback
-	}
-	defer f.Close()
-	if _, err := f.Seek(off, 0); err != nil {
-		return fallback
-	}
-	b, err := bufio.NewReaderSize(f, 1<<20).ReadBytes('\n')
-	if err != nil && len(b) == 0 {
-		return fallback
-	}
-	var l transcriptLine
-	if json.Unmarshal(b, &l) != nil {
-		return fallback
-	}
-	if _, t := l.rawSpeech(); t != "" {
-		return t
+func rawText(path string, off int64, fallback string) string {
+	if l, ok := readLineAt(path, off); ok {
+		if _, t := l.rawSpeech(); t != "" {
+			return t
+		}
 	}
 	return fallback
 }
@@ -505,7 +450,7 @@ func Messages(path string, before int64, n int) Page {
 			}
 			if m := l.speech(); m.Text != "" {
 				if len(m.Text) > msgTextCap {
-					m.Text = m.Text[:msgTextCap] + truncMark
+					m.Text = capText(m.Text, msgTextCap) + truncMark
 				}
 				m.Off, m.Steps, pending = offs[i], pending, nil
 				page.Msgs = append(page.Msgs, m)
@@ -526,6 +471,4 @@ func interesting(b []byte) bool {
 		bytes.Contains(b, []byte(`"type":"custom_tool_call`))
 }
 
-func RecentMessages(path string, n int) []Message { return Messages(path, -1, n).Msgs }
-
-func AllMessages(path string) []Message { return Messages(path, -1, 1<<30).Msgs }
+func recentMessages(path string, n int) []Message { return Messages(path, -1, n).Msgs }

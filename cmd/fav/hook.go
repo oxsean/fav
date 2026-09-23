@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/oxsean/fav/internal/capture"
+	"github.com/oxsean/fav/internal/fileio"
 	"github.com/oxsean/fav/internal/i18n"
 	"github.com/oxsean/fav/internal/shell"
 )
@@ -25,13 +26,7 @@ var hookEvents = []struct{ event, matcher string }{
 
 const hookVerb = "hook-event"
 
-func claudeSettings() string {
-	if h := os.Getenv("CLAUDE_CONFIG_DIR"); h != "" {
-		return filepath.Join(h, "settings.json")
-	}
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".claude", "settings.json")
-}
+func claudeSettings() string { return filepath.Join(capture.ClaudeHome(), "settings.json") }
 
 // isFavHook: a hook command fav installed (any fav binary path).
 func isFavHook(cmd string) bool {
@@ -72,14 +67,8 @@ func saveSettings(path string, o *object, old []byte) error {
 		if err := os.WriteFile(path+".bak-"+time.Now().Format("20060102-150405"), old, mode); err != nil {
 			return err
 		}
-	} else if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
 	}
-	tmp := path + ".fav-tmp"
-	if err := os.WriteFile(tmp, b, mode); err != nil {
-		return err
-	}
-	return os.Rename(tmp, path)
+	return fileio.WriteFile(path, b, mode)
 }
 
 func groupsOf(hooks *object, event string) []any {
@@ -104,6 +93,9 @@ func hasFavHook(group any) bool {
 }
 
 func cmdInstallHook(args []string) error {
+	if err := newFlags("install-hook").Parse(args); err != nil {
+		return err
+	}
 	bin, err := os.Executable()
 	if err != nil {
 		return err
@@ -156,6 +148,9 @@ func cmdInstallHook(args []string) error {
 }
 
 func cmdUninstallHook(args []string) error {
+	if err := newFlags("uninstall-hook").Parse(args); err != nil {
+		return err
+	}
 	path := claudeSettings()
 	o, old, err := loadSettings(path)
 	if err != nil || old == nil {

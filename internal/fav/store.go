@@ -4,8 +4,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
-	"github.com/oxsean/fav/internal/filelock"
-	"github.com/oxsean/fav/internal/i18n"
+	"io"
 	"os"
 	"path/filepath"
 	"slices"
@@ -13,6 +12,10 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/oxsean/fav/internal/fileio"
+	"github.com/oxsean/fav/internal/filelock"
+	"github.com/oxsean/fav/internal/i18n"
 )
 
 // Store is an append-only JSONL file: one full record per line, last line per id wins, Deleted is a tombstone; fully loaded, scanned linearly.
@@ -74,7 +77,7 @@ func (s *Store) load() error {
 		s.raw++
 		var r Rec
 		if err := json.Unmarshal([]byte(line), &r); err != nil {
-			fmt.Fprintf(os.Stderr, i18n.T("store.skipped_line"), n, err)
+			fmt.Fprint(os.Stderr, i18n.F("store.skipped_line", n, err))
 			continue
 		}
 		if !ValidStatus(r.Status) {
@@ -136,6 +139,19 @@ func (s *Store) BySession(provider, sessionID string) *Rec {
 }
 
 func (s *Store) Put(r *Rec) error {
+	if err := os.MkdirAll(filepath.Dir(s.Path), 0o755); err != nil {
+		return err
+	}
+	unlock, err := s.lock()
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	return s.put(r)
+}
+
+// ⚠️ put: the caller holds the lock.
+func (s *Store) put(r *Rec) error {
 	if !ValidStatus(r.Status) {
 		r.Status = StatusDefault
 	}
@@ -147,14 +163,7 @@ func (s *Store) Put(r *Rec) error {
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(s.Path), 0o755); err != nil {
-		return err
-	}
-	unlock, err := s.lock()
-	if err != nil {
-		return err
-	}
-	defer unlock()
+	stale := s.Changed() // ⚠️ another process wrote since the last load: leave it for the next reload to see
 	f, err := os.OpenFile(s.Path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
 		return err
@@ -163,7 +172,9 @@ func (s *Store) Put(r *Rec) error {
 	if _, err := f.Write(append(line, '\n')); err != nil {
 		return err
 	}
-	s.seen = s.stamp()
+	if !stale {
+		s.seen = s.stamp()
+	}
 
 	r.buildHay()
 	s.raw++
@@ -182,6 +193,43 @@ func (s *Store) Put(r *Rec) error {
 		s.recs = append([]*Rec{r}, s.recs...)
 	}
 	return nil
+}
+
+// Update reloads under the lock, applies change to the stored copy of r (by ID, else session) and saves it.
+// ⚠️ A reload replaces every record object: callers holding records re-resolve them (Changed tells).
+func (s *Store) Update(r *Rec, change func(*Rec)) (*Rec, error) {
+	if err := os.MkdirAll(filepath.Dir(s.Path), 0o755); err != nil {
+		return r, err
+	}
+	unlock, err := s.lock()
+	if err != nil {
+		return r, err
+	}
+	defer unlock()
+	if s.Changed() {
+		if err := s.load(); err != nil {
+			return r, err
+		}
+	}
+	if r.ID != "" {
+		if r = s.Get(r.ID); r == nil {
+			return nil, i18n.E("store.record_deleted")
+		}
+	} else if cur := s.BySession(r.Provider, r.SessionID); cur != nil {
+		r = cur
+	}
+	fresh := r.ID == ""
+	if fresh {
+		r.ID = NewID()
+	}
+	change(r)
+	if err := s.put(r); err != nil {
+		if fresh {
+			r.ID = ""
+		}
+		return r, err
+	}
+	return r, nil
 }
 
 func (s *Store) NeedsCompact() bool { return s.raw > 2*len(s.recs)+50 }
@@ -206,33 +254,16 @@ func (s *Store) Compact() error {
 	if err := s.load(); err != nil {
 		return err
 	}
-	tmp, err := os.CreateTemp(filepath.Dir(s.Path), ".records-*.jsonl")
-	if err != nil {
-		return err
-	}
-	defer os.Remove(tmp.Name())
-
-	w := bufio.NewWriter(tmp)
-	for _, v := range slices.Backward(s.recs) {
-		line, err := json.Marshal(v)
-		if err != nil {
-			tmp.Close()
-			return err
+	err = fileio.WriteAtomic(s.Path, 0o600, func(w io.Writer) error {
+		enc := json.NewEncoder(w)
+		for _, v := range slices.Backward(s.recs) {
+			if err := enc.Encode(v); err != nil {
+				return err
+			}
 		}
-		w.Write(line)
-		w.WriteByte('\n')
-	}
-	if err := w.Flush(); err != nil {
-		tmp.Close()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	if err := os.Chmod(tmp.Name(), 0o600); err != nil {
-		return err
-	}
-	if err := os.Rename(tmp.Name(), s.Path); err != nil {
+		return nil
+	})
+	if err != nil {
 		return err
 	}
 	s.raw = len(s.recs)

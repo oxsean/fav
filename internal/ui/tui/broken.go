@@ -23,14 +23,5 @@ func (m *Model) broken(r *fav.Rec) (dirGone, transcriptGone bool) {
 	if r == nil || m.isLive(r.SessionID) {
 		return false, false
 	}
-	dirGone = r.Cwd != "" && !m.exists(r.Cwd)
-	for _, p := range []string{r.PinnedPath, r.TranscriptPath} {
-		if p != "" {
-			transcriptGone = true
-			if m.exists(p) {
-				return dirGone, false
-			}
-		}
-	}
-	return dirGone, transcriptGone
+	return r.Broken(m.exists)
 }

@@ -14,9 +14,6 @@ import (
 
 var keyRe = regexp.MustCompile(`^[a-z0-9_]+(\.[a-z0-9_]+)+$`)
 
-// prefixes built at runtime (i18n.T("status."+s), weekday arrays), exempt from the orphan check
-var dynamicPrefixes = []string{"status.", "time.wd."}
-
 // every i18n.T key exists in en and zh, both files have the same keys and placeholders, no unused keys
 func TestEveryKeyTranslated(t *testing.T) {
 	used := map[string]string{}
@@ -88,14 +85,7 @@ func TestEveryKeyTranslated(t *testing.T) {
 		if a, b := verbs.FindAllString(e, -1), verbs.FindAllString(z, -1); strings.Join(a, "") != strings.Join(b, "") {
 			t.Errorf("placeholders differ for %q: en %v zh %v", k, a, b)
 		}
-		if literals[k] {
-			continue
-		}
-		dyn := false
-		for _, p := range dynamicPrefixes {
-			dyn = dyn || strings.HasPrefix(k, p)
-		}
-		if !dyn {
+		if !literals[k] {
 			t.Errorf("orphan key (nothing uses it): %q", k)
 		}
 	}

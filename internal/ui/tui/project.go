@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"os"
 	"sort"
 	"strings"
 	"time"
@@ -44,7 +43,7 @@ func (m *Model) projectBlock(name string, y0, x0, w, h int) []string {
 	dirs := topN(recs, func(r *fav.Rec) string { return r.Cwd }, 1)
 	if len(dirs) > 0 {
 		dir := paths.Tilde(dirs[0].key)
-		if st, err := os.Stat(dirs[0].key); err != nil || !st.IsDir() {
+		if !paths.IsDir(dirs[0].key) {
 			dir += errSty.Render(i18n.T("project.missing"))
 		}
 		if extra := distinct(recs, func(r *fav.Rec) string { return r.Cwd }) - 1; extra > 0 {

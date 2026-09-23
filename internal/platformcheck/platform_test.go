@@ -15,7 +15,7 @@ var rules = []struct {
 	owner   string // the one directory allowed to match
 	use     string
 }{
-	{regexp.MustCompile(`(HasPrefix|CutPrefix|TrimPrefix)\([^)]*filepath\.Separator`), "internal/paths", "paths.Under / paths.Inside"},
+	{regexp.MustCompile(`(HasPrefix|CutPrefix|TrimPrefix)\(.*filepath\.Separator`), "internal/paths", "paths.Under / paths.Inside"},
 	{regexp.MustCompile(`HasPrefix\(rel, *"\.\."`), "internal/paths", "paths.Inside"},
 	{regexp.MustCompile(`"~/"|"~" *\+`), "internal/paths", "paths.Tilde / paths.Expand"},
 	{regexp.MustCompile(`'\\''|func shellQuote`), "internal/shell", "shell.Kind.Quote / Join / Line"},

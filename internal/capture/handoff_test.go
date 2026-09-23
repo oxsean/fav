@@ -24,22 +24,22 @@ func TestHandoffPack(t *testing.T) {
 	lines = append(lines,
 		`{"type":"assistant","timestamp":"2026-09-22T10:07:00Z","message":{"role":"assistant","content":[{"type":"text","text":"先改排序"},{"type":"tool_use","name":"Edit","input":{"file_path":`+testkit.JSONString(filepath.Join(cwd, "a.go"))+`,"old_string":"x","new_string":"y"}},{"type":"tool_use","name":"Bash","input":{"command":"cat secret.env"}}]}}`,
 		`{"type":"user","timestamp":"2026-09-22T10:07:01Z","message":{"role":"user","content":[{"type":"tool_result","content":"TOKEN=abc"}]}}`,
-		`{"type":"assistant","timestamp":"2026-09-22T10:08:00Z","message":{"role":"assistant","content":[{"type":"text","text":"改完了\n| a | b |\n下一步跑测试"},{"type":"tool_use","name":"Write","input":{"file_path":"/elsewhere/b.md","content":"z"}}]}}`,
+		`{"type":"assistant","timestamp":"2026-09-22T10:08:00Z","message":{"role":"assistant","content":[{"type":"text","text":"改完了\n| a | b |\n下一步跑测试"},{"type":"tool_use","name":"Write","input":{"file_path":"/elsewhere/b.md","content":"z"}},{"type":"tool_use","name":"NotebookEdit","input":{"notebook_path":"/elsewhere/n.ipynb","new_source":"x"}}]}}`,
 	)
 	os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o644)
 	r := &fav.Rec{Provider: fav.ProviderClaude, SessionID: "abc", Title: "修分页", Summary: "分页游标漂移", Cwd: cwd, TranscriptPath: path}
 
-	msgs := RecentMessages(path, handoffScan)
+	msgs := recentMessages(path, handoffScan)
 	if got := lastRequests(path, msgs, 5); !slices.Equal(got, []string{"要求二", "要求三", "要求四", "要求五", "要求六"}) {
 		t.Errorf("the newest five requests, oldest first: %q", got)
 	}
 	if got := lastReply(path, msgs); got != "改完了\n| a | b |\n下一步跑测试" {
 		t.Errorf("last reply: %q", got)
 	}
-	if got := changedFiles(msgs, cwd, 30); !slices.Equal(got, []string{"/elsewhere/b.md", "a.go"}) {
+	if got := changedFiles(msgs, cwd, 30); !slices.Equal(got, []string{"/elsewhere/n.ipynb", "/elsewhere/b.md", "a.go"}) {
 		t.Errorf("changed files, newest first, relative under cwd: %q", got)
 	}
-	pack := Handoff(r)
+	pack := handoff(r)
 	for _, want := range []string{"分页游标漂移", "要求六", "改完了", "- a.go", "> 改完了\n> | a | b |\n", path} {
 		if !strings.Contains(pack, want) {
 			t.Errorf("pack lacks %q:\n%s", want, pack)
@@ -67,15 +67,15 @@ func TestWriteHandoffPrunesOld(t *testing.T) {
 }
 
 func TestForkAndStartCommands(t *testing.T) {
-	c, _ := BuildFork(&fav.Rec{Provider: fav.ProviderClaude, SessionID: "s1", Cwd: "/p"})
+	c, _ := buildFork(&fav.Rec{Provider: fav.ProviderClaude, SessionID: "s1", Cwd: "/p"})
 	if got := c.ShellLine(); got != "cd /p && claude --resume s1 --fork-session" {
 		t.Errorf("claude fork: %s", got)
 	}
-	c, _ = BuildFork(&fav.Rec{Provider: fav.ProviderCodex, SessionID: "s2"})
+	c, _ = buildFork(&fav.Rec{Provider: fav.ProviderCodex, SessionID: "s2"})
 	if got := c.ShellLine(); got != "codex fork s2" {
 		t.Errorf("codex fork: %s", got)
 	}
-	c, _ = BuildStart(fav.ProviderCodex, "/p", "read /x.md")
+	c, _ = buildStart(fav.ProviderCodex, "/p", "read /x.md")
 	if !slices.Equal(c.Argv(), []string{"codex", "read /x.md"}) || c.Cwd != "/p" {
 		t.Errorf("codex start: %q", c.Argv())
 	}

@@ -59,8 +59,8 @@ func (m *Model) screen() string {
 	for _, l := range ovLines {
 		m.ovW = max(m.ovW, ansi.StringWidth(l))
 	}
-	m.shiftZones(0, x, y)
-	m.lastFrame = composite(lines, ovLines, x, y, m.w, m.h)
+	m.shiftZones(x, y)
+	m.lastFrame = composite(lines, ovLines, x, y, m.w)
 	return m.paintSelection(m.lastFrame)
 }
 
@@ -237,7 +237,7 @@ func orAll(s string) string {
 
 func statusLabel(s string) string {
 	switch s {
-	case "live":
+	case fav.StatusLive:
 		return "Agents"
 	case "all":
 		return i18n.T("label.all")
@@ -258,7 +258,7 @@ func statusLabel(s string) string {
 // timeLabel: last: reads "active since", after: / before: the days the session started in.
 func timeLabel(q fav.Query) string {
 	if !q.Active.IsZero() {
-		return i18n.T("date.active_from") + q.Active.Format("01-02")
+		return i18n.F("date.active_from", q.Active.Format("01-02"))
 	}
 	if q.After.IsZero() && q.Before.IsZero() {
 		return i18n.T("label.all")
@@ -267,9 +267,9 @@ func timeLabel(q fav.Query) string {
 	case !q.After.IsZero() && !q.Before.IsZero():
 		return q.After.Format("01-02") + ".." + q.Before.AddDate(0, 0, -1).Format("01-02")
 	case !q.After.IsZero():
-		return i18n.T("date.from") + q.After.Format("01-02")
+		return i18n.F("date.from", q.After.Format("01-02"))
 	}
-	return i18n.T("date.until") + q.Before.Format("01-02")
+	return i18n.F("date.until", q.Before.Format("01-02"))
 }
 
 func (m *Model) body(y0, h int) []string {
@@ -519,7 +519,7 @@ func (m *Model) recLine(r *fav.Rec, sel bool, w int) string {
 func (m *Model) cardBox(r *fav.Rec, sel bool, w int) []string {
 	inner := w - 4
 	when := render.When(m.when(r), m.now)
-	meta := providerShort(r.Provider)
+	meta := fav.ProviderName(r.Provider)
 	if r.App {
 		meta += " App"
 	}
@@ -556,7 +556,7 @@ func (m *Model) cardBox(r *fav.Rec, sel bool, w int) []string {
 		title, mark = fit(glyphFor(r)+" "+r.Title, inner-2)+" ", "!"
 	}
 	metaLine := fit(render.Pad(meta, max(0, inner-render.Width(when)-1))+" "+when, inner)
-	tags := fit(tagString(r.Tags), inner)
+	tags := fit(render.TagString(r.Tags), inner)
 	if !r.Favorite() && len(r.Tags) == 0 {
 		tags = fit(paths.Tilde(r.Cwd), inner) // cwd when there are no tags
 	}
@@ -584,28 +584,6 @@ func (m *Model) cardBox(r *fav.Rec, sel bool, w int) []string {
 	return strings.Split(sty.Width(w).Render(content), "\n")
 }
 
-func tagString(tags []string) string {
-	var b strings.Builder
-	for i, t := range tags {
-		if i > 0 {
-			b.WriteByte(' ')
-		}
-		b.WriteByte('#')
-		b.WriteString(t)
-	}
-	return b.String()
-}
-
-func providerShort(p string) string {
-	switch p {
-	case fav.ProviderClaude:
-		return "Claude"
-	case fav.ProviderCodex:
-		return "Codex"
-	}
-	return p
-}
-
 func glyphFor(r *fav.Rec) string {
 	if r.Favorite() {
 		return render.GlyphActive
@@ -621,7 +599,6 @@ func (m *Model) detailBlock(y0, x0, w, h int) []string {
 		}
 		return panel(i18n.T("detail.preview"), nil, w, h)
 	}
-	m.chatY, m.chatX = -1, x0+2
 	inner := w - 4
 
 	target := m.targetBox(inner)
@@ -706,7 +683,7 @@ func (m *Model) statusLine(r *fav.Rec, w int) string {
 			state += dimmed.Render(i18n.T("detail.live_elsewhere"))
 		}
 	}
-	tail := "  ·  " + providerLabel(r.Provider) + "  ·  " + render.WhenFull(r.When())
+	tail := "  ·  " + fav.ProviderLabel(r.Provider) + "  ·  " + render.WhenFull(r.When())
 	return fit(state+dimmed.Render(tail), w)
 }
 
@@ -737,7 +714,7 @@ func (m *Model) fieldLines(r *fav.Rec, w int) []string {
 		}
 		add(render.GlyphHerdr+" Herdr", herdr)
 	}
-	add(render.GlyphTag+i18n.T("card.tags"), tagString(r.Tags))
+	add(render.GlyphTag+i18n.T("card.tags"), render.TagString(r.Tags))
 	if l, ok := m.live[r.SessionID]; ok {
 		where := i18n.T("detail.background")
 		if l.TabID != "" {
@@ -915,18 +892,18 @@ func (m *Model) targetBox(w int) []string {
 	return strings.Split(panelSty.Width(w).Render(content), "\n")
 }
 
-// footKey is one footer hint; when the line is too wide the highest rank goes first, rank 0 never.
+// footKey is one footer hint, key and text; when the line is too wide the highest rank goes first, rank 0 never.
 type footKey struct {
-	text string
-	rank int
-	raw  bool // drawn as is (the notice)
+	key, text string
+	rank      int
+	raw       bool // text drawn as is (the notice)
 }
 
 // footGroup is a run of hints drawn together; groups are split by a bar.
 type footGroup []footKey
 
 func fk(key, text string, rank int) footKey {
-	return footKey{text: keyed(key, i18n.T(text)), rank: rank}
+	return footKey{key: key, text: i18n.T(text), rank: rank}
 }
 
 var (
@@ -1101,12 +1078,14 @@ func renderFoot(gs []footGroup) string {
 	for _, g := range pruneFoot(gs) {
 		parts := make([]string, len(g))
 		for i, k := range g {
-			key, desc, ok := strings.Cut(k.text, " ")
-			if k.raw || !ok {
+			switch {
+			case k.raw:
 				parts[i] = k.text
-				continue
+			case k.key == "":
+				parts[i] = dimmed.Render(k.text)
+			default:
+				parts[i] = accent.Render(k.key) + dimmed.Render(" "+k.text)
 			}
-			parts[i] = accent.Render(key) + dimmed.Render(" "+desc)
 		}
 		groups = append(groups, strings.Join(parts, "  "))
 	}

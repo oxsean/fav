@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+
+	"github.com/oxsean/fav/internal/fileio"
 )
 
 // Config holds the settings panel values (~/.agent/fav/config.json); FAV_ICONS and --no-mouse override it.
@@ -62,12 +64,9 @@ func LoadConfig() Config {
 }
 
 func (c Config) Save() error {
-	if err := os.MkdirAll(Home(), 0o755); err != nil {
-		return err
-	}
 	b, err := json.MarshalIndent(c, "", "  ")
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(ConfigPath(), append(b, '\n'), 0o644)
+	return fileio.WriteFile(ConfigPath(), append(b, '\n'), 0o644)
 }

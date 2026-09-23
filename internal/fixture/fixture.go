@@ -17,7 +17,7 @@ import (
 	"github.com/oxsean/fav/internal/paths"
 )
 
-// Session is one scenario; Listed = shown by `fav sessions`, Agent = one-shot or scratch run (Agents list only).
+// Session is one scenario; Listed: shown by `fav sessions status:all`; Agent: a one-shot or scratch run.
 type Session struct {
 	Name, Provider, ID, Cwd, Path, Title string
 	Listed, Agent, Favorite              bool
@@ -211,6 +211,10 @@ func (b *builder) claudeSessions() {
 	s.reply("日志里 state 被 URL 编码了两次，已经在回调里只解码一次。")
 	s.tool("Write", obj{{"file_path", b.dir("webapp", "docs", "oauth.md")}, {"content", "# OAuth\n\nstate 只解码一次。\n"}},
 		"File created successfully.")
+	s.tool("NotebookEdit", obj{{"notebook_path", b.dir("webapp", "docs", "state.ipynb")}, {"new_source", "decode(state)"}},
+		"Updated cell.")
+	s.tool("Write", obj{{"file_path", filepath.Join(b.Tmp, "claude-501", "scratchpad", "notes.md")}, {"content", "draft"}},
+		"File created successfully.")
 	s.user("好，顺便把文档补一下，然后跑一遍测试")
 	s.tool("Bash", obj{{"command", "npm test -- auth"}}, "PASS src/auth/callback.test.ts\nTests: 12 passed")
 	s.reply("测试全部通过，文档已补到 docs/oauth.md。")
@@ -308,7 +312,7 @@ func (b *builder) codexSessions() {
 	cli.turnContext()
 	cli.say("webapp 的 CI 在 lint 阶段失败了，帮我修好")
 	cli.exec("npm run lint", "src/app.ts:3:7  error  'unused' is assigned a value but never used")
-	cli.patch("*** Update File: src/app.ts\n@@\n-const unused = 1\n")
+	cli.patch("*** Update File: src/app.ts\n@@\n-const unused = 1\n*** Add File: " + b.dir("webapp", "scripts", "lint.sh") + "\n+npm run lint\n")
 	cli.reply("删掉了未使用的变量，lint 通过。")
 	cli.say("再确认一下 build")
 	cli.exec("npm run build", "built in 2.1s")
@@ -371,7 +375,7 @@ func (b *builder) codexSessions() {
 	lost.say("legacy-app 的 Dockerfile 换成多阶段构建")
 	lost.reply("已改为多阶段构建，镜像小了 60%。")
 	b.favorite("codex-missing-dir", "legacy-app 多阶段构建", "项目目录已被移走", fav.StatusDone, []string{"docker"}, false)
-	b.recs[len(b.recs)-1].GitRemote = fmt.Sprintf(remote, "legacy-app")
+	b.recs[len(b.recs)-1].GitRemote = strings.TrimSuffix(fmt.Sprintf(remote, "legacy-app"), ".git")
 }
 
 func (b *builder) sidecars() error {

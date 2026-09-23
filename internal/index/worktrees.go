@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/oxsean/fav/internal/capture"
+	"github.com/oxsean/fav/internal/fileio"
 	"github.com/oxsean/fav/internal/paths"
 )
 
@@ -62,10 +63,7 @@ func (w worktrees) learn(files map[string]*File, path string) worktrees {
 		return w
 	}
 	if b, err := json.Marshal(next); err == nil {
-		tmp := path + ".tmp"
-		if os.WriteFile(tmp, b, 0o644) == nil {
-			os.Rename(tmp, path)
-		}
+		fileio.WriteFile(path, b, 0o644)
 	}
 	return next
 }

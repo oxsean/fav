@@ -5,11 +5,6 @@ import (
 	"os"
 	"strings"
 	"testing"
-
-	tea "charm.land/bubbletea/v2"
-	"github.com/charmbracelet/x/ansi"
-
-	"github.com/oxsean/fav/internal/i18n"
 )
 
 func TestKeysAreUniquePerScope(t *testing.T) {
@@ -62,7 +57,7 @@ func TestDialogTabAndSpace(t *testing.T) {
 		default:
 			t.Errorf("scope %d: Tab does %d", s, a)
 		}
-		switch a := keyAct(s, " "); a {
+		switch a := keyAct(s, "space"); a {
 		case actNone, actPageDown:
 		default:
 			t.Errorf("scope %d: Space does %d", s, a)
@@ -153,59 +148,5 @@ func TestLabelTextsCarryNoKeys(t *testing.T) {
 				t.Errorf("%s %s = %q starts with a key", lang, k, v)
 			}
 		}
-	}
-}
-
-func TestSplitBlocksKeepsOrderAndBalances(t *testing.T) {
-	block := func(name string, n int) []string {
-		b := []string{name}
-		for range n - 1 {
-			b = append(b, "·")
-		}
-		return b
-	}
-	blocks := [][]string{block("a", 6), block("b", 2), block("c", 3), block("d", 5), block("e", 1)}
-	cols := splitBlocks(blocks, 2)
-	if len(cols) != 2 {
-		t.Fatalf("want 2 columns, got %d", len(cols))
-	}
-	var order []string
-	tallest := 0
-	for _, c := range cols {
-		tallest = max(tallest, len(c))
-		for _, l := range c {
-			if l != "·" && l != "" {
-				order = append(order, l)
-			}
-		}
-	}
-	if strings.Join(order, "") != "abcde" {
-		t.Fatalf("groups out of reading order: %v", order)
-	}
-	if tallest != 11 { // a b | c d e = 9 | 11 beats a b c | d e = 13 | 7
-		t.Fatalf("tallest column %d, want 11", tallest)
-	}
-	if got := splitBlocks(blocks, 1); len(got) != 1 {
-		t.Fatalf("one column wanted, got %d", len(got))
-	}
-}
-
-func TestHelpPagesTurnByKeyAndClick(t *testing.T) {
-	m := sized(t, 140, 40)
-	m.ov = overlay{kind: ovHelp}
-	m.screen()
-	m.Update(press("tab"))
-	if m.ov.page != 1 || !strings.Contains(ansi.Strip(m.screen()), "a|b") {
-		t.Fatalf("Tab goes to the syntax page: page %d", m.ov.page)
-	}
-	m.Update(press("shift+tab"))
-	m.Update(press("shift+tab"))
-	if m.ov.page != 2 {
-		t.Fatalf("Shift+Tab wraps around to the last page: page %d", m.ov.page)
-	}
-	x, y := findText(m.screen(), i18n.T("help.tab.keys"))
-	m.Update(tea.MouseClickMsg{Button: tea.MouseLeft, X: x + 1, Y: y})
-	if m.ov.kind != ovHelp || m.ov.page != 0 {
-		t.Fatalf("clicking a page name opens it: kind %d page %d", m.ov.kind, m.ov.page)
 	}
 }

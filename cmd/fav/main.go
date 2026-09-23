@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -51,7 +52,7 @@ func main() {
 func run(args []string) error {
 	i18n.Set(i18n.Resolve(loadConfig().Lang)) // icons / time format / turn threshold apply to every subcommand, including the fzf children
 	cmd := ""
-	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
+	if len(args) > 0 && (!strings.HasPrefix(args[0], "-") || slices.Contains([]string{"-h", "--help", "--version"}, args[0])) {
 		cmd, args = args[0], args[1:]
 	}
 	switch cmd {
@@ -76,10 +77,8 @@ func run(args []string) error {
 		return cmdOpen(args)
 	case "edit":
 		return cmdEdit(args)
-	case "status":
-		return cmdStatus(args)
-	case "done":
-		return cmdStatus([]string{firstArg(args), fav.StatusDone})
+	case "status", "done":
+		return cmdStatus(cmd, args)
 	case "archive", "unarchive", "fav", "unfav":
 		return cmdFlag(cmd, args)
 	case "pin", "unpin":
@@ -117,7 +116,7 @@ func run(args []string) error {
 	case "install-skill":
 		return cmdInstallSkill(args)
 	case "uninstall-skill":
-		return cmdUninstallSkill()
+		return cmdUninstallSkill(args)
 	case "shell-init":
 		return cmdShellInit(args)
 	case "version", "--version":
@@ -130,8 +129,6 @@ func run(args []string) error {
 		return i18n.E("cli.unknown_subcommand", cmd, usage())
 	}
 }
-
-func openStore() (*fav.Store, error) { return fav.Open() }
 
 // parseMixed lets flags appear after positional args.
 func parseMixed(fs *flag.FlagSet, args []string) ([]string, error) {
@@ -148,8 +145,31 @@ func parseMixed(fs *flag.FlagSet, args []string) ([]string, error) {
 	}
 }
 
-// pick falls back from record id to session id (prefix ok): favorites, then the index, then live sessions;
-// a session that was never favorited comes back with an empty ID.
+// matchRef finds the items whose session id starts with ref or whose record id is ref: the last hit and how many.
+func matchRef[T any](items []T, ref string, keys func(T) (sid, id string)) (hit T, n int) {
+	for _, it := range items {
+		if sid, id := keys(it); strings.HasPrefix(sid, ref) || id != "" && id == ref {
+			hit, n = it, n+1
+		}
+	}
+	return hit, n
+}
+
+func refErr(ref string, n int) error {
+	switch {
+	case n == 0:
+		return i18n.E("cli.record_not_found", ref)
+	case n > 1:
+		return i18n.E("cli.session_ambiguous", ref)
+	}
+	return nil
+}
+
+func recKeys(r *fav.Rec) (string, string) { return r.SessionID, r.ID }
+
+// pick resolves a record id or session id prefix: favorites, indexed sessions, running ones, then any file the index
+// has (one-shot runs, silent sessions, older ids of a chain); more than one session is an error. A session never
+// favorited comes back with an empty ID.
 func pick(s *fav.Store, ref string) (*fav.Rec, error) {
 	if ref == "" {
 		return nil, errors.New(i18n.T("cli.missing_id"))
@@ -157,54 +177,27 @@ func pick(s *fav.Store, ref string) (*fav.Rec, error) {
 	if r := s.Get(ref); r != nil {
 		return r, nil
 	}
-	var hit *fav.Rec
-	for _, r := range s.All() {
-		if r.SessionID == ref || strings.HasPrefix(r.SessionID, ref) {
-			if hit != nil {
-				return nil, i18n.E("cli.session_ambiguous", ref)
-			}
-			hit = r
-		}
-	}
-	if hit != nil {
-		return hit, nil
+	if r, n := matchRef(s.All(), ref, recKeys); n > 0 {
+		return r, refErr(ref, n)
 	}
 	idx, err := index.Open()
 	if err != nil {
 		return nil, err
 	}
-	for _, ss := range idx.Sessions() {
-		if ss.SessionID == ref || strings.HasPrefix(ss.SessionID, ref) {
-			if hit != nil {
-				return nil, i18n.E("cli.session_ambiguous", ref)
-			}
-			hit = ss.Rec()
-		}
+	sessionKeys := func(ss *index.Session) (string, string) { return ss.SessionID, "" }
+	if ss, n := matchRef(idx.Sessions(), ref, sessionKeys); n > 0 {
+		return ss.Rec(), refErr(ref, n)
 	}
-	if hit == nil {
-		for id, l := range capture.LiveSessions() {
-			if id == ref || strings.HasPrefix(id, ref) {
-				hit = synthLive(id, l, idx.Transcript(id))
-			}
-		}
+	var rows index.Rows
+	running, _ := rows.List(s, idx, nil, capture.LiveSessions(), fav.Query{Status: fav.StatusLive, All: true})
+	if r, n := matchRef(running, ref, recKeys); n > 0 {
+		return r, refErr(ref, n)
 	}
-	if hit == nil {
-		if f := idx.FileByPrefix(ref); f != nil {
-			hit = f.Rec()
-		}
+	f, n := idx.FileByPrefix(ref) // one-shot runs, silent sessions, older ids of a chain
+	if err := refErr(ref, n); err != nil {
+		return nil, err
 	}
-	if hit == nil {
-		return nil, i18n.E("cli.record_not_found", ref)
-	}
-	return hit, nil
-}
-
-// save gives a session from the index a record on its first write; favorited_at stays empty so it is not a favorite.
-func save(s *fav.Store, r *fav.Rec) error {
-	if r.ID == "" {
-		r.ID = fav.NewID()
-	}
-	return s.Put(r)
+	return f.Rec(), nil
 }
 
 type skillInput struct {
@@ -253,7 +246,7 @@ func cmdAdd(args []string) error {
 		ctx.TranscriptPath = capture.TranscriptPath(ctx.Provider, ctx.SessionID)
 	}
 
-	s, err := openStore()
+	s, err := fav.Open()
 	if err != nil {
 		return err
 	}
@@ -309,43 +302,30 @@ func cmdList(args []string) error {
 	if err != nil {
 		return err
 	}
-	expr := strings.TrimSpace(*query + " " + strings.Join(rest, " "))
-
-	s, err := openStore()
+	s, err := fav.Open()
 	if err != nil {
 		return err
 	}
-	if idx, err := index.Open(); err == nil {
-		idx.Attach(s, nil)
+	idx, err := index.Open()
+	if err != nil {
+		return err
 	}
-	q := fav.Parse(expr)
-	if q.Status == "live" {
-		live := capture.LiveSessions()
-		q.Live = func(id string) bool { _, ok := live[id]; return ok }
+	recs, err := listRecs(s, idx, nil, fav.Parse(*query+" "+strings.Join(rest, " ")), "")
+	if err != nil {
+		return err
 	}
-	recs := s.Query(q)
-	if *limit > 0 && len(recs) > *limit {
-		recs = recs[:*limit]
-	}
-
-	now := time.Now()
+	fav.SortByStart(recs)
+	recs = recs[:limited(len(recs), *limit)]
 	switch {
 	case *asJSON:
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		return enc.Encode(recs)
+		return printJSON(recs)
 	case *asLine:
+		now := time.Now()
 		for _, r := range recs {
 			fmt.Println(render.Line(r, now))
 		}
 	default:
-		for _, r := range recs {
-			for _, l := range render.Card(r, min(termWidth(), 100), now) {
-				fmt.Println(l)
-			}
-			fmt.Println()
-		}
-		fmt.Print(i18n.F("cli.items_count", len(recs)))
+		printCards(recs)
 	}
 	return nil
 }
@@ -358,7 +338,7 @@ func cmdSessions(args []string) error {
 	if err != nil {
 		return err
 	}
-	s, err := openStore()
+	s, err := fav.Open()
 	if err != nil {
 		return err
 	}
@@ -366,94 +346,96 @@ func cmdSessions(args []string) error {
 	if err != nil {
 		return err
 	}
-	recs := sessionRecs(s, refreshed(idx), strings.Join(rest, " "), "")
-	if *limit > 0 && len(recs) > *limit {
-		recs = recs[:*limit]
+	recs, err := sessionRecs(s, refreshed(idx), strings.Join(rest, " "), "")
+	if err != nil {
+		return err
 	}
+	recs = recs[:limited(len(recs), *limit)]
+	if !*asJSON {
+		printCards(recs)
+		return nil
+	}
+	type row struct {
+		*fav.Rec
+		Turns  int       `json:"turns"`
+		Msgs   int       `json:"msgs"`
+		LastAt time.Time `json:"last_at"`
+	}
+	rows := make([]row, len(recs))
+	for i, r := range recs {
+		rows[i] = row{r, r.Turns, r.Msgs, r.ActiveAt()}
+	}
+	return printJSON(rows)
+}
 
-	now := time.Now()
-	switch {
-	case *asJSON:
-		type row struct {
-			*fav.Rec
-			Turns  int       `json:"turns"`
-			Msgs   int       `json:"msgs"`
-			LastAt time.Time `json:"last_at"`
-		}
-		rows := make([]row, len(recs))
-		for i, r := range recs {
-			rows[i] = row{r, r.Turns, r.Msgs, lastAt(r)}
-		}
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		return enc.Encode(rows)
-	default:
-		for _, r := range recs {
-			for _, l := range render.Card(r, min(termWidth(), 100), now) {
-				fmt.Println(l)
-			}
-			fmt.Println()
-		}
-		fmt.Print(i18n.F("cli.items_count", len(recs)))
+func limited(n, limit int) int {
+	if limit > 0 {
+		return min(n, limit)
 	}
-	return nil
+	return n
+}
+
+func printJSON(v any) error {
+	enc := json.NewEncoder(os.Stdout)
+	enc.SetIndent("", "  ")
+	return enc.Encode(v)
+}
+
+func printCards(recs []*fav.Rec) {
+	now := time.Now()
+	for _, r := range recs {
+		for _, l := range render.Card(r, min(termWidth(), 100), now) {
+			fmt.Println(l)
+		}
+		fmt.Println()
+	}
+	fmt.Print(i18n.F("cli.items_count", len(recs)))
 }
 
 func refreshed(idx *index.Index) *index.Index {
 	idx, changed := idx.Refresh()
 	if changed {
 		if err := idx.Save(); err != nil {
-			fmt.Fprintln(os.Stderr, i18n.T("cli.index_not_written")+err.Error())
+			fmt.Fprintln(os.Stderr, i18n.F("cli.index_not_written", err))
 		}
 	}
 	return idx
 }
 
-// keep is the key of the row just acted on: it stays until the next reload even when it no longer matches,
-// so the action can be undone (the TUI's pin).
-func sessionRecs(s *fav.Store, idx *index.Index, expr, keep string) []*fav.Rec {
-	q := fav.Parse(expr)
-	q.All = true
-	all := agentRecs(idx, q)
-	if all == nil {
-		all = append(idx.Attach(s, nil), s.All()...)
+func rescanned(idx *index.Index, force map[string]bool) *index.Index {
+	idx, err := idx.RescanSave(force)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, i18n.F("cli.index_not_written", err))
 	}
-	if q.Status == "live" {
-		live := capture.LiveSessions()
-		q.Live = func(id string) bool { _, ok := live[id]; return ok }
+	return idx
+}
+
+// listRecs lists what q shows; keep, the fzf key of the row just acted on, stays listed so the action can be undone.
+func listRecs(s *fav.Store, idx *index.Index, live map[string]capture.Live, q fav.Query, keep string) ([]*fav.Rec, error) {
+	if live == nil && q.Status == fav.StatusLive {
+		live = capture.LiveSessions()
 	}
-	var recs []*fav.Rec
-	for _, r := range all {
-		if q.Match(r) || kept(r, keep) {
-			recs = append(recs, r)
+	unfav := idx.Attach(s, nil)
+	var rows index.Rows
+	recs, err := rows.List(s, idx, unfav, live, q)
+	isKept := func(r *fav.Rec) bool { return keep != "" && (r.ID == keep || r.SessionID == keep) }
+	if !slices.ContainsFunc(recs, isKept) {
+		for _, pool := range [][]*fav.Rec{s.All(), unfav} {
+			if i := slices.IndexFunc(pool, isKept); i >= 0 {
+				recs = append(recs, pool[i])
+				break
+			}
 		}
 	}
-	sort.SliceStable(recs, func(i, j int) bool { return lastAt(recs[i]).After(lastAt(recs[j])) })
-	return recs
+	return recs, err
 }
 
-// agentRecs: the rows of status:agent, nil for every other query.
-func agentRecs(idx *index.Index, q fav.Query) []*fav.Rec {
-	if q.Status != fav.StatusAgent {
-		return nil
-	}
-	out := []*fav.Rec{}
-	for _, ss := range idx.AgentSessions() {
-		out = append(out, ss.Rec())
-	}
-	return out
-}
-
-func kept(r *fav.Rec, keep string) bool { return keep != "" && !r.Deleted && render.LineKey(r) == keep }
-
-func lastAt(r *fav.Rec) time.Time {
-	if !r.LastAt.IsZero() {
-		return r.LastAt
-	}
-	if r.FavoritedAt != nil {
-		return *r.FavoritedAt
-	}
-	return r.When()
+func sessionRecs(s *fav.Store, idx *index.Index, expr, keep string) ([]*fav.Rec, error) {
+	q := fav.Parse(expr)
+	q.All = true
+	recs, err := listRecs(s, idx, nil, q, keep)
+	sort.SliceStable(recs, func(i, j int) bool { return recs[i].ActiveAt().After(recs[j].ActiveAt()) })
+	return recs, err
 }
 
 func cmdShow(args []string) error {
@@ -463,7 +445,7 @@ func cmdShow(args []string) error {
 	if err != nil {
 		return err
 	}
-	s, err := openStore()
+	s, err := fav.Open()
 	if err != nil {
 		return err
 	}
@@ -472,9 +454,7 @@ func cmdShow(args []string) error {
 		return err
 	}
 	if *asJSON {
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		return enc.Encode(r)
+		return printJSON(r)
 	}
 	fmt.Print(render.Preview(r, min(termWidth(), 100), time.Now()))
 	return nil
@@ -487,7 +467,7 @@ func cmdPreview(args []string) error {
 	if err != nil {
 		return err
 	}
-	s, err := openStore()
+	s, err := fav.Open()
 	if err != nil {
 		return err
 	}
@@ -500,11 +480,7 @@ func cmdPreview(args []string) error {
 		w = termWidth()
 	}
 	fmt.Print(render.Preview(r, w, time.Now()))
-	path := r.TranscriptPath
-	if r.PinnedPath != "" {
-		path = r.PinnedPath
-	}
-	if page := capture.Messages(path, -1, previewMsgs); len(page.Msgs) > 0 {
+	if page := capture.Messages(first(r.Transcripts()), -1, previewMsgs); len(page.Msgs) > 0 {
 		fmt.Println()
 		fmt.Println(i18n.F("preview.chat", len(page.Msgs)))
 		for _, l := range render.Chat(page.Msgs, w, 6) {
@@ -516,20 +492,20 @@ func cmdPreview(args []string) error {
 
 const previewMsgs = 40 // reads the last 1MB of the file, like the TUI right pane
 
-func cmdStatus(args []string) error {
-	if len(args) < 2 || !fav.ValidStatus(args[1]) {
+func cmdStatus(cmd string, args []string) error {
+	fs := newFlags(cmd)
+	pos, err := parseMixed(fs, args)
+	if err != nil {
+		return err
+	}
+	if cmd == "done" {
+		pos = []string{first(pos), fav.StatusDone}
+	}
+	if len(pos) != 2 || !fav.ValidStatus(pos[1]) {
 		return errors.New(i18n.T("cli.status.usage"))
 	}
-	s, err := openStore()
+	r, err := update(pos[0], func(r *fav.Rec) { r.Status = pos[1] })
 	if err != nil {
-		return err
-	}
-	r, err := pick(s, args[0])
-	if err != nil {
-		return err
-	}
-	r.Status = args[1]
-	if err := save(s, r); err != nil {
 		return err
 	}
 	fmt.Printf("%s → %s\n", r.Title, render.StatusLabel(r.Status))
@@ -537,39 +513,56 @@ func cmdStatus(args []string) error {
 }
 
 func cmdFlag(cmd string, args []string) error {
-	s, err := openStore()
-	if err != nil {
-		return err
-	}
-	r, err := pick(s, firstArg(args))
+	fs := newFlags(cmd)
+	pos, err := parseMixed(fs, args)
 	if err != nil {
 		return err
 	}
 	now := time.Now()
-	var msg string
-	switch cmd {
-	case "fav":
-		r.FavoritedAt, msg = &now, i18n.T("cli.favorited")
-	case "unfav":
-		r.FavoritedAt, msg = nil, i18n.T("cli.unfavorited")
-	case "archive":
-		r.ArchivedAt, msg = &now, i18n.T("status.archived")
-	case "unarchive":
-		r.ArchivedAt, msg = nil, i18n.T("cli.unarchived")
-	}
-	if err := save(s, r); err != nil {
-		return err
-	}
-	fmt.Printf("%s  %s\n", msg, r.Title)
-	return nil
-}
-
-func cmdPin(cmd string, args []string) error {
-	s, err := openStore()
+	msg := map[string]string{"fav": "cli.favorited", "unfav": "cli.unfavorited", "archive": "status.archived", "unarchive": "cli.unarchived"}[cmd]
+	r, err := update(first(pos), func(r *fav.Rec) {
+		switch cmd {
+		case "fav":
+			r.FavoritedAt = &now
+		case "unfav":
+			r.FavoritedAt = nil
+		case "archive":
+			r.ArchivedAt = &now
+		case "unarchive":
+			r.ArchivedAt = nil
+		}
+	})
 	if err != nil {
 		return err
 	}
-	r, err := pick(s, firstArg(args))
+	fmt.Printf("%s  %s\n", i18n.T(msg), r.Title)
+	return nil
+}
+
+func update(ref string, change func(*fav.Rec)) (*fav.Rec, error) {
+	s, err := fav.Open()
+	if err != nil {
+		return nil, err
+	}
+	r, err := pick(s, ref)
+	if err != nil {
+		return nil, err
+	}
+	r, err = s.Update(r, change)
+	return r, err
+}
+
+func cmdPin(cmd string, args []string) error {
+	fs := newFlags(cmd)
+	pos, err := parseMixed(fs, args)
+	if err != nil {
+		return err
+	}
+	s, err := fav.Open()
+	if err != nil {
+		return err
+	}
+	r, err := pick(s, first(pos))
 	if err != nil {
 		return err
 	}
@@ -581,8 +574,7 @@ func cmdPin(cmd string, args []string) error {
 		if err := os.Remove(r.PinnedPath); err != nil && !os.IsNotExist(err) {
 			return err
 		}
-		r.PinnedPath = ""
-		if err := s.Put(r); err != nil {
+		if _, err := s.Update(r, func(r *fav.Rec) { r.PinnedPath = "" }); err != nil {
 			return err
 		}
 		fmt.Print(i18n.F("cli.pin.unpinned", r.Title))
@@ -596,31 +588,19 @@ func cmdPin(cmd string, args []string) error {
 	if err != nil {
 		return i18n.E("cli.pin.transcript_unavailable", err)
 	}
-	dir := filepath.Join(fav.Home(), "pinned")
-	if err := os.MkdirAll(dir, 0o700); err != nil {
+	var linkErr error
+	r, err = s.Update(r, func(r *fav.Rec) {
+		r.PinnedPath = filepath.Join(fav.Home(), "pinned", r.Provider+"-"+r.SessionID+".jsonl")
+		linkErr = r.Relink(r.TranscriptPath)
+	})
+	if err != nil {
 		return err
 	}
-	dst := filepath.Join(dir, r.Provider+"-"+r.SessionID+".jsonl")
-	os.Remove(dst)
-	if err := os.Link(r.TranscriptPath, dst); err != nil {
-		// ⚠️ never falls back to copying across devices
-		return i18n.E("cli.pin.link_failed", err)
+	if linkErr != nil {
+		return i18n.E("cli.pin.link_failed", linkErr)
 	}
-	r.PinnedPath = dst
-	if err := s.Put(r); err != nil {
-		return err
-	}
-	fmt.Print(i18n.F("cli.pin.pinned", r.Title, dst, float64(st.Size())/(1<<20)))
+	fmt.Print(i18n.F("cli.pin.pinned", r.Title, r.PinnedPath, float64(st.Size())/(1<<20)))
 	return nil
-}
-
-func firstArg(args []string) string {
-	for _, a := range args {
-		if !strings.HasPrefix(a, "-") {
-			return a
-		}
-	}
-	return ""
 }
 
 func first(ss []string) string {

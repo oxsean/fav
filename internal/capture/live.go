@@ -1,7 +1,6 @@
 package capture
 
 import (
-	"bufio"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -12,6 +11,7 @@ import (
 	"github.com/oxsean/fav/internal/fav"
 	"github.com/oxsean/fav/internal/filelock"
 	"github.com/oxsean/fav/internal/herdr"
+	"github.com/oxsean/fav/internal/paths"
 )
 
 type Live struct {
@@ -34,20 +34,22 @@ func LiveSessions() map[string]Live {
 }
 
 // prev is the previous result: unchanged status and seq keep their Since.
-// Herdr re-reads a pane's Claude session id only on a state change, so an id without a sessions/*.json is stale and dropped.
 func HerdrLive(local, prev map[string]Live) map[string]Live {
 	agents, err := herdr.Agents()
 	if err != nil {
 		return nil
 	}
-	now := time.Now()
-	_, tracked := os.Stat(filepath.Join(ClaudeHome(), "sessions"))
+	return herdrLive(agents, local, prev, paths.IsDir(filepath.Join(ClaudeHome(), "sessions")), time.Now())
+}
+
+// ⚠️ Herdr re-reads a pane's session id only on a state change: when tracked, an id without sessions/*.json is stale.
+func herdrLive(agents []herdr.Pane, local, prev map[string]Live, tracked bool, now time.Time) map[string]Live {
 	out := map[string]Live{}
 	for _, a := range agents {
 		if a.AgentSession == nil || a.AgentSession.Value == "" {
 			continue
 		}
-		if a.Agent == fav.ProviderClaude && tracked == nil {
+		if a.Agent == fav.ProviderClaude && tracked {
 			if _, ok := local[a.AgentSession.Value]; !ok {
 				continue
 			}
@@ -120,35 +122,23 @@ func codexOneOff(id, lock string) bool {
 	if v, ok := codexOneOffByID[id]; ok {
 		return v
 	}
-	hits, _ := filepath.Glob(filepath.Join(codexSessionsDir(), "*", "[0-9][0-9]", "[0-9][0-9]", "rollout-*-"+id+".jsonl"))
+	hits := CodexRollouts(id)
 	if len(hits) == 0 {
 		fi, err := os.Stat(lock)
 		return err == nil && time.Since(fi.ModTime()) > time.Minute
 	}
-	f, err := os.Open(hits[0])
+	m, err := readSessionMeta(hits[0])
 	if err != nil {
 		return false
 	}
-	defer f.Close()
-	var meta struct {
-		Payload struct {
-			Originator     string  `json:"originator"`
-			ParentThreadID *string `json:"parent_thread_id"`
-		} `json:"payload"`
-	}
-	sc := bufio.NewScanner(f)
-	sc.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
-	if sc.Scan() {
-		json.Unmarshal(sc.Bytes(), &meta)
-	}
-	codexOneOffByID[id] = CodexOneOff(meta.Payload.Originator, meta.Payload.ParentThreadID)
+	codexOneOffByID[id] = CodexOneOff(m.Originator, m.ParentThreadID)
 	return codexOneOffByID[id]
 }
 
 // CodexLive: a held flock means the thread is open. The Claude Code plugin's app-server keeps holding locks of threads it ran; those do not count.
 func CodexLive() map[string]Live {
 	out := map[string]Live{}
-	locks, _ := filepath.Glob(filepath.Join(filepath.Dir(codexSessionsDir()), "thread-writer-locks", "*.lock"))
+	locks, _ := filepath.Glob(filepath.Join(CodexHome(), "thread-writer-locks", "*.lock"))
 	for _, f := range locks {
 		id := strings.TrimSuffix(filepath.Base(f), ".lock")
 		if strings.HasPrefix(id, ".") || !filelock.Held(f) || codexOneOff(id, f) {
@@ -157,24 +147,6 @@ func CodexLive() map[string]Live {
 		out[id] = Live{Agent: fav.ProviderCodex}
 	}
 	return out
-}
-
-// ClaudeHome is Claude Code's data directory: CLAUDE_CONFIG_DIR, else ~/.claude.
-func ClaudeHome() string {
-	if h := os.Getenv("CLAUDE_CONFIG_DIR"); h != "" {
-		return h
-	}
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".claude")
-}
-
-// CodexHome is Codex's data directory: CODEX_HOME, else ~/.codex.
-func CodexHome() string {
-	if h := os.Getenv("CODEX_HOME"); h != "" {
-		return h
-	}
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".codex")
 }
 
 func LocalLive() map[string]Live { return MergeLive(CodexLive(), ClaudeLive()) }
@@ -212,7 +184,7 @@ func MergeLive(maps ...map[string]Live) map[string]Live {
 	return out
 }
 
-// background sessions cannot --resume
-func BuildAttach(r *fav.Rec, backgroundID string) CommandSpec {
+// buildAttach: background sessions cannot --resume.
+func buildAttach(r *fav.Rec, backgroundID string) CommandSpec {
 	return CommandSpec{Exec: "claude", Args: []string{"attach", backgroundID}, Cwd: r.Cwd}
 }

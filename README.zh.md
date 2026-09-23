@@ -85,7 +85,7 @@ curl -fsSL https://github.com/oxsean/fav/releases/latest/download/fav_$(uname -s
 # 或者有 Go：
 go install github.com/oxsean/fav/cmd/fav@latest
 
-fav install-skill                            # /fav Skill 装进 ~/.claude/skills 和 ~/.codex/skills
+fav install-skill                            # /fav Skill 装进 ~/.claude/skills 和 ~/.codex/skills（设了 $CLAUDE_CONFIG_DIR / $CODEX_HOME 就装到那里）
 fav install-hook                             # 可选：Claude Code 问你问题时告诉 fav，没有 Herdr 也能在 Agents 页标出权限确认（fav uninstall-hook 删掉）
 fav                                          # 第一次启动后台建索引，几秒后「会话」页就有你所有历史
 ```

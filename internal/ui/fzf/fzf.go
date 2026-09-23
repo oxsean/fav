@@ -70,7 +70,10 @@ func TabByName(name string) Tab {
 	return TabFavorites
 }
 
-func (t Tab) Name() string { return tabNames[t] }
+func (t Tab) Next(d int) Tab {
+	n := Tab(len(tabNames))
+	return ((t+Tab(d))%n + n) % n
+}
 
 func (t Tab) label() string {
 	switch t {
@@ -216,7 +219,7 @@ func Tick(cur Tab) string {
 	return reloadAction(selfIn(childBindShell()))
 }
 
-func HasTimer() bool {
+func hasTimer() bool {
 	major, minor := version()
 	return atLeast(major, minor, 73)
 }
@@ -240,7 +243,7 @@ func hints(t Tab) (header, footer string) {
 	case TabLive:
 		keys = i18n.T("fzf.keys_live")
 		text = i18n.T("fzf.header_live")
-		if !HasTimer() {
+		if !hasTimer() {
 			text = i18n.T("fzf.header_live_manual")
 		}
 	default:

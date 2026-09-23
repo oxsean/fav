@@ -3,7 +3,6 @@ package tui
 import (
 	"context"
 	"strings"
-	"time"
 	"unicode/utf8"
 
 	tea "charm.land/bubbletea/v2"
@@ -18,18 +17,18 @@ import (
 
 // hitList: → on a message-search result lists every hit of that session in the left pane; the right pane follows the selection.
 type hitList struct {
-	rec       *fav.Rec
-	key       string // msgKey of rec: records are rebuilt on a store reload
-	q         string
-	items     []fulltext.Hit
-	self      map[string]bool // item paths the right pane reads (the newest transcript, or its pinned hard link)
-	loading   bool
-	total     int                // every match; items holds the newest hitLimit
-	cancel    context.CancelFunc // the read in flight
-	openWant  bool               // Enter came while the pane was still paging to the hit
-	syncOff   int64              // message offset the selection last matched: the right pane moving elsewhere moves it
-	cur, top  int
-	lastClick time.Time
+	rec      *fav.Rec
+	key      string // rec.Key(): records are rebuilt on a store reload
+	q        string
+	items    []fulltext.Hit
+	self     map[string]bool // item paths the right pane reads (the newest transcript, or its pinned hard link)
+	loading  bool
+	total    int                // every match; items holds the newest hitLimit
+	cancel   context.CancelFunc // the read in flight
+	openWant bool               // Enter came while the pane was still paging to the hit
+	syncOff  int64              // message offset the selection last matched: the right pane moving elsewhere moves it
+	cur, top int
+	clicks   clicks
 }
 
 const (
@@ -39,7 +38,7 @@ const (
 
 func (m *Model) hitsOpen() bool {
 	hl, r := &m.msg.hl, m.current()
-	if hl.key == "" || r == nil || msgKey(r) != hl.key || hl.q != m.findQuery() {
+	if hl.key == "" || r == nil || r.Key() != hl.key || hl.q != m.findQuery() {
 		return false
 	}
 	hl.rec = r
@@ -57,7 +56,7 @@ func (m *Model) openHits(kw string) tea.Cmd {
 	if x, ok := m.msgHit(r); ok {
 		pin = fulltext.Hit{Path: x.Path, Off: x.Off}
 	}
-	key, dir, tr := msgKey(r), fulltext.Dir(), transcript(r)
+	key, dir, tr := r.Key(), fulltext.Dir(), transcript(r)
 	var loaded []capture.Message // the right pane's messages: a live session's newest may not be in the text store yet
 	if p := m.probes[r]; p != nil {
 		loaded = p.msgs
@@ -157,13 +156,8 @@ func (m *Model) selectHit(i int) tea.Cmd {
 }
 
 func (m *Model) clickHit(i int) tea.Cmd {
-	hl := &m.msg.hl
-	now := time.Now()
-	double := hl.cur == i && now.Sub(hl.lastClick) < 500*time.Millisecond
-	hl.lastClick = now
 	m.pane = paneList
-	if double {
-		hl.lastClick = time.Time{}
+	if m.msg.hl.clicks.double(i) && m.msg.hl.cur == i {
 		return m.openHitMessage()
 	}
 	return m.selectHit(i)

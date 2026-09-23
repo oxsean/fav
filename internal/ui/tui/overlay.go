@@ -41,7 +41,8 @@ const ovPad = 3
 type overlay struct {
 	kind      ovKind
 	page      int // help: the page shown
-	scrollMax int // last line offset the message / help text can scroll to, set while rendering
+	scrollMax int // set by scrollWindow
+	room      int // lines shown
 	title     string
 	hint      string
 	items     []item
@@ -70,11 +71,10 @@ type overlay struct {
 	armed     string     // peek: the digit pressed once, sent on the second press
 	armedAt   time.Time
 
-	msg    capture.Message
-	lines  []string
-	kinds  []byte // per line: 'T' body, 'H' tool header, 'B' argument continuation, 'R' result
-	stepOf []int  // step index per line, -1 = body
-	boxW   int
+	msg   capture.Message
+	lines []string
+	kinds []byte // per line: 'T' body, 'H' tool header, 'B' argument continuation, 'R' result, 'S' separator
+	boxW  int
 	// cursor doubles as the scroll offset
 }
 
@@ -201,6 +201,62 @@ func cancelBtn() btn {
 	return btn{keyed(keyName("esc"), i18n.T("btn.cancel")), false, (*Model).closeOverlay}
 }
 
+func (m *Model) focusOrPress(i int) {
+	if m.ov.focus == i {
+		m.pressFocused()
+		return
+	}
+	m.ov.focus = i
+}
+
+func (m *Model) dialogKey(a act, enter func()) {
+	switch a {
+	case actEnter:
+		if !m.pressFocused() {
+			enter()
+		}
+	case actFocusPrev:
+		m.moveFocus(-1)
+	case actFocusNext:
+		m.moveFocus(1)
+	case actClose:
+		m.closeOverlay()
+	}
+}
+
+func (m *Model) scrollWindow(n, room int) int {
+	m.ov.room, m.ov.scrollMax = room, max(0, n-room)
+	m.ov.cursor = min(max(m.ov.cursor, 0), m.ov.scrollMax)
+	return min(n, m.ov.cursor+room)
+}
+
+// scrollKey moves a scrolling dialog's text; false when a does not scroll.
+func (m *Model) scrollKey(a act) bool {
+	c, page := m.ov.cursor, max(1, m.ov.room)
+	switch a {
+	case actDown:
+		c++
+	case actUp:
+		c--
+	case actPageDown:
+		c += page
+	case actPageUp:
+		c -= page
+	case actHalfDown:
+		c += max(1, page/2)
+	case actHalfUp:
+		c -= max(1, page/2)
+	case actTop:
+		c = 0
+	case actBottom:
+		c = m.ov.scrollMax
+	default:
+		return false
+	}
+	m.ov.cursor = min(max(c, 0), m.ov.scrollMax)
+	return true
+}
+
 func (m *Model) pressFocused() bool {
 	if m.ov.focus < 0 || m.ov.focus >= len(m.ov.btns) {
 		return false
@@ -209,14 +265,23 @@ func (m *Model) pressFocused() bool {
 	return true
 }
 
-func (m *Model) clearPicker() {
+func (m *Model) closeThen(f func(*Model)) {
+	m.closeOverlay()
+	if f != nil {
+		f(m)
+	}
+}
+
+func (m *Model) finishPicker(chosen []string) {
 	apply := m.ov.apply
 	m.closeOverlay()
 	if apply != nil {
-		apply(m, nil)
+		apply(m, chosen)
 	}
 	m.refresh()
 }
+
+func (m *Model) clearPicker() { m.finishPicker(nil) }
 
 func (m *Model) applyPicker() {
 	var chosen []string
@@ -230,12 +295,7 @@ func (m *Model) applyPicker() {
 	} else if m.ov.cursor < len(vis) {
 		chosen = []string{vis[m.ov.cursor].name}
 	}
-	apply := m.ov.apply
-	m.closeOverlay()
-	if apply != nil {
-		apply(m, chosen)
-	}
-	m.refresh()
+	m.finishPicker(chosen)
 }
 
 func (m *Model) renderOverlay() string {
@@ -299,9 +359,7 @@ func (m *Model) renderMessage() string {
 	w := m.ov.boxW
 	room := max(1, m.h-4-6) // 2 rows top and bottom, minus border 2, title 1, blank 2, hint 1
 	lines := m.ov.lines
-	m.ov.scrollMax = max(0, len(lines)-room)
-	m.ov.cursor = min(max(m.ov.cursor, 0), m.ov.scrollMax)
-	end := min(len(lines), m.ov.cursor+room)
+	end := m.scrollWindow(len(lines), room)
 	who := i18n.T("chat.you")
 	if m.ov.msg.Role != "user" {
 		who = "AI"
@@ -338,7 +396,7 @@ func (m *Model) renderMessage() string {
 	}
 	hint := i18n.T("msg.hint")
 	if len(lines) > room {
-		hint = i18n.T("msg.hint_scroll") + hint
+		hint = i18n.F("msg.hint_scroll", hint)
 	}
 	body = append(body, "", dimmed.Render(hint))
 	return ovRender(body, w)
@@ -439,10 +497,16 @@ func labelKey(label string) (key, desc string, ok bool) {
 	return key, desc, ok && isKeyName(key)
 }
 
-var keyNames = map[string]bool{"Enter": true, "Esc": true, "Tab": true, "Space": true, "Backspace": true, "PgUp": true, "PgDn": true, "Home": true, "End": true}
-
 func isKeyName(s string) bool {
-	return utf8.RuneCountInString(s) == 1 || keyNames[s] || strings.ContainsAny(s, "+/") && isASCII(s)
+	if utf8.RuneCountInString(s) == 1 || strings.ContainsAny(s, "+/") && isASCII(s) {
+		return true
+	}
+	for _, n := range keyNamesShown {
+		if n == s {
+			return true
+		}
+	}
+	return false
 }
 
 func isASCII(s string) bool {
@@ -632,9 +696,6 @@ func helpGroups() []helpGroup {
 	var gs []helpGroup
 	for _, sec := range helpLayout() {
 		g := helpGroup{title: i18n.T(sec.title)}
-		if sec.note != "" {
-			g.note = i18n.T(sec.note)
-		}
 		for _, h := range sec.rows {
 			g.rows = append(g.rows, helpRow{helpKeys(h, helpKeyCap-2), i18n.T(h.desc)})
 		}
@@ -802,9 +863,7 @@ func (m *Model) renderHelp() string {
 
 	// scrolls when it does not fit: cursor is the first visible line; j/k, paging and the wheel move it
 	room := max(1, m.h-4-7)
-	m.ov.scrollMax = max(0, len(lines)-room)
-	m.ov.cursor = min(max(m.ov.cursor, 0), m.ov.scrollMax)
-	end := min(len(lines), m.ov.cursor+room)
+	end := m.scrollWindow(len(lines), room)
 	head := boldSty.Foreground(cText).Render(i18n.T("help.title")) + "  "
 	x := ovPad + render.Width(i18n.T("help.title")) + 2
 	for i, name := range helpPageNames() {
@@ -911,14 +970,14 @@ func startKeys() []string {
 func (m *Model) resumeGroups() []btnGroup {
 	p := m.ov.plan
 	k := func(a act, text string) string { return keyed(keyOf(inResume, a), text) }
-	project := btnGroup{label: i18n.T("resume.group.project"), bs: []btn{{k(actIDE, "IDE"), false, (*Model).openIDE}, {k(actCode, "VS Code"), false, (*Model).openCode}, {k(actFiles, fileManagerName()), false, (*Model).openFiles}}}
+	project := btnGroup{label: i18n.T("resume.group.project"), bs: []btn{{k(actIDE, "IDE"), false, (*Model).openIDE}, {k(actCode, "VS Code"), false, (*Model).openCode}, {k(actFiles, capture.FileManagerName()), false, (*Model).openFiles}}}
 	cancel := cancelBtn()
 	if dirGone, tGone := m.broken(m.ov.rec); dirGone || tGone { // unrecoverable: move / delete instead of resume
 		move := k(actMove, i18n.T("resume.btn_move"))
 		if dirGone && m.ov.rec.Repo != "" {
 			move = k(actMove, i18n.T("resume.btn_move_repo"))
 		}
-		gs := []btnGroup{{label: i18n.T("resume.group.repair"), bs: []btn{{move, dirGone, (*Model).askMove}, {k(actDelete, i18n.T("resume.btn_delete")), !dirGone, (*Model).askDelete}}}}
+		gs := []btnGroup{{label: i18n.T("resume.group.repair"), bs: []btn{{move, dirGone, func(mm *Model) { mm.askMove(mm.ovRec()) }}, {k(actDelete, i18n.T("resume.btn_delete")), !dirGone, func(mm *Model) { mm.askDelete(mm.ovRec()) }}}}}
 		if !dirGone {
 			gs = append(gs, project)
 		}
@@ -991,19 +1050,42 @@ func (m *Model) agentBtns() []btn {
 	return bs
 }
 
-// agentAction runs a running-session action from the dialog on the session under the cursor (the dialog's own).
 func (m *Model) agentAction(a act) {
-	if _, ok := m.liveOf(m.ov.rec); !ok {
+	r := m.ovRec()
+	if _, ok := m.liveOf(r); !ok {
 		return
 	}
 	m.closeOverlay()
 	switch a {
 	case actHandled:
-		m.handleAttn(false)
+		m.handleAttn(r, false)
 	case actSnooze:
-		m.handleAttn(true)
+		m.handleAttn(r, true)
 	case actCloseTab:
-		m.closeLive()
+		m.closeLive(r)
+	}
+}
+
+func (m *Model) recordAction(a act) {
+	r := m.ovRec()
+	switch a {
+	case actMove:
+		m.askMove(r)
+		return
+	case actDelete:
+		m.askDelete(r)
+		return
+	}
+	m.closeOverlay()
+	switch a {
+	case actFavorite:
+		m.toggleFavorite(r)
+	case actDone:
+		m.toggleStatus(r, fav.StatusDone)
+	case actArchive:
+		m.toggleArchive(r)
+	case actEdit:
+		m.pending = m.openEdit(r)
 	}
 }
 
@@ -1013,11 +1095,7 @@ func (m *Model) focusKey(a act) {
 	key := keyOf(inResume, a)
 	for i, b := range m.ov.btns {
 		if k, _, ok := labelKey(b.label); ok && k == key {
-			if m.ov.focus == i {
-				m.pressFocused()
-				return
-			}
-			m.ov.focus = i
+			m.focusOrPress(i)
 			return
 		}
 	}
@@ -1082,16 +1160,14 @@ func (m *Model) recordBtns() []btn {
 		}
 		return keyed(keyOf(inResume, a), i18n.T(off))
 	}
-	act := func(f func(*Model)) func(*Model) {
-		return func(mm *Model) { mm.closeOverlay(); f(mm) }
-	}
+	act := func(a act) func(*Model) { return func(mm *Model) { mm.recordAction(a) } }
 	return []btn{
-		{pick(actFavorite, r != nil && r.Favorite(), "footer.unfavorite", "key.favorite"), false, act((*Model).toggleFavorite)},
-		{pick(actDone, r != nil && r.Done(), "footer.undo_done", "key.done"), false, act(func(mm *Model) { mm.toggleStatus(fav.StatusDone) })},
-		{pick(actArchive, r != nil && r.Archived(), "footer.unarchive", "key.archive"), false, act((*Model).toggleArchive)},
-		{keyed(keyOf(inResume, actEdit), i18n.T("key.edit")), false, func(mm *Model) { mm.pending = mm.openEdit() }},
-		{keyed(keyOf(inResume, actMove), i18n.T("footer.move")), false, (*Model).askMove},
-		{keyed(keyOf(inResume, actDelete), i18n.T("footer.delete")), false, (*Model).askDelete},
+		{pick(actFavorite, r != nil && r.Favorite(), "footer.unfavorite", "key.favorite"), false, act(actFavorite)},
+		{pick(actDone, r != nil && r.Done(), "footer.undo_done", "key.done"), false, act(actDone)},
+		{pick(actArchive, r != nil && r.Archived(), "footer.unarchive", "key.archive"), false, act(actArchive)},
+		{keyed(keyOf(inResume, actEdit), i18n.T("key.edit")), false, act(actEdit)},
+		{keyed(keyOf(inResume, actMove), i18n.T("footer.move")), false, act(actMove)},
+		{keyed(keyOf(inResume, actDelete), i18n.T("footer.delete")), false, act(actDelete)},
 	}
 }
 
@@ -1114,7 +1190,7 @@ func (m *Model) copyResume() {
 		return
 	}
 	m.closeOverlay()
-	m.flash(i18n.T("resume.copied") + cmd)
+	m.flash(i18n.F("resume.copied", cmd))
 }
 
 func (m *Model) titleLines(inner, y0 int) []string {
@@ -1144,7 +1220,7 @@ func (m *Model) doResume(noHerdr bool) {
 		r.Title = t
 		if r.ID != "" {
 			if err := m.store.Put(r); err != nil {
-				m.flash(i18n.T("resume.title_not_saved") + err.Error())
+				m.flash(i18n.F("resume.title_not_saved", err))
 			}
 		}
 	}
@@ -1192,7 +1268,7 @@ func (m *Model) runPlan(r *fav.Rec, p capture.Plan, noHerdr bool) {
 		m.markSeen(r.SessionID, true) // switching to it is taking it in
 	}
 	if c := p.Blocking(); c != nil && (p.Live.TabID == "" || noHerdr) { // focusing a tab touches no session file; checks do not apply
-		m.flash(i18n.T("resume.failed") + c.Text)
+		m.flash(i18n.F("resume.failed", c.Text))
 		return
 	}
 	if p.Live.TabID == "" && p.Ws == nil || noHerdr {
@@ -1219,16 +1295,6 @@ func (m *Model) resumeTargetLine(r *fav.Rec) string {
 	return m.ov.plan.Target(r, "  "+render.GlyphArrow+"  ")
 }
 
-func providerLabel(p string) string {
-	switch p {
-	case fav.ProviderClaude:
-		return "Claude Code"
-	case fav.ProviderCodex:
-		return "Codex CLI"
-	}
-	return p
-}
-
 func overlayOrigin(boxLines []string, w, h int) (int, int) {
 	bw := 0
 	for _, l := range boxLines {
@@ -1238,7 +1304,7 @@ func overlayOrigin(boxLines []string, w, h int) (int, int) {
 }
 
 // composite lays the overlay over the base frame: the base is stripped of colour and dimmed, then cut per column.
-func composite(base, boxLines []string, x, y, w, h int) string {
+func composite(base, boxLines []string, x, y, w int) string {
 	out := make([]string, len(base))
 	for i, l := range base {
 		out[i] = backSty.Render(ansi.Strip(l))

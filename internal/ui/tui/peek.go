@@ -189,7 +189,8 @@ func (m *Model) peekKey(msg tea.KeyPressMsg) tea.Cmd {
 		m.ov.edit, cmd = m.ov.edit.Update(msg)
 		return cmd
 	}
-	switch k := msg.String(); keyAct(inPeek, k) {
+	k := msg.String()
+	switch a := keyAct(inPeek, k); a {
 	case actAnswer:
 		m.pressDigit(k)
 	case actReply:
@@ -198,21 +199,14 @@ func (m *Model) peekKey(msg tea.KeyPressMsg) tea.Cmd {
 		m.peekTab(1)
 	case actTabPrev:
 		m.peekTab(-1)
-	case actEnter:
-		if m.pressFocused() {
-			return nil
-		}
-		m.peekSwitch()
-	case actFocusPrev:
-		m.moveFocus(-1)
-	case actFocusNext:
-		m.moveFocus(1)
 	case actClose:
 		if m.ov.armed != "" {
 			m.ov.armed = ""
 			return nil
 		}
 		m.closeOverlay()
+	default:
+		m.dialogKey(a, m.peekSwitch)
 	}
 	return nil
 }

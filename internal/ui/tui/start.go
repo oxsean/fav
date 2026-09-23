@@ -2,6 +2,7 @@ package tui
 
 import (
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
@@ -14,10 +15,10 @@ import (
 	"github.com/oxsean/fav/internal/render"
 )
 
-// newSessionDir: where a new session under the cursor would run — the session's directory (its main checkout when a removed
-// worktree), or on a projects group header the group's most used directory that still exists.
-func (m *Model) newSessionDir() (dir, name string) {
-	if r := m.current(); r != nil {
+// newSessionDir: r's directory (the main checkout for a removed worktree), or with r nil on a projects group header
+// the group's most used directory that still exists.
+func (m *Model) newSessionDir(r *fav.Rec) (dir, name string) {
+	if r != nil {
 		for _, d := range []string{r.Cwd, r.Repo} {
 			if paths.IsDir(d) {
 				return d, r.Project
@@ -37,12 +38,12 @@ func (m *Model) newSessionDir() (dir, name string) {
 	return "", g
 }
 
-// askStart (w): a new session in the directory under the cursor; the sessions already running there come first.
-func (m *Model) askStart() {
+// askStart: a new session in r's directory; the sessions already running there come first.
+func (m *Model) askStart(r *fav.Rec) {
 	if m.view == viewLive || m.inTrash() {
 		return
 	}
-	dir, name := m.newSessionDir()
+	dir, name := m.newSessionDir(r)
 	if dir == "" {
 		m.flash(i18n.T("start.no_dir"))
 		return
@@ -50,7 +51,7 @@ func (m *Model) askStart() {
 	if name == "" {
 		name = filepath.Base(dir)
 	}
-	r := &fav.Rec{Title: name, Cwd: dir}
+	r = &fav.Rec{Title: name, Cwd: dir}
 	ov := overlay{kind: ovStart, rec: r, focus: -1, cursor: -1, providers: startProviders(m.projectProviders(dir))}
 	for id, l := range m.live {
 		cur := m.bySession(id)
@@ -77,12 +78,7 @@ func (m *Model) askStart() {
 func (m *Model) askStartFromDialog() {
 	r := m.ovRec()
 	m.closeOverlay()
-	for i, row := range m.rows {
-		if row.rec == r {
-			m.cursor = i
-		}
-	}
-	m.askStart()
+	m.askStart(r)
 }
 
 // projectProviders: providers of the sessions under dir, most used first.
@@ -110,16 +106,16 @@ func startProviders(order []string) []string {
 	return out
 }
 
-func (m *Model) startNew(provider string) {
+func (m *Model) startWith(provider, prompt string) {
 	r := m.ov.rec
 	if !capture.Installed(provider) {
-		m.flash(providerLabel(provider) + i18n.T("resume.check.not_installed"))
+		m.flash(i18n.F("resume.check.not_installed", fav.ProviderLabel(provider)))
 		return
 	}
 	p := m.ov.plan
 	if len(m.ov.providers) == 0 || provider != m.ov.providers[0] {
 		var err error
-		if p, err = capture.PlanStart(r, provider, "", false); err != nil {
+		if p, err = capture.PlanStart(r, provider, prompt, false); err != nil {
 			m.flash(err.Error())
 			return
 		}
@@ -140,7 +136,7 @@ func (m *Model) switchRunning(i int) {
 func (m *Model) startGroups() []btnGroup {
 	var bs []btn
 	for i, p := range m.ov.providers {
-		bs = append(bs, btn{keyed(keyOf(inStart, providerAct(p)), providerLabel(p)), i == 0 && m.ov.cursor < 0, func(mm *Model) { mm.startNew(p) }})
+		bs = append(bs, btn{keyed(keyOf(inStart, providerAct(p)), fav.ProviderLabel(p)), i == 0 && m.ov.cursor < 0, func(mm *Model) { mm.startWith(p, "") }})
 	}
 	return []btnGroup{{label: i18n.T("start.group"), bs: bs, end: []btn{cancelBtn()}}}
 }
@@ -193,15 +189,6 @@ func (m *Model) renderStart() string {
 
 func (m *Model) startKey(msg tea.KeyPressMsg) tea.Cmd {
 	switch a := keyAct(inStart, msg.String()); a {
-	case actEnter:
-		if m.pressFocused() {
-			return nil
-		}
-		if m.ov.cursor >= 0 {
-			m.switchRunning(m.ov.cursor)
-		} else if len(m.ov.providers) > 0 {
-			m.startNew(m.ov.providers[0])
-		}
 	case actClaude, actCodex:
 		m.ov.cursor = -1
 		m.selectProvider(providerOf(a))
@@ -211,14 +198,17 @@ func (m *Model) startKey(msg tea.KeyPressMsg) tea.Cmd {
 	case actUp:
 		m.ov.cursor = max(m.ov.cursor-1, -1)
 		m.ov.focus = -1
-	case actFocusPrev:
-		m.ov.cursor = -1
-		m.moveFocus(-1)
-	case actFocusNext:
-		m.ov.cursor = -1
-		m.moveFocus(1)
-	case actClose:
-		m.closeOverlay()
+	default:
+		if a == actFocusPrev || a == actFocusNext {
+			m.ov.cursor = -1
+		}
+		m.dialogKey(a, func() {
+			if m.ov.cursor >= 0 {
+				m.switchRunning(m.ov.cursor)
+			} else if len(m.ov.providers) > 0 {
+				m.startWith(m.ov.providers[0], "")
+			}
+		})
 	}
 	return nil
 }
@@ -240,16 +230,9 @@ func providerAct(p string) act {
 // selectProvider (1 / 2 in the new-session and handoff dialogs) focuses that provider's button; the same digit again or
 // Enter starts it.
 func (m *Model) selectProvider(p string) {
-	for i, have := range m.ov.providers {
-		if have != p {
-			continue
-		}
-		if m.ov.focus == i {
-			m.pressFocused()
-			return
-		}
-		m.ov.focus = i
+	if i := slices.Index(m.ov.providers, p); i >= 0 {
+		m.focusOrPress(i)
 		return
 	}
-	m.flash(providerLabel(p) + i18n.T("resume.check.not_installed"))
+	m.flash(i18n.F("resume.check.not_installed", fav.ProviderLabel(p)))
 }

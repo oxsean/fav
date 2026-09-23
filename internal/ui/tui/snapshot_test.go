@@ -17,33 +17,50 @@ import (
 	"github.com/oxsean/fav/internal/index"
 )
 
+// every frame is exactly the terminal's size: each line w wide (overlays are composited by column), h lines
 func TestFrameLinesFillWidth(t *testing.T) {
 	st := demoStore(t)
-	for _, size := range []struct{ w, h int }{{120, 34}, {80, 24}, {56, 20}} {
-		for _, ov := range []string{"", "picker", "help", "resume", "resume-edit"} {
-			m := New(st, noIndex(t), fav.DefaultConfig(), "")
-			m.Update(tea.WindowSizeMsg{Width: size.w, Height: size.h})
-			openOverlay(m, ov)
-			for i, line := range strings.Split(m.screen(), "\n") {
+	states := []string{"", "detail", "projects", "syntax", "picker", "help", "help-input", "resume", "resume-edit", "edit",
+		"edit-summary", "settings", "settings-ide", "status", "delete", "start", "message", "handoff", "peek"}
+	for _, size := range []struct{ w, h int }{{140, 40}, {120, 34}, {80, 24}, {80, 18}, {56, 20}, {50, 16}} {
+		for _, state := range states {
+			m := newModel(t, st, size.w, size.h)
+			openOverlay(m, state)
+			if layout := state == "" || state == "detail" || state == "projects" || state == "syntax"; layout == m.ov.active() {
+				t.Fatalf("%q did not open (overlay %d)", state, m.ov.kind)
+			}
+			lines := strings.Split(m.screen(), "\n")
+			if len(lines) != size.h {
+				t.Errorf("%dx%d %q: %d lines", size.w, size.h, state, len(lines))
+			}
+			for i, line := range lines {
 				if got := ansi.StringWidth(line); got != size.w {
-					t.Errorf("%dx%d ov=%q 第 %d 行宽 %d：%q",
-						size.w, size.h, ov, i+1, got, ansi.Strip(line))
+					t.Errorf("%dx%d %q line %d is %d wide: %q", size.w, size.h, state, i+1, got, ansi.Strip(line))
 				}
 			}
 		}
 	}
 }
 
+// openOverlay puts m into a named state: an overlay, or a list layout ("detail", "projects", "syntax").
 func openOverlay(m *Model, kind string) {
 	switch kind {
+	case "detail":
+		m.detail = true
+	case "projects":
+		m.setView(viewProjects)
+		m.foldAll(nil)
+	case "syntax":
+		m.search.SetValue("> ")
+		m.refresh()
 	case "picker":
 		m.pickTags()
 	case "help":
-		m.ov = overlay{kind: ovHelp}
+		m.ov = overlay{kind: ovHelp, focus: -1}
 	case "help-syntax":
-		m.ov = overlay{kind: ovHelp, page: 1}
+		m.ov = overlay{kind: ovHelp, focus: -1, page: 1}
 	case "help-input":
-		m.ov = overlay{kind: ovHelp, page: 2}
+		m.ov = overlay{kind: ovHelp, focus: -1, page: 2}
 	case "resume":
 		m.askResume()
 	case "resume-edit":
@@ -59,25 +76,37 @@ func openOverlay(m *Model, kind string) {
 			}
 		}
 	case "edit":
-		m.openEdit()
+		m.openEdit(m.current())
 	case "edit-summary":
-		m.openEdit()
+		m.openEdit(m.current())
 		m.editKey(press("tab"))
 		m.editKey(press("tab"))
 	case "status":
 		m.pickStatus()
 	case "delete":
-		m.askDelete()
+		m.askDelete(m.current())
 	case "start":
-		m.askStart()
+		m.current().Cwd = os.TempDir()
+		m.askStart(m.current())
 	case "find":
 		m.startChatSearch()
+	case "message":
+		long := capture.Message{Role: "assistant", Text: strings.Repeat("一段很长的回复，放不下一屏。", 200),
+			Steps: []capture.Step{{Tool: "Bash", Text: "go test ./..."}, {Result: true, Text: "ok"}}}
+		m.probes = map[*fav.Rec]*probe{m.current(): {done: true, msgs: []capture.Message{long}}}
+		m.pane = paneChat
+		m.openMessage()
+	case "handoff":
+		m.ov = overlay{kind: ovHandoff, rec: m.current(), title: "/tmp/handoff.md", focus: -1,
+			lines: strings.Split(strings.Repeat("# 交接\n继续做分页游标的修复，先跑测试。\n", 40), "\n")}
+	case "peek":
+		m.ov = overlay{kind: ovPeek, rec: m.current(), title: "p1", edit: newInput(), focus: -1,
+			lines: strings.Split(strings.Repeat("Edit a.go?\n❯ 1. Yes\n", 60), "\n")}
 	}
 }
 
 func TestClickZones(t *testing.T) {
-	m := New(demoStore(t), noIndex(t), fav.DefaultConfig(), "")
-	m.Update(tea.WindowSizeMsg{Width: 120, Height: 36})
+	m := newModel(t, demoStore(t), 120, 36)
 	m.screen()
 
 	x, y := findText(m.screen(), "项目")
@@ -133,8 +162,7 @@ func TestDumpFrame(t *testing.T) {
 	if _, err := fmt.Sscanf(spec, "%dx%d", &w, &h); err != nil {
 		t.Fatalf("FAV_DUMP 应形如 120x34：%v", err)
 	}
-	m := New(demoStore(t), noIndex(t), fav.DefaultConfig(), "")
-	m.Update(tea.WindowSizeMsg{Width: w, Height: h})
+	m := newModel(t, demoStore(t), w, h)
 	if os.Getenv("FAV_DUMP_VIEW") == "real" {
 		idx, _ := index.Open()
 		m.Update(m.pollLive()())
@@ -154,22 +182,18 @@ func demoStore(t *testing.T) *fav.Store {
 		title, summary, project, work string
 		tags                          []string
 		provider, branch, ws          string
-		done                          bool
 	}{
-		{"notes-api WebSocket 断线重连排障", "弱网下心跳超时后不重连，定位到 backoff 计时器被 close 事件重置。", "notes-api", "排障", []string{"notes-api", "debug", "websocket"}, fav.ProviderClaude, "fix/ws-reconnect", "notes-api", false},
-		{"WebApp 分支栈 rebase 自动化", "把手工 rebase 流程收敛成 make 目标，处理 worktree 隔离与冲突恢复。", "webapp", "重构", []string{"webapp", "git", "tooling"}, fav.ProviderCodex, "feat/stack-rebase", "webapp", false},
-		{"Fav Session Manager 实现", "去掉 SQLite 改 JSONL，FZF 与原生 TUI 双前端。", "fav", "实现", []string{"fav", "golang", "tui"}, fav.ProviderClaude, "main", "dev", false},
-		{"标签合并规则重写", "合并优先级与生效时间窗的边界条件梳理，补了 14 条表驱动测试。", "notes-api", "实现", []string{"notes-api", "tags"}, fav.ProviderClaude, "feat/geo-override", "", true},
-		{"Codex rollout 文件反查会话 id", "没有环境变量可用，只能按 mtime + cwd 从首行反查，多命中时报错不猜。", "fav", "调研", []string{"fav", "codex"}, fav.ProviderCodex, "main", "", true},
+		{"notes-api WebSocket 断线重连排障", "弱网下心跳超时后不重连，定位到 backoff 计时器被 close 事件重置。", "notes-api", "排障", []string{"notes-api", "debug", "websocket"}, fav.ProviderClaude, "fix/ws-reconnect", "notes-api"},
+		{"WebApp 分支栈 rebase 自动化", "把手工 rebase 流程收敛成 make 目标，处理 worktree 隔离与冲突恢复。", "webapp", "重构", []string{"webapp", "git", "tooling"}, fav.ProviderCodex, "feat/stack-rebase", "webapp"},
+		{"Fav Session Manager 实现", "去掉 SQLite 改 JSONL，FZF 与原生 TUI 双前端。", "fav", "实现", []string{"fav", "golang", "tui"}, fav.ProviderClaude, "main", "dev"},
+		{"标签合并规则重写", "合并优先级与生效时间窗的边界条件梳理，补了 14 条表驱动测试。", "notes-api", "实现", []string{"notes-api", "tags"}, fav.ProviderClaude, "feat/geo-override", ""},
+		{"Codex rollout 文件反查会话 id", "没有环境变量可用，只能按 mtime + cwd 从首行反查，多命中时报错不猜。", "fav", "调研", []string{"fav", "codex"}, fav.ProviderCodex, "main", ""},
 	} {
 		r := &fav.Rec{
 			ID: fav.NewID(), Provider: d.provider, SessionID: d.title,
 			Title: d.title, Summary: d.summary, Project: d.project, WorkType: d.work,
 			Tags: d.tags, GitBranch: d.branch, HerdrWorkspace: d.ws,
 			Cwd: "/Users/me/work/" + d.project, Status: fav.StatusDone,
-		}
-		if d.done {
-			r.Status = fav.StatusDone
 		}
 		r.Tags = fav.Normalize(r.Tags)
 		r.FavoritedAt = new(time.Now().Add(-time.Duration(len(d.title)) * time.Hour))
@@ -200,8 +224,7 @@ func lum(c color.Color) int {
 
 func TestResumeDialogEditsTitle(t *testing.T) {
 	st := demoStore(t)
-	m := New(st, noIndex(t), fav.DefaultConfig(), "")
-	m.Update(tea.WindowSizeMsg{Width: 120, Height: 36})
+	m := newModel(t, st, 120, 36)
 	m.askResume()
 	rec := m.ov.rec
 	old := rec.Title
@@ -246,8 +269,7 @@ func TestResumeDialogEditsTitle(t *testing.T) {
 
 func TestSessionsViewFavorites(t *testing.T) {
 	st := demoStore(t)
-	m := New(st, noIndex(t), fav.DefaultConfig(), "")
-	m.Update(tea.WindowSizeMsg{Width: 120, Height: 36})
+	m := newModel(t, st, 120, 36)
 	rec := &fav.Rec{Provider: fav.ProviderClaude, SessionID: "sess-x", Title: "第一句话",
 		Cwd: t.TempDir(), FavoritedAt: new(time.Now()), Status: fav.StatusDone}
 	rec.Attach(5, 10, time.Now(), "第一句话\n再来一句\n")
@@ -305,8 +327,7 @@ func TestSessionsViewFavorites(t *testing.T) {
 }
 
 func TestArrowNavigation(t *testing.T) {
-	m := New(demoStore(t), noIndex(t), fav.DefaultConfig(), "")
-	m.Update(tea.WindowSizeMsg{Width: 120, Height: 36})
+	m := newModel(t, demoStore(t), 120, 36)
 	key := func(s string) {
 		m.Update(press(s))
 	}
@@ -337,20 +358,11 @@ func TestArrowNavigation(t *testing.T) {
 	if m.chipFocus != -1 {
 		t.Fatalf("chip 行往下应回列表，chipFocus=%d", m.chipFocus)
 	}
-	key("right")
-	if m.pane != paneChat {
-		t.Fatalf("列表里 → 应把焦点切到右栏，pane=%v", m.pane)
-	}
-	key("left")
-	if m.pane != paneList {
-		t.Fatalf("← 应回到列表，pane=%v", m.pane)
-	}
 }
 
 func TestFavoriteToggle(t *testing.T) {
 	st := demoStore(t)
-	m := New(st, noIndex(t), fav.DefaultConfig(), "")
-	m.Update(tea.WindowSizeMsg{Width: 120, Height: 36})
+	m := newModel(t, st, 120, 36)
 	m.setView(viewSessions)
 	first := m.current()
 	if first == nil || !first.Favorite() {
@@ -380,8 +392,7 @@ func TestFavoriteToggle(t *testing.T) {
 
 func TestStateOnPlainSession(t *testing.T) {
 	st := demoStore(t)
-	m := New(st, noIndex(t), fav.DefaultConfig(), "")
-	m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
+	m := newModel(t, st, 120, 40)
 	m.setView(viewSessions)
 	sess := &fav.Rec{Provider: "claude", SessionID: "plain-1", Title: "没收藏的会话", Cwd: "/tmp", Status: fav.StatusDone}
 	sess.Attach(9, 20, time.Now(), "")
@@ -447,8 +458,7 @@ func TestStateOnPlainSession(t *testing.T) {
 }
 
 func TestCursorFollowsRecordOnRefresh(t *testing.T) {
-	m := New(demoStore(t), noIndex(t), fav.DefaultConfig(), "")
-	m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
+	m := newModel(t, demoStore(t), 120, 40)
 	m.move(1)
 	m.move(1)
 	cur := m.current()

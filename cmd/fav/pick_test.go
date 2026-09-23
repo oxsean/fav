@@ -35,8 +35,4 @@ func TestPickBySessionPrefix(t *testing.T) {
 	if _, err := pick(s, "zzzz"); err == nil {
 		t.Fatal("unknown id should fail")
 	}
-	fresh := &fav.Rec{Provider: fav.ProviderCodex, SessionID: "9999", Title: "fresh"}
-	if err := save(s, fresh); err != nil || fresh.ID == "" || s.Get(fresh.ID) == nil {
-		t.Fatalf("save should mint an id: %q %v", fresh.ID, err)
-	}
 }

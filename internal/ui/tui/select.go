@@ -6,6 +6,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/mattn/go-runewidth"
+
 	"github.com/oxsean/fav/internal/i18n"
 )
 
@@ -18,7 +19,7 @@ type selection struct {
 	left, right, top, bottom int
 }
 
-func (m *Model) region(x, y int) (left, right, top, bottom int) {
+func (m *Model) region(x int) (left, right, top, bottom int) {
 	if m.ov.active() {
 		return m.ovX + 1, m.ovX + m.ovW - 1, m.ovY + 1, m.ovY + m.ovH - 1
 	}
@@ -35,7 +36,7 @@ func (m *Model) mouseSelect(msg tea.MouseMsg) {
 	mo := msg.Mouse()
 	switch msg.(type) {
 	case tea.MouseClickMsg:
-		l, r, t, b := m.region(mo.X, mo.Y)
+		l, r, t, b := m.region(mo.X)
 		m.sel = selection{x1: mo.X, y1: mo.Y, x2: mo.X, y2: mo.Y, pressed: true, left: l, right: r, top: t, bottom: b}
 	case tea.MouseMotionMsg:
 		if m.sel.pressed && (mo.X != m.sel.x1 || mo.Y != m.sel.y1) {
@@ -58,7 +59,7 @@ func (s selection) ordered() (int, int, int, int) {
 }
 
 // span is the selected column range [from, to) of line y; (0, 0) when none.
-func (s selection) span(y, _ int) (int, int) {
+func (s selection) span(y int) (int, int) {
 	x1, y1, x2, y2 := s.ordered()
 	y1, y2 = max(y1, s.top), min(y2, s.bottom-1)
 	clamp := func(x int) int { return min(max(x, s.left), s.right) }
@@ -102,7 +103,7 @@ func (m *Model) copySelection() {
 	lines := strings.Split(m.lastFrame, "\n")
 	var out []string
 	for y, line := range lines {
-		from, to := m.sel.span(y, m.w)
+		from, to := m.sel.span(y)
 		if from == to {
 			continue
 		}
@@ -115,7 +116,7 @@ func (m *Model) copySelection() {
 		return
 	}
 	if err := copyText(text); err != nil {
-		m.flash(i18n.T("flash.clipboard_unavailable") + err.Error())
+		m.flash(i18n.F("flash.clipboard_unavailable", err))
 		return
 	}
 	m.flash(i18n.F("select.copied", len([]rune(text)), strings.ReplaceAll(text, "\n", " ⏎ ")))
@@ -127,7 +128,7 @@ func (m *Model) paintSelection(frame string) string {
 	}
 	lines := strings.Split(frame, "\n")
 	for y, line := range lines {
-		from, to := m.sel.span(y, m.w)
+		from, to := m.sel.span(y)
 		if from == to {
 			continue
 		}

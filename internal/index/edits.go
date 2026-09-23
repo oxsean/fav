@@ -4,7 +4,8 @@ import (
 	"bytes"
 	"encoding/json"
 	"path/filepath"
-	"strings"
+
+	"github.com/oxsean/fav/internal/capture"
 )
 
 var editNames = [][]byte{[]byte(`"name":"Edit"`), []byte(`"name":"Write"`), []byte(`"name":"MultiEdit"`), []byte(`"name":"NotebookEdit"`)}
@@ -25,9 +26,6 @@ func isEdit(b []byte) bool {
 	return false
 }
 
-// patchHeaders are apply_patch's file lines ("*** Move to:" names the new path of an update).
-var patchHeaders = []string{"*** Add File: ", "*** Update File: ", "*** Delete File: ", "*** Move to: "}
-
 func (f *File) takeEdits(b []byte) {
 	var l struct {
 		Message struct {
@@ -43,33 +41,22 @@ func (f *File) takeEdits(b []byte) {
 		return
 	}
 	if l.Payload.Type == "custom_tool_call" && l.Payload.Name == "apply_patch" {
-		for line := range strings.SplitSeq(l.Payload.Input, "\n") {
-			for _, h := range patchHeaders {
-				if p, ok := strings.CutPrefix(line, h); ok {
-					f.edited(strings.TrimSpace(p))
-				}
-			}
+		for _, p := range capture.PatchFiles(l.Payload.Input) {
+			f.edited(p)
 		}
 		return
 	}
 	var blocks []struct {
-		Type  string `json:"type"`
-		Name  string `json:"name"`
-		Input struct {
-			FilePath     string `json:"file_path"`
-			NotebookPath string `json:"notebook_path"`
-		} `json:"input"`
+		Type  string          `json:"type"`
+		Name  string          `json:"name"`
+		Input json.RawMessage `json:"input"`
 	}
 	if len(l.Message.Content) == 0 || l.Message.Content[0] != '[' || json.Unmarshal(l.Message.Content, &blocks) != nil {
 		return
 	}
 	for _, bl := range blocks {
-		switch {
-		case bl.Type != "tool_use":
-		case bl.Name == "Edit" || bl.Name == "Write" || bl.Name == "MultiEdit":
-			f.edited(bl.Input.FilePath)
-		case bl.Name == "NotebookEdit":
-			f.edited(bl.Input.NotebookPath)
+		if bl.Type == "tool_use" {
+			f.edited(capture.EditedPath(bl.Name, bl.Input))
 		}
 	}
 }

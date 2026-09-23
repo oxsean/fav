@@ -5,8 +5,12 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/oxsean/fav/internal/i18n"
 	"github.com/oxsean/fav/internal/shell"
+	"github.com/oxsean/fav/internal/testkit"
 )
+
+func TestMain(m *testing.M) { testkit.Main(m) }
 
 func TestBindShell(t *testing.T) {
 	if runtime.GOOS == "windows" {
@@ -26,13 +30,24 @@ func TestBindShell(t *testing.T) {
 	}
 }
 
-func TestSwitchUsesTheBindShell(t *testing.T) {
+func TestSwitchReloads(t *testing.T) {
 	t.Setenv(bindShellEnv, "cmd")
-	s := Switch(TabSessions)
-	if !strings.Contains(s, "reload(") || strings.Contains(s, "cat ") || strings.Contains(s, "/dev/null") {
+	if s := Switch(TabSessions); !strings.Contains(s, "reload(") {
 		t.Errorf("tab switch: %s", s)
 	}
-	if self := selfIn(shell.Cmd); strings.HasPrefix(self, "'") {
-		t.Errorf("cmd does not read single quotes: %s", self)
+}
+
+func TestTabLivesInThePrompt(t *testing.T) {
+	for _, lang := range []string{"en", "zh"} {
+		i18n.Set(lang)
+		for t0 := range Tab(len(tabNames)) {
+			if got := TabOf(t0.prompt()); got != t0 {
+				t.Errorf("%s: TabOf(%q) = %v", lang, t0.prompt(), got)
+			}
+			if t0.Next(1).Next(-1) != t0 || t0.Next(len(tabNames)) != t0 {
+				t.Errorf("Next wraps around from %v", t0)
+			}
+		}
 	}
+	i18n.Set("en")
 }

@@ -14,6 +14,8 @@ import (
 	"github.com/oxsean/fav/internal/testkit"
 )
 
+func TestMain(m *testing.M) { testkit.Main(m) }
+
 func write(t *testing.T, path, content string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -51,6 +53,20 @@ func claudeLines(prompts ...string) string {
 
 var sprintf = fmt.Sprintf
 
+func rolloutPath(codex string, day int, sid string) string {
+	d := sprintf("%02d", day)
+	return filepath.Join(codex, "sessions", "2026", "09", d, "rollout-2026-09-"+d+"T02-00-00-"+sid+".jsonl")
+}
+
+func codexLines(sid, cwd, originator string, prompts ...string) string {
+	var b strings.Builder
+	b.WriteString(sprintf(`{"timestamp":"2026-09-11T02:00:00Z","type":"session_meta","payload":{"session_id":%q,"cwd":%q,"originator":%q}}`+"\n", sid, cwd, originator))
+	for _, p := range prompts {
+		b.WriteString(sprintf(`{"timestamp":"2026-09-11T02:00:01Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":%q}]}}`+"\n", p))
+	}
+	return b.String()
+}
+
 func setup(t *testing.T) (claude, codex string) {
 	t.Helper()
 	root := t.TempDir()
@@ -78,14 +94,11 @@ func TestScanMergeAndIncremental(t *testing.T) {
 	write(t, filepath.Join(claude, "projects", "-Users-me", "quiet.jsonl"),
 		`{"type":"user","timestamp":"2026-09-10T01:00:00Z","cwd":"/Users/me","message":{"content":[{"type":"tool_result","content":"x"}]}}`+"\n")
 
-	meta := `{"timestamp":"2026-09-11T02:00:00Z","type":"session_meta","payload":{"session_id":"%s","cwd":"/Users/me/work/env","originator":"%s"}}` + "\n"
-	msg := `{"timestamp":"2026-09-11T02:00:01Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"%s"}]}}` + "\n"
-	c1 := filepath.Join(codex, "sessions", "2026", "09", "11", "rollout-2026-09-11T02-00-00-cccc.jsonl")
-	write(t, c1, sprintf(meta, "cccc", "Codex Desktop")+sprintf(msg, "把 env 仓库的 CI 修好")+sprintf(msg, "<environment_context>x</environment_context>"))
-	write(t, filepath.Join(codex, "sessions", "2026", "09", "12", "rollout-2026-09-12T02-00-00-dddd.jsonl"),
-		sprintf(meta, "cccc", "Codex Desktop")+sprintf(msg, "再跑一遍"))
-	write(t, filepath.Join(codex, "sessions", "2026", "09", "12", "rollout-2026-09-12T03-00-00-eeee.jsonl"),
-		sprintf(meta, "eeee", "codex_exec")+sprintf(msg, "exec 跑的"))
+	env := "/Users/me/work/env"
+	c1 := rolloutPath(codex, 11, "cccc")
+	write(t, c1, codexLines("cccc", env, "Codex Desktop", "把 env 仓库的 CI 修好", "<environment_context>x</environment_context>"))
+	write(t, rolloutPath(codex, 12, "dddd"), codexLines("cccc", env, "Codex Desktop", "再跑一遍"))
+	write(t, rolloutPath(codex, 12, "eeee"), codexLines("eeee", env, "codex_exec", "exec 跑的"))
 	write(t, filepath.Join(codex, "session_index.jsonl"), `{"id":"cccc","thread_name":"修 env CI","updated_at":"x"}`+"\n")
 
 	idx, err := OpenAt(cache)
@@ -241,49 +254,11 @@ func TestClaudeContinuationChainIsOneSession(t *testing.T) {
 	}
 }
 
-func TestAgentSessionsAreOnlyTheSkippedOnes(t *testing.T) {
-	dir := t.TempDir()
-	proj := filepath.Join(dir, "projects", "-tmp-p")
-	if err := os.MkdirAll(proj, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("CLAUDE_CONFIG_DIR", dir)
-	t.Setenv("CODEX_HOME", filepath.Join(dir, "codex"))
-	write := func(name, entrypoint string) {
-		lines := []string{
-			`{"type":"user","entrypoint":"` + entrypoint + `","cwd":"/tmp/p","timestamp":"2026-09-22T10:00:00Z","message":{"role":"user","content":"hello there"}}`,
-			`{"type":"assistant","timestamp":"2026-09-22T10:00:01Z","message":{"role":"assistant","content":[{"type":"text","text":"hi"}]}}`,
-		}
-		if err := os.WriteFile(filepath.Join(proj, name), []byte(strings.Join(lines, "\n")+"\n"), 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
-	write("11111111-1111-1111-1111-111111111111.jsonl", "cli")
-	write("22222222-2222-2222-2222-222222222222.jsonl", "sdk-cli")
-
-	idx, err := OpenAt(filepath.Join(dir, "sessions.jsonl"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	idx, _ = idx.Refresh()
-	if got := len(idx.Sessions()); got != 1 {
-		t.Fatalf("the normal listing keeps only the cli session, got %d", got)
-	}
-	agents := idx.AgentSessions()
-	if len(agents) != 1 || agents[0].SessionID != "22222222-2222-2222-2222-222222222222" {
-		t.Fatalf("AgentSessions should return the sdk session alone, got %+v", agents)
-	}
-	if want := "p: hello there"; agents[0].DisplayTitle() != want {
-		t.Fatalf("an untitled agent run is named after its directory and first prompt: %q", agents[0].DisplayTitle())
-	}
-}
-
 func TestCodexArchivedSessionsStayFound(t *testing.T) {
 	_, codex := setup(t)
-	meta := `{"timestamp":"2026-09-11T02:00:00Z","type":"session_meta","payload":{"session_id":"ffff","cwd":"/Users/me/work/env","originator":"codex-tui"}}` + "\n"
-	msg := `{"timestamp":"2026-09-11T02:00:01Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"把 env 仓库的 CI 修好"}]}}` + "\n"
-	live := filepath.Join(codex, "sessions", "2026", "09", "11", "rollout-2026-09-11T02-00-00-ffff.jsonl")
-	write(t, live, meta+msg+msg+msg)
+	live := rolloutPath(codex, 11, "ffff")
+	fix := "把 env 仓库的 CI 修好"
+	write(t, live, codexLines("ffff", "/Users/me/work/env", "codex-tui", fix, fix, fix))
 	idx, err := OpenAt(filepath.Join(t.TempDir(), "sessions.jsonl"))
 	if err != nil {
 		t.Fatal(err)
@@ -340,43 +315,15 @@ func TestAgentScratch(t *testing.T) {
 	}
 }
 
-func TestScratchSessionsOnlyInAgents(t *testing.T) {
-	testkit.PosixOnly(t)
-	claude, _ := setup(t)
-	line := `{"type":"user","timestamp":"2026-09-10T01:00:0%dZ","cwd":"%s","message":{"content":"第 %d 句比较长的提示语在这里"}}` + "\n"
-	body := func(cwd string) string {
-		return sprintf(line, 1, cwd, 1) + sprintf(line, 2, cwd, 2) + sprintf(line, 3, cwd, 3)
-	}
-	write(t, filepath.Join(claude, "projects", "-private-tmp-claude-501-x", "scr1.jsonl"), body("/private/tmp/claude-501/x/scratchpad"))
-	write(t, filepath.Join(claude, "projects", "-Users-me-work", "work.jsonl"), body("/Users/me/work"))
-	idx, _ := (&Index{files: map[string]*File{}}).Refresh()
-	store, err := fav.OpenAt(filepath.Join(t.TempDir(), "records.jsonl"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	recs := idx.Attach(store, nil)
-	if len(recs) != 1 || recs[0].SessionID != "work" {
-		t.Fatalf("a scratch run is not a project session: %+v", recs)
-	}
-	var agent []string
-	for _, s := range idx.AgentSessions() {
-		agent = append(agent, s.SessionID)
-	}
-	if len(agent) != 1 || agent[0] != "scr1" {
-		t.Fatalf("status:agent lists it: %v", agent)
-	}
-}
-
 func TestRecapBecomesTheSummary(t *testing.T) {
 	claude, codex := setup(t)
 	write(t, filepath.Join(claude, "projects", "-Users-me-work", "rrrr.jsonl"),
 		claudeLines("帮我看看登录为什么收不到邮件", "继续", "好")+
 			`{"type":"system","subtype":"away_summary","content":"旧的回顾","timestamp":"2026-09-10T01:00:10Z"}`+"\n"+
 			`{"type":"system","subtype":"away_summary","content":"修登录邮件：加了 SPF。下一步等 DNS 生效。 (disable recaps in /config)","timestamp":"2026-09-10T01:00:20Z"}`+"\n")
-	meta := `{"timestamp":"2026-09-11T02:00:00Z","type":"session_meta","payload":{"session_id":"xxxx","cwd":"/Users/me/work/env","originator":"codex-tui"}}` + "\n"
-	msg := `{"timestamp":"2026-09-11T02:00:01Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"把 env 仓库的 CI 修好"}]}}` + "\n"
+	fix := "把 env 仓库的 CI 修好"
 	done := `{"timestamp":"2026-09-11T02:00:09Z","type":"event_msg","payload":{"type":"task_complete","last_agent_message":"CI 修好了：缓存键写错。\n\n细节：……"}}` + "\n"
-	write(t, filepath.Join(codex, "sessions", "2026", "09", "11", "rollout-2026-09-11T02-00-00-xxxx.jsonl"), meta+msg+msg+msg+done)
+	write(t, rolloutPath(codex, 11, "xxxx"), codexLines("xxxx", "/Users/me/work/env", "codex-tui", fix, fix, fix)+done)
 	idx, _ := (&Index{files: map[string]*File{}}).Refresh()
 	got := map[string]*fav.Rec{}
 	for _, s := range idx.Sessions() {
@@ -422,5 +369,36 @@ func TestCacheStaysSmallWhenOneBigFileKeepsChanging(t *testing.T) {
 	st, _ := os.Stat(cache)
 	if line := int64(len(prompts)); st.Size() > 3*line+64<<10 {
 		t.Fatalf("stale rewrites of one big line piled up: cache %d bytes, the line is ~%d", st.Size(), line)
+	}
+}
+
+func TestAnUnreadableCacheLineIsRewrittenAway(t *testing.T) {
+	claude, _ := setup(t)
+	cache := filepath.Join(t.TempDir(), "sessions.jsonl")
+	for _, id := range []string{"aaaa", "bbbb", "cccc"} {
+		write(t, filepath.Join(claude, "projects", "-w", id+".jsonl"), claudeLines("第一句话", "第二句话", "第三句话"))
+	}
+	idx, _ := OpenAt(cache)
+	idx, _ = idx.Refresh()
+	if err := idx.Save(); err != nil {
+		t.Fatal(err)
+	}
+	b, _ := os.ReadFile(cache)
+	lines := strings.SplitAfter(string(b), "\n")
+	junk := strings.Repeat("x", 5<<20) + "\n"
+	os.WriteFile(cache, []byte(lines[0]+junk+strings.Join(lines[1:], "")), 0o644)
+	for range 2 {
+		idx, err := OpenAt(cache)
+		if err != nil {
+			t.Fatal(err)
+		}
+		idx, _ = idx.Refresh()
+		idx.Save()
+	}
+	if st, _ := os.Stat(cache); st.Size() > 1<<20 {
+		t.Fatalf("the bad line is still in the cache: %d bytes", st.Size())
+	}
+	if idx, _ := OpenAt(cache); idx.Len() != 3 {
+		t.Fatalf("loaded %d of 3 files", idx.Len())
 	}
 }

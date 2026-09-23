@@ -32,8 +32,8 @@ func PlanResume(r *fav.Rec, live map[string]Live, noHerdr bool) (Plan, error) {
 	}
 	var err error
 	if p.Live.BackgroundID != "" {
-		p.Spec = BuildAttach(r, p.Live.BackgroundID)
-	} else if p.Spec, err = BuildResume(r); err != nil {
+		p.Spec = buildAttach(r, p.Live.BackgroundID)
+	} else if p.Spec, err = buildResume(r); err != nil {
 		return p, err
 	}
 	p.findWorkspace(r, noHerdr)
@@ -44,7 +44,7 @@ func PlanResume(r *fav.Rec, live map[string]Live, noHerdr bool) (Plan, error) {
 func PlanFork(r *fav.Rec, noHerdr bool) (Plan, error) {
 	p := Plan{Checks: Checks(r)}
 	var err error
-	if p.Spec, err = BuildFork(r); err != nil {
+	if p.Spec, err = buildFork(r); err != nil {
 		return p, err
 	}
 	p.findWorkspace(r, noHerdr)
@@ -55,7 +55,7 @@ func PlanFork(r *fav.Rec, noHerdr bool) (Plan, error) {
 func PlanStart(r *fav.Rec, provider, prompt string, noHerdr bool) (Plan, error) {
 	p := Plan{Checks: startChecks(provider, r.Cwd)}
 	var err error
-	if p.Spec, err = BuildStart(provider, r.Cwd, prompt); err != nil {
+	if p.Spec, err = buildStart(provider, r.Cwd, prompt); err != nil {
 		return p, err
 	}
 	p.findWorkspace(r, noHerdr)

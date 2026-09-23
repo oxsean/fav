@@ -3,7 +3,6 @@ package tui
 import (
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -14,12 +13,10 @@ import (
 
 	"github.com/oxsean/fav/internal/capture"
 	"github.com/oxsean/fav/internal/fav"
+	"github.com/oxsean/fav/internal/i18n"
 	"github.com/oxsean/fav/internal/index"
 	"github.com/oxsean/fav/internal/testkit"
 )
-
-//go:fix inline
-func ptr(t time.Time) *time.Time { return new(t) }
 
 func fixture(t *testing.T) *fav.Store {
 	t.Helper()
@@ -32,12 +29,11 @@ func fixture(t *testing.T) *fav.Store {
 		title, project, provider string
 		tags                     []string
 		ago                      time.Duration
-		done                     bool
 	}{
-		{"notes-api 搜索分页游标漂移排障", "notes-api", fav.ProviderClaude, []string{"notes-api", "pagination", "debug"}, time.Hour, false},
-		{"SaaS 公共能力盘点补全", "webapp", fav.ProviderCodex, []string{"saas", "design"}, 4 * time.Hour, false},
-		{"WebSocket launch regression", "notes-api", fav.ProviderClaude, []string{"notes-api", "debug", "websocket"}, 9 * time.Hour, false},
-		{"RBAC 数据范围设计", "webapp", fav.ProviderCodex, []string{"rbac", "design"}, 30 * time.Hour, true},
+		{"notes-api 搜索分页游标漂移排障", "notes-api", fav.ProviderClaude, []string{"notes-api", "pagination", "debug"}, time.Hour},
+		{"SaaS 公共能力盘点补全", "webapp", fav.ProviderCodex, []string{"saas", "design"}, 4 * time.Hour},
+		{"WebSocket launch regression", "notes-api", fav.ProviderClaude, []string{"notes-api", "debug", "websocket"}, 9 * time.Hour},
+		{"RBAC 数据范围设计", "webapp", fav.ProviderCodex, []string{"rbac", "design"}, 30 * time.Hour},
 	}
 	for _, x := range seed {
 		r := &fav.Rec{
@@ -46,9 +42,6 @@ func fixture(t *testing.T) *fav.Store {
 			Project: x.project, Tags: x.tags, Status: fav.StatusDone,
 			Cwd: cwd, GitBranch: "feature/cursor-pagination",
 			FavoritedAt: new(base.Add(-x.ago)),
-		}
-		if x.done {
-			r.Status = fav.StatusDone
 		}
 		if err := s.Put(r); err != nil {
 			t.Fatal(err)
@@ -66,12 +59,15 @@ func noIndex(t *testing.T) *index.Index {
 	return idx
 }
 
-func sized(t *testing.T, w, h int) *Model {
+func sized(t *testing.T, w, h int) *Model { return newModel(t, fixture(t), w, h) }
+
+// newModel is a w×h Model on st with an empty index; FAV_HOME is the test's own unless it set one.
+func newModel(t *testing.T, st *fav.Store, w, h int) *Model {
 	t.Helper()
-	if os.Getenv("FAV_HOME") == "" || !strings.HasPrefix(os.Getenv("FAV_HOME"), os.TempDir()) {
-		t.Setenv("FAV_HOME", t.TempDir()) // ⚠️ never the real ~/.agent/fav
+	if testkit.Shared(os.Getenv("FAV_HOME")) {
+		t.Setenv("FAV_HOME", t.TempDir())
 	}
-	m := New(fixture(t), noIndex(t), fav.DefaultConfig(), "")
+	m := New(st, noIndex(t), fav.DefaultConfig(), "")
 	m.Update(tea.WindowSizeMsg{Width: w, Height: h})
 	return m
 }
@@ -106,88 +102,87 @@ func viewLines(m *Model) []string {
 	return strings.Split(m.screen(), "\n")
 }
 
-func TestNoLineExceedsTerminalWidth(t *testing.T) {
-	for _, size := range [][2]int{{140, 40}, {100, 30}, {80, 24}, {60, 20}, {50, 16}} {
-		w, h := size[0], size[1]
-		m := sized(t, w, h)
-
-		states := map[string]func(){
-			"列表":   func() {},
-			"详情":   func() { m.detail = true },
-			"项目视图": func() { m.detail = false; m.view = viewProjects; m.refresh() },
-			"标签浮层": func() { m.view = viewSessions; m.refresh(); m.pickTags() },
-			"恢复浮层": func() { m.closeOverlay(); m.askResume() },
-			"帮助浮层": func() { m.ov = overlay{kind: ovHelp} },
-		}
-		for name, setup := range states {
-			setup()
-			for i, line := range viewLines(m) {
-				if got := ansi.StringWidth(line); got > w {
-					t.Errorf("%dx%d %s 第 %d 行宽 %d 列，超出 %d：%q",
-						w, h, name, i, got, w, ansi.Strip(line))
-				}
-			}
-			m.closeOverlay()
-		}
-	}
-}
-
-func TestViewHeightMatchesTerminal(t *testing.T) {
-	for _, size := range [][2]int{{140, 40}, {80, 24}, {50, 16}} {
-		m := sized(t, size[0], size[1])
-		if got := len(viewLines(m)); got != size[1] {
-			t.Errorf("%dx%d 渲染出 %d 行，应为 %d", size[0], size[1], got, size[1])
-		}
-	}
-}
-
+// two panes from 100 columns; the footer says what Enter does there
 func TestLayoutSwitchesOnWidth(t *testing.T) {
-	wide := sized(t, 140, 40)
-	if !wide.twoColumn() {
-		t.Error("140 列应走双栏")
-	}
-	if !strings.Contains(ansi.Strip(wide.screen()), "恢复目标") {
-		t.Error("双栏应在右侧同屏显示预览")
-	}
-
-	narrow := sized(t, 80, 24)
-	if narrow.twoColumn() {
-		t.Error("80 列应退为单栏")
-	}
-	if strings.Contains(ansi.Strip(narrow.screen()), "恢复目标") {
-		t.Error("单栏列表页不应并排显示预览")
+	for _, c := range []struct {
+		w, h  int
+		two   bool
+		enter string
+	}{{140, 40, true, "footer.enter_actions"}, {80, 24, false, "footer.enter_details"}, {50, 16, false, "footer.enter_details"}} {
+		m := sized(t, c.w, c.h)
+		if m.twoColumn() != c.two || strings.Contains(ansi.Strip(m.screen()), i18n.T("card.resume_target")) != c.two {
+			t.Errorf("%d 列：双栏=%v，右侧预览只在双栏", c.w, m.twoColumn())
+		}
+		if f := ansi.Strip(m.footer()); !strings.Contains(f, keyed(enterKey, i18n.T(c.enter))) {
+			t.Errorf("%d 列下 footer 应说 Enter 做什么：%q", c.w, f)
+		}
 	}
 }
 
-func TestNarrowEnterGoesToDetailFirst(t *testing.T) {
-	m := sized(t, 80, 24)
-	m.navKey(press("enter"))
-	if !m.detail {
-		t.Fatal("窄屏第一次 Enter 应进入详情页")
-	}
-	if m.ov.active() {
-		t.Fatal("窄屏第一次 Enter 不应直接起恢复确认")
-	}
-	m.navKey(press("enter"))
-	if m.ov.kind != ovResume {
-		t.Fatal("详情页里再按 Enter 应起恢复确认")
-	}
-}
-
-func TestKeysAreTextWhileTyping(t *testing.T) {
+// while typing letters are text; arrows and Ctrl+N / Ctrl+P move the list; Enter after moving opens the dialog
+func TestTypingKeys(t *testing.T) {
 	m := sized(t, 140, 40)
-	m.navKey(press("/"))
+	m.Update(press("/"))
 	if !m.typing {
 		t.Fatal("/ 应聚焦搜索框")
 	}
 	for _, r := range "tpsdx" {
-		m.searchKey(press(string(r)))
+		m.Update(press(string(r)))
 	}
-	if m.ov.active() {
-		t.Fatal("输入状态下的快捷键字母不应触发筛选浮层")
+	if m.ov.active() || m.search.Value() != "tpsdx" {
+		t.Fatalf("输入状态下字母是文字，不触发快捷键：ov=%v %q", m.ov.active(), m.search.Value())
 	}
-	if got := m.search.Value(); got != "tpsdx" {
-		t.Fatalf("应被当作文字输入，got %q", got)
+	m.search.SetValue("")
+	m.Update(press("notes-api"))
+	first := m.current()
+	m.Update(press("down"))
+	if m.current() == first || !m.typing {
+		t.Fatalf("打字时 ↓ 选下一条且不退出输入：typing=%v", m.typing)
+	}
+	m.Update(press("ctrl+p"))
+	if m.current() != first || !m.typing {
+		t.Fatalf("ctrl+p 选上一条且不退出输入：typing=%v", m.typing)
+	}
+	m.Update(press("ctrl+n"))
+	m.Update(press("enter"))
+	if m.typing || m.ov.kind != ovResume {
+		t.Fatalf("选过记录后 Enter 应直接起恢复确认：typing=%v ov=%v", m.typing, m.ov.kind)
+	}
+}
+
+// a paste types only into the focused input
+func TestPasteGoesOnlyToTheFocusedInput(t *testing.T) {
+	m := sized(t, 140, 40)
+	paste := func() { m.Update(tea.PasteMsg{Content: "粘贴"}) }
+	paste()
+	if m.search.Value() != "" || m.chat.input.Value() != "" {
+		t.Fatal("nothing focused: the paste goes nowhere")
+	}
+	m.focusSearch()
+	paste()
+	if m.search.Value() != "粘贴" {
+		t.Fatalf("the search box takes it: %q", m.search.Value())
+	}
+	m.Update(press("esc"))
+	m.search.SetValue("")
+	m.refresh()
+	m.startChatSearch()
+	paste()
+	if m.chat.input.Value() != "粘贴" || m.search.Value() != "" {
+		t.Fatalf("the chat find takes it, the search box not: %q / %q", m.chat.input.Value(), m.search.Value())
+	}
+	m.Update(press("esc"))
+	m.pickTags()
+	paste()
+	if m.ov.filter.Value() != "粘贴" {
+		t.Fatalf("the picker filter takes it: %q", m.ov.filter.Value())
+	}
+	m.closeOverlay()
+	m.openEdit(m.current())
+	title, tags, summary := m.ov.edit.Value(), m.ov.edit2.Value(), m.ov.area.Value()
+	paste()
+	if m.ov.edit.Value() != title+"粘贴" || m.ov.edit2.Value() != tags || m.ov.area.Value() != summary {
+		t.Fatalf("only the focused title field takes it: %q %q", m.ov.edit.Value(), m.ov.edit2.Value())
 	}
 }
 
@@ -292,31 +287,31 @@ func TestViewHotkeys(t *testing.T) {
 func TestToggleArchiveRefreshes(t *testing.T) {
 	m := sized(t, 140, 40)
 	before, r := m.countRecs(), m.current()
-	m.toggleArchive()
+	m.toggleArchive(m.current())
 	if m.current() != r || m.countRecs() != before || m.notice == "" {
 		t.Fatalf("刚归档的应还在光标下并有反馈：cur==r=%v %d -> %d", m.current() == r, before, m.countRecs())
 	}
-	m.toggleArchive()
+	m.toggleArchive(m.current())
 	if r.Archived() {
 		t.Fatal("再按 a 取消归档的应是同一条")
 	}
-	m.toggleStatus(fav.StatusDone)
+	m.toggleStatus(m.current(), fav.StatusDone)
 	if r.Status != fav.StatusDoing {
 		t.Fatalf("默认是已完成，x 应改成进行中：%s", r.Status)
 	}
-	m.toggleArchive()
+	m.toggleArchive(m.current())
 	if !r.Archived() || r.Status != fav.StatusDoing {
 		t.Fatalf("归档不动看板状态：%s archived=%v", r.Status, r.Archived())
 	}
-	m.toggleArchive()
+	m.toggleArchive(m.current())
 	if r.Archived() || r.Status != fav.StatusDoing {
 		t.Fatalf("取消归档也不动看板状态：%s", r.Status)
 	}
-	m.toggleStatus(fav.StatusDone)
+	m.toggleStatus(m.current(), fav.StatusDone)
 	if !r.Done() {
 		t.Fatalf("x 再按回到已完成：%s", r.Status)
 	}
-	m.toggleArchive()
+	m.toggleArchive(m.current())
 	m.move(1)
 	m.refresh()
 	if got := m.countRecs(); got != before-1 {
@@ -384,7 +379,7 @@ func TestDatePicker(t *testing.T) {
 		t.Errorf("open-ended presets mean active since: %v", byLabel)
 	}
 
-	m := New(fixture(t), noIndex(t), fav.DefaultConfig(), "")
+	m := newModel(t, fixture(t), 80, 24)
 	m.pickDate()
 	m.ov.filter.SetValue("9-1..9-15")
 	m.Update(press("enter"))
@@ -402,7 +397,7 @@ func TestDatePicker(t *testing.T) {
 }
 
 func TestPickerClear(t *testing.T) {
-	m := New(fixture(t), noIndex(t), fav.DefaultConfig(), "")
+	m := newModel(t, fixture(t), 80, 24)
 	m.search.SetValue("geo #pagination last:7d")
 	m.pickTags()
 	m.ov.filter.SetValue("x")
@@ -430,16 +425,6 @@ func TestPickerClear(t *testing.T) {
 func TestConventionalKeys(t *testing.T) {
 	m := sized(t, 140, 40)
 	key := func(k string) { m.Update(press(k)) }
-	key("/")
-	if !m.typing {
-		t.Fatal("列表里 / 应聚焦搜索框")
-	}
-	before := m.cursor
-	m.Update(press("ctrl+n"))
-	if m.cursor <= before || !m.typing {
-		t.Fatalf("搜索框里 ctrl+n 应选下一条且不离开搜索框：cursor=%d typing=%v", m.cursor, m.typing)
-	}
-	m.Update(press("esc"))
 	key("l")
 	if m.pane != paneChat {
 		t.Fatal("l 应把焦点切到右栏")
@@ -460,7 +445,7 @@ func TestConventionalKeys(t *testing.T) {
 	key("h")
 	m.cursor = 0
 	m.clampCursor()
-	before = m.cursor
+	before := m.cursor
 	m.Update(press("ctrl+d"))
 	if m.cursor <= before {
 		t.Fatalf("ctrl+d 应往下走半页：%d", m.cursor)
@@ -515,92 +500,6 @@ func TestProjectsSortKeepsGroups(t *testing.T) {
 		if m.countRecs() != total {
 			t.Fatalf("记录数变了：%d → %d", total, m.countRecs())
 		}
-	}
-}
-
-// wheel up after expanding must reach the first group header
-func TestWheelReachesFirstGroup(t *testing.T) {
-	m := sized(t, 140, 40)
-	m.setView(viewProjects)
-	m.move(1)
-	m.toggleGroup()
-	for range 20 {
-		m.wheel(1, 0)
-	}
-	for range 200 {
-		m.wheel(-1, 0)
-	}
-	m.screen()
-	if m.cursor != 0 || m.scroll != 0 {
-		t.Fatalf("应回到顶上：cursor=%d scroll=%d", m.cursor, m.scroll)
-	}
-}
-
-func TestStatusPickerAndTrash(t *testing.T) {
-	t.Setenv("FAV_HOME", t.TempDir())
-	m := sized(t, 140, 40)
-	m.pickStatus()
-	if !m.ov.active() || m.ov.visible()[m.ov.cursor].name != fav.StatusOpen {
-		t.Fatalf("选择器应打开并停在当前值：%+v", m.ov.cursor)
-	}
-	m.ov.filter.SetValue("回收")
-	m.Update(press("enter"))
-	if m.search.Value() != "status:trash" || !m.inTrash() {
-		t.Fatalf("选回收站应写进查询串：%q", m.search.Value())
-	}
-	if len(m.rows) != 0 {
-		t.Fatalf("回收站应是空的：%d", len(m.rows))
-	}
-	m.search.SetValue("")
-	m.refresh()
-	r := m.current()
-	if r == nil {
-		t.Fatal("要有一条当前记录")
-	}
-	transcript := filepath.Join(t.TempDir(), r.SessionID+".jsonl")
-	os.WriteFile(transcript, []byte("{}\n"), 0o644)
-	r.PinnedPath = transcript
-	m.store.Put(r)
-	key := func(k string) { m.Update(press(k)) }
-	key("D")
-	if m.ov.kind != ovConfirm {
-		t.Fatal("D 应先确认")
-	}
-	m.Update(press("esc"))
-	if m.ov.active() || m.store.Get(r.ID) == nil {
-		t.Fatal("Esc 应取消，不删")
-	}
-	key("D")
-	m.Update(press("enter"))
-	if m.ov.active() || m.store.Get(r.ID) == nil {
-		t.Fatal("删除确认的焦点在取消：Enter 不删")
-	}
-	key("D")
-	key("y")
-	if m.store.Get(r.ID) != nil {
-		t.Fatal("确认后记录应墓碑")
-	}
-	if _, err := os.Stat(transcript); !os.IsNotExist(err) {
-		t.Fatal("钉住的文件应已挪走")
-	}
-	m.search.SetValue("status:trash")
-	m.refresh()
-	if m.countRecs() != 1 || m.current() == nil || m.current().SessionID != r.SessionID {
-		t.Fatalf("回收站应列出刚删的：%d", m.countRecs())
-	}
-	key("f")
-	if m.store.Get(r.ID) != nil {
-		t.Fatal("回收站里 f 不该复活记录")
-	}
-	key("D")
-	if got := m.store.Get(r.ID); got == nil || got.Deleted {
-		t.Fatal("还原后记录应回来")
-	}
-	if _, err := os.Stat(transcript); err != nil {
-		t.Fatal("文件应回到原处")
-	}
-	if len(m.rows) != 0 {
-		t.Fatalf("还原后回收站应空：%d", len(m.rows))
 	}
 }
 
@@ -695,110 +594,6 @@ func TestProjectKeyboardJump(t *testing.T) {
 	}
 }
 
-func TestMoveProjectFromTUI(t *testing.T) {
-	root := t.TempDir()
-	t.Setenv("CLAUDE_CONFIG_DIR", filepath.Join(root, "claude"))
-	t.Setenv("CODEX_HOME", filepath.Join(root, "codex"))
-	t.Setenv("FAV_HOME", filepath.Join(root, "fav"))
-	old, dst := filepath.Join(root, "work", "proj"), filepath.Join(root, "dev", "proj")
-	os.MkdirAll(dst, 0o755)
-	pdir := index.ClaudeProjectDir(old)
-	os.MkdirAll(pdir, 0o755)
-	line := func(i int, cwd string) string {
-		return `{"type":"user","timestamp":"2026-09-10T01:00:0` + strconv.Itoa(i) + `Z","cwd":` + testkit.JSONString(cwd) + `,"message":{"content":"提示 ` + strconv.Itoa(i) + ` 做点什么事情"}}` + "\n"
-	}
-	os.WriteFile(filepath.Join(pdir, "s1.jsonl"), []byte(line(0, old)+line(1, old)+line(2, old)), 0o644)
-	os.WriteFile(filepath.Join(pdir, "s2.jsonl"), []byte(line(0, old)+line(1, old)+line(2, old)), 0o644)
-	idx, _ := index.OpenAt(filepath.Join(root, "sessions.jsonl"))
-	idx, _ = idx.Refresh()
-	s, _ := fav.OpenAt(filepath.Join(root, "records.jsonl"))
-	m := New(s, idx, fav.DefaultConfig(), "")
-	m.w, m.h = 140, 40
-	m.setView(viewProjects)
-	m.refresh()
-	if m.current() != nil || m.groupUnderCursor() != "proj" {
-		t.Fatalf("应停在 proj 分组上：%+v", m.rows[:1])
-	}
-	key := func(k string) { m.Update(press(k)) }
-
-	m.live = map[string]capture.Live{"s2": {}}
-	key("M")
-	if m.ov.active() || !strings.Contains(m.notice, "在跑") {
-		t.Fatalf("有在跑的会话应拒绝：ov=%v notice=%q", m.ov.active(), m.notice)
-	}
-
-	m.live = nil
-	key("M")
-	if m.ov.kind != ovPicker || m.ov.browse == nil || m.ov.filter.Value() != dst {
-		t.Fatalf("旧目录不在了、唯一猜到去向，应预填它：%+v", m.ov.filter.Value())
-	}
-	m.ov.filter.SetValue(filepath.Join(root, "dev"))
-	vis := m.ov.visible()
-	if len(vis) < 2 || vis[1].name != dst {
-		t.Fatalf("列出 dev 下的子目录：%+v", vis)
-	}
-	m.ov.cursor = 1
-	m.Update(press("enter"))
-	if m.ov.kind != ovPicker || m.ov.filter.Value() != dst+string(filepath.Separator) || m.ov.cursor != 0 {
-		t.Fatalf("子目录上 Enter 应进入而不是选定：%q cur=%d", m.ov.filter.Value(), m.ov.cursor)
-	}
-	m.Update(press("enter"))
-	if m.ov.kind != ovConfirm || !strings.Contains(strings.Join(m.ov.lines, "\n"), "2 个会话（Claude 2 · Codex 0）") {
-		t.Fatalf("「就是这个目录」上 Enter 应弹确认框：kind=%d %v", m.ov.kind, m.ov.lines)
-	}
-	m.Update(press("enter"))
-	if m.ov.kind != ovPicker || m.ov.browse == nil || m.ov.filter.Value() != dst+string(filepath.Separator) || m.notice != "" {
-		t.Fatalf("确认框默认焦点在取消，Enter 应回到目录选择器：kind=%d %q notice=%q", m.ov.kind, m.ov.filter.Value(), m.notice)
-	}
-	key("M")
-	if m.ov.filter.Value() != dst+string(filepath.Separator)+"M" {
-		t.Fatalf("M types into the path: %q", m.ov.filter.Value())
-	}
-	m.ov.filter.SetValue(dst + string(filepath.Separator))
-	m.ov.cursor = 0
-	m.Update(press("enter")) // the first row = this directory
-	key("y")
-	if m.ov.active() || !strings.Contains(m.notice, "已移动 2") {
-		t.Fatalf("y 应搬完：notice=%q", m.notice)
-	}
-	if _, err := os.Stat(filepath.Join(index.ClaudeProjectDir(dst), "s1.jsonl")); err != nil {
-		t.Fatal("会话文件应到新项目目录")
-	}
-	if _, err := os.Stat(pdir); !os.IsNotExist(err) {
-		t.Fatal("旧项目目录应清掉")
-	}
-	m.refresh()
-	found := false
-	for _, r := range m.unfav {
-		found = found || r.Cwd == dst
-	}
-	if !found {
-		t.Fatal("索引应立刻认到新目录")
-	}
-}
-
-func TestDirPickerClickPlacesCursor(t *testing.T) {
-	m := sized(t, 140, 40)
-	m.openDirPicker("t", "/Users/x/dev/", func(*Model, string) {})
-	m.ov.focus = 0
-	m.screen()
-	var z *zone
-	for i := range m.zones {
-		if m.zones[i].x2-m.zones[i].x1 > 40 {
-			z = &m.zones[i]
-			break
-		}
-	}
-	if z == nil {
-		t.Fatalf("输入框应登记点击区：%+v", m.zones)
-	}
-	x := z.x1 + 2 + 2 + len("/Users/x/") // border+padding, prompt 2 columns: the click lands on the d of dev
-	m.Update(tea.MouseClickMsg{Button: tea.MouseLeft, X: x, Y: z.y})
-	if m.ov.filter.Position() != len("/Users/x/") || m.ov.focus != -1 {
-		t.Fatalf("点哪光标落哪、焦点回列表：pos=%d focus=%d", m.ov.filter.Position(), m.ov.focus)
-	}
-}
-
 func TestSearchBarClickPlacesCursor(t *testing.T) {
 	m := sized(t, 140, 40)
 	m.search.SetValue("webapp rbac")
@@ -860,11 +655,16 @@ func TestDrillInAndBack(t *testing.T) {
 		t.Fatalf("点左栏焦点应回左栏：pane=%d cur=%d", m.pane, m.cursor)
 	}
 
-	m.w = 80 // narrow: Enter opens the detail, ← and Esc both leave
+	m.w = 80 // narrow: the first Enter opens the detail, the second the dialog; ← and Esc both leave
 	key("enter")
-	if !m.detail {
-		t.Fatal("窄屏 Enter 应进详情")
+	if !m.detail || m.ov.active() {
+		t.Fatal("窄屏第一次 Enter 应进详情，不直接起恢复框")
 	}
+	key("enter")
+	if m.ov.kind != ovResume {
+		t.Fatal("详情页里再按 Enter 应起恢复框")
+	}
+	key("esc")
 	key("left")
 	if m.detail {
 		t.Fatal("窄屏详情 ← 应退回列表")
@@ -873,5 +673,98 @@ func TestDrillInAndBack(t *testing.T) {
 
 func TestMain(m *testing.M) {
 	copyText = func(string) error { return nil } // ⚠️ never the user's clipboard
-	os.Exit(m.Run())
+	testkit.Main(m)
+}
+
+func TestCtrlCQuitsEverywhere(t *testing.T) {
+	for name, setup := range map[string]func(*Model){
+		"搜索框":  func(m *Model) { m.focusSearch() },
+		"右栏搜索": func(m *Model) { m.startChatSearch() },
+		"浮层":   func(m *Model) { m.pickTags() },
+	} {
+		m := sized(t, 120, 40)
+		setup(m)
+		m.Update(press("ctrl+c"))
+		if !m.quitting {
+			t.Errorf("%s里 ctrl+c 没退出", name)
+		}
+	}
+}
+
+func TestNoticeExpires(t *testing.T) {
+	m := sized(t, 140, 40)
+	m.askResume()
+	_, cmd := m.Update(press("y"))
+	if !strings.HasPrefix(m.notice, i18n.F("resume.copied", "")) || cmd == nil {
+		t.Fatalf("copying says so and schedules the notice's expiry: %q", m.notice)
+	}
+	seq := m.noticeSeq
+	m.flash("newer")
+	m.Update(noticeExpiredMsg{seq})
+	if m.notice != "newer" {
+		t.Fatal("an older expiry leaves a newer notice alone")
+	}
+	m.Update(noticeExpiredMsg{m.noticeSeq})
+	if m.notice != "" {
+		t.Fatal("the notice goes away when its time is up")
+	}
+}
+
+// Space never starts anything: it switches to a session already in a Herdr tab, otherwise it only opens the dialog.
+func TestSpaceOnlyOpensTheDialogOrSwitches(t *testing.T) {
+	m := sized(t, 140, 40)
+	capture.SetAppAvailable(fav.ProviderClaude, true)
+	r := m.current()
+	r.SessionID, r.Provider = "c5126b86-64bb-46a8-9a69-fc421c8f4f9a", fav.ProviderClaude
+	appFiles(t, r)
+	m.cfg.ResumeIn = fav.ResumeApp
+	m.Update(press("space"))
+	if m.quitting || m.ov.kind != ovResume || m.notice != "" {
+		t.Fatalf("Space opens the dialog, like Enter: quitting=%v kind=%d notice=%q", m.quitting, m.ov.kind, m.notice)
+	}
+	m.closeOverlay()
+	m.pane = paneChat
+	m.Update(press("space"))
+	if m.ov.active() || m.quitting {
+		t.Fatal("in the chat Space pages, it does not open the dialog")
+	}
+	m.pane = paneList
+	m.Update(liveMsg{herdr: map[string]capture.Live{r.SessionID: {TabID: "t1", Status: "working", Since: time.Now()}}})
+	m.Update(press("space"))
+	if m.ov.active() || m.quitting || m.notice != i18n.T("resume.switching") {
+		t.Fatalf("in a Herdr tab Space switches to it, no dialog: ov=%v notice=%q", m.ov.kind, m.notice)
+	}
+}
+
+func TestCompactEnterShowsTheDetail(t *testing.T) {
+	m := sized(t, 50, 20)
+	before := ansi.Strip(m.screen())
+	m.Update(press("enter"))
+	if !m.detail || ansi.Strip(m.screen()) == before {
+		t.Fatal("under 60 columns Enter shows the detail")
+	}
+}
+
+func TestSearchFromTheRightPaneMovesTheList(t *testing.T) {
+	m := sized(t, 140, 40)
+	m.pane = paneChat
+	m.Update(press("/"))
+	if !m.typing || m.pane != paneList {
+		t.Fatal("/ from the right pane: the arrows select records")
+	}
+}
+
+func TestIndexHeldWhileScrolling(t *testing.T) {
+	m := sized(t, 140, 40)
+	idx := m.idx
+	m.Update(tea.MouseWheelMsg{Button: tea.MouseWheelDown, X: 5, Y: 20})
+	m.Update(indexMsg{idx: idx, changed: true})
+	if m.heldIdx == nil {
+		t.Fatal("滚动中收到的索引应先攥着")
+	}
+	m.lastWheel = time.Now().Add(-2 * time.Second)
+	m.Update(storeTickMsg{})
+	if m.heldIdx != nil {
+		t.Fatal("停下来后应换上")
+	}
 }

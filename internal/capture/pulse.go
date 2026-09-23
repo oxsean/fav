@@ -13,10 +13,12 @@ import (
 // Pulse is what a running session's card shows, read from the transcript tail.
 type Pulse struct {
 	Reply   string    // the newest AI text, whitespace folded, capped
-	TurnAt  time.Time // the newest prompt: the turn has run since then
+	Prompt  string    // the newest prompt, the same way
+	TurnAt  time.Time // when Prompt was sent: the turn has run since then
 	Context int       // tokens the last request sent (0: unknown)
 	Window  int       // context window, Codex only (Claude does not record it)
 	Size    int64     // file size when read: new output since the user last looked means Size grew
+	ModTime time.Time
 	// Asking: the last step is a question to the user (Claude AskUserQuestion / ExitPlanMode) not answered yet.
 	Asking bool
 	// Finished: the last thing in the file is the AI's reply (Claude text, Codex task_complete), not a tool call.
@@ -27,8 +29,8 @@ type Pulse struct {
 var askTools = map[string]bool{"AskUserQuestion": true, "ExitPlanMode": true}
 
 const (
-	pulseTail     = 512 * 1024
-	pulseReplyCap = 200
+	pulseTail    = 512 * 1024
+	pulseTextCap = 200
 )
 
 var pulseCache sync.Map // path → pulseEntry
@@ -61,7 +63,7 @@ func ReadPulse(path string) (Pulse, bool) {
 		return Pulse{}, false
 	}
 	p := pulseOf(bytes.Split(buf, []byte{'\n'}))
-	p.Size = st.Size()
+	p.Size, p.ModTime = st.Size(), st.ModTime()
 	pulseCache.Store(path, pulseEntry{st.Size(), st.ModTime(), p})
 	return p, true
 }
@@ -90,12 +92,12 @@ func pulseOf(lines [][]byte) Pulse {
 		}
 		if !haveTurn {
 			if s := l.prompt(); s != "" {
-				p.TurnAt, haveTurn = l.Timestamp.Local(), true
+				p.Prompt, p.TurnAt, haveTurn = clip(strings.Join(strings.Fields(s), " "), pulseTextCap), l.Timestamp.Local(), true
 			}
 		}
 		if !haveReply {
 			if m := l.speech(); m.Role == "assistant" && strings.TrimSpace(m.Text) != "" {
-				p.Reply, haveReply = clip(m.Text, pulseReplyCap), true // speech already folds whitespace: one line
+				p.Reply, haveReply = clip(m.Text, pulseTextCap), true // speech already folds whitespace: one line
 			}
 		}
 	}

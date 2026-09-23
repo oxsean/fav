@@ -3,10 +3,11 @@ package fav
 import (
 	"testing"
 	"time"
+
+	"github.com/oxsean/fav/internal/testkit"
 )
 
-//go:fix inline
-func ptr(t time.Time) *time.Time { return new(t) }
+func TestMain(m *testing.M) { testkit.Main(m) }
 
 func rec(title string, mod func(*Rec)) *Rec {
 	r := &Rec{

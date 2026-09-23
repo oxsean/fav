@@ -1,9 +1,7 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
-	"os"
 	"sort"
 	"strings"
 	"time"
@@ -48,7 +46,7 @@ func cmdReport(period string, args []string) error {
 	if err != nil {
 		return err
 	}
-	s, err := openStore()
+	s, err := fav.Open()
 	if err != nil {
 		return err
 	}
@@ -67,7 +65,10 @@ func cmdReport(period string, args []string) error {
 		expr += " turns:1"
 	}
 	expr += " last:" + since.Format("2006-01-02")
-	recs := sessionRecs(s, refreshed(idx), expr, "")
+	recs, err := sessionRecs(s, refreshed(idx), expr, "")
+	if err != nil {
+		return err
+	}
 	projects := groupReport(recs, since)
 
 	if *asJSON {
@@ -160,12 +161,12 @@ func printReport(period string, since, now time.Time, recs []*fav.Rec, projects 
 		fmt.Println(head)
 		for _, r := range p.Sessions {
 			when := render.When(r.ActiveAt(), now)
-			meta := i18n.F("report.session_meta", providerName(r.Provider), r.Turns)
+			meta := i18n.F("report.session_meta", fav.ProviderName(r.Provider), r.Turns)
 			title := render.Truncate(r.Title, max(10, w-render.Width(meta)-render.Width(when)-8))
-			fmt.Printf("  %s %s  %s  %s\n", reportGlyph(r), title, meta, when)
+			fmt.Printf("  %s %s  %s  %s\n", render.RecGlyph(r), title, meta, when)
 		}
 		if len(p.Files) > 0 {
-			fmt.Println("  " + render.Truncate(i18n.T("report.files")+render.FileList(p.Files, p.Dir), w-2))
+			fmt.Println("  " + render.Truncate(i18n.F("report.files", render.FileList(p.Files, p.Dir)), w-2))
 		}
 		if len(p.Commits) > 0 {
 			shown := p.Commits[:min(reportCommits, len(p.Commits))]
@@ -185,26 +186,6 @@ func printReport(period string, since, now time.Time, recs []*fav.Rec, projects 
 			fmt.Printf("  fav open %s   %s\n", shortID(r.SessionID), render.Truncate(r.Title, w-30))
 		}
 	}
-}
-
-func reportGlyph(r *fav.Rec) string {
-	switch {
-	case r.Favorite() && r.Done():
-		return render.GlyphDone
-	case r.Favorite():
-		return render.GlyphActive
-	}
-	return render.GlyphSession
-}
-
-func providerName(p string) string {
-	switch p {
-	case fav.ProviderClaude:
-		return "Claude"
-	case fav.ProviderCodex:
-		return "Codex"
-	}
-	return p
 }
 
 func printReportJSON(period string, since time.Time, recs []*fav.Rec, projects []*reportProject) error {
@@ -235,7 +216,5 @@ func printReportJSON(period string, since time.Time, recs []*fav.Rec, projects [
 		}
 		out.Projects = append(out.Projects, pj)
 	}
-	enc := json.NewEncoder(os.Stdout)
-	enc.SetIndent("", "  ")
-	return enc.Encode(out)
+	return printJSON(out)
 }

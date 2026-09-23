@@ -14,8 +14,7 @@ import (
 // Sep separates the hidden id from the visible part of an fzf row (--delimiter, --with-nth=2).
 const Sep = "\t"
 
-// unfavorited → o; favorited → * / ✓ by status
-func glyph(r *fav.Rec) string {
+func RecGlyph(r *fav.Rec) string {
 	if !r.Favorite() {
 		return GlyphSession
 	}
@@ -60,7 +59,7 @@ func When(t time.Time, now time.Time) string {
 	case !t.Before(today) && t.Before(today.AddDate(0, 0, 1)):
 		return t.Format("15:04")
 	case !t.Before(today.AddDate(0, 0, -1)) && t.Before(today):
-		return i18n.T("time.yesterday_prefix") + t.Format("15:04")
+		return i18n.F("time.yesterday_at", t.Format("15:04"))
 	case !t.Before(today.AddDate(0, 0, -6)) && t.Before(today):
 		return i18n.T(weekdays[t.Weekday()]) + " " + t.Format("15:04")
 	case t.Year() == now.Year():
@@ -82,9 +81,9 @@ func DayLabel(t, now time.Time) string {
 	date := t.Format("2006-01-02")
 	switch {
 	case !t.Before(today):
-		return i18n.T("time.today_prefix") + date
+		return i18n.F("time.today_at", date)
 	case !t.Before(today.AddDate(0, 0, -1)):
-		return i18n.T("time.yesterday_prefix") + date
+		return i18n.F("time.yesterday_at", date)
 	}
 	return date
 }
@@ -107,7 +106,7 @@ func line(r *fav.Rec, now time.Time, col string) string {
 	var b strings.Builder
 	b.WriteString(LineKey(r))
 	b.WriteString(Sep)
-	b.WriteString(glyph(r))
+	b.WriteString(RecGlyph(r))
 	b.WriteByte(' ')
 	b.WriteString(Pad(When(r.When(), now), 11))
 	b.WriteByte(' ')
@@ -116,17 +115,20 @@ func line(r *fav.Rec, now time.Time, col string) string {
 	b.WriteString(Pad(r.Title, 48))
 	b.WriteString("  ")
 
-	meta := providerShort(r.Provider)
-	if r.Project != "" {
-		meta += " · " + r.Project
-	}
-	b.WriteString(dim.p(Pad(meta, 22)))
+	b.WriteString(dim.p(Pad(Meta(r), 22)))
 
 	if len(r.Tags) > 0 {
 		b.WriteString("  ")
-		b.WriteString(blue.p(tagString(r.Tags)))
+		b.WriteString(blue.p(TagString(r.Tags)))
 	}
 	return b.String()
+}
+
+func Meta(r *fav.Rec) string {
+	if r.Project == "" {
+		return fav.ProviderName(r.Provider)
+	}
+	return fav.ProviderName(r.Provider) + " · " + r.Project
 }
 
 func LineKey(r *fav.Rec) string {
@@ -169,22 +171,17 @@ func ShortDur(d time.Duration) string {
 
 func Card(r *fav.Rec, width int, now time.Time) []string {
 	when := When(r.When(), now)
-	head := glyph(r) + " " + r.Title
+	head := RecGlyph(r) + " " + r.Title
 	gap := width - Width(when) - 1
 	line1 := Pad(head, gap) + " " + when
-
-	meta := providerShort(r.Provider)
-	if r.Project != "" {
-		meta += " · " + r.Project
-	}
-	out := []string{line1, "  " + dim.p(Truncate(meta, width-2))}
+	out := []string{line1, "  " + dim.p(Truncate(Meta(r), width-2))}
 	if len(r.Tags) > 0 {
-		out = append(out, "  "+blue.p(Truncate(tagString(r.Tags), width-2)))
+		out = append(out, "  "+blue.p(Truncate(TagString(r.Tags), width-2)))
 	}
 	return out
 }
 
-// Preview is shared by the fzf preview window and the TUI right pane; it never shows env var values.
+// ⚠️ Preview (fzf preview window, `fav show`) never shows env var values.
 func Preview(r *fav.Rec, width int, now time.Time) string {
 	if width < 20 {
 		width = 20
@@ -234,7 +231,7 @@ func Preview(r *fav.Rec, width int, now time.Time) string {
 		field(GlyphHerdr+" Herdr", herdr)
 	}
 	if len(r.Tags) > 0 {
-		field(GlyphTag+i18n.T("card.tags"), tagString(r.Tags))
+		field(GlyphTag+i18n.T("card.tags"), TagString(r.Tags))
 	}
 	field(GlyphClock+i18n.T("card.resume"), resumeInfo(r, now))
 	field(GlyphClock+i18n.T("card.last_activity"), ActivityLine(r))
@@ -270,9 +267,9 @@ func Preview(r *fav.Rec, width int, now time.Time) string {
 }
 
 func statusLine(r *fav.Rec, now time.Time) string {
-	state := green.p(glyph(r) + " " + StatusLabel(r.Status))
+	state := green.p(RecGlyph(r) + " " + StatusLabel(r.Status))
 	if r.Done() || r.Status == "" {
-		state = dim.p(glyph(r) + " " + StatusLabel(r.Status))
+		state = dim.p(RecGlyph(r) + " " + StatusLabel(r.Status))
 	}
 	if r.Archived() {
 		state += dim.p("  " + GlyphArchive + i18n.T("card.archived"))
@@ -283,7 +280,7 @@ func statusLine(r *fav.Rec, now time.Time) string {
 	if r.PinnedPath != "" {
 		state += cyan.p("  " + GlyphPinned + i18n.T("detail.pinned"))
 	}
-	return state + dim.p("  ·  "+providerLabel(r.Provider)+"  ·  "+When(r.When(), now))
+	return state + dim.p("  ·  "+fav.ProviderLabel(r.Provider)+"  ·  "+When(r.When(), now))
 }
 
 func resumeInfo(r *fav.Rec, now time.Time) string {
@@ -298,7 +295,7 @@ func resumeInfo(r *fav.Rec, now time.Time) string {
 }
 
 func resumeTarget(r *fav.Rec) string {
-	target := providerLabel(r.Provider)
+	target := fav.ProviderLabel(r.Provider)
 	dir := paths.Tilde(r.Cwd)
 	if dir == "" {
 		dir = i18n.T("resume.where.cwd")
@@ -309,7 +306,7 @@ func resumeTarget(r *fav.Rec) string {
 	return i18n.T("resume.where.terminal") + " " + GlyphArrow + " " + dir + " " + GlyphArrow + " " + target
 }
 
-func tagString(tags []string) string {
+func TagString(tags []string) string {
 	var b strings.Builder
 	for i, t := range tags {
 		if i > 0 {
@@ -319,29 +316,6 @@ func tagString(tags []string) string {
 		b.WriteString(t)
 	}
 	return b.String()
-}
-
-// Provider is the short provider name shown on cards: Claude / Codex.
-func Provider(p string) string { return providerShort(p) }
-
-func providerShort(p string) string {
-	switch p {
-	case fav.ProviderClaude:
-		return "Claude"
-	case fav.ProviderCodex:
-		return "Codex"
-	}
-	return p
-}
-
-func providerLabel(p string) string {
-	switch p {
-	case fav.ProviderClaude:
-		return "Claude Code"
-	case fav.ProviderCodex:
-		return "Codex CLI"
-	}
-	return p
 }
 
 // FileList: "a.go ×3  ·  b.go" with paths under base written relative to it.
@@ -373,24 +347,15 @@ func FilesField(r *fav.Rec, n int) string {
 }
 
 func ActivityLine(r *fav.Rec) string {
-	for _, p := range []string{r.PinnedPath, r.TranscriptPath} {
-		if p == "" {
-			continue
+	for _, p := range r.Transcripts() {
+		if pl, ok := capture.ReadPulse(p); ok {
+			return strings.TrimSpace(pl.ModTime.Format("2006-01-02 15:04") + "  " + pl.Prompt)
 		}
-		a, ok := capture.LastActivity(p)
-		if !ok {
-			continue
-		}
-		s := a.ModTime.Format("2006-01-02 15:04")
-		if a.Last.Text != "" {
-			s += "  " + strings.Join(strings.Fields(a.Last.Text), " ")
-		}
-		return s
 	}
 	return ""
 }
 
-// Chat has the same shape as the TUI right pane: a header (who · time · length) and at most bodyRows lines of body per message.
+// Chat is `fav preview`'s message list: a who · time · length header and at most bodyRows body lines per message.
 func Chat(msgs []capture.Message, width, bodyRows int) []string {
 	var out []string
 	for _, msg := range msgs {

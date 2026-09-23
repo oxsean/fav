@@ -87,7 +87,7 @@ curl -fsSL https://github.com/oxsean/fav/releases/latest/download/fav_$(uname -s
 # or with Go:
 go install github.com/oxsean/fav/cmd/fav@latest
 
-fav install-skill      # links the /fav skill into ~/.claude/skills and ~/.codex/skills
+fav install-skill      # links the /fav skill into ~/.claude/skills and ~/.codex/skills ($CLAUDE_CONFIG_DIR / $CODEX_HOME when set)
 fav install-hook       # optional: Claude Code tells fav when it asks you something, so Agents flags permission questions without Herdr (fav uninstall-hook removes it)
 fav                    # the first start builds the index in the background; the Sessions tab fills up in seconds
 ```

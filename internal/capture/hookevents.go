@@ -7,10 +7,11 @@ import (
 	"time"
 
 	"github.com/oxsean/fav/internal/fav"
+	"github.com/oxsean/fav/internal/fileio"
 )
 
-// HookEvent is the latest Claude Code hook event of a session (fav install-hook), with the transcript size at that moment.
-type HookEvent struct {
+// hookEvent: a session's latest Claude Code hook event (fav install-hook) and the transcript size at that moment.
+type hookEvent struct {
 	Event string    `json:"event"`
 	At    time.Time `json:"at"`
 	Size  int64     `json:"size"`
@@ -25,19 +26,12 @@ func RecordHookEvent(sessionID, event, transcript string) {
 	if sessionID == "" || event == "" {
 		return
 	}
-	e := HookEvent{Event: event, At: time.Now()}
+	e := hookEvent{Event: event, At: time.Now()}
 	if st, err := os.Stat(transcript); err == nil {
 		e.Size = st.Size()
 	}
 	b, _ := json.Marshal(e)
-	path := hookEventPath(sessionID)
-	if os.MkdirAll(filepath.Dir(path), 0o755) != nil {
-		return
-	}
-	tmp := path + ".tmp"
-	if os.WriteFile(tmp, b, 0o644) == nil {
-		os.Rename(tmp, path)
-	}
+	fileio.WriteFile(hookEventPath(sessionID), b, 0o644)
 }
 
 // HookWaiting: the session's latest hook event is a question for the user (a permission prompt, a dialog) and the
@@ -47,7 +41,7 @@ func HookWaiting(sessionID string, size int64) bool {
 	if err != nil {
 		return false
 	}
-	var e HookEvent
+	var e hookEvent
 	if json.Unmarshal(b, &e) != nil {
 		return false
 	}

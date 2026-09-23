@@ -12,14 +12,14 @@ func TestLiveCreateTabAndRun(t *testing.T) {
 	if os.Getenv("HERDR_LIVE") == "" || !Active() {
 		t.Skip("需要 HERDR_LIVE=1 且运行在 Herdr 中")
 	}
-	wsID, _, _ := Env()
+	wsID := os.Getenv("HERDR_WORKSPACE_ID")
 	pane, err := CreateTab(wsID, "/tmp", "fav-selftest")
 	if err != nil {
 		t.Fatalf("CreateTab: %v", err)
 	}
 	t.Logf("新 pane: %s (tab %s)", pane.PaneID, pane.TabID)
 	defer func() {
-		if err := run([]string{"tab", "close", pane.TabID}, nil); err != nil {
+		if err := CloseTab(pane.TabID); err != nil {
 			t.Errorf("清理失败，请手动关掉 tab %s: %v", pane.TabID, err)
 		}
 	}()

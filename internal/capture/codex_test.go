@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/oxsean/fav/internal/fav"
 )
 
 func writeRollout(t *testing.T, root string, day time.Time, sessionID, cwd string, big bool) string {
@@ -98,16 +100,17 @@ func TestDetectCodexNoMatch(t *testing.T) {
 	}
 }
 
-func TestReadSessionMetaOnlyReadsFirstLine(t *testing.T) {
+func TestTranscriptPathFindsOldAndArchivedRollouts(t *testing.T) {
 	root := t.TempDir()
-	sessions := filepath.Join(root, "sessions")
-	p := writeRollout(t, sessions, time.Now(), "aaaa-1111", "/work/notes-api", true)
-
-	meta, err := readSessionMeta(p)
-	if err != nil {
-		t.Fatal(err)
+	t.Setenv("CODEX_HOME", root)
+	old := writeRollout(t, filepath.Join(root, "sessions"), time.Now().AddDate(-2, 0, 0), "old-1111", "/w", false)
+	archived := filepath.Join(root, "archived_sessions", "rollout-2025-01-02T03-04-05-arch-2222.jsonl")
+	os.MkdirAll(filepath.Dir(archived), 0o755)
+	os.WriteFile(archived, []byte("{}\n"), 0o600)
+	if got := TranscriptPath(fav.ProviderCodex, "old-1111"); got != old {
+		t.Errorf("a rollout from two years ago: %q", got)
 	}
-	if meta.SessionID != "aaaa-1111" || meta.Cwd != "/work/notes-api" {
-		t.Fatalf("首行解析错了：%+v", meta)
+	if got := TranscriptPath(fav.ProviderCodex, "arch-2222"); got != archived {
+		t.Errorf("an archived rollout: %q", got)
 	}
 }

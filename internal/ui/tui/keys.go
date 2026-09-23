@@ -20,9 +20,10 @@ const (
 	inStart                     // new-session dialog
 	inHandoff                   // handoff dialog
 	inPeek                      // peek at a Herdr agent (outside its reply input)
+	inReader                    // help and the full-message view
 )
 
-var scopes = []scope{inList, inResume, inConfirm, inStart, inHandoff, inPeek}
+var scopes = []scope{inList, inResume, inConfirm, inStart, inHandoff, inPeek, inReader}
 
 // tier is how much an action changes. ⚠️ Rules for new keys:
 // tierStart never gets a list key (only a dialog's Enter or the same key pressed twice runs it);
@@ -193,12 +194,16 @@ var bindings = []binding{
 
 	{act: actClaude, in: inStart | inHandoff, tier: tierStart, keys: []string{"1"}},
 	{act: actCodex, in: inStart | inHandoff, tier: tierStart, keys: []string{"2"}},
-	{act: actDown, in: inStart | inHandoff, keys: []string{"j", "down", "ctrl+n"}},
-	{act: actUp, in: inStart | inHandoff, keys: []string{"k", "up", "ctrl+p"}},
-	{act: actPageDown, in: inHandoff, keys: []string{"space", "pgdown", "ctrl+f"}},
-	{act: actPageUp, in: inHandoff, keys: []string{"pgup", "ctrl+b"}},
+	{act: actDown, in: inStart | inHandoff | inReader, keys: []string{"j", "down", "ctrl+n"}},
+	{act: actUp, in: inStart | inHandoff | inReader, keys: []string{"k", "up", "ctrl+p"}},
+	{act: actPageDown, in: inHandoff | inReader, keys: []string{"space", "pgdown", "ctrl+f"}},
+	{act: actPageUp, in: inHandoff | inReader, keys: []string{"pgup", "ctrl+b", "b"}},
+	{act: actHalfDown, in: inHandoff | inReader, keys: []string{"ctrl+d"}},
+	{act: actHalfUp, in: inHandoff | inReader, keys: []string{"ctrl+u"}},
+	{act: actTop, in: inHandoff | inReader, keys: []string{"g", "home"}},
+	{act: actBottom, in: inHandoff | inReader, keys: []string{"G", "end"}},
 	{act: actEdit, in: inHandoff, keys: []string{"e", "ctrl+e"}},
-	{act: actCopy, in: inHandoff, keys: []string{"y", "ctrl+y"}},
+	{act: actCopy, in: inHandoff | inReader, keys: []string{"y", "ctrl+y"}},
 
 	{act: actAnswer, in: inPeek, tier: tierStart, keys: []string{"1", "2", "3"}},
 	{act: actReply, in: inPeek, keys: []string{":", "："}},
@@ -206,6 +211,10 @@ var bindings = []binding{
 	{act: actTabPrev, in: inPeek, keys: []string{"shift+tab"}},
 	{act: actFocusPrev, in: inPeek, keys: []string{"left", "h"}},
 	{act: actFocusNext, in: inPeek, keys: []string{"right", "l"}},
+
+	{act: actTabNext, in: inReader, keys: []string{"tab", "right", "l", "J", "ctrl+j"}},
+	{act: actTabPrev, in: inReader, keys: []string{"shift+tab", "left", "h", "K", "ctrl+k"}},
+	{act: actClose, in: inReader, keys: []string{"esc", "q", "enter"}},
 }
 
 var keyIndex = func() map[scope]map[string]*binding {
@@ -337,14 +346,13 @@ type helpSpec struct {
 
 type helpSection struct {
 	title string
-	note  string
 	rows  []helpSpec
 }
 
 // helpLayout: the list's keys; dialogs label their own buttons, so only moving between them is listed.
 func helpLayout() []helpSection {
 	return []helpSection{
-		{"help.group.search", "", []helpSpec{
+		{"help.group.search", []helpSpec{
 			{"help.search", inList, false, []act{actSearch}},
 			{"help.msg_search", inList, false, []act{actMsgSearch}},
 			{"help.find", inList, false, []act{actFind}},
@@ -352,7 +360,7 @@ func helpLayout() []helpSection {
 			{"help.all_hits", inList, false, []act{actRight}},
 			{"help.sort", inList, false, []act{actSort}},
 		}},
-		{"help.group.read", "", []helpSpec{
+		{"help.group.read", []helpSpec{
 			{"help.move", inList, true, []act{actDown, actUp}},
 			{"help.page", inList, true, []act{actPageDown, actPageUp}},
 			{"help.half", inList, true, []act{actHalfDown, actHalfUp}},
@@ -361,12 +369,12 @@ func helpLayout() []helpSection {
 			{"help.tabs", inList, true, []act{actNextView, actPrevView}},
 			{"help.tab_n", inList, false, []act{actView}},
 		}},
-		{"help.group.open", "", []helpSpec{
+		{"help.group.open", []helpSpec{
 			{"help.enter", inList, false, []act{actEnter, actResume}},
 			{"help.space", inList, false, []act{actSpace}},
 			{"help.new_session", inList, false, []act{actNew}},
 		}},
-		{"help.group.record", "", []helpSpec{
+		{"help.group.record", []helpSpec{
 			{"help.favorite", inList, false, []act{actFavorite}},
 			{"help.done", inList, false, []act{actDone}},
 			{"help.archive", inList, false, []act{actArchive}},
@@ -374,26 +382,26 @@ func helpLayout() []helpSection {
 			{"help.move_project", inList, false, []act{actMove}},
 			{"help.delete", inList, false, []act{actDelete}},
 		}},
-		{"help.group.view", "", []helpSpec{
+		{"help.group.view", []helpSpec{
 			{"help.chip_row", inList, false, []act{actChips}},
 			{"help.filters", inList, false, []act{actTags, actProjects, actProvider, actDate}},
 			{"help.status", inList, false, []act{actStatus}},
 			{"help.enter_group", inList, false, []act{actEnter}},
 			{"help.fold_all", inList, false, []act{actFoldAll, actFold, actUnfold}},
 		}},
-		{"help.group.chat", "", []helpSpec{
+		{"help.group.chat", []helpSpec{
 			{"help.chat_move", inList, true, []act{actChatDown, actChatUp}},
 			{"help.enter_chat", inList, false, []act{actEnter}},
 			{"help.copy_msg", inList, false, []act{actCopy}},
 		}},
-		{"help.group.agents", "", []helpSpec{
+		{"help.group.agents", []helpSpec{
 			{"help.peek", inList, false, []act{actPeek}},
 			{"help.handled", inList, false, []act{actHandled}},
 			{"help.snooze", inList, false, []act{actSnooze}},
 			{"help.close_tab", inList, false, []act{actCloseTab}},
 			{"help.close_idle", inList, false, []act{actCloseIdle}},
 		}},
-		{"help.group.other", "", []helpSpec{
+		{"help.group.other", []helpSpec{
 			{"help.settings", inList, false, []act{actSettings}},
 			{"help.help", inList, false, []act{actHelp}},
 			{"help.esc", inList, false, []act{actBack}},

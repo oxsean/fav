@@ -16,6 +16,7 @@ import (
 
 	"github.com/oxsean/fav/internal/capture"
 	"github.com/oxsean/fav/internal/fav"
+	"github.com/oxsean/fav/internal/fileio"
 	"github.com/oxsean/fav/internal/filelock"
 )
 
@@ -70,27 +71,28 @@ func (st *state) save(dir string) error {
 	if err != nil {
 		return err
 	}
-	tmp := filepath.Join(dir, "state.json.tmp")
-	if err := os.WriteFile(tmp, b, 0o644); err != nil {
-		return err
-	}
-	return os.Rename(tmp, filepath.Join(dir, "state.json"))
+	return fileio.WriteFile(filepath.Join(dir, "state.json"), b, 0o644)
 }
 
 // Progress of one Update: Total transcripts needed reading, Done of them are read.
 type Progress struct{ Done, Total int }
 
-// Update brings the store in line with these transcripts: new and grown ones are read from where they stopped, shrunk or
-// rewritten ones from the start, vanished ones dropped. It stops early, keeping what it did, when ctx ends; a deadline in
-// ctx is the time budget. progress is called after each transcript. ErrBusy: another process holds the store.
-func Update(ctx context.Context, dir string, paths []string, progress func(Progress)) (Progress, error) {
-	return UpdateWith(ctx, dir, paths, Options{}, progress)
-}
-
 // Options of an update: OutLines lines of each tool output are kept (0 = none); changing it rebuilds the store.
 type Options struct{ OutLines int }
 
-func UpdateWith(ctx context.Context, dir string, paths []string, opt Options, progress func(Progress)) (Progress, error) {
+// Sync updates the store for indexed plus the pinned copies of recs whose original is gone.
+// ⚠️ An empty indexed means the index is not built yet: Sync does nothing, or Update would drop every text file.
+func Sync(ctx context.Context, indexed []string, recs []*fav.Rec, outLines int, progress func(Progress)) (Progress, error) {
+	if len(indexed) == 0 {
+		return Progress{}, nil
+	}
+	return Update(ctx, Dir(), sources(indexed, recs), Options{OutLines: outLines}, progress)
+}
+
+// Update brings the store in line with these transcripts: new and grown ones are read from where they stopped, shrunk or
+// rewritten ones from the start, vanished ones dropped. It stops early, keeping what it did, when ctx ends; a deadline in
+// ctx is the time budget. progress is called after each transcript. ErrBusy: another process holds the store.
+func Update(ctx context.Context, dir string, paths []string, opt Options, progress func(Progress)) (Progress, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return Progress{}, err
 	}

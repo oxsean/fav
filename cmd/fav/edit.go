@@ -11,6 +11,7 @@ import (
 
 	"github.com/oxsean/fav/internal/fav"
 	"github.com/oxsean/fav/internal/i18n"
+	"github.com/oxsean/fav/internal/shell"
 )
 
 type editable struct {
@@ -24,11 +25,16 @@ type editable struct {
 }
 
 func cmdEdit(args []string) error {
-	s, err := openStore()
+	fs := newFlags("edit")
+	pos, err := parseMixed(fs, args)
 	if err != nil {
 		return err
 	}
-	r, err := pick(s, firstArg(args))
+	s, err := fav.Open()
+	if err != nil {
+		return err
+	}
+	r, err := pick(s, first(pos))
 	if err != nil {
 		return err
 	}
@@ -69,12 +75,14 @@ func cmdEdit(args []string) error {
 		return i18n.E("cli.edit.bad_status", strings.Join(fav.Statuses, "|"), after.Status)
 	}
 
-	r.Title = strings.TrimSpace(after.Title)
-	r.Label = strings.TrimSpace(after.Label)
-	r.Summary = strings.TrimSpace(after.Summary)
-	r.Tags = fav.Normalize(after.Tags)
-	r.Project, r.WorkType, r.Status = after.Project, after.WorkType, after.Status
-	if err := save(s, r); err != nil {
+	r, err = s.Update(r, func(r *fav.Rec) {
+		r.Title = strings.TrimSpace(after.Title)
+		r.Label = strings.TrimSpace(after.Label)
+		r.Summary = strings.TrimSpace(after.Summary)
+		r.Tags = fav.Normalize(after.Tags)
+		r.Project, r.WorkType, r.Status = after.Project, after.WorkType, after.Status
+	})
+	if err != nil {
 		return err
 	}
 	fmt.Print(i18n.F("cli.edit.updated", r.Title))
@@ -82,15 +90,10 @@ func cmdEdit(args []string) error {
 }
 
 func openEditor(path string) error {
-	ed := os.Getenv("VISUAL")
-	if ed == "" {
-		ed = os.Getenv("EDITOR")
-	}
-	if ed == "" {
+	parts := shell.Editor()
+	if len(parts) == 0 {
 		return errors.New(i18n.T("cli.edit.no_editor"))
 	}
-	// $EDITOR may carry arguments ("code -w"): split on whitespace, no shell.
-	parts := strings.Fields(ed)
 	bin, err := exec.LookPath(parts[0])
 	if err != nil {
 		return i18n.E("cli.edit.editor_missing", parts[0], err)

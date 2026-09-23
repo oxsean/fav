@@ -134,31 +134,61 @@ func GitOut(dir string, args ...string) string {
 	return strings.TrimSpace(string(out))
 }
 
-// Claude transcripts are found by globbing the session id, not by re-encoding the cwd.
+func ClaudeHome() string {
+	if h := os.Getenv("CLAUDE_CONFIG_DIR"); h != "" {
+		return h
+	}
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".claude")
+}
+
+func CodexHome() string {
+	if h := os.Getenv("CODEX_HOME"); h != "" {
+		return h
+	}
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".codex")
+}
+
+func codexSessionsDir() string { return filepath.Join(CodexHome(), "sessions") }
+
+// CodexArchivedDir: archiving a thread moves its rollout here, flat.
+func CodexArchivedDir() string { return filepath.Join(CodexHome(), "archived_sessions") }
+
+// ClaudeTranscripts are the transcripts of session id ("" = every session): projects/<encoded cwd>/<id>.jsonl.
+func ClaudeTranscripts(id string) []string {
+	if id == "" {
+		id = "*"
+	}
+	hits, _ := filepath.Glob(filepath.Join(ClaudeHome(), "projects", "*", id+".jsonl"))
+	return hits
+}
+
+// CodexRollouts: sessions/YYYY/MM/DD/rollout-<time>-<id>.jsonl, then the archived ones (id "" = every session).
+func CodexRollouts(id string) []string {
+	name := "rollout-*.jsonl"
+	if id != "" {
+		name = "rollout-*-" + id + ".jsonl"
+	}
+	hits, _ := filepath.Glob(filepath.Join(codexSessionsDir(), "[0-9][0-9][0-9][0-9]", "[0-9][0-9]", "[0-9][0-9]", name))
+	archived, _ := filepath.Glob(filepath.Join(CodexArchivedDir(), name))
+	return append(hits, archived...)
+}
+
+// TranscriptPath finds a session's transcript by its id, never by re-encoding the cwd.
 func TranscriptPath(provider, sessionID string) string {
 	if sessionID == "" {
 		return ""
 	}
+	var hits []string
 	switch provider {
 	case fav.ProviderClaude:
-		hits, _ := filepath.Glob(filepath.Join(ClaudeHome(), "projects", "*", sessionID+".jsonl"))
-		if len(hits) > 0 {
-			return hits[0]
-		}
+		hits = ClaudeTranscripts(sessionID)
 	case fav.ProviderCodex:
-		return findCodexRollout(sessionID)
+		hits = CodexRollouts(sessionID)
 	}
-	return ""
-}
-
-func TranscriptAlive(r *fav.Rec) bool {
-	for _, p := range []string{r.PinnedPath, r.TranscriptPath} {
-		if p == "" {
-			continue
-		}
-		if _, err := os.Stat(p); err == nil {
-			return true
-		}
+	if len(hits) == 0 {
+		return ""
 	}
-	return false
+	return hits[0]
 }

@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"strings"
-	"time"
 
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
@@ -33,8 +32,6 @@ func transcript(r *fav.Rec) string {
 	}
 	return r.TranscriptPath
 }
-
-func (m *Model) ensureOlder(r *fav.Rec) tea.Cmd { return m.load(r, olderMsgs) }
 
 func (m *Model) load(r *fav.Rec, n int) tea.Cmd {
 	p := m.probes[r]
@@ -160,14 +157,12 @@ func (m *Model) moveChat(delta int) {
 
 // clickChat: a click selects, a second click on the same message within a short time opens the full text.
 func (m *Model) clickChat(i int) {
-	now := time.Now()
 	m.pane = paneChat
-	if m.chatCur == i && m.chatHit == i && now.Sub(m.chatHitAt) < 500*time.Millisecond {
-		m.chatHitAt = time.Time{}
+	if m.chatClicks.double(i) && m.chatCur == i {
 		m.pending = m.openMessage()
 		return
 	}
-	m.chatCur, m.chatHit, m.chatHitAt, m.chatFollow = i, i, now, true
+	m.chatCur, m.chatFollow = i, true
 }
 
 func (m *Model) currentMessage() (capture.Message, bool) {
@@ -222,32 +217,32 @@ func firstHitLine(lines []string, q string) int {
 
 func (m *Model) layoutMessage() {
 	w := m.ov.boxW - 4
-	add := func(ls []string, kind byte, step int) {
+	add := func(ls []string, kind byte) {
 		for _, l := range ls {
-			m.ov.lines, m.ov.kinds, m.ov.stepOf = append(m.ov.lines, l), append(m.ov.kinds, kind), append(m.ov.stepOf, step)
+			m.ov.lines, m.ov.kinds = append(m.ov.lines, l), append(m.ov.kinds, kind)
 		}
 	}
-	m.ov.lines, m.ov.kinds, m.ov.stepOf = nil, nil, nil
-	add(render.Wrap(m.ov.msg.Text, w), 'T', -1)
+	m.ov.lines, m.ov.kinds = nil, nil
+	add(render.Wrap(m.ov.msg.Text, w), 'T')
 	if len(m.ov.msg.Steps) == 0 {
 		return
 	}
-	add([]string{""}, 'T', -1)
+	add([]string{""}, 'T')
 	for i, text := range capture.StepsFull(transcript(m.current()), m.ov.msg.Steps) {
 		st := m.ov.msg.Steps[i]
 		text = prettyJSON(text)
 		from := len(m.ov.lines)
 		if st.Result {
-			add(hardWrap("→ "+strings.ReplaceAll(text, "\n", "\n  "), w, "  "), 'R', i)
+			add(hardWrap("→ "+strings.ReplaceAll(text, "\n", "\n  "), w, "  "), 'R')
 		} else {
 			head, rest, _ := strings.Cut(text, "\n")
-			add(hardWrap(st.Tool+"\x00"+head, w, "  "), 'H', i)
+			add(hardWrap(st.Tool+"\x00"+head, w, "  "), 'H')
 			if rest != "" {
-				add(hardWrap(rest, w, ""), 'B', i)
+				add(hardWrap(rest, w, ""), 'B')
 			}
 		}
 		if len(m.ov.lines)-from > longStep {
-			add([]string{""}, 'S', i)
+			add([]string{""}, 'S')
 		}
 	}
 }
@@ -304,7 +299,7 @@ func (m *Model) copyMessage() {
 		return
 	}
 	if err := copyText(msg.Text); err != nil {
-		m.flash(i18n.T("flash.clipboard_unavailable") + err.Error())
+		m.flash(i18n.F("flash.clipboard_unavailable", err))
 		return
 	}
 	m.flash(i18n.F("chat.copied", len([]rune(msg.Text))))

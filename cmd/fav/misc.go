@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -12,6 +13,7 @@ import (
 	"github.com/oxsean/fav/internal/fav"
 	"github.com/oxsean/fav/internal/i18n"
 	"github.com/oxsean/fav/internal/index"
+	"github.com/oxsean/fav/internal/paths"
 	"github.com/oxsean/fav/skills"
 )
 
@@ -31,7 +33,7 @@ func cmdDoctor(args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	s, err := openStore()
+	s, err := fav.Open()
 	if err != nil {
 		return err
 	}
@@ -42,7 +44,7 @@ func cmdDoctor(args []string) error {
 	var dead []*fav.Rec
 	alive, pinned, backfilled := 0, 0, 0
 	for _, r := range s.All() {
-		if !capture.TranscriptAlive(r) {
+		if !slices.ContainsFunc(r.Transcripts(), paths.Exists) {
 			dead = append(dead, r)
 			continue
 		}
@@ -52,7 +54,7 @@ func cmdDoctor(args []string) error {
 		}
 		// old records lack the session start time; fill it in while the file still exists
 		if r.SessionStartedAt == nil {
-			for _, p := range []string{r.PinnedPath, r.TranscriptPath} {
+			for _, p := range r.Transcripts() {
 				if t, ok := capture.SessionStart(p); ok {
 					r.SessionStartedAt = &t
 					if err := s.Put(r); err == nil {
@@ -69,13 +71,13 @@ func cmdDoctor(args []string) error {
 	}
 
 	if idx, err := index.Open(); err == nil {
-		idx, _ = idx.Refresh()
-		if list := filterBroken(scanBroken(s, idx, ""), brokenQuery(nil)); len(list) > 0 {
+		idx = refreshed(idx)
+		live := capture.LiveSessions()
+		if list := filterBroken(scanBroken(s, idx, live, ""), brokenQuery(nil)); len(list) > 0 {
 			fmt.Println(i18n.T("cli.doctor.broken"))
 			printBroken(list)
 			fmt.Print(i18n.T("cli.doctor.suggest_fix"))
 		}
-		live := capture.LiveSessions()
 		if hookInstalled() {
 			fmt.Print(i18n.T("cli.doctor.hook_on"))
 		} else {
@@ -133,13 +135,7 @@ func cmdInstallSkill(args []string) error {
 	if err != nil {
 		return err
 	}
-
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return err
-	}
-	for _, base := range []string{".claude", ".codex"} {
-		dst := filepath.Join(home, base, "skills", "fav")
+	for _, dst := range skillLinks() {
 		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 			return err
 		}
@@ -158,13 +154,11 @@ func cmdInstallSkill(args []string) error {
 }
 
 // Only removes symlinks fav made; a real directory belongs to someone else.
-func cmdUninstallSkill() error {
-	home, err := os.UserHomeDir()
-	if err != nil {
+func cmdUninstallSkill(args []string) error {
+	if err := newFlags("uninstall-skill").Parse(args); err != nil {
 		return err
 	}
-	for _, base := range []string{".claude", ".codex"} {
-		dst := filepath.Join(home, base, "skills", "fav")
+	for _, dst := range skillLinks() {
 		fi, err := os.Lstat(dst)
 		if err != nil {
 			fmt.Print(i18n.F("cli.skill.not_installed", dst))
@@ -180,6 +174,10 @@ func cmdUninstallSkill() error {
 		fmt.Print(i18n.F("cli.skill.removed", dst))
 	}
 	return nil
+}
+
+func skillLinks() []string {
+	return []string{filepath.Join(capture.ClaudeHome(), "skills", "fav"), filepath.Join(capture.CodexHome(), "skills", "fav")}
 }
 
 func defaultSkillDir() (string, error) {
@@ -227,7 +225,7 @@ func cmdShellInit(args []string) error {
 	if err != nil {
 		return err
 	}
-	shell := firstArg(pos)
+	shell := first(pos)
 	if shell == "" {
 		shell = filepath.Base(os.Getenv("SHELL"))
 	}

@@ -7,9 +7,13 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"time"
+
+	"github.com/oxsean/fav/internal/fileio"
+	"github.com/oxsean/fav/internal/filelock"
 )
 
 // TrashEntry is a trashed session: where the files went, plus the record as it was.
@@ -82,159 +86,204 @@ func LoadTrash() ([]TrashEntry, error) {
 }
 
 func saveTrash(entries []TrashEntry) error {
+	return fileio.WriteAtomic(trashManifest(), 0o600, func(w io.Writer) error {
+		enc := json.NewEncoder(w)
+		for _, e := range entries {
+			if err := enc.Encode(e); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+// errUnchanged from a change: nothing to save.
+var errUnchanged = errors.New("unchanged")
+
+// ⚠️ editTrash loads, changes and saves the manifest under its lock (TUI and CLI both write it); after runs locked.
+func editTrash(change func([]TrashEntry) ([]TrashEntry, error), after ...func()) error {
 	if err := os.MkdirAll(TrashDir(), 0o700); err != nil {
 		return err
 	}
-	tmp := trashManifest() + ".tmp"
-	f, err := os.OpenFile(tmp, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
+	unlock, err := filelock.Lock(trashManifest() + ".lock")
 	if err != nil {
 		return err
 	}
-	w := bufio.NewWriter(f)
-	for _, e := range entries {
-		b, err := json.Marshal(e)
-		if err != nil {
-			f.Close()
-			return err
-		}
-		w.Write(b)
-		w.WriteByte('\n')
-	}
-	if err := w.Flush(); err != nil {
-		f.Close()
-		return err
-	}
-	if err := f.Close(); err != nil {
-		return err
-	}
-	return os.Rename(tmp, trashManifest())
-}
-
-// MoveToTrash moves paths (files or dirs) into the trash and records them; an earlier entry of the same session is replaced.
-func MoveToTrash(e TrashEntry, paths []string) (TrashEntry, error) {
+	defer unlock()
 	entries, err := LoadTrash()
 	if err != nil {
-		return e, err
+		return err
 	}
-	e.DeletedAt = time.Now()
-	e.Dir = filepath.Join(TrashDir(), e.Provider, e.SessionID+"-"+strconv.FormatInt(e.DeletedAt.UnixNano(), 36))
-	dst := e.dir()
-	if err := os.MkdirAll(dst, 0o700); err != nil {
-		return e, err
-	}
-	e.Files = nil
-	for i, p := range paths {
-		if _, err := os.Lstat(p); err != nil {
-			continue
+	if entries, err = change(entries); err != nil {
+		if err == errUnchanged {
+			return nil
 		}
-		to := filepath.Join(dst, strconv.Itoa(i)+"-"+filepath.Base(p))
-		if err := moveAny(p, to); err != nil {
-			return e, err
-		}
-		e.Files = append(e.Files, Moved{From: p, To: to})
+		return err
 	}
-	kept := entries[:0]
-	for _, x := range entries {
-		if x.Provider != e.Provider || x.SessionID != e.SessionID {
-			kept = append(kept, x)
-		}
+	if err := saveTrash(entries); err != nil {
+		return err
 	}
-	return e, saveTrash(append([]TrashEntry{e}, kept...))
+	for _, f := range after {
+		f()
+	}
+	return nil
 }
+
+// MoveToTrash moves paths into the trash under one entry per session: with nothing to move an earlier entry stays;
+// otherwise it is replaced and its files move under the new entry, to be purged with it.
+func MoveToTrash(e TrashEntry, paths []string) (TrashEntry, error) {
+	var earlier, dir string
+	var moved []Moved
+	err := editTrash(func(entries []TrashEntry) ([]TrashEntry, error) {
+		same := slices.IndexFunc(entries, func(x TrashEntry) bool { return x.Provider == e.Provider && x.SessionID == e.SessionID })
+		if same >= 0 && !slices.ContainsFunc(paths, present) {
+			if e.Record != nil {
+				entries[same].Record = e.Record
+			}
+			e = entries[same]
+			return entries, nil
+		}
+		e.DeletedAt = time.Now()
+		e.Dir = filepath.Join(TrashDir(), e.Provider, e.SessionID+"-"+strconv.FormatInt(e.DeletedAt.UnixNano(), 36))
+		if err := os.MkdirAll(e.Dir, 0o700); err != nil {
+			return nil, err
+		}
+		dir = e.Dir
+		for i, p := range paths {
+			if !present(p) {
+				continue
+			}
+			to := filepath.Join(e.Dir, strconv.Itoa(i)+"-"+filepath.Base(p))
+			if err := moveAny(p, to); err != nil {
+				return nil, err
+			}
+			moved = append(moved, Moved{From: p, To: to})
+		}
+		e.Files = moved
+		if same < 0 {
+			return append([]TrashEntry{e}, entries...), nil
+		}
+		earlier = entries[same].dir()
+		return append([]TrashEntry{e}, slices.Delete(entries, same, same+1)...), nil
+	}, func() {
+		if earlier != "" {
+			os.Rename(earlier, filepath.Join(e.Dir, "earlier"))
+		}
+	})
+	if err != nil && dir != "" { // ⚠️ nothing may stay in a directory no entry owns: the purge would delete it
+		for _, f := range slices.Backward(moved) {
+			moveAny(f.To, f.From)
+		}
+		os.Remove(dir)
+	}
+	return e, err
+}
+
+// present: ⚠️ Lstat, so a dangling link still counts and moves.
+func present(p string) bool { _, err := os.Lstat(p); return err == nil }
 
 // SaveTrashEntry replaces the entry of the same session (a project move calls MoveToTrash first, then records the rewritten files).
 func SaveTrashEntry(e TrashEntry) error {
-	entries, err := LoadTrash()
-	if err != nil {
-		return err
-	}
-	for i := range entries {
-		if entries[i].Provider == e.Provider && entries[i].SessionID == e.SessionID {
-			entries[i] = e
-			return saveTrash(entries)
+	return editTrash(func(entries []TrashEntry) ([]TrashEntry, error) {
+		for i := range entries {
+			if entries[i].Provider == e.Provider && entries[i].SessionID == e.SessionID {
+				entries[i] = e
+				return entries, nil
+			}
 		}
-	}
-	return saveTrash(append([]TrashEntry{e}, entries...))
+		return append([]TrashEntry{e}, entries...), nil
+	})
 }
 
 // RestoreTrash puts the session back (recreating the original directory if needed), drops the entry and deletes files a project move rewrote.
 func RestoreTrash(provider, sessionID string) (TrashEntry, error) {
-	entries, err := LoadTrash()
-	if err != nil {
-		return TrashEntry{}, err
-	}
-	idx := -1
-	for i, x := range entries {
-		if x.Provider == provider && x.SessionID == sessionID {
-			idx = i
+	var e TrashEntry
+	err := editTrash(func(entries []TrashEntry) ([]TrashEntry, error) {
+		i := slices.IndexFunc(entries, func(x TrashEntry) bool { return x.Provider == provider && x.SessionID == sessionID })
+		if i < 0 {
+			return nil, errors.New("not in trash")
 		}
-	}
-	if idx < 0 {
-		return TrashEntry{}, errors.New("not in trash")
-	}
-	e := entries[idx]
+		e = entries[i]
+		if err := e.restore(); err != nil {
+			return nil, err
+		}
+		return slices.Delete(entries, i, i+1), nil
+	})
+	return e, err
+}
+
+func (e TrashEntry) restore() error {
 	// validate everything first so a failure midway can be retried: a used rewrite refuses; a missing trash copy (restore interrupted last time) counts as restored
 	for _, f := range e.Files {
 		if f.Replaced != "" {
 			if _, err := os.Lstat(f.To); err == nil && FileStamp(f.Replaced) != f.Stamp && FileStamp(f.Replaced) != "" {
-				return e, errors.New("session was used after the move; restore refused")
+				return errors.New("session was used after the move; restore refused")
 			}
-		}
-	}
-	for _, f := range e.Files {
-		if _, err := os.Lstat(f.To); err != nil {
-			continue
-		}
-		if err := os.MkdirAll(filepath.Dir(f.From), 0o700); err != nil {
-			return e, err
-		}
-		if f.Replaced != "" {
-			os.RemoveAll(f.Replaced)
-		}
-		if err := moveAny(f.To, f.From); err != nil {
-			return e, err
 		}
 	}
 	moved := false
 	for _, f := range e.Files {
 		moved = moved || f.Replaced != ""
-	}
-	if r := e.Record; moved && r != nil && r.PinnedPath != "" && r.TranscriptPath != "" { // the move relinked the pin to the rewrite; point it back at the original
-		os.Remove(r.PinnedPath)
-		if os.Link(r.TranscriptPath, r.PinnedPath) != nil {
-			r.PinnedPath = ""
-		}
-	}
-	os.Remove(e.dir())
-	return e, saveTrash(append(entries[:idx:idx], entries[idx+1:]...))
-}
-
-// PurgeTrash deletes entries older than days; days <= 0 means everything.
-func PurgeTrash(days int) (int, error) {
-	entries, err := LoadTrash()
-	if err != nil {
-		return 0, err
-	}
-	cut := time.Now().AddDate(0, 0, -days)
-	var kept []TrashEntry
-	n := 0
-	for _, e := range entries {
-		if days > 0 && e.DeletedAt.After(cut) {
-			kept = append(kept, e)
+		if _, err := os.Lstat(f.To); err != nil {
 			continue
 		}
-		os.RemoveAll(e.dir()) // Relocated.To lives outside the trash and is in use
-		n++
+		if err := os.MkdirAll(filepath.Dir(f.From), 0o700); err != nil {
+			return err
+		}
+		if f.Replaced != "" {
+			os.RemoveAll(f.Replaced)
+		}
+		if err := moveAny(f.To, f.From); err != nil {
+			return err
+		}
 	}
-	if n == 0 {
-		return 0, nil
+	if r := e.Record; moved && r != nil && r.PinnedPath != "" && r.TranscriptPath != "" { // the move relinked the pin to the rewrite; point it back at the original
+		r.Relink(r.TranscriptPath)
 	}
-	return n, saveTrash(kept)
+	os.Remove(e.dir())
+	return nil
 }
 
-// rename first; copy + delete across volumes
+// PurgeTrash deletes entries and unowned directories older than days; days <= 0 means everything.
+func PurgeTrash(days int) (int, error) {
+	if !present(TrashDir()) {
+		return 0, nil
+	}
+	cut := time.Now().AddDate(0, 0, -days)
+	due := func(t time.Time) bool { return days <= 0 || !t.After(cut) }
+	n := 0
+	err := editTrash(func(entries []TrashEntry) ([]TrashEntry, error) {
+		var kept []TrashEntry
+		owned := map[string]bool{} // by provider/name: the manifest's absolute paths go stale when FAV_HOME moves
+		for _, e := range entries {
+			if !due(e.DeletedAt) {
+				kept = append(kept, e)
+				owned[filepath.Join(e.Provider, filepath.Base(e.dir()))] = true
+				continue
+			}
+			os.RemoveAll(e.dir()) // Relocated.To lives outside the trash and is in use
+			n++
+		}
+		for _, p := range []string{ProviderClaude, ProviderCodex} {
+			ds, _ := os.ReadDir(filepath.Join(TrashDir(), p))
+			for _, d := range ds {
+				if info, err := d.Info(); err == nil && !owned[filepath.Join(p, d.Name())] && due(info.ModTime()) {
+					os.RemoveAll(filepath.Join(TrashDir(), p, d.Name()))
+				}
+			}
+		}
+		if n == 0 {
+			return nil, errUnchanged
+		}
+		return kept, nil
+	})
+	return n, err
+}
+
+var rename = os.Rename
+
 func moveAny(from, to string) error {
-	if err := os.Rename(from, to); err == nil {
+	if err := rename(from, to); err == nil {
 		return nil
 	}
 	st, err := os.Lstat(from)

@@ -36,7 +36,7 @@ func printIdleAgents(s *fav.Store, idx *index.Index, live map[string]capture.Liv
 			continue
 		}
 		title := l.Title
-		if f := idx.FileByPrefix(id); f != nil && f.Title != "" {
+		if f, _ := idx.FileByPrefix(id); f != nil && f.Title != "" {
 			title = f.Title
 		}
 		if r := s.BySession(l.Agent, id); r != nil {

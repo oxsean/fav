@@ -7,6 +7,8 @@ import (
 	"sort"
 	"strings"
 	"sync"
+
+	"github.com/oxsean/fav/internal/fileio"
 )
 
 // The vocabulary counts the Latin words of the store (add-only: words of dropped transcripts linger harmlessly). A
@@ -46,12 +48,11 @@ func (v *vocab) save(dir string) error {
 	if err != nil {
 		return err
 	}
-	tmp := filepath.Join(dir, vocabFile+".tmp")
-	if err := os.WriteFile(tmp, b, 0o644); err != nil {
+	if err := fileio.WriteFile(filepath.Join(dir, vocabFile), b, 0o644); err != nil {
 		return err
 	}
 	v.dirty = false
-	return os.Rename(tmp, filepath.Join(dir, vocabFile))
+	return nil
 }
 
 // add counts the Latin words (4+ letters, lowercased) of text.

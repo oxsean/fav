@@ -1,11 +1,11 @@
 package main
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -21,39 +21,30 @@ import (
 )
 
 type broken struct {
-	n       int
-	rec     *fav.Rec
-	dirGone bool
-	found   []string
-	live    bool
+	n                       int
+	rec                     *fav.Rec
+	dirGone, transcriptGone bool
+	found                   []string
+	live                    bool
 }
 
-// Does the stat / flock / git work once; filterBroken narrows the result without rescanning.
-func scanBroken(s *fav.Store, idx *index.Index, dir string) []broken {
-	live := capture.LiveSessions()
+func brokenKeys(b broken) (string, string) { return b.rec.SessionID, b.rec.ID }
+
+func scanBroken(s *fav.Store, idx *index.Index, live map[string]capture.Live, dir string) []broken {
+	recs, _ := listRecs(s, idx, live, brokenQuery(nil), "")
 	seen := map[string]bool{}
 	var out []broken
-	add := func(r *fav.Rec) {
-		key := r.Provider + ":" + r.SessionID
-		if r.SessionID == "" || seen[key] {
-			return
+	for _, r := range recs {
+		if r.SessionID == "" || seen[r.Key()] || dir != "" && !paths.Under(r.Cwd, dir) {
+			continue
 		}
-		if dir != "" && !paths.Under(r.Cwd, dir) {
-			return
+		dirGone, transcriptGone := r.Broken(paths.Exists)
+		if !dirGone && !transcriptGone {
+			continue
 		}
-		dirGone := r.Cwd != "" && !paths.IsDir(r.Cwd)
-		if !dirGone && capture.TranscriptAlive(r) {
-			return
-		}
-		seen[key] = true
+		seen[r.Key()] = true
 		_, isLive := live[r.SessionID]
-		out = append(out, broken{rec: r, dirGone: dirGone, live: isLive})
-	}
-	for _, r := range s.All() {
-		add(r)
-	}
-	for _, r := range idx.Attach(s, nil) {
-		add(r)
+		out = append(out, broken{rec: r, dirGone: dirGone, transcriptGone: transcriptGone, live: isLive})
 	}
 	found := map[string][]string{}
 	for _, b := range out {
@@ -118,7 +109,7 @@ func printBroken(list []broken) {
 			for i, p := range b.found {
 				found[i] = paths.Tilde(p)
 			}
-			fmt.Print(i18n.T("cli.broken.ambiguous") + strings.Join(found, "  "))
+			fmt.Print(i18n.F("cli.broken.ambiguous", strings.Join(found, "  ")))
 		default:
 			fmt.Print(i18n.T("cli.broken.not_found"))
 		}
@@ -142,11 +133,9 @@ func printBrokenJSON(list []broken) error {
 	}
 	rows := make([]row, 0, len(list))
 	for _, b := range list {
-		rows = append(rows, row{b.n, b.rec.Provider, b.rec.SessionID, b.rec.ID, b.rec.Title, b.rec.Cwd, b.dirGone, !b.dirGone, b.found, b.rec.Repo, b.live})
+		rows = append(rows, row{b.n, b.rec.Provider, b.rec.SessionID, b.rec.ID, b.rec.Title, b.rec.Cwd, b.dirGone, b.transcriptGone, b.found, b.rec.Repo, b.live})
 	}
-	enc := json.NewEncoder(os.Stdout)
-	enc.SetIndent("", "  ")
-	return enc.Encode(rows)
+	return printJSON(rows)
 }
 
 func pickBroken(list []broken, args []string) ([]broken, error) {
@@ -155,26 +144,21 @@ func pickBroken(list []broken, args []string) ([]broken, error) {
 		if a == "all" {
 			return list, nil
 		}
+		var hit broken
 		if n, err := strconv.Atoi(a); err == nil {
 			if n < 1 || n > len(list) {
 				return nil, i18n.E("cli.broken.bad_number", a)
 			}
-			out = append(out, list[n-1])
-			continue
-		}
-		var hit *broken
-		for i := range list {
-			if strings.HasPrefix(list[i].rec.SessionID, a) || list[i].rec.ID == a {
-				if hit != nil {
-					return nil, i18n.E("cli.session_ambiguous", a)
-				}
-				hit = &list[i]
+			hit = list[n-1]
+		} else {
+			var n int
+			if hit, n = matchRef(list, a, brokenKeys); refErr(a, n) != nil {
+				return nil, refErr(a, n)
 			}
 		}
-		if hit == nil {
-			return nil, i18n.E("cli.record_not_found", a)
+		if !slices.ContainsFunc(out, func(b broken) bool { return b.n == hit.n }) {
+			out = append(out, hit)
 		}
-		out = append(out, *hit)
 	}
 	return out, nil
 }
@@ -201,18 +185,10 @@ func isNumber(s string) bool { _, err := strconv.Atoi(s); return err == nil }
 func brokenQuery(words []string) fav.Query {
 	q := fav.Parse(strings.Join(words, " "))
 	q.All = true
-	has := func(k string) bool {
-		for _, w := range words {
-			if strings.HasPrefix(strings.ToLower(w), k+":") {
-				return true
-			}
-		}
-		return false
-	}
-	if !has("status") {
+	if !slices.ContainsFunc(words, fav.HasPrefix("status:")) {
 		q.Status = "all"
 	}
-	if !has("turns") {
+	if !slices.ContainsFunc(words, fav.HasPrefix("turns:")) {
 		q.Turns = 0
 	}
 	return q
@@ -220,13 +196,7 @@ func brokenQuery(words []string) fav.Query {
 
 func splitIDs(list []broken, query []string) (sel, rest []string) {
 	for _, w := range query {
-		hits := 0
-		for _, b := range list {
-			if strings.HasPrefix(b.rec.SessionID, w) || b.rec.ID == w {
-				hits++
-			}
-		}
-		if hits == 1 {
+		if _, n := matchRef(list, w, brokenKeys); n == 1 {
 			sel = append(sel, w)
 		} else {
 			rest = append(rest, w)
@@ -236,7 +206,7 @@ func splitIDs(list []broken, query []string) (sel, rest []string) {
 }
 
 func loadBroken(dir string) (*fav.Store, *index.Index, []broken, error) {
-	s, err := openStore()
+	s, err := fav.Open()
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -244,8 +214,8 @@ func loadBroken(dir string) (*fav.Store, *index.Index, []broken, error) {
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	idx, _ = idx.Refresh()
-	return s, idx, scanBroken(s, idx, dir), nil
+	idx = refreshed(idx)
+	return s, idx, scanBroken(s, idx, capture.LiveSessions(), dir), nil
 }
 
 func loadPick(pos []string) (*fav.Store, *index.Index, []broken, []string, error) {
@@ -290,12 +260,6 @@ func looksLikeID(w string) bool {
 	return true
 }
 
-// Without a TTY and without -y, fail loudly instead of silently answering N with exit 0.
-func confirm(prompt string, yes bool) bool {
-	ok, _ := confirmErr(prompt, yes)
-	return ok
-}
-
 func confirmErr(prompt string, yes bool) (bool, error) {
 	if yes {
 		return true, nil
@@ -317,7 +281,7 @@ func cmdClean(args []string) error {
 	if err != nil {
 		return err
 	}
-	s, _, list, sel, err := loadPick(pos)
+	s, idx, list, sel, err := loadPick(pos)
 	if err != nil {
 		return err
 	}
@@ -348,13 +312,13 @@ func cmdClean(args []string) error {
 			skipped++
 			continue
 		}
-		n, err := trashSession(s, b.rec)
-		if err != nil {
+		files := index.SessionFilesOf(idx, b.rec)
+		if _, err := index.Trash(s, b.rec, files); err != nil {
 			fmt.Fprintln(os.Stderr, "  "+err.Error())
 			failed++
 			continue
 		}
-		fmt.Print(i18n.F("cli.rm.done", b.rec.Title, n))
+		fmt.Print(i18n.F("cli.rm.done", b.rec.Title, len(files)))
 		done++
 	}
 	fmt.Print(i18n.F("cli.broken.summary", done, skipped, failed))
@@ -478,10 +442,8 @@ func moveOne(s *fav.Store, idx *index.Index, r *fav.Rec, to string) (*index.Inde
 	if err != nil {
 		return idx, err
 	}
-	next, _ := idx.Rescan(rep.Touched)
-	next.Save()
 	fmt.Print(i18n.F("cli.fix.moved", render.Truncate(r.Title, 40), paths.Tilde(to)))
-	return next, nil
+	return rescanned(idx, rep.Touched), nil
 }
 
 func shortID(id string) string {

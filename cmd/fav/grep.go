@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -42,7 +41,7 @@ func cmdGrep(args []string) error {
 	if fulltext.TooLong(kw) {
 		return errors.New(i18n.T("msg.too_long"))
 	}
-	s, err := openStore()
+	s, err := fav.Open()
 	if err != nil {
 		return err
 	}
@@ -52,10 +51,11 @@ func cmdGrep(args []string) error {
 	}
 	idx = refreshed(idx)
 	syncText(s, idx, 0, term.IsTerminal(os.Stderr.Fd()))
-	recs, res := grep(s, idx, kw, scope)
-	if *limit > 0 && len(res) > *limit {
-		res = res[:*limit]
+	recs, res, err := grep(s, idx, kw, scope, true)
+	if err != nil {
+		return err
 	}
+	res = res[:limited(len(res), *limit)]
 
 	if *asJSON {
 		type row struct {
@@ -67,9 +67,7 @@ func cmdGrep(args []string) error {
 		for i, x := range res {
 			rows[i] = row{recs[x.Cand], x.Hits, x.Snippet}
 		}
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		return enc.Encode(rows)
+		return printJSON(rows)
 	}
 	if fixes := fulltext.Expand(fulltext.Dir(), fulltext.ParseQuery(kw)).Fixes(); len(fixes) > 0 {
 		fmt.Println(strings.TrimPrefix(i18n.F("msg.also", strings.Join(fixes, " ")), " · ") + "\n")
@@ -80,11 +78,7 @@ func cmdGrep(args []string) error {
 		r := recs[x.Cand]
 		hits := i18n.F("cli.grep.hits", x.Hits)
 		fmt.Println(render.Truncate(r.Title, max(8, w-render.Width(hits)-2)) + "  " + hits)
-		meta := render.Provider(r.Provider)
-		if r.Project != "" {
-			meta += " · " + r.Project
-		}
-		fmt.Println("  " + render.Truncate(meta+" · "+render.When(r.When(), now)+" · "+shortID(r.SessionID), w-2))
+		fmt.Println("  " + render.Truncate(render.Meta(r)+" · "+render.When(r.When(), now)+" · "+shortID(r.SessionID), w-2))
 		for _, l := range render.Wrap(x.Snippet, w-4) {
 			fmt.Println("    " + l)
 		}
@@ -95,9 +89,11 @@ func cmdGrep(args []string) error {
 }
 
 // grep runs a message search over the sessions scope picks; results index into the returned records.
-func grep(s *fav.Store, idx *index.Index, kw, scope string) ([]*fav.Rec, []fulltext.Result) {
-	recs := sessionRecs(s, idx, scope, "")
-	return recs, fulltext.Search(context.Background(), fulltext.Dir(), fulltext.Cands(recs, idx.PathsBySession()), kw)
+func grep(s *fav.Store, idx *index.Index, kw, scope string, all bool) ([]*fav.Rec, []fulltext.Result, error) {
+	q := fav.Parse(scope)
+	q.All = all
+	recs, err := listRecs(s, idx, nil, q, "")
+	return recs, fulltext.Search(context.Background(), fulltext.Dir(), fulltext.Cands(recs, idx.PathsBySession()), kw), err
 }
 
 // syncText brings the full-text store up to date within budget (0 = no limit); false: the budget cut it short.
@@ -109,11 +105,7 @@ func syncText(s *fav.Store, idx *index.Index, budget time.Duration, show bool) b
 		defer cancel()
 	}
 	shown := false
-	if len(idx.Paths()) == 0 { // ⚠️ an index not built yet would make Update drop every text file
-		return true
-	}
-	paths := fulltext.Sources(idx.Paths(), s.All())
-	p, err := fulltext.UpdateWith(ctx, fulltext.Dir(), paths, fulltext.Options{OutLines: loadConfig().ToolOutput}, func(p fulltext.Progress) {
+	p, err := fulltext.Sync(ctx, idx.Paths(), s.All(), loadConfig().ToolOutput, func(p fulltext.Progress) {
 		if show && p.Total >= 20 {
 			fmt.Fprint(os.Stderr, "\r"+i18n.F("cli.grep.indexing", p.Done, p.Total))
 			shown = true
@@ -133,7 +125,7 @@ func syncText(s *fav.Store, idx *index.Index, budget time.Duration, show bool) b
 
 // cmdTextSync finishes a full-text update an fzf keystroke started (hidden; run detached).
 func cmdTextSync() error {
-	s, err := openStore()
+	s, err := fav.Open()
 	if err != nil {
 		return err
 	}

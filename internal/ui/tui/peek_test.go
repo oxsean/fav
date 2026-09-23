@@ -6,6 +6,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
@@ -70,5 +71,23 @@ func TestPeekAndReply(t *testing.T) {
 	b, _ := os.ReadFile(log)
 	if got := string(b); got != "agent send-keys p1 1\nagent prompt p1 继续\n" {
 		t.Fatalf("second 1 answers, the typed line is the next prompt: %q", got)
+	}
+}
+
+func TestPeekForgetsTheArmedDigitWhenTheScreenChanges(t *testing.T) {
+	m := sized(t, 140, 40)
+	m.ov = overlay{kind: ovPeek, rec: m.current(), title: "p1", lines: []string{"1. Yes"}, armed: "1", armedAt: time.Now()}
+	m.applyPeek(peekMsg{pane: "p1", text: "1. Yes\n"})
+	if m.ov.armed != "1" {
+		t.Fatal("same screen: still armed")
+	}
+	m.applyPeek(peekMsg{pane: "p1", text: "Another question?\n1. Yes\n"})
+	if m.ov.armed != "" {
+		t.Fatal("a changed screen forgets the armed digit")
+	}
+	m.ov.armed, m.ov.armedAt = "2", time.Now().Add(-peekArmFor-time.Second)
+	m.applyPeek(peekMsg{pane: "p1", text: "Another question?\n1. Yes\n"})
+	if m.ov.armed != "" {
+		t.Fatal("an old armed digit expires")
 	}
 }

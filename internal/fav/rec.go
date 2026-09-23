@@ -3,6 +3,8 @@ package fav
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"os"
+	"path/filepath"
 	"slices"
 	"sort"
 	"strings"
@@ -29,6 +31,28 @@ const (
 	ProviderClaude = "claude"
 	ProviderCodex  = "codex"
 )
+
+func ProviderName(p string) string {
+	switch p {
+	case ProviderClaude:
+		return "Claude"
+	case ProviderCodex:
+		return "Codex"
+	}
+	return p
+}
+
+func ProviderLabel(p string) string {
+	switch p {
+	case ProviderClaude:
+		return "Claude Code"
+	case ProviderCodex:
+		return "Codex CLI"
+	}
+	return p
+}
+
+func SessionKey(provider, sid string) string { return provider + ":" + sid }
 
 type Rec struct {
 	ID        string   `json:"id"`
@@ -93,17 +117,6 @@ func (r *Rec) Archived() bool { return r.ArchivedAt != nil }
 func (r *Rec) Done() bool     { return r.Status == StatusDone }
 func (r *Rec) Favorite() bool { return r.ID != "" && r.FavoritedAt != nil }
 
-func (r *Rec) Favorited() time.Time {
-	if r.FavoritedAt != nil {
-		return *r.FavoritedAt
-	}
-	return time.Time{}
-}
-
-func (r *Rec) Visible() bool {
-	return !r.Deleted && !r.Archived() && r.Favorite()
-}
-
 func (r *Rec) Prepare() { r.buildHay() }
 
 func (r *Rec) buildHay() {
@@ -140,12 +153,80 @@ func Normalize(tags []string) []string {
 	return out
 }
 
+func (r *Rec) Key() string { return SessionKey(r.Provider, r.SessionID) }
+
+func (r *Rec) Transcripts() []string {
+	out := make([]string, 0, 2)
+	for _, p := range []string{r.PinnedPath, r.TranscriptPath} {
+		if p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// Broken: the cwd is gone, or every recorded transcript is (none recorded: not broken); callers skip running sessions.
+func (r *Rec) Broken(exists func(string) bool) (dirGone, transcriptGone bool) {
+	dirGone = r.Cwd != "" && !exists(r.Cwd)
+	ts := r.Transcripts()
+	return dirGone, len(ts) > 0 && !slices.ContainsFunc(ts, exists)
+}
+
+// ⚠️ Relink hard-links src, never copies, or a pin doubles a transcript's disk use; on failure r is left unpinned.
+func (r *Rec) Relink(src string) error {
+	if err := os.MkdirAll(filepath.Dir(r.PinnedPath), 0o700); err != nil {
+		r.PinnedPath = ""
+		return err
+	}
+	os.Remove(r.PinnedPath)
+	if err := os.Link(src, r.PinnedPath); err != nil {
+		r.PinnedPath = ""
+		return err
+	}
+	return nil
+}
+
+func (r *Rec) ToggleFavorite(now time.Time) {
+	if r.Favorite() {
+		r.FavoritedAt = nil
+		return
+	}
+	r.FavoritedAt = &now
+}
+
+func (r *Rec) ToggleArchived(now time.Time) {
+	if r.Archived() {
+		r.ArchivedAt = nil
+		return
+	}
+	r.ArchivedAt = &now
+}
+
+func (r *Rec) ToggleStatus(target string) {
+	if r.Status == target {
+		r.Status = StatusDoing
+		return
+	}
+	r.Status = target
+}
+
 // ActiveAt: the last activity the index saw, else When.
 func (r *Rec) ActiveAt() time.Time {
 	if r.LastAt.After(r.When()) {
 		return r.LastAt
 	}
 	return r.When()
+}
+
+// SortByStart: newest start first; a session with no time yet (not indexed) counts as newest.
+func SortByStart(recs []*Rec) {
+	sort.SliceStable(recs, func(i, j int) bool {
+		a, b := recs[i].When(), recs[j].When()
+		if a.IsZero() != b.IsZero() {
+			return a.IsZero()
+		}
+		return a.After(b)
+	})
 }
 
 func (r *Rec) When() time.Time {

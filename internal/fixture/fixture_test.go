@@ -18,6 +18,8 @@ import (
 	"github.com/oxsean/fav/internal/testkit"
 )
 
+func TestMain(m *testing.M) { testkit.Main(m) }
+
 func load(t *testing.T) (*Dataset, *index.Index, *fav.Store) {
 	t.Helper()
 	d, err := Build(filepath.Join(t.TempDir(), "machine"), time.Now())
@@ -42,12 +44,12 @@ func load(t *testing.T) (*Dataset, *index.Index, *fav.Store) {
 func byKey(ss []*index.Session) map[string]*index.Session {
 	m := map[string]*index.Session{}
 	for _, s := range ss {
-		m[s.Provider+":"+s.SessionID] = s
+		m[s.Key()] = s
 	}
 	return m
 }
 
-func key(s Session) string { return s.Provider + ":" + s.ID }
+func key(s Session) string { return fav.SessionKey(s.Provider, s.ID) }
 
 func TestIndexSeesEveryScenario(t *testing.T) {
 	d, idx, _ := load(t)
@@ -60,10 +62,9 @@ func TestIndexSeesEveryScenario(t *testing.T) {
 			if inList {
 				t.Errorf("%s: an older link of a continuation chain is listed on its own", s.Name)
 			}
+		case s.Agent != inAgents:
+			t.Errorf("%s: agent run %v, want %v", s.Name, inAgents, s.Agent)
 		case s.Agent:
-			if !inAgents {
-				t.Errorf("%s: missing from the agent runs", s.Name)
-			}
 		case !inList:
 			t.Errorf("%s: missing from the sessions", s.Name)
 		}
@@ -80,10 +81,14 @@ func TestIndexSeesEveryScenario(t *testing.T) {
 	if oauth.Title != "登录页 OAuth 回调排障" || oauth.Turns != 4 || oauth.Branch != "feat/oauth-callback" || !strings.Contains(oauth.Recap, "OAuth") {
 		t.Errorf("oauth: %+v", oauth)
 	}
-	for _, f := range []string{filepath.Join(d.Work, "webapp", "src", "auth", "callback.ts"), filepath.Join(d.Work, "webapp", "docs", "oauth.md")} {
-		if oauth.Files[f] == 0 {
-			t.Errorf("oauth: %s not among the files written: %v", f, oauth.Files)
+	for _, f := range []string{filepath.Join(d.Work, "webapp", "src", "auth", "callback.ts"), filepath.Join(d.Work, "webapp", "docs", "oauth.md"),
+		filepath.Join(d.Work, "webapp", "docs", "state.ipynb")} {
+		if oauth.Files[f] != 1 {
+			t.Errorf("oauth: %s not written once: %v", f, oauth.Files)
 		}
+	}
+	if len(oauth.Files) != 3 {
+		t.Errorf("oauth: a file in the agent scratch dir is not a project file: %v", oauth.Files)
 	}
 	if s := get("worktree"); s.Repo != filepath.Join(d.Work, "webapp") {
 		t.Errorf("worktree: repo %q", s.Repo)
@@ -92,8 +97,12 @@ func TestIndexSeesEveryScenario(t *testing.T) {
 		t.Errorf("chain: %+v", s)
 	}
 	cli := get("codex-cli")
-	if cli.Title != "修 webapp CI" || !strings.Contains(cli.Recap, "lint") || cli.Files[filepath.Join(d.Work, "webapp", "src", "app.ts")] == 0 {
-		t.Errorf("codex-cli: %+v", cli)
+	if cli.Title != "修 webapp CI" || !strings.Contains(cli.Recap, "lint") || len(cli.Files) != 2 ||
+		cli.Files[filepath.Join(d.Work, "webapp", "src", "app.ts")] != 1 || cli.Files[filepath.Join(d.Work, "webapp", "scripts", "lint.sh")] != 1 {
+		t.Errorf("codex-cli: apply_patch paths, relative ones under the cwd: %+v", cli)
+	}
+	if got, want := agents[key(d.Get("sdk"))].DisplayTitle(), "webapp: Summarize the diff in one line"; got != want {
+		t.Errorf("sdk: an untitled agent run is named after its directory and first prompt: %q", got)
 	}
 	if !get("codex-desktop").App {
 		t.Error("codex-desktop: not marked as started in the app")
@@ -103,6 +112,93 @@ func TestIndexSeesEveryScenario(t *testing.T) {
 	}
 	if !get("codex-archived").CodexArchived() {
 		t.Error("codex-archived: not recognised as archived")
+	}
+}
+
+func TestRowsListEveryKind(t *testing.T) {
+	d, idx, store := load(t)
+	unfav := idx.Attach(store, nil)
+	var rs index.Rows
+	list := func(expr string, all bool, live map[string]capture.Live) map[string]*fav.Rec {
+		t.Helper()
+		q := fav.Parse(expr)
+		q.All = all
+		recs, err := rs.List(store, idx, unfav, live, q)
+		if err != nil {
+			t.Fatal(err)
+		}
+		out := map[string]*fav.Rec{}
+		for _, r := range recs {
+			out[r.Key()] = r
+		}
+		return out
+	}
+	shown, agents := list("status:all", true, nil), list("status:agent", false, nil)
+	for _, s := range d.Sessions {
+		if _, ok := shown[key(s)]; ok != s.Listed {
+			t.Errorf("%s: listed %v, want %v", s.Name, ok, s.Listed)
+		}
+		if _, ok := agents[key(s)]; ok != s.Agent {
+			t.Errorf("%s: among the agent runs %v, want %v", s.Name, ok, s.Agent)
+		}
+	}
+
+	oauth := d.Get("oauth")
+	fresh := fav.SessionKey(fav.ProviderClaude, "0d0d0d0d-new")
+	live := map[string]capture.Live{"0d0d0d0d-new": {Agent: fav.ProviderClaude, Cwd: filepath.Join(d.Work, "webapp")}, oauth.ID: {Agent: fav.ProviderClaude}}
+	running := list("status:live", true, live)
+	if len(running) != 2 || running[key(oauth)] != store.BySession(oauth.Provider, oauth.ID) || running[fresh] == nil || running[fresh].Project != "webapp" {
+		t.Fatalf("running: the favorite's own record plus a row for the session the index has not seen: %v", running)
+	}
+	if again := list("status:live", true, live); again[fresh] != running[fresh] {
+		t.Error("a made-up row must be the same object on the next call")
+	}
+	if favs := list("status:live", false, live); len(favs) != 1 || favs[key(oauth)] == nil {
+		t.Errorf("favorites only: %v", favs)
+	}
+
+	r := running[key(oauth)]
+	if _, err := index.Trash(store, r, index.SessionFilesOf(idx, r)); err != nil {
+		t.Fatal(err)
+	}
+	trashed := list("status:trash", false, nil)
+	if trashed[key(oauth)] == nil || trashed[key(oauth)].Title != r.Title || list("status:trash", false, nil)[key(oauth)] != trashed[key(oauth)] {
+		t.Fatalf("trash rows come from the manifest, the same object each call: %v", trashed)
+	}
+	if _, ok := list("status:all", true, nil)[key(oauth)]; ok {
+		t.Error("a trashed session is still listed")
+	}
+	if _, _, err := index.Restore(store, oauth.Provider, oauth.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := list("status:all", true, nil)[key(oauth)]; !ok || len(list("status:trash", false, nil)) != 0 {
+		t.Error("the restored session is listed again and gone from the trash")
+	}
+	if _, err := os.Stat(oauth.Path); err != nil {
+		t.Errorf("the transcript is back: %v", err)
+	}
+}
+
+func TestTrashingAChainTakesEveryFileOfIt(t *testing.T) {
+	d, idx, store := load(t)
+	chain := d.Get("chain-new")
+	var r *fav.Rec
+	for _, x := range idx.Attach(store, nil) {
+		if x.SessionID == chain.ID {
+			r = x
+		}
+	}
+	if r == nil {
+		t.Fatal("the chain is listed")
+	}
+	if _, err := index.Trash(store, r, index.SessionFilesOf(idx, r)); err != nil {
+		t.Fatal(err)
+	}
+	idx, _ = idx.Rescan(nil)
+	for _, s := range idx.Sessions() {
+		if s.SessionID == chain.ID || s.SessionID == d.Get("chain-old").ID {
+			t.Fatalf("part of the trashed chain is listed again: %+v", s)
+		}
 	}
 }
 
@@ -161,7 +257,7 @@ func TestMessageSearch(t *testing.T) {
 	d, idx, store := load(t)
 	recs := append(idx.Attach(store, nil), store.All()...)
 	dir := filepath.Join(d.Home, "text")
-	if _, err := fulltext.Update(context.Background(), dir, idx.Paths(), nil); err != nil {
+	if _, err := fulltext.Update(context.Background(), dir, idx.Paths(), fulltext.Options{}, nil); err != nil {
 		t.Fatal(err)
 	}
 	for q, want := range map[string]string{"state 解码": "oauth", "cursor drift": "pagination", "trace id": "codex-desktop"} {

@@ -7,14 +7,15 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/oxsean/fav/internal/i18n"
-	"github.com/oxsean/fav/internal/paths"
 	"os"
 	"os/exec"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/oxsean/fav/internal/i18n"
+	"github.com/oxsean/fav/internal/paths"
 )
 
 type Pane struct {
@@ -69,21 +70,26 @@ func Reachable() bool {
 	return reachable.ok
 }
 
-func Env() (workspace, tab, pane string) {
-	return os.Getenv("HERDR_WORKSPACE_ID"), os.Getenv("HERDR_TAB_ID"), os.Getenv("HERDR_PANE_ID")
-}
-
-func run(args []string, out any) error {
+func output(args []string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "herdr", args...)
-	cmd.Stderr = nil
-	b, err := cmd.Output()
+	b, err := exec.CommandContext(ctx, "herdr", args...).Output()
 	if err != nil {
-		return fmt.Errorf("herdr %s: %w", strings.Join(args, " "), err)
+		what := strings.Join(args[:min(2, len(args))], " ")
+		var ee *exec.ExitError
+		if errors.As(err, &ee) && len(bytes.TrimSpace(ee.Stderr)) > 0 {
+			return nil, fmt.Errorf("herdr %s: %s", what, bytes.TrimSpace(ee.Stderr))
+		}
+		return nil, fmt.Errorf("herdr %s: %w", what, err)
 	}
-	if out == nil {
-		return nil
+	return b, nil
+}
+
+// run decodes the result of herdr's JSON envelope into out (nil: ignore it).
+func run(args []string, out any) error {
+	b, err := output(args)
+	if err != nil || out == nil {
+		return err
 	}
 	var env struct {
 		Result json.RawMessage `json:"result"`
@@ -153,7 +159,7 @@ func matchWorkspaces(panes []Pane, ws []Workspace, cwd string) []Workspace {
 	exact, near := map[string]bool{}, map[string]bool{}
 	for _, p := range panes {
 		switch {
-		case p.Cwd == cwd:
+		case paths.Same(p.Cwd, cwd):
 			exact[p.WorkspaceID] = true
 		case paths.Nested(p.Cwd, cwd):
 			near[p.WorkspaceID] = true
@@ -259,32 +265,18 @@ func Run(paneID, line string) error {
 
 // ReadAgent is the last lines of an agent pane's terminal, as plain text.
 func ReadAgent(paneID string, lines int) (string, error) {
-	return text([]string{"agent", "read", paneID, "--source", "recent", "--lines", strconv.Itoa(lines), "--format", "text"})
+	b, err := output([]string{"agent", "read", paneID, "--source", "recent", "--lines", strconv.Itoa(lines), "--format", "text"})
+	return string(b), err
 }
 
 // PromptAgent submits text as the agent's next prompt; Herdr refuses it while the agent is blocked on a question.
 func PromptAgent(paneID, prompt string) error {
-	_, err := text([]string{"agent", "prompt", paneID, prompt})
+	_, err := output([]string{"agent", "prompt", paneID, prompt})
 	return err
 }
 
 // SendKeys presses keys in an agent pane (answering a prompt such as a permission question).
 func SendKeys(paneID string, keys ...string) error {
-	_, err := text(append([]string{"agent", "send-keys", paneID}, keys...))
+	_, err := output(append([]string{"agent", "send-keys", paneID}, keys...))
 	return err
-}
-
-// text runs herdr for its plain output; a failure carries herdr's own message.
-func text(args []string) (string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	b, err := exec.CommandContext(ctx, "herdr", args...).Output()
-	if err != nil {
-		var ee *exec.ExitError
-		if errors.As(err, &ee) && len(bytes.TrimSpace(ee.Stderr)) > 0 {
-			return "", fmt.Errorf("herdr %s: %s", args[1], bytes.TrimSpace(ee.Stderr))
-		}
-		return "", fmt.Errorf("herdr %s: %w", args[1], err)
-	}
-	return string(b), nil
 }

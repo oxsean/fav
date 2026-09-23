@@ -26,26 +26,6 @@ func Truncate(s string, max int) string {
 	return runewidth.Truncate(s, max, "…")
 }
 
-// CutPad cuts or pads to exactly width cells, no ellipsis.
-func CutPad(s string, width int) string {
-	if width <= 0 {
-		return ""
-	}
-	n := 0
-	for i, r := range s {
-		rw := runewidth.RuneWidth(r)
-		if n+rw > width {
-			s = s[:i]
-			break
-		}
-		n += rw
-	}
-	if n < width {
-		return s + strings.Repeat(" ", width-n)
-	}
-	return s
-}
-
 func Pad(s string, width int) string {
 	s = Truncate(s, width)
 	if n := width - runewidth.StringWidth(s); n > 0 {

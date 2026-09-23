@@ -2,9 +2,9 @@
 package tui
 
 import (
+	"maps"
 	"os"
 	"slices"
-	"sort"
 	"strconv"
 	"time"
 	"unicode/utf8"
@@ -73,8 +73,7 @@ type Model struct {
 	clickX     int
 	pathOK     map[string]bool // stat cache, cleared on index change and storeTick
 	chatInputX int
-	lastHit    int
-	lastTime   time.Time
+	rowClicks  clicks
 	wheelAcc   int
 	wheelStep  int
 	wheelPend  int  // wheel events not yet applied: some terminals send one per pixel, a trackpad fling is thousands
@@ -110,14 +109,11 @@ type Model struct {
 	chatSkip   int // lines skipped inside the first message: the wheel scrolls by line, J/K by message
 	chatCur    int
 	chatFollow bool // highlight moved by keyboard → the viewport follows it; wheel → the highlight is clamped into view
-	chatHit    int
-	chatHitAt  time.Time
+	chatClicks clicks
 	pane       int
 	chatW      int // last frame's chat width and rows, for wheel math and end detection
 	chatRoom   int
 	chatShown  int // messages shown last frame, to detect nearing the end
-	chatY      int
-	chatX      int
 	chat       chatSearch
 	hitsFor    *fav.Rec // hits() cache key: record, query, message count
 	hitsQ      string
@@ -135,23 +131,21 @@ type Model struct {
 	mouse     bool                     // mouse reporting on; View asks the terminal for it
 	themed    bool                     // the terminal's background is known (or will not be): View draws only from then on
 	heldIdx   *index.Index             // index that arrived mid-scroll, applied once scrolling stops
+	forced    map[string]bool          // files every background rescan reads from scratch until one is applied
 	idxGen    int                      // +1 after a project move: refreshes started before it return stale snapshots
 	idx       *index.Index             // index snapshot, replaced whole by the background refresh
 	nFav      int                      // tab totals, query-independent, recomputed when the index or the store changes
 	nAll      int
 	nProj     int
-	unfav     []*fav.Rec          // unfavorited sessions from the index (empty ID); objects survive refreshes
-	extra     *fav.Rec            // a session opened by id that the lists would not show (fav open)
-	agents    map[string]*fav.Rec // status:agent rows, by session key
-	msg       msgState            // > message search and the full-text store updates
+	unfav     []*fav.Rec // unfavorited sessions from the index (empty ID); objects survive refreshes
+	extra     *fav.Rec   // a session opened by id that the lists would not show (fav open)
+	lists     index.Rows // the rows it makes up (trash, agent runs, unindexed live sessions) survive refreshes
+	msg       msgState   // > message search and the full-text store updates
 	// a just-edited record stays in place until the cursor leaves, the filter or the tab changes
 	pin     *fav.Rec
 	pinKey  string
-	synth   map[string]*fav.Rec   // live sessions the index has not seen, built from Herdr's title and cwd; objects survive refreshes
 	groups  map[string][]*fav.Rec // records per project group incl. collapsed ones, for the right-pane project info
 	projCur int                   // highlighted session in the project info; active when the right pane has focus on a group header
-	trashed map[string]*fav.Rec   // trash cards; objects survive refreshes
-	gone    map[string]bool       // sessions deleted by this process, hidden until the index drops them
 }
 
 func New(s *fav.Store, idx *index.Index, cfg fav.Config, initialQuery string) *Model {
@@ -214,10 +208,10 @@ func (m *Model) Init() tea.Cmd {
 const indexEvery = 10 * time.Second
 
 func (m *Model) refreshIndex() tea.Cmd {
-	idx, gen := m.idx, m.idxGen
+	idx, gen, force := m.idx, m.idxGen, maps.Clone(m.forced)
 	return func() tea.Msg {
-		next, changed := idx.Refresh()
-		return indexMsg{next, changed, gen} // saved on the main loop after the seq check: a stale snapshot must not overwrite the forced rescan after a move
+		next, changed := idx.Rescan(force)
+		return indexMsg{next, changed, gen, false} // saved on the main loop after the seq check: a stale snapshot must not overwrite the forced rescan after a move
 	}
 }
 
@@ -225,6 +219,21 @@ type indexMsg struct {
 	idx     *index.Index
 	changed bool
 	gen     int
+	once    bool // from reindex: the periodic refresh keeps its own schedule
+}
+
+// reindex rescans in the background (force: files to read from scratch); refreshes already running come back stale.
+func (m *Model) reindex(force map[string]bool) tea.Cmd {
+	m.heldIdx, m.idxGen = nil, m.idxGen+1
+	if m.forced == nil {
+		m.forced = map[string]bool{}
+	}
+	maps.Copy(m.forced, force)
+	idx, gen, force := m.idx, m.idxGen, maps.Clone(m.forced)
+	return func() tea.Msg {
+		next, _ := idx.Rescan(force)
+		return indexMsg{next, true, gen, true}
+	}
 }
 
 type indexTickMsg struct{}
@@ -248,7 +257,7 @@ func (m *Model) syncStore() {
 		return
 	}
 	if err := m.store.Reload(); err != nil {
-		m.flash(i18n.T("flash.reload_failed") + err.Error())
+		m.flash(i18n.F("flash.reload_failed", err))
 		return
 	}
 	m.probes, m.probeWant = nil, nil // new record objects, old probes no longer match
@@ -293,12 +302,13 @@ func (m *Model) probeCurrent() tea.Cmd {
 		m.probes = map[*fav.Rec]*probe{}
 	}
 	m.probes[r] = &probe{}
+	cp, path := *r, transcript(r) // ⚠️ rows are reused and refreshed in place: the background reads a copy
 	return func() tea.Msg {
 		var page capture.Page
-		if path := transcript(r); path != "" {
+		if path != "" {
 			page = capture.Messages(path, -1, recentMsgs)
 		}
-		return probeMsg{r, capture.Checks(r), page}
+		return probeMsg{r, capture.Checks(&cp), page}
 	}
 }
 
@@ -310,12 +320,7 @@ func (m *Model) recount() {
 	q := fav.Parse("status:all")
 	m.nFav = len(m.store.Query(q))
 	q.All = true
-	all := m.store.Query(q)
-	for _, r := range m.unfav {
-		if q.Match(r) {
-			all = append(all, r)
-		}
-	}
+	all := m.list(q)
 	projects := map[string]bool{}
 	for _, r := range all {
 		projects[r.Project] = true
@@ -333,27 +338,24 @@ func (m *Model) query() fav.Query {
 	q := fav.Parse(s)
 	q.All, q.Live = m.view != viewFavorites, m.isLive
 	if m.view == viewLive {
-		q.Status, q.Turns = "live", 0
+		q.Status, q.Turns = fav.StatusLive, 0
 	}
 	return q
 }
 
+func (m *Model) list(q fav.Query) []*fav.Rec {
+	recs, err := m.lists.List(m.store, m.idx, m.unfav, m.live, q)
+	if err != nil {
+		m.flash(i18n.F("flash.trash_read_failed", err))
+	}
+	return recs
+}
+
 func (m *Model) refresh() {
 	q := m.query()
-	recs := m.store.Query(q)
-	if q.Status == fav.StatusTrash {
-		recs = m.trashRecs(q)
-	} else if q.Status == fav.StatusAgent {
-		recs = m.agentRecs(q)
-	} else if q.All {
-		for _, r := range m.unfav {
-			if q.Match(r) && !m.gone[r.Provider+":"+r.SessionID] {
-				recs = append(recs, r)
-			}
-		}
-		if m.extra != nil && !slices.Contains(recs, m.extra) {
-			recs = append(recs, m.extra)
-		}
+	recs := m.list(q)
+	if m.extra != nil && q.All && q.Status != fav.StatusTrash && q.Status != fav.StatusAgent && !slices.Contains(recs, m.extra) {
+		recs = append(recs, m.extra)
 	}
 	cur := m.current()
 	curGroup := ""
@@ -372,7 +374,6 @@ func (m *Model) refresh() {
 		_, m.at = m.sortBy.sorted(recs)
 		m.rows = m.msgRows(recs)
 	} else if m.view == viewLive {
-		recs = append(recs, m.synthLive(q)...)
 		recs, m.at = m.sortBy.sorted(recs)
 		m.rows = m.liveRows(recs)
 	} else {
@@ -550,25 +551,16 @@ func (m *Model) move(delta int) {
 
 // foldAll: any open → collapse all, else expand all; fold non-nil forces it.
 func (m *Model) foldAll(fold *bool) {
-	recs := append(m.store.Query(m.query()), m.unfav...)
 	anyOpen := false
-	names := map[string]bool{}
-	for _, r := range recs {
-		p := r.Project
-		if p == "" {
-			p = i18n.T("group.no_project")
-		}
-		names[p] = true
-		if m.open[p] {
-			anyOpen = true
-		}
+	for g := range m.groups {
+		anyOpen = anyOpen || m.open[g]
 	}
 	want := !anyOpen
 	if fold != nil {
 		want = !*fold
 	}
-	for p := range names {
-		m.open[p] = want
+	for g := range m.groups {
+		m.open[g] = want
 	}
 	m.refresh()
 }
@@ -716,23 +708,13 @@ func (m *Model) setView(v view) {
 
 func (m *Model) nextView() view { return (m.view + 1) % viewCount }
 
-func (m *Model) toggleFavorite() {
-	r := m.current()
+func (m *Model) toggleFavorite(r *fav.Rec) {
 	if r == nil {
 		return
 	}
-	title := render.Truncate(r.Title, 30)
-	fresh := r.ID == ""
-	ok := m.edit(func(r *fav.Rec) {
-		if r.Favorite() {
-			r.FavoritedAt = nil
-			return
-		}
-		now := time.Now()
-		r.FavoritedAt = &now
-	})
-	switch {
-	case !ok:
+	title, fresh, now := render.Truncate(r.Title, 30), r.ID == "", time.Now()
+	switch r = m.editRec(r, func(r *fav.Rec) { r.ToggleFavorite(now) }); {
+	case r == nil:
 	case !r.Favorite():
 		m.flash(i18n.F("flash.unfavorited", title))
 	case fresh:
@@ -742,41 +724,53 @@ func (m *Model) toggleFavorite() {
 	}
 }
 
-// edit changes the current record and saves; an unsaved session gets a record first (not a favorite); a failed write is rolled back.
-func (m *Model) edit(change func(*fav.Rec)) bool { return m.editRec(m.current(), change) }
-
-// editRec changes r and saves; after a store reload it edits the new object with the same ID (another process wrote).
-func (m *Model) editRec(r *fav.Rec, change func(*fav.Rec)) bool {
+func (m *Model) toggleArchive(r *fav.Rec) {
 	if r == nil {
-		return false
+		return
 	}
-	if r.ID != "" {
-		if cur := m.store.Get(r.ID); cur != nil {
-			r = cur
-		}
-	} else if cur := m.store.BySession(r.Provider, r.SessionID); cur != nil { // another process just favorited it
+	now := time.Now()
+	switch r = m.editRec(r, func(r *fav.Rec) { r.ToggleArchived(now) }); {
+	case r == nil:
+	case r.Archived():
+		m.flash(i18n.F("flash.archived", r.Title))
+	default:
+		m.flash(i18n.F("flash.unarchived", r.Title))
+	}
+}
+
+func (m *Model) toggleStatus(r *fav.Rec, target string) {
+	if r == nil {
+		return
+	}
+	switch r = m.editRec(r, func(r *fav.Rec) { r.ToggleStatus(target) }); {
+	case r == nil:
+	case r.Status == target:
+		m.flash(i18n.F("flash.status_set", render.StatusLabel(target), r.Title))
+	default:
+		m.flash(i18n.F("flash.back_to_doing", r.Title))
+	}
+}
+
+// editRec saves change through Store.Update and returns the record written (nil on failure).
+// An unsaved session gets a record, not a favorite.
+func (m *Model) editRec(r *fav.Rec, change func(*fav.Rec)) *fav.Rec {
+	if r == nil {
+		return nil
+	}
+	m.syncStore()
+	unsaved := r.ID == ""
+	saved, err := m.store.Update(r, change)
+	if err != nil {
+		m.flash(i18n.F("flash.write_failed", err))
+		return nil
+	}
+	if unsaved {
 		m.dropUnfav(r)
-		r = cur
 	}
-	fresh := r.ID == ""
-	if fresh {
-		r.ID = fav.NewID()
-	}
-	change(r)
-	if err := m.store.Put(r); err != nil {
-		if fresh {
-			r.ID = ""
-		}
-		m.flash(i18n.T("flash.write_failed") + err.Error())
-		return false
-	}
-	if fresh {
-		m.dropUnfav(r)
-	}
-	m.pin, m.pinKey = r, m.pinContext()
+	m.pin, m.pinKey = saved, m.pinContext()
 	m.recount()
 	m.refresh()
-	return true
+	return saved
 }
 
 func (m *Model) dropUnfav(r *fav.Rec) {
@@ -811,13 +805,11 @@ func (m *Model) clickRow(i int) {
 	if i < 0 || i >= len(m.rows) || m.rows[i].rec == nil {
 		return
 	}
-	now := time.Now()
-	if m.cursor == i && m.lastHit == i && now.Sub(m.lastTime) < 500*time.Millisecond {
-		m.lastTime = time.Time{}
+	if m.rowClicks.double(i) && m.cursor == i {
 		m.askResume()
 		return
 	}
-	m.cursor, m.lastHit, m.lastTime = i, i, now
+	m.cursor = i
 	m.detail, m.pane = false, paneList
 }
 
@@ -838,46 +830,21 @@ type item struct {
 }
 
 func tagsOf(recs []*fav.Rec) []item {
-	counts := map[string]int{}
-	for _, r := range recs {
-		for _, t := range r.Tags {
-			counts[t]++
-		}
-	}
-	return byCount(counts)
+	return countBy(recs, func(r *fav.Rec) []string { return r.Tags })
 }
-
 func projectsOf(recs []*fav.Rec) []item {
-	counts := map[string]int{}
-	for _, r := range recs {
-		if r.Project != "" {
-			counts[r.Project]++
-		}
-	}
-	return byCount(counts)
+	return countBy(recs, func(r *fav.Rec) []string { return []string{r.Project} })
 }
-
 func providersOf(recs []*fav.Rec) []item {
-	counts := map[string]int{}
-	for _, r := range recs {
-		if r.Provider != "" {
-			counts[r.Provider]++
-		}
-	}
-	return byCount(counts)
+	return countBy(recs, func(r *fav.Rec) []string { return []string{r.Provider} })
 }
 
-func byCount(counts map[string]int) []item {
-	out := make([]item, 0, len(counts))
-	for k, n := range counts {
-		out = append(out, item{name: k, count: n})
+func countBy(recs []*fav.Rec, keys func(*fav.Rec) []string) []item {
+	counts := fav.CountBy(recs, keys)
+	out := make([]item, len(counts))
+	for i, c := range counts {
+		out[i] = item{name: c.Name, count: c.N}
 	}
-	sort.Slice(out, func(i, j int) bool {
-		if out[i].count != out[j].count {
-			return out[i].count > out[j].count
-		}
-		return out[i].name < out[j].name
-	})
 	return out
 }
 

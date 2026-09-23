@@ -44,8 +44,6 @@ func Set(l string) {
 	lang = ZH
 }
 
-func Lang() string { return lang }
-
 // "" follows the system
 func Resolve(cfg string) string {
 	if cfg == ZH || cfg == EN {

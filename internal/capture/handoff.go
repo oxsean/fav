@@ -22,8 +22,8 @@ const (
 	handoffKeep     = 30 * 24 * time.Hour
 )
 
-// BuildFork: a new session that starts with r's history (Claude --fork-session, codex fork); r itself is left as it was.
-func BuildFork(r *fav.Rec) (CommandSpec, error) {
+// buildFork: a new session with r's history (claude --fork-session, codex fork); r itself is left as it was.
+func buildFork(r *fav.Rec) (CommandSpec, error) {
 	if r.SessionID == "" {
 		return CommandSpec{}, i18n.E("resume.check.no_session")
 	}
@@ -36,24 +36,16 @@ func BuildFork(r *fav.Rec) (CommandSpec, error) {
 	return CommandSpec{}, i18n.E("resume.unknown_provider", r.Provider)
 }
 
-// BuildStart: a new session of provider in cwd whose first message is prompt ("" = none).
-func BuildStart(provider, cwd, prompt string) (CommandSpec, error) {
+// buildStart: a new session of provider in cwd whose first message is prompt ("" = none).
+func buildStart(provider, cwd, prompt string) (CommandSpec, error) {
+	if !known(provider) {
+		return CommandSpec{}, i18n.E("resume.unknown_provider", provider)
+	}
 	var args []string
 	if prompt != "" {
 		args = []string{prompt}
 	}
-	switch provider {
-	case fav.ProviderClaude:
-		return CommandSpec{Exec: "claude", Args: args, Cwd: cwd}, nil
-	case fav.ProviderCodex:
-		return CommandSpec{Exec: "codex", Args: args, Cwd: cwd}, nil
-	}
-	return CommandSpec{}, i18n.E("resume.unknown_provider", provider)
-}
-
-func Installed(provider string) bool {
-	_, err := lookPath(provider)
-	return err == nil
+	return CommandSpec{Exec: provider, Args: args, Cwd: cwd}, nil
 }
 
 // HandoffPrompt is the new session's first message; the pack itself stays in the file so it never reaches argv or ps.
@@ -73,7 +65,7 @@ func WriteHandoff(r *fav.Rec) (string, error) {
 		sid = sid[:8]
 	}
 	path := filepath.Join(dir, fmt.Sprintf("%s-%s.md", sid, time.Now().Format("20060102-150405")))
-	return path, os.WriteFile(path, []byte(Handoff(r)), 0o600)
+	return path, os.WriteFile(path, []byte(handoff(r)), 0o600)
 }
 
 func pruneHandoffs(dir string, now time.Time) {
@@ -85,22 +77,22 @@ func pruneHandoffs(dir string, now time.Time) {
 	}
 }
 
-// Handoff is r's handoff pack in Markdown: where it ran, its summary, the latest requests, the last reply, the files it
+// handoff is r's handoff pack in Markdown: where it ran, its summary, the latest requests, the last reply, the files it
 // changed and what git has uncommitted. Tool output is left out.
-func Handoff(r *fav.Rec) string {
+func handoff(r *fav.Rec) string {
 	var b strings.Builder
 	line := func(s string) { b.WriteString(s + "\n") }
 	section := func(key string) { line(""); line("## " + i18n.T(key)); line("") }
 
 	line("# " + i18n.F("handoff.title", r.Title))
 	line("")
-	src := i18n.F("handoff.source", providerLabel(r.Provider), r.SessionID, orDash(r.Cwd))
+	src := i18n.F("handoff.source", fav.ProviderLabel(r.Provider), r.SessionID, orDash(r.Cwd))
 	if r.GitBranch != "" {
 		src += i18n.F("handoff.branch", r.GitBranch)
 	}
 	var msgs []Message // newest first
 	if r.TranscriptPath != "" {
-		msgs = RecentMessages(r.TranscriptPath, handoffScan)
+		msgs = recentMessages(r.TranscriptPath, handoffScan)
 	}
 	at := r.ActiveAt()
 	if len(msgs) > 0 && msgs[0].At.After(at) {
@@ -167,7 +159,7 @@ func lastRequests(path string, msgs []Message, n int) []string {
 			break
 		}
 		if m.Role == "user" {
-			out = append([]string{RawText(path, m.Off, m.Text)}, out...)
+			out = append([]string{rawText(path, m.Off, m.Text)}, out...)
 		}
 	}
 	return out
@@ -176,13 +168,11 @@ func lastRequests(path string, msgs []Message, n int) []string {
 func lastReply(path string, msgs []Message) string {
 	for _, m := range msgs {
 		if m.Role == "assistant" {
-			return RawText(path, m.Off, m.Text)
+			return rawText(path, m.Off, m.Text)
 		}
 	}
 	return ""
 }
-
-var editTools = map[string]bool{"Write": true, "Edit": true, "MultiEdit": true, "NotebookEdit": true}
 
 // changedFiles: files the AI wrote or patched in msgs (newest first), most recent first, relative to cwd when under it.
 func changedFiles(msgs []Message, cwd string, n int) []string {
@@ -201,15 +191,8 @@ func changedFiles(msgs []Message, cwd string, n int) []string {
 	for _, m := range msgs {
 		steps := m.Steps
 		for j := len(steps) - 1; j >= 0 && len(out) < n; j-- {
-			s := steps[j]
-			switch {
-			case s.Result:
-			case editTools[s.Tool]:
-				add(strings.TrimSpace(firstLine(s.Text)))
-			case s.Tool == "apply_patch":
-				for f := range strings.FieldsSeq(firstLine(s.Text)) {
-					add(f)
-				}
+			for _, f := range steps[j].Files {
+				add(f)
 			}
 		}
 	}

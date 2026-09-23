@@ -7,7 +7,11 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/oxsean/fav/internal/testkit"
 )
+
+func TestMain(m *testing.M) { testkit.Main(m) }
 
 func claudeLine(role, text string) string {
 	return `{"type":"` + role + `","timestamp":"2026-09-22T10:00:00Z","message":{"role":"` + role + `","content":"` + text + `"}}` + "\n"
@@ -36,7 +40,8 @@ func textLines(t *testing.T, dir, path string) []string {
 	var out []string
 	for l := range strings.SplitSeq(strings.TrimSpace(string(b)), "\n") {
 		if l != "" {
-			out = append(out, string(field4([]byte(l))))
+			_, _, _, text, _ := fields([]byte(l))
+			out = append(out, string(text))
 		}
 	}
 	return out
@@ -49,7 +54,7 @@ func TestUpdateIsIncrementalAndFollowsTheTranscripts(t *testing.T) {
 	writeTranscript(t, b, claudeLine("user", "other session"))
 	ctx := context.Background()
 
-	p, err := Update(ctx, dir, []string{a, b}, nil)
+	p, err := Update(ctx, dir, []string{a, b}, Options{}, nil)
 	if err != nil || p.Total != 2 || p.Done != 2 {
 		t.Fatalf("first build: %+v %v", p, err)
 	}
@@ -57,12 +62,12 @@ func TestUpdateIsIncrementalAndFollowsTheTranscripts(t *testing.T) {
 		t.Fatalf("a: %q", got)
 	}
 
-	if p, _ := Update(ctx, dir, []string{a, b}, nil); p.Total != 0 {
+	if p, _ := Update(ctx, dir, []string{a, b}, Options{}, nil); p.Total != 0 {
 		t.Fatalf("nothing changed, nothing read: %+v", p)
 	}
 
 	appendTranscript(t, a, claudeLine("user", "second question"))
-	if p, _ := Update(ctx, dir, []string{a, b}, nil); p.Total != 1 {
+	if p, _ := Update(ctx, dir, []string{a, b}, Options{}, nil); p.Total != 1 {
 		t.Fatalf("only the grown transcript is read: %+v", p)
 	}
 	if got := textLines(t, dir, a); len(got) != 3 || got[2] != "second question" {
@@ -70,31 +75,31 @@ func TestUpdateIsIncrementalAndFollowsTheTranscripts(t *testing.T) {
 	}
 
 	writeTranscript(t, a, claudeLine("user", "rewritten"))
-	Update(ctx, dir, []string{a, b}, nil)
+	Update(ctx, dir, []string{a, b}, Options{}, nil)
 	if got := textLines(t, dir, a); strings.Join(got, "|") != "rewritten" {
 		t.Fatalf("a shorter transcript is rebuilt: %q", got)
 	}
 
 	writeTranscript(t, a, claudeLine("user", "rewritten in place, now longer"), claudeLine("assistant", "tail"))
-	Update(ctx, dir, []string{a, b}, nil)
+	Update(ctx, dir, []string{a, b}, Options{}, nil)
 	if got := textLines(t, dir, a); strings.Join(got, "|") != "rewritten in place, now longer|tail" {
 		t.Fatalf("a transcript rewritten longer is rebuilt, not resumed mid-line: %q", got)
 	}
 
 	writeTranscript(t, a, claudeLine("user", "rewritten in place, same sizE!"), claudeLine("assistant", "tail"))
 	os.Chtimes(a, time.Now().Add(time.Minute), time.Now().Add(time.Minute))
-	Update(ctx, dir, []string{a, b}, nil)
+	Update(ctx, dir, []string{a, b}, Options{}, nil)
 	if got := textLines(t, dir, a); strings.Join(got, "|") != "rewritten in place, same sizE!|tail" {
 		t.Fatalf("a same-size rewrite is noticed by its mtime: %q", got)
 	}
 
 	os.Remove(filepath.Join(dir, textName(a)))
-	Update(ctx, dir, []string{a, b}, nil)
+	Update(ctx, dir, []string{a, b}, Options{}, nil)
 	if got := textLines(t, dir, a); len(got) != 2 {
 		t.Fatalf("a lost text file is rebuilt: %q", got)
 	}
 
-	Update(ctx, dir, []string{a}, nil)
+	Update(ctx, dir, []string{a}, Options{}, nil)
 	if _, err := os.Stat(filepath.Join(dir, textName(b))); !os.IsNotExist(err) {
 		t.Fatal("a transcript that left the index loses its text")
 	}
@@ -105,14 +110,14 @@ func TestUpdateRecoversFromARunThatDiedBeforeSavingState(t *testing.T) {
 	a := filepath.Join(src, "a.jsonl")
 	writeTranscript(t, a, claudeLine("user", "kept"))
 	ctx := context.Background()
-	Update(ctx, dir, []string{a}, nil)
+	Update(ctx, dir, []string{a}, Options{}, nil)
 
 	// the dead run appended its text but its state never reached disk
 	f, _ := os.OpenFile(filepath.Join(dir, textName(a)), os.O_APPEND|os.O_WRONLY, 0)
 	f.WriteString("99\tu\t0\tghost\n")
 	f.Close()
 	appendTranscript(t, a, claudeLine("user", "new"))
-	Update(ctx, dir, []string{a}, nil)
+	Update(ctx, dir, []string{a}, Options{}, nil)
 	if got := textLines(t, dir, a); strings.Join(got, "|") != "kept|new" {
 		t.Fatalf("the unsaved tail is cut before appending: %q", got)
 	}
@@ -128,14 +133,14 @@ func TestUpdateStopsWhenTheBudgetEnds(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	calls := 0
-	Update(ctx, dir, paths, func(Progress) {
+	Update(ctx, dir, paths, Options{}, func(Progress) {
 		calls++
 		cancel()
 	})
 	if calls != 1 {
 		t.Fatalf("a cancelled update stops after the transcript in hand, got %d", calls)
 	}
-	if p, _ := Update(context.Background(), dir, paths, nil); p.Total != 2 {
+	if p, _ := Update(context.Background(), dir, paths, Options{}, nil); p.Total != 2 {
 		t.Fatalf("the next update picks up the rest: %+v", p)
 	}
 }
@@ -181,7 +186,7 @@ func TestSearchNeedsEveryKeywordInTheSession(t *testing.T) {
 	writeTranscript(t, one, claudeLine("user", "滚轮加速怎么调"), claudeLine("assistant", "看设置面板"))
 	writeTranscript(t, spread, claudeLine("user", "滚轮太慢"), claudeLine("assistant", "加上加速就好"))
 	writeTranscript(t, half, claudeLine("user", "只有滚轮"))
-	Update(context.Background(), dir, []string{one, spread, half}, nil)
+	Update(context.Background(), dir, []string{one, spread, half}, Options{}, nil)
 
 	cands := []Cand{{Paths: []string{half}}, {Paths: []string{spread}}, {Paths: []string{one}}}
 	res := Search(context.Background(), dir, cands, "滚轮 加速")
@@ -215,7 +220,7 @@ func TestResultPointsAtTheBestHitAndHitsListsThemAll(t *testing.T) {
 	first, second := claudeLine("user", "滚轮太慢"), claudeLine("assistant", "滚轮加速做好了")
 	writeTranscript(t, a, first, second, claudeLine("user", "无关"))
 	ctx := context.Background()
-	Update(ctx, dir, []string{a}, nil)
+	Update(ctx, dir, []string{a}, Options{}, nil)
 	res := Search(ctx, dir, []Cand{{Paths: []string{a}}}, "滚轮 加速")
 	if len(res) != 1 || res[0].Path != a || res[0].Off != int64(len(first)) {
 		t.Fatalf("the result points at the message holding both keywords: %+v", res)
@@ -235,15 +240,15 @@ func TestRewritesBehindAPartialLineOrAnUnchangedHeadAreRebuilt(t *testing.T) {
 	ctx := context.Background()
 	head := claudeLine("user", strings.Repeat("h", 5000)) // longer than the hashed head
 	writeTranscript(t, a, head, claudeLine("user", "old middle"), `{"type":"user","partial`)
-	Update(ctx, dir, []string{a}, nil)
+	Update(ctx, dir, []string{a}, Options{}, nil)
 	writeTranscript(t, a, head, claudeLine("user", "new middle"), `{"type":"user","partial`)
 	os.Chtimes(a, time.Now().Add(time.Minute), time.Now().Add(time.Minute))
-	Update(ctx, dir, []string{a}, nil)
+	Update(ctx, dir, []string{a}, Options{}, nil)
 	if got := textLines(t, dir, a); len(got) != 2 || got[1] != "new middle" {
 		t.Fatalf("a same-size rewrite behind a partial last line is rebuilt: %q", got)
 	}
 	writeTranscript(t, a, head, claudeLine("user", "newer, longer middle"), claudeLine("assistant", "more"))
-	Update(ctx, dir, []string{a}, nil)
+	Update(ctx, dir, []string{a}, Options{}, nil)
 	if got := textLines(t, dir, a); strings.Join(got[1:], "|") != "newer, longer middle|more" {
 		t.Fatalf("a longer rewrite with the same head is rebuilt: %q", got[1:])
 	}
@@ -255,7 +260,7 @@ func TestKeywordsCloseTogetherRankFirst(t *testing.T) {
 	filler := strings.Repeat("无关的内容", 60)
 	writeTranscript(t, far, claudeLine("user", "滚轮"+filler+"加速"))
 	writeTranscript(t, near, claudeLine("user", filler+"滚轮加速"))
-	Update(context.Background(), dir, []string{far, near}, nil)
+	Update(context.Background(), dir, []string{far, near}, Options{}, nil)
 	res := Search(context.Background(), dir, []Cand{{Paths: []string{far}}, {Paths: []string{near}}}, "滚轮 加速")
 	if len(res) != 2 || res[0].Cand != 1 {
 		t.Fatalf("the message with the keywords side by side ranks first: %+v", res)
@@ -280,7 +285,7 @@ func TestRankingWeighsWhenWhoAndWhatTheSessionIsAbout(t *testing.T) {
 	writeTranscript(t, mine, linedAt("user", "游标漂移", now.AddDate(0, 0, -1), ""), linedAt("assistant", "游标漂移", now, ""))
 	writeTranscript(t, titled, linedAt("assistant", "游标漂移", now.AddDate(0, 0, -1), ""))
 	ctx := context.Background()
-	Update(ctx, dir, []string{old, fresh, recap, mine, titled}, nil)
+	Update(ctx, dir, []string{old, fresh, recap, mine, titled}, Options{}, nil)
 	search := func(cands ...Cand) []Result { return Search(ctx, dir, cands, "游标漂移") }
 
 	if res := search(Cand{Paths: []string{old}}, Cand{Paths: []string{fresh}}); res[0].Cand != 1 {
@@ -322,7 +327,7 @@ func TestQuotedKeywordsMatchVerbatim(t *testing.T) {
 	a, b := filepath.Join(src, "a.jsonl"), filepath.Join(src, "b.jsonl")
 	writeTranscript(t, a, claudeLine("user", "恢复了标题"))
 	writeTranscript(t, b, claudeLine("user", "先把标题恢复一下"))
-	Update(context.Background(), dir, []string{a, b}, nil)
+	Update(context.Background(), dir, []string{a, b}, Options{}, nil)
 	res := Search(context.Background(), dir, []Cand{{Paths: []string{a}}, {Paths: []string{b}}}, `"标题恢复"`)
 	if len(res) != 1 || res[0].Cand != 1 {
 		t.Fatalf("only the verbatim session: %+v", res)
@@ -346,7 +351,7 @@ func TestQuerySyntaxExcludesAlternativesAndSpeakers(t *testing.T) {
 	writeTranscript(t, a, claudeLine("user", "flyway baseline 坏了"), claudeLine("assistant", "flyway 修好了"))
 	writeTranscript(t, b, claudeLine("user", "flyway 升级"))
 	ctx := context.Background()
-	Update(ctx, dir, []string{a, b}, nil)
+	Update(ctx, dir, []string{a, b}, Options{}, nil)
 	cands := []Cand{{Paths: []string{a}}, {Paths: []string{b}}}
 	if res := Search(ctx, dir, cands, "flyway -baseline who:me"); len(res) != 1 || res[0].Cand != 1 {
 		t.Fatalf("only b has a message of the user's with flyway and without baseline: %+v", res)
@@ -381,7 +386,7 @@ func TestATypoFindsTheWordTheSessionsUse(t *testing.T) {
 	writeTranscript(t, a, lines...)
 	writeTranscript(t, b, claudeLine("user", "claude clause"))
 	ctx := context.Background()
-	Update(ctx, dir, []string{a, b}, nil)
+	Update(ctx, dir, []string{a, b}, Options{}, nil)
 
 	q := Expand(dir, ParseQuery("flyawy"))
 	if fixes := q.Fixes(); len(fixes) != 1 || fixes[0] != "flyway" {
@@ -406,11 +411,11 @@ func TestToolOutputIsSearchableWhenAsked(t *testing.T) {
 		`{"type":"user","timestamp":"2026-09-22T10:00:01Z","message":{"role":"user","content":[{"type":"tool_result","content":"line one\nNullPointerException at Foo.java:12\nline three\nline four"}]}}`+"\n")
 	ctx := context.Background()
 	cands := []Cand{{Paths: []string{a}}}
-	Update(ctx, dir, []string{a}, nil)
+	Update(ctx, dir, []string{a}, Options{}, nil)
 	if res := Search(ctx, dir, cands, "NullPointerException"); len(res) != 0 {
 		t.Fatalf("outputs are off by default: %+v", res)
 	}
-	UpdateWith(ctx, dir, []string{a}, Options{OutLines: 2}, nil)
+	Update(ctx, dir, []string{a}, Options{OutLines: 2}, nil)
 	res := Search(ctx, dir, cands, "NullPointerException")
 	if len(res) != 1 {
 		t.Fatal("with two lines kept, the error in the second line is found")
@@ -418,7 +423,7 @@ func TestToolOutputIsSearchableWhenAsked(t *testing.T) {
 	if hs, _ := Hits(ctx, dir, []string{a}, "NullPointerException who:tool", 0, Hit{}); len(hs) != 1 || hs[0].Role != 'o' {
 		t.Fatalf("an output hit, found by who:tool: %+v", hs)
 	}
-	UpdateWith(ctx, dir, []string{a}, Options{OutLines: 1}, nil)
+	Update(ctx, dir, []string{a}, Options{OutLines: 1}, nil)
 	if res := Search(ctx, dir, cands, "NullPointerException"); len(res) != 0 {
 		t.Fatal("changing the line count rebuilds: the second line is gone")
 	}

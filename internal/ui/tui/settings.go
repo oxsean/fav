@@ -7,6 +7,7 @@ import (
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/oxsean/fav/internal/capture"
 	"github.com/oxsean/fav/internal/fav"
 	"github.com/oxsean/fav/internal/i18n"
 	"github.com/oxsean/fav/internal/paths"
@@ -96,7 +97,7 @@ func settingsTable() []setting {
 			func(m *Model) int { return indexOf(trashOpts, m.cfg.TrashDays) },
 			func(m *Model, i int) tea.Cmd { m.cfg.TrashDays = trashOpts[i]; return nil }, nil, ""},
 		{i18n.T("settings.notify"), []string{i18n.T("settings.notify_off"), i18n.T("settings.notify_bell")},
-			func(m *Model) int { return max(0, indexOf(notifies, m.cfg.Notify)) },
+			func(m *Model) int { return indexOf(notifies, m.cfg.Notify) },
 			func(m *Model, i int) tea.Cmd { m.cfg.Notify = notifies[i]; return nil }, nil, ""},
 		{i18n.T("settings.resume_in"), []string{i18n.T("settings.resume_terminal"), i18n.T("settings.resume_app"), i18n.T("settings.resume_origin")},
 			func(m *Model) int { return indexOf(resumeIns, m.cfg.ResumeIn) },
@@ -113,7 +114,7 @@ func settingsTable() []setting {
 				}
 				return nil
 			}, nil, ""},
-		{label: "IDE", text: func(m *Model) *string { return &m.cfg.IDE }, hint: i18n.F("settings.ide_hint", defaultIDE())},
+		{label: "IDE", text: func(m *Model) *string { return &m.cfg.IDE }, hint: i18n.F("settings.ide_hint", capture.DefaultIDE())},
 		{i18n.T("settings.language"), []string{i18n.T("settings.lang_system"), "中文", "English"},
 			func(m *Model) int { return indexOf(langs, m.cfg.Lang) },
 			func(m *Model, i int) tea.Cmd { m.cfg.Lang = langs[i]; i18n.Set(i18n.Resolve(m.cfg.Lang)); return nil }, nil, ""},
@@ -134,7 +135,7 @@ func (m *Model) cycleSetting(i, delta int) tea.Cmd {
 	if s.text != nil {
 		ti := newInput()
 		ti.SetValue(*s.text(m))
-		ti.Placeholder = defaultIDE()
+		ti.Placeholder = capture.DefaultIDE()
 		ti.CharLimit = 200
 		ti.Focus()
 		ti.CursorEnd()
@@ -143,9 +144,7 @@ func (m *Model) cycleSetting(i, delta int) tea.Cmd {
 	}
 	n := len(s.opts)
 	cmd := s.set(m, ((s.get(m)+delta)%n+n)%n)
-	if err := m.cfg.Save(); err != nil {
-		m.flash(i18n.T("flash.settings_not_saved") + err.Error())
-	}
+	m.saveConfig()
 	return cmd
 }
 
@@ -158,9 +157,7 @@ func (m *Model) settingsKey(msg tea.KeyPressMsg) tea.Cmd {
 		case "enter":
 			*settingsTable()[m.ov.cursor].text(m) = strings.TrimSpace(m.ov.edit.Value())
 			m.ov.editing = false
-			if err := m.cfg.Save(); err != nil {
-				m.flash(i18n.T("flash.settings_not_saved") + err.Error())
-			}
+			m.saveConfig()
 			return nil
 		}
 		var cmd tea.Cmd

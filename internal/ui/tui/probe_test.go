@@ -14,44 +14,41 @@ import (
 
 	"github.com/oxsean/fav/internal/capture"
 	"github.com/oxsean/fav/internal/fav"
+	"github.com/oxsean/fav/internal/i18n"
 	"github.com/oxsean/fav/internal/render"
 )
 
-func TestScrollReadsNothing(t *testing.T) {
-	home, _ := os.UserHomeDir()
-	if _, err := os.Stat(filepath.Join(home, ".claude", "projects")); err != nil {
-		t.Skip("no Claude transcripts on this machine")
+// transcriptOf writes a Claude transcript of n user messages ("第0句" oldest).
+func transcriptOf(t *testing.T, n int) string {
+	t.Helper()
+	var b strings.Builder
+	for i := range n {
+		fmt.Fprintf(&b, `{"type":"user","timestamp":"2026-09-12T15:%02d:00Z","message":{"content":"第%d句"}}`+"\n", i%60, i)
 	}
-	paths, _ := filepath.Glob(filepath.Join(home, ".claude", "projects", "*", "*.jsonl"))
-	s, _ := fav.OpenAt(filepath.Join(t.TempDir(), "records.jsonl"))
-	for i, p := range paths {
-		if i >= 230 {
-			break
-		}
-		s.Put(&fav.Rec{ID: fav.NewID(), Provider: fav.ProviderClaude, SessionID: filepath.Base(p), Title: "t", Summary: "s",
-			Project: "webapp", Status: fav.StatusDone, Cwd: filepath.Join(home, "work", "webapp"), GitBranch: "main",
-			TranscriptPath: p, FavoritedAt: new(time.Now().Add(-time.Duration(i) * time.Hour))})
+	path := filepath.Join(t.TempDir(), "t.jsonl")
+	if err := os.WriteFile(path, []byte(b.String()), 0o644); err != nil {
+		t.Fatal(err)
 	}
-	m := New(s, noIndex(t), fav.DefaultConfig(), "")
-	m.Update(tea.WindowSizeMsg{Width: 160, Height: 45})
-	m.screen()
-	t0 := time.Now()
+	return path
+}
 
+func TestScrollingProbesOnlyWhereTheCursorRests(t *testing.T) {
+	s, _ := fav.OpenAt(filepath.Join(t.TempDir(), "records.jsonl"))
+	for i := range 60 {
+		s.Put(&fav.Rec{ID: fav.NewID(), Provider: fav.ProviderClaude, SessionID: strconv.Itoa(i), Title: "t", Status: fav.StatusDone,
+			Cwd: t.TempDir(), TranscriptPath: transcriptOf(t, 3), FavoritedAt: new(time.Now().Add(-time.Duration(i) * time.Hour))})
+	}
+	m := newModel(t, s, 160, 45)
 	for range 50 {
 		m.Update(press("down"))
 		m.screen()
 	}
-	per := time.Since(t0) / 50
-	t.Logf("key+frame while scrolling 50 records: %s", per)
-	if per > 3*time.Millisecond {
-		t.Errorf("scrolling should not touch disk; %s per step", per)
-	}
-	if !strings.Contains(m.screen(), "检查中") {
-		t.Errorf("detail should show the placeholder before the probe lands")
+	if len(m.probes) != 0 || !strings.Contains(m.screen(), strings.TrimSpace(i18n.T("detail.checking"))) {
+		t.Fatalf("scrolling reads nothing: the detail shows the placeholder, probes=%d", len(m.probes))
 	}
 	settle(m)
-	if !strings.Contains(m.screen(), "已识别会话来源") {
-		t.Errorf("probe result should render into the detail panel")
+	if !strings.Contains(m.screen(), i18n.F("resume.check.source", "")) {
+		t.Error("the probe of the record the cursor rests on renders into the detail")
 	}
 }
 
@@ -81,25 +78,14 @@ func settle(m *Model) {
 }
 
 func TestChatScrollKeys(t *testing.T) {
-	home, _ := os.UserHomeDir()
-	paths, _ := filepath.Glob(filepath.Join(home, ".claude", "projects", "*", "*.jsonl"))
-	if len(paths) == 0 {
-		t.Skip("no Claude transcripts on this machine")
-	}
-	biggest, size := paths[0], int64(0)
-	for _, p := range paths {
-		if st, err := os.Stat(p); err == nil && st.Size() > size {
-			biggest, size = p, st.Size()
-		}
-	}
 	s, _ := fav.OpenAt(filepath.Join(t.TempDir(), "records.jsonl"))
 	s.Put(&fav.Rec{ID: fav.NewID(), Provider: fav.ProviderClaude, SessionID: "x", Title: "t", Summary: "s", Project: "p",
-		Status: fav.StatusDone, Cwd: home, TranscriptPath: biggest, FavoritedAt: new(time.Now())})
-	m := New(s, noIndex(t), fav.DefaultConfig(), "")
-	m.Update(tea.WindowSizeMsg{Width: 150, Height: 44})
+		Status: fav.StatusDone, Cwd: t.TempDir(), TranscriptPath: transcriptOf(t, 100), FavoritedAt: new(time.Now())})
+	m := newModel(t, s, 150, 44)
 	settle(m)
-	if !strings.Contains(m.screen(), "第 1–") || !m.chatFills(0, 0) {
-		t.Skip("transcript has no conversation to show, or it all fits on screen")
+	m.screen()
+	if !m.chatFills(0, 0) {
+		t.Fatal("100 messages overflow the pane")
 	}
 	m.Update(press("J"))
 	m.screen()
@@ -115,9 +101,10 @@ func TestChatScrollKeys(t *testing.T) {
 	}
 	for range 60 {
 		m.Update(press("K"))
+		m.screen()
 	}
-	if !strings.Contains(m.screen(), "第 1–") || m.chatCur != 0 {
-		t.Errorf("K should not scroll past the newest message")
+	if m.chatScroll != 0 || m.chatCur != 0 {
+		t.Errorf("K should not scroll past the newest message: scroll=%d cur=%d", m.chatScroll, m.chatCur)
 	}
 }
 
@@ -186,15 +173,9 @@ func TestChatSearch(t *testing.T) {
 }
 
 func TestChatPagesBackward(t *testing.T) {
-	var b strings.Builder
-	for i := range 100 {
-		fmt.Fprintf(&b, `{"type":"user","timestamp":"2026-09-12T15:%02d:00Z","message":{"content":"第%d句"}}`+"\n", i%60, i)
-	}
-	path := filepath.Join(t.TempDir(), "t.jsonl")
-	os.WriteFile(path, []byte(b.String()), 0o644)
 	m := sized(t, 140, 40)
 	r := m.current()
-	r.TranscriptPath = path
+	r.TranscriptPath = transcriptOf(t, 100)
 	m.probes = nil
 	m.Update(m.probeCurrent()())
 	p := m.probes[r]
@@ -282,23 +263,6 @@ func TestMessageOverlay(t *testing.T) {
 	}
 }
 
-func TestMessageOverlaySteps(t *testing.T) {
-	m := sized(t, 140, 40)
-	r := m.current()
-	msg := capture.Message{Role: "assistant", Text: "我来跑测试", Steps: []capture.Step{
-		{Tool: "Bash", Text: "go test ./..."}, {Result: true, Text: "ok fav 0.1s"}}}
-	m.probes = map[*fav.Rec]*probe{r: {done: true, full: true, msgs: []capture.Message{msg}}}
-	m.screen()
-	m.pane = paneChat
-	m.Update(press("enter"))
-	v := ansi.Strip(m.screen())
-	for _, want := range []string{"我来跑测试", "Bash  go test ./...", "→ ok fav 0.1s"} {
-		if !strings.Contains(v, want) {
-			t.Errorf("全文里缺 %q", want)
-		}
-	}
-}
-
 func TestMessageOverlayMultilineStep(t *testing.T) {
 	m := sized(t, 60, 30)
 	r := m.current()
@@ -339,7 +303,7 @@ func TestMessageOverlayFullSteps(t *testing.T) {
 	line4 := `{"type":"assistant","timestamp":"2026-09-12T15:18:00Z","message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":"` + big.String() + `"}}]}}` + "\n"
 	os.WriteFile(path, []byte(line1+line2+line3+line4), 0o644)
 	r.TranscriptPath = path
-	msgs := capture.AllMessages(path)
+	msgs := capture.Messages(path, -1, 1<<30).Msgs
 	if !strings.Contains(msgs[0].Steps[2].Text, "还有") {
 		t.Fatalf("内存里的步骤应是截过的：%q", msgs[0].Steps[2].Text)
 	}
@@ -350,6 +314,9 @@ func TestMessageOverlayFullSteps(t *testing.T) {
 	m.Update(press("enter"))
 	if m.ov.kind != ovMessage || len(m.ov.msg.Steps) != 3 {
 		t.Fatalf("应打开带三步的全文：%+v", m.ov.msg)
+	}
+	if v := ansi.Strip(m.screen()); !strings.Contains(v, "看了") || !strings.Contains(v, "Bash  curl x") || !strings.Contains(v, "→ {") {
+		t.Errorf("the text, then each tool call and its result:\n%s", v)
 	}
 	joined := strings.Join(m.ov.lines, "\n")
 	if !strings.Contains(joined, `"a": 1`) || !strings.Contains(joined, "line 39") || strings.Contains(joined, "还有") {

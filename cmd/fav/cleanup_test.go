@@ -11,7 +11,10 @@ import (
 	"github.com/oxsean/fav/internal/capture"
 	"github.com/oxsean/fav/internal/fav"
 	"github.com/oxsean/fav/internal/index"
+	"github.com/oxsean/fav/internal/testkit"
 )
+
+func TestMain(m *testing.M) { testkit.Main(m) }
 
 func stdoutOf(t *testing.T, f func()) string {
 	t.Helper()

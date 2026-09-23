@@ -44,6 +44,21 @@ func TestTerminalLinePerShell(t *testing.T) {
 	}
 }
 
+func TestPOSIXSplitsArgsBack(t *testing.T) {
+	sh, err := exec.LookPath("sh")
+	if err != nil {
+		t.Skip("no POSIX shell")
+	}
+	args := []string{"--name", `geo 排障 it's "quoted" $HOME; & 50%`, `C:\a b\`}
+	out, err := exec.Command(sh, "-c", `for a in `+POSIX.Join(args)+`; do printf '%s\n' "$a"; done`).Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Split(strings.TrimRight(string(out), "\n"), "\n"); !slices.Equal(got, args) {
+		t.Errorf("sh split %q, want %q", got, args)
+	}
+}
+
 func TestPowerShellSplitsArgsBack(t *testing.T) {
 	ps := ""
 	for _, name := range []string{"pwsh", "powershell"} {
