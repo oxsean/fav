@@ -1014,20 +1014,20 @@ func datePresets(now time.Time) []item {
 	year := time.Date(today.Year(), 1, 1, 0, 0, 0, 0, time.Local)
 	return []item{
 		{name: "", label: i18n.T("picker.all")},
-		{name: "after:" + ymd(today), label: i18n.T("date.today")},
+		{name: "last:" + ymd(today), label: i18n.T("date.today")},
 		{name: span(today.AddDate(0, 0, -1), today), label: i18n.T("date.yesterday")},
-		{name: "after:" + ymd(today.AddDate(0, 0, -1)), label: i18n.T("date.last_2_days")},
-		{name: "after:" + ymd(today.AddDate(0, 0, -2)), label: i18n.T("date.last_3_days")},
-		{name: "after:" + ymd(week), label: i18n.T("date.this_week")},
+		{name: "last:" + ymd(today.AddDate(0, 0, -1)), label: i18n.T("date.last_2_days")},
+		{name: "last:" + ymd(today.AddDate(0, 0, -2)), label: i18n.T("date.last_3_days")},
+		{name: "last:" + ymd(week), label: i18n.T("date.this_week")},
 		{name: span(week.AddDate(0, 0, -7), week), label: i18n.T("date.last_week")},
 		{name: "last:7d", label: i18n.T("date.last_7_days")},
 		{name: "last:14d", label: i18n.T("date.last_14_days")},
 		{name: "last:30d", label: i18n.T("date.last_30_days")},
-		{name: "after:" + ymd(month), label: i18n.T("date.this_month")},
+		{name: "last:" + ymd(month), label: i18n.T("date.this_month")},
 		{name: span(month.AddDate(0, -1, 0), month), label: i18n.T("date.last_month")},
 		{name: "last:90d", label: i18n.T("date.last_90_days")},
 		{name: "last:180d", label: i18n.T("date.last_6_months")},
-		{name: "after:" + ymd(year), label: i18n.T("date.this_year")},
+		{name: "last:" + ymd(year), label: i18n.T("date.this_year")},
 	}
 }
 
@@ -1064,7 +1064,7 @@ func dateItem(s string, now time.Time) (item, bool) {
 		return item{name: strings.Join(toks, " "), label: label}, true
 	}
 	if t, ok := fav.ParseDay(s, now); ok {
-		return item{name: "after:" + t.Format("2006-01-02"), label: i18n.T("date.from") + t.Format("01-02")}, true
+		return item{name: "last:" + t.Format("2006-01-02"), label: i18n.T("date.active_from") + t.Format("01-02")}, true
 	}
 	if _, ok := fav.ParseWhen(s, now); ok && !strings.Contains(s, "-") {
 		return item{name: "last:" + s, label: i18n.T("date.last") + s}, true

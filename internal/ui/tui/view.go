@@ -205,7 +205,7 @@ func (m *Model) chipData() []chip {
 		{render.GlyphTag, i18n.T("label.tags"), tagVal, len(q.Tags) > 0, (*Model).pickTags},
 		{render.GlyphTerm, i18n.T("label.source"), orAll(q.Provider), q.Provider != "", (*Model).cycleProvider},
 		{render.GlyphOK, i18n.T("label.status"), statusLabel(q.Status), q.Status != fav.StatusOpen, (*Model).pickStatus},
-		{render.GlyphClock, i18n.T("label.time"), timeLabel(q), !q.After.IsZero() || !q.Before.IsZero(), (*Model).pickDate},
+		{render.GlyphClock, i18n.T("label.time"), timeLabel(q), !q.After.IsZero() || !q.Before.IsZero() || !q.Active.IsZero(), (*Model).pickDate},
 	}
 	if m.view == viewLive {
 		chips = append(chips[:3], chips[4])
@@ -240,7 +240,11 @@ func statusLabel(s string) string {
 	return render.StatusLabel(s)
 }
 
+// timeLabel: last: reads "active since", after: / before: the days the session started in.
 func timeLabel(q fav.Query) string {
+	if !q.Active.IsZero() {
+		return i18n.T("date.active_from") + q.Active.Format("01-02")
+	}
 	if q.After.IsZero() && q.Before.IsZero() {
 		return i18n.T("label.all")
 	}
@@ -480,6 +484,9 @@ func (m *Model) cardBox(r *fav.Rec, sel bool, w int) []string {
 	if r.App {
 		meta += " App"
 	}
+	if r.CodexArchived {
+		meta += "  ·  " + i18n.T("card.codex_archived")
+	}
 	if r.Project != "" {
 		meta += "  ·  " + r.Project
 	}
@@ -622,9 +629,10 @@ func (m *Model) statusLine(r *fav.Rec, w int) string {
 	if !r.Favorite() {
 		state = dimmed.Render(render.GlyphSession + i18n.T("detail.not_favorited"))
 	}
-	if r.Done() {
+	switch {
+	case r.Done():
 		state += dimmed.Render("  " + render.GlyphDone + i18n.T("detail.done"))
-	} else {
+	case r.Status != "": // an unfavorited session nobody marked has no status
 		state += okSty.Render("  " + render.StatusLabel(r.Status))
 	}
 	if r.Archived() {

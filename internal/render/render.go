@@ -36,6 +36,8 @@ func StatusLabel(s string) string {
 		return i18n.T("status.todo")
 	case fav.StatusDone:
 		return i18n.T("status.done")
+	case "":
+		return i18n.T("status.unmarked")
 	}
 	return i18n.T("status.active")
 }
@@ -258,7 +260,7 @@ func Preview(r *fav.Rec, width int, now time.Time) string {
 
 func statusLine(r *fav.Rec, now time.Time) string {
 	state := green.p(glyph(r) + " " + StatusLabel(r.Status))
-	if r.Done() {
+	if r.Done() || r.Status == "" {
 		state = dim.p(glyph(r) + " " + StatusLabel(r.Status))
 	}
 	if r.Archived() {

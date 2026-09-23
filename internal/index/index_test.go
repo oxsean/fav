@@ -274,3 +274,82 @@ func TestAgentSessionsAreOnlyTheSkippedOnes(t *testing.T) {
 		t.Fatalf("an untitled agent run is named after its directory and first prompt: %q", agents[0].DisplayTitle())
 	}
 }
+
+func TestCodexArchivedSessionsStayFound(t *testing.T) {
+	_, codex := setup(t)
+	meta := `{"timestamp":"2026-09-11T02:00:00Z","type":"session_meta","payload":{"session_id":"ffff","cwd":"/Users/me/work/env","originator":"codex-tui"}}` + "\n"
+	msg := `{"timestamp":"2026-09-11T02:00:01Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"把 env 仓库的 CI 修好"}]}}` + "\n"
+	live := filepath.Join(codex, "sessions", "2026", "09", "11", "rollout-2026-09-11T02-00-00-ffff.jsonl")
+	write(t, live, meta+msg+msg+msg)
+	idx, err := OpenAt(filepath.Join(t.TempDir(), "sessions.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	idx, _ = idx.Refresh()
+	store, err := fav.OpenAt(filepath.Join(t.TempDir(), "records.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	rec := &fav.Rec{ID: "r1", Provider: fav.ProviderCodex, SessionID: "ffff", Title: "修 CI", TranscriptPath: live, FavoritedAt: &now}
+	if err := store.Put(rec); err != nil {
+		t.Fatal(err)
+	}
+
+	archived := filepath.Join(codex, "archived_sessions", filepath.Base(live))
+	os.MkdirAll(filepath.Dir(archived), 0o755)
+	if err := os.Rename(live, archived); err != nil {
+		t.Fatal(err)
+	}
+	idx, _ = idx.Refresh()
+	idx.Attach(store, nil)
+	got := store.Get("r1")
+	if got.TranscriptPath != archived || !got.CodexArchived {
+		t.Fatalf("archiving in Codex moves the file: the record follows it and says so: %+v", got)
+	}
+	if files := SessionFiles(fav.ProviderCodex, "ffff"); len(files) != 1 || files[0] != archived {
+		t.Fatalf("trash and move see the archived rollout: %v", files)
+	}
+}
+
+func TestAgentScratch(t *testing.T) {
+	for cwd, want := range map[string]bool{
+		"/private/tmp/claude-501/-Users-ozn-dev-fav-0a24/scratchpad": true,
+		"/private/var/folders/m7/xx/T/claude-review-2370e1":          true,
+		"/tmp/claude-501/x":      true,
+		"/private/tmp":           false, // a person's own scratch work stays listed
+		"/tmp/notes":             false,
+		"/Users/me/claude-tools": false,
+		"":                       false,
+	} {
+		if got := AgentScratch(cwd); got != want {
+			t.Errorf("AgentScratch(%q) = %v", cwd, got)
+		}
+	}
+}
+
+func TestScratchSessionsOnlyInAgents(t *testing.T) {
+	claude, _ := setup(t)
+	line := `{"type":"user","timestamp":"2026-09-10T01:00:0%dZ","cwd":"%s","message":{"content":"第 %d 句比较长的提示语在这里"}}` + "\n"
+	body := func(cwd string) string {
+		return sprintf(line, 1, cwd, 1) + sprintf(line, 2, cwd, 2) + sprintf(line, 3, cwd, 3)
+	}
+	write(t, filepath.Join(claude, "projects", "-private-tmp-claude-501-x", "scr1.jsonl"), body("/private/tmp/claude-501/x/scratchpad"))
+	write(t, filepath.Join(claude, "projects", "-Users-me-work", "work.jsonl"), body("/Users/me/work"))
+	idx, _ := (&Index{files: map[string]*File{}}).Refresh()
+	store, err := fav.OpenAt(filepath.Join(t.TempDir(), "records.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	recs := idx.Attach(store, nil)
+	if len(recs) != 1 || recs[0].SessionID != "work" {
+		t.Fatalf("a scratch run is not a project session: %+v", recs)
+	}
+	var agent []string
+	for _, s := range idx.AgentSessions() {
+		agent = append(agent, s.SessionID)
+	}
+	if len(agent) != 1 || agent[0] != "scr1" {
+		t.Fatalf("status:agent lists it: %v", agent)
+	}
+}

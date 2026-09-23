@@ -122,10 +122,15 @@ func FindWorkspace(label string) (*Workspace, error) {
 	return nil, nil
 }
 
-// WorkspaceFor: by label first, else by directory — any pane whose cwd shares a subtree with the record's cwd.
-func WorkspaceFor(label, cwd string) (*Workspace, error) {
+// WorkspacesFor: the workspace named label; else those with a pane in cwd's subtree — only those with a pane exactly in cwd
+// when there are any. ⚠️ More than one: the caller asks the user, never picks.
+func WorkspacesFor(label, cwd string) ([]Workspace, error) {
 	if label != "" {
-		return FindWorkspace(label)
+		w, err := FindWorkspace(label)
+		if w == nil {
+			return nil, err
+		}
+		return []Workspace{*w}, err
 	}
 	if cwd == "" {
 		return nil, nil
@@ -138,17 +143,29 @@ func WorkspaceFor(label, cwd string) (*Workspace, error) {
 	if err != nil {
 		return nil, err
 	}
+	return matchWorkspaces(panes, ws, cwd), nil
+}
+
+func matchWorkspaces(panes []Pane, ws []Workspace, cwd string) []Workspace {
+	exact, near := map[string]bool{}, map[string]bool{}
 	for _, p := range panes {
-		if !sameTree(p.Cwd, cwd) {
-			continue
-		}
-		for i := range ws {
-			if ws[i].WorkspaceID == p.WorkspaceID {
-				return &ws[i], nil
-			}
+		switch {
+		case p.Cwd == cwd:
+			exact[p.WorkspaceID] = true
+		case sameTree(p.Cwd, cwd):
+			near[p.WorkspaceID] = true
 		}
 	}
-	return nil, nil
+	if len(exact) > 0 {
+		near = exact
+	}
+	var out []Workspace
+	for _, w := range ws {
+		if near[w.WorkspaceID] {
+			out = append(out, w)
+		}
+	}
+	return out
 }
 
 func sameTree(a, b string) bool {

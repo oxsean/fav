@@ -14,6 +14,7 @@ import (
 	"github.com/oxsean/fav/internal/capture"
 	"github.com/oxsean/fav/internal/fav"
 	"github.com/oxsean/fav/internal/fulltext"
+	"github.com/oxsean/fav/internal/herdr"
 	"github.com/oxsean/fav/internal/i18n"
 )
 
@@ -695,5 +696,22 @@ func TestProjectHeaderFooterFollowsFolding(t *testing.T) {
 	has := func(f, k string) bool { return strings.Contains(f, i18n.T(k)) }
 	if has(first, "footer.enter_expand") == has(second, "footer.enter_expand") || has(first, "footer.enter_collapse") == has(second, "footer.enter_collapse") {
 		t.Fatalf("Enter says expand on a folded group and collapse on an open one: %q → %q", first, second)
+	}
+}
+
+func TestResumeAsksWhichWorkspace(t *testing.T) {
+	m := sized(t, 140, 40)
+	appFiles(t, m.current())
+	m.askResume()
+	m.ov.plan.Ws = nil
+	m.ov.plan.WsChoices = []herdr.Workspace{{WorkspaceID: "a", Label: "api"}, {WorkspaceID: "b", Label: "web"}}
+	m.doResume(false)
+	if m.ov.kind != ovPicker || len(m.ov.items) != 3 {
+		t.Fatalf("two workspaces fit: the user picks (or this terminal): kind=%v items=%d", m.ov.kind, len(m.ov.items))
+	}
+	m.ov.cursor = 1
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd == nil || !strings.Contains(m.notice, "web") || m.quitting {
+		t.Fatalf("picking web opens the tab there: notice=%q", m.notice)
 	}
 }

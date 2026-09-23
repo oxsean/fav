@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strings"
 
 	"github.com/oxsean/fav/internal/capture"
 	"github.com/oxsean/fav/internal/fav"
@@ -18,6 +19,7 @@ func cmdResume(args []string) error {
 	noHerdr := fs.Bool("no-herdr", false, i18n.T("cli.resume.flag_no_herdr"))
 	inApp := fs.Bool("app", false, i18n.T("cli.resume.flag_app"))
 	inTerminal := fs.Bool("terminal", false, i18n.T("cli.resume.flag_terminal"))
+	workspace := fs.String("workspace", "", i18n.T("cli.resume.flag_workspace"))
 	rest, err := parseMixed(fs, args)
 	if err != nil {
 		return err
@@ -37,7 +39,7 @@ func cmdResume(args []string) error {
 		}
 		fmt.Fprintln(os.Stderr, err) // the setting asked for the app: fall back to the terminal
 	}
-	return resumeRec(s, r, *dryRun, *noHerdr)
+	return resumeRec(s, r, *dryRun, *noHerdr, *workspace)
 }
 
 // wantsApp: the resume setting sends r to its desktop app.
@@ -63,10 +65,22 @@ func openInApp(s *fav.Store, r *fav.Rec) error {
 	return nil
 }
 
-func resumeRec(s *fav.Store, r *fav.Rec, dryRun, noHerdr bool) error {
+func resumeRec(s *fav.Store, r *fav.Rec, dryRun, noHerdr bool, workspace string) error {
 	plan, err := capture.PlanResume(r, capture.LiveSessions(), noHerdr)
 	if err != nil {
 		return err
+	}
+	if plan.Ws == nil && len(plan.WsChoices) > 1 {
+		var labels []string
+		for i, w := range plan.WsChoices {
+			labels = append(labels, w.Label)
+			if workspace != "" && strings.EqualFold(w.Label, workspace) {
+				plan.Ws = &plan.WsChoices[i]
+			}
+		}
+		if plan.Ws == nil && !dryRun {
+			return i18n.E("cli.resume.ws_ambiguous", len(labels), strings.Join(labels, ", "))
+		}
 	}
 	if dryRun {
 		printPlan(r, plan)

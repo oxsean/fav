@@ -33,7 +33,8 @@ type transcriptLine struct {
 		} `json:"content"`
 		Name      string          `json:"name"`      // Codex function_call
 		Arguments string          `json:"arguments"` // Codex function_call: JSON string
-		Output    json.RawMessage `json:"output"`    // Codex function_call_output: string or block array
+		Output    json.RawMessage `json:"output"`    // Codex function_call_output / custom_tool_call_output: string or block array
+		Input     string          `json:"input"`     // Codex custom_tool_call (apply_patch): free text
 	} `json:"payload"`
 }
 
@@ -52,7 +53,8 @@ const (
 	stepCharCap     = 1200 // max chars kept per line
 )
 
-// steps: Claude has tool_use blocks on assistant lines and tool_result on user lines, Codex function_call / function_call_output; full skips truncation.
+// steps: Claude has tool_use blocks on assistant lines and tool_result on user lines, Codex function_call / custom_tool_call and
+// their outputs; full skips truncation.
 func (l *transcriptLine) steps(off int64, full bool) []Step {
 	argLines, resLines := stepArgLines, stepResultLines
 	if full {
@@ -78,10 +80,34 @@ func (l *transcriptLine) steps(off int64, full bool) []Step {
 		}
 	case l.Type == "response_item" && l.Payload.Type == "function_call":
 		out = append(out, Step{Tool: l.Payload.Name, Text: toolArg(l.Payload.Name, json.RawMessage(l.Payload.Arguments), argLines), Off: off})
-	case l.Type == "response_item" && l.Payload.Type == "function_call_output":
+	case l.Type == "response_item" && l.Payload.Type == "custom_tool_call":
+		out = append(out, Step{Tool: l.Payload.Name, Text: customArg(l.Payload.Name, l.Payload.Input, argLines), Off: off})
+	case l.Type == "response_item" && (l.Payload.Type == "function_call_output" || l.Payload.Type == "custom_tool_call_output"):
 		out = append(out, Step{Result: true, Text: head(blockText(l.Payload.Output), resLines), Off: off})
 	}
 	return out
+}
+
+// patchFileMarks are apply_patch's file headers.
+var patchFileMarks = []string{"*** Add File: ", "*** Update File: ", "*** Delete File: ", "*** Move to: "}
+
+// customArg: an apply_patch puts the files it touches on the first line (what search and the step header show), then the patch.
+func customArg(name, input string, n int) string {
+	if name != "apply_patch" {
+		return head(input, n)
+	}
+	var files []string
+	for _, l := range strings.Split(input, "\n") {
+		for _, m := range patchFileMarks {
+			if strings.HasPrefix(l, m) {
+				files = append(files, strings.TrimSpace(l[len(m):]))
+			}
+		}
+	}
+	if len(files) == 0 {
+		return head(input, n)
+	}
+	return strings.Join(files, " ") + "\n" + head(input, max(1, n-1))
 }
 
 const (
@@ -456,7 +482,8 @@ func Messages(path string, before int64, n int) Page {
 
 func interesting(b []byte) bool {
 	return bytes.Contains(b, []byte(`"type":"user"`)) || bytes.Contains(b, []byte(`"type":"assistant"`)) ||
-		bytes.Contains(b, []byte(`"type":"message"`)) || bytes.Contains(b, []byte(`"type":"function_call`))
+		bytes.Contains(b, []byte(`"type":"message"`)) || bytes.Contains(b, []byte(`"type":"function_call`)) ||
+		bytes.Contains(b, []byte(`"type":"custom_tool_call`))
 }
 
 func RecentMessages(path string, n int) []Message { return Messages(path, -1, n).Msgs }

@@ -74,7 +74,9 @@ type Rec struct {
 	Msgs   int       `json:"-"`
 	LastAt time.Time `json:"-"`
 	App    bool      `json:"-"` // started in a desktop app (Claude or ChatGPT): opening it there is the default when set so
-	extra  string
+	// CodexArchived: the rollout is in ~/.codex/archived_sessions.
+	CodexArchived bool `json:"-"`
+	extra         string
 
 	hay string
 }
@@ -133,6 +135,14 @@ func Normalize(tags []string) []string {
 		out = append(out, t)
 	}
 	return out
+}
+
+// ActiveAt: the last activity the index saw, else When.
+func (r *Rec) ActiveAt() time.Time {
+	if r.LastAt.After(r.When()) {
+		return r.LastAt
+	}
+	return r.When()
 }
 
 func (r *Rec) When() time.Time {

@@ -986,6 +986,38 @@ func (m *Model) doResume(noHerdr bool) {
 			return
 		}
 	}
+	if p.Live.TabID == "" && p.Ws == nil && len(p.WsChoices) > 1 {
+		m.pickWorkspace(r, p)
+		return
+	}
+	m.runPlan(r, p, noHerdr)
+}
+
+// pickWorkspace asks which of several Herdr workspaces in the session's directory to resume in; the last item is this terminal.
+func (m *Model) pickWorkspace(r *fav.Rec, p capture.Plan) {
+	items := make([]item, 0, len(p.WsChoices)+1)
+	for _, w := range p.WsChoices {
+		items = append(items, item{name: w.WorkspaceID, label: w.Label})
+	}
+	items = append(items, item{name: "", label: i18n.T("resume.pick_ws_terminal")})
+	m.openPicker(i18n.T("resume.pick_ws_title"), "", items, false, []string{p.WsChoices[0].WorkspaceID},
+		func(m *Model, chosen []string) {
+			if len(chosen) == 0 || chosen[0] == "" {
+				m.runPlan(r, capture.Plan{Spec: p.Spec, Live: p.Live, Checks: p.Checks}, true)
+				return
+			}
+			for i := range p.WsChoices {
+				if p.WsChoices[i].WorkspaceID == chosen[0] {
+					p.Ws = &p.WsChoices[i]
+				}
+			}
+			m.runPlan(r, p, false)
+		})
+}
+
+// runPlan carries out a resume plan: focus the running tab, a new Herdr tab, or this terminal (the TUI quits and the caller
+// execs).
+func (m *Model) runPlan(r *fav.Rec, p capture.Plan, noHerdr bool) {
 	if p.Live.TabID == "" && p.Ws == nil {
 		// resuming in this terminal execs over it: quit the TUI and let the caller do it
 		m.finish(Result{Resume: r, NoHerdr: noHerdr})

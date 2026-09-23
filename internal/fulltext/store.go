@@ -21,7 +21,7 @@ import (
 // Store layout: <dir>/<sha1(transcript path)[:16]>.tsv holds one line per entry, "off\trole\tunix\ttext" (text has no tab or
 // newline); <dir>/state.json records per transcript how far it was read and how long its text file was at that point.
 // ⚠️ A text file longer than its recorded size was written by a run that died before saving state: it is cut back first.
-const storeVer = 5
+const storeVer = 6
 
 // bytes hashed at the start and before the read offset to notice a transcript rewritten in place (fav mv changes cwd in every line)
 const headLen, tailLen = 4096, 256

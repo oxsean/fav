@@ -171,6 +171,7 @@ fav grep '滚轮 加速 project:fav'      # message search: keywords + filters, 
 fav open <id>                           # the TUI on that session, right pane focused (sessions the lists hide too)
 fav resume <id> --dry-run               # print the command and checks only
 fav resume <id> --no-herdr              # resume in this terminal
+fav resume <id> --workspace api         # several Herdr workspaces in that directory: pick one
 fav resume <id> --app                   # open it in the desktop app (Claude, or ChatGPT for Codex); --terminal overrides the setting
 
 fav status <id> todo|doing|done  ·  fav done <id>  ·  fav archive|unarchive <id>  ·  fav fav|unfav <id>
@@ -202,7 +203,7 @@ fav doctor [--compact]                  # check data files, dead sessions, trash
 ## Query syntax
 
 `#tag`, `project:x`, `provider:claude|codex`, `status:open|active|done|archived|trash|all|live|agent`,
-`after:2026-09-01`, `before:…`, `last:7d`, `turns:3`, plus plain keywords. All ANDed; CJK matches by substring.
+`after:2026-09-01`, `before:…` (when the session started), `last:7d` / `last:2026-09-01` (active since — a session started last week and used today counts), `turns:3`, plus plain keywords. All ANDed; CJK matches by substring.
 Starting the query with `>` (or `》`) searches message text instead: keywords are looked up in every message and tool command, the filter tokens only pick the
 sessions (default `status:all turns:0`). Every keyword must occur somewhere in the session; a keyword matches when 60% of its terms do (Chinese is cut into
 character pairs, so word order inside a Chinese keyword does not matter; quote a keyword — `"…"`, `“…”` or `「…」` — to require it verbatim; `a|b` matches either, `-x` drops messages holding x, `who:me`, `who:ai` or `who:tool` keep one speaker; a misspelt English word the sessions barely use also searches the known words one letter away, and the title says so); ranking is BM25 with bonuses for keywords close together, newer messages, what you said yourself (tool commands, tool output and Claude's context recaps count less) and sessions whose title, summary or tags hold the keywords; sessions with one message holding every keyword come first, `o` switches to the newest hit first.

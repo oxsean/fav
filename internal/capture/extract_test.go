@@ -65,3 +65,32 @@ func TestExtractSkipsOverlongLines(t *testing.T) {
 		t.Fatalf("got %q upto %d err %v", got, upto, err)
 	}
 }
+
+func TestExtractCodexApplyPatch(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "rollout.jsonl")
+	lines := []string{
+		`{"timestamp":"2026-09-22T10:00:00Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"修一下分页"}]}}`,
+		`{"timestamp":"2026-09-22T10:00:01Z","type":"response_item","payload":{"type":"custom_tool_call","status":"completed","call_id":"c1","name":"apply_patch","input":"*** Begin Patch\n*** Update File: /src/page.go\n@@\n-a\n+b\n*** Add File: /src/cursor.go\n+package src\n*** End Patch\n"}}`,
+		`{"timestamp":"2026-09-22T10:00:02Z","type":"response_item","payload":{"type":"custom_tool_call_output","call_id":"c1","output":"Exit code: 0\nSuccess. Updated the following files:\nM /src/page.go"}}`,
+	}
+	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var got []Entry
+	if _, _, err := Extract(context.Background(), path, 0, -1, 2, func(e Entry) { got = append(got, e) }); err != nil {
+		t.Fatal(err)
+	}
+	var texts []string
+	for _, e := range got {
+		texts = append(texts, string(e.Role)+":"+e.Text)
+	}
+	want := []string{"u:修一下分页", "t:apply_patch /src/page.go /src/cursor.go", "o:Exit code: 0 | Success. Updated the following files:"}
+	if strings.Join(texts, "|") != strings.Join(want, "|") {
+		t.Fatalf("an apply_patch is indexed by the files it touches:\n got %q\nwant %q", texts, want)
+	}
+
+	msgs := RecentMessages(path, 10)
+	if len(msgs) != 1 || len(msgs[0].Steps) != 2 || msgs[0].Steps[0].Tool != "apply_patch" || !strings.HasPrefix(msgs[0].Steps[0].Text, "/src/page.go /src/cursor.go\n") {
+		t.Fatalf("the right pane shows the patch step: %+v", msgs)
+	}
+}

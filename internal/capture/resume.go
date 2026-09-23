@@ -110,6 +110,10 @@ func Checks(r *fav.Rec) []Check {
 		out = append(out, Check{Text: i18n.T("resume.check.transcript_gone")})
 	}
 
+	if r.CodexArchived {
+		out = append(out, Check{Warn: true, Text: i18n.F("resume.check.codex_archived", r.SessionID)})
+	}
+
 	if r.GitBranch != "" && r.Cwd != "" && dirExists(r.Cwd) {
 		if cur := GitOut(r.Cwd, "rev-parse", "--abbrev-ref", "HEAD"); cur != "" && cur != r.GitBranch {
 			out = append(out, Check{Warn: true, Text: i18n.F("resume.check.branch_differs", cur, r.GitBranch)})

@@ -69,7 +69,7 @@ func runTUI(s *fav.Store, query string, focus *fav.Rec, args []string) error {
 	if res.Resume == nil {
 		return nil
 	}
-	return resumeRec(s, res.Resume, false, res.NoHerdr)
+	return resumeRec(s, res.Resume, false, res.NoHerdr, "")
 }
 
 func cmdUI(cmd string, args []string) error {
@@ -191,7 +191,7 @@ func cmdFzfList(args []string) error {
 }
 
 func synthLive(id string, l capture.Live, transcript string) *fav.Rec {
-	r := &fav.Rec{Provider: l.Agent, SessionID: id, Cwd: l.Cwd, Title: l.Title, Status: fav.StatusDoing, TranscriptPath: transcript}
+	r := &fav.Rec{Provider: l.Agent, SessionID: id, Cwd: l.Cwd, Title: l.Title, TranscriptPath: transcript}
 	if l.Cwd != "" {
 		r.Project = filepath.Base(l.Cwd)
 	}

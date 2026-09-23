@@ -332,7 +332,7 @@ func TestFoldAll(t *testing.T) {
 func TestDatePicker(t *testing.T) {
 	now := time.Date(2026, 9, 21, 10, 0, 0, 0, time.Local) // a Monday
 	for _, c := range []struct{ in, want string }{
-		{"09-01", "after:2026-09-01"},
+		{"09-01", "last:2026-09-01"}, // open-ended: active since that day
 		{"9-1..9-15", "after:2026-09-01 before:2026-09-16"},
 		{"..09-15", "before:2026-09-16"},
 		{"7d", "last:7d"},
@@ -350,6 +350,9 @@ func TestDatePicker(t *testing.T) {
 	}
 	if byLabel["昨天"] != "after:2026-09-20 before:2026-09-21" || byLabel["上周"] != "after:2026-09-14 before:2026-09-21" || byLabel["上月"] != "after:2026-08-01 before:2026-09-01" {
 		t.Errorf("预设区间不对：%v", byLabel)
+	}
+	if byLabel["今天"] != "last:2026-09-21" || byLabel["本周"] != "last:2026-09-21" {
+		t.Errorf("open-ended presets mean active since: %v", byLabel)
 	}
 
 	m := New(fixture(t), noIndex(t), fav.DefaultConfig(), "")

@@ -11,10 +11,12 @@ import (
 )
 
 type Plan struct {
-	Spec   CommandSpec
-	Live   Live             // running now: TabID set → just focus it, BackgroundID set → attach
-	Ws     *herdr.Workspace // non-nil → new Herdr tab, nil → this terminal
-	Checks []Check
+	Spec CommandSpec
+	Live Live             // running now: TabID set → just focus it, BackgroundID set → attach
+	Ws   *herdr.Workspace // non-nil → new Herdr tab, nil → this terminal
+	// WsChoices: several workspaces fit the directory and Ws is nil — the user picks one (or this terminal).
+	WsChoices []herdr.Workspace
+	Checks    []Check
 }
 
 // PlanResume: running in a Herdr tab → focus it; Claude background session → attach;
@@ -31,7 +33,12 @@ func PlanResume(r *fav.Rec, live map[string]Live, noHerdr bool) (Plan, error) {
 		return p, err
 	}
 	if !noHerdr && herdr.Reachable() {
-		p.Ws, _ = herdr.WorkspaceFor(r.HerdrWorkspace, r.Cwd)
+		switch ws, _ := herdr.WorkspacesFor(r.HerdrWorkspace, r.Cwd); {
+		case len(ws) == 1:
+			p.Ws = &ws[0]
+		case len(ws) > 1:
+			p.WsChoices = ws
+		}
 	}
 	return p, nil
 }
@@ -46,6 +53,8 @@ func (p Plan) Target(r *fav.Rec, arrow string) string {
 		return i18n.T("resume.where.running") + arrow + i18n.T("resume.where.switch")
 	case p.Ws != nil:
 		return "Herdr " + p.Ws.Label + arrow + i18n.T("resume.where.new_tab") + arrow + dir + arrow + p.Spec.Exec
+	case len(p.WsChoices) > 1:
+		return i18n.F("resume.where.pick_ws", len(p.WsChoices)) + arrow + i18n.T("resume.where.new_tab") + arrow + dir + arrow + p.Spec.Exec
 	}
 	return i18n.T("resume.where.terminal") + arrow + dir + arrow + p.Spec.Exec
 }

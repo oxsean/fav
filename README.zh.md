@@ -168,6 +168,7 @@ fav grep '滚轮 加速 project:fav'      # 搜消息：关键词 + 筛选，按
 fav open <id>                           # 直接打开这个会话的界面，右栏聚焦（列表不显示的也行）
 fav resume <id> --dry-run               # 只打印要执行的命令和检查项
 fav resume <id> --no-herdr              # 当前终端恢复
+fav resume <id> --workspace api         # 目录下有多个 Herdr workspace 时指定一个
 fav resume <id> --app                   # 在桌面 App 里打开（Claude，Codex 用 ChatGPT）；--terminal 不管设置走终端
 
 fav status <id> todo|doing|done  ·  fav done <id>  ·  fav archive|unarchive <id>  ·  fav fav|unfav <id>
@@ -199,7 +200,7 @@ fav doctor [--compact]                  # 体检：数据文件、失效会话�
 ## 查询语法
 
 `#标签`、`project:x`、`provider:claude|codex`、`status:open|active|done|archived|trash|all|live|agent`、
-`after:2026-09-01`、`before:…`、`last:7d`、`turns:3`，以及普通关键词。全部 AND，中文直接子串匹配。
+`after:2026-09-01`、`before:…`（按会话开始时间）、`last:7d` / `last:2026-09-01`（按最近活动：上周开始、今天还在用的也算）、`turns:3`，以及普通关键词。全部 AND，中文直接子串匹配。
 以 `>`（或 `》`）开头改搜消息正文：关键词在每条消息和工具命令里找，筛选词只限定会话范围（默认 `status:all turns:0`）。每个关键词都要在会话里出现；
 关键词的词项命中六成就算中（中文按相邻两字切，关键词内部不讲词序；用引号包起来——`"…"`、`“…”` 或 `「…」`——就必须原样连着出现；`a|b` 两个有一个就算，`-x` 去掉含 x 的消息，`who:me`、`who:ai` 或 `who:tool` 只看某一方说的；英文词拼错、会话里又几乎没出现过时，也会顺带搜只差一个字母的常见词，标题里写明「也搜了 …」）；BM25 排序，关键词挨得近、消息越新、是你自己说的（工具命令、工具输出和 Claude 的续接摘要权重低）、标题摘要标签里也有关键词的，都加分；有一条消息同时含全部关键词的会话排前面，`o` 切到按最近命中排。
 默认看未归档的；关键词也搜索引里的用户提示语——记得「让它做过 X」就能搜到。三个前端共用同一个解析器。

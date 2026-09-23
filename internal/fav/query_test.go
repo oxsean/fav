@@ -166,3 +166,28 @@ func TestStatusAgentIsItsOwnListing(t *testing.T) {
 		t.Fatal("without All the listing stays empty (agent rows never come from the store)")
 	}
 }
+
+func TestLastMeansActiveSince(t *testing.T) {
+	started := time.Now().AddDate(0, 0, -10)
+	r := &Rec{ID: "x", SessionStartedAt: &started, LastAt: time.Now().Add(-time.Hour), FavoritedAt: &started}
+	if !Parse("last:1d").Match(r) {
+		t.Error("started ten days ago, active an hour ago: last:1d finds it")
+	}
+	if Parse("after:" + time.Now().AddDate(0, 0, -1).Format("2006-01-02")).Match(r) {
+		t.Error("after: still means when the session started")
+	}
+}
+
+func TestUnmarkedSessionsAreNotActive(t *testing.T) {
+	now := time.Now()
+	r := &Rec{Provider: ProviderClaude, SessionID: "s", Turns: 9, SessionStartedAt: &now}
+	q := Parse("status:active")
+	q.All = true // the sessions view
+	if q.Match(r) {
+		t.Error("an unfavorited session nobody marked is not in status:active")
+	}
+	r.Status = StatusDoing
+	if !q.Match(r) {
+		t.Error("marked doing: status:active finds it")
+	}
+}

@@ -15,10 +15,11 @@ type Query struct {
 	All      bool   // include non-favorites; default is favorites only
 	// decides status:live; nil matches nothing
 	Live    func(sessionID string) bool
-	Turns   int // non-favorited sessions need at least this many turns; favorites are exempt
-	After   time.Time
+	Turns   int       // non-favorited sessions need at least this many turns; favorites are exempt
+	After   time.Time // after: / before: — when the session started
 	Before  time.Time
-	Unknown []string // unknown qualifiers, already matched as plain keywords
+	Active  time.Time // last: — active since (a session started last week and continued today counts)
+	Unknown []string  // unknown qualifiers, already matched as plain keywords
 }
 
 var DefaultTurns = 3
@@ -66,7 +67,7 @@ func Parse(s string) Query {
 			}
 		case "last":
 			if t, ok := ParseWhen(v, now); ok {
-				q.After = t
+				q.Active = t
 			} else {
 				q.unknown(low)
 			}
@@ -183,6 +184,9 @@ func (q Query) Match(r *Rec) bool {
 	if !q.Before.IsZero() && r.When().After(q.Before) {
 		return false
 	}
+	if !q.Active.IsZero() && r.ActiveAt().Before(q.Active) {
+		return false
+	}
 	for _, w := range q.Words {
 		if !strings.Contains(r.hay, w) {
 			return false
@@ -212,7 +216,7 @@ func (q Query) matchStatus(r *Rec) bool {
 	}
 	switch q.Status {
 	case StatusActive:
-		return !r.Done()
+		return r.Status == StatusTodo || r.Status == StatusDoing
 	case StatusOpen:
 		return true
 	default:

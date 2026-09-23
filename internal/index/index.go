@@ -58,6 +58,11 @@ type Session struct {
 	App       bool // started in a desktop app (Codex: from the file; Claude: set by Attach)
 }
 
+// CodexArchived: the rollout sits in ~/.codex/archived_sessions (archived in Codex or the desktop app).
+func (s *Session) CodexArchived() bool {
+	return s.Provider == fav.ProviderCodex && strings.HasPrefix(s.Path, codexArchivedDir()+string(filepath.Separator))
+}
+
 func (s *Session) Key() string { return s.Provider + ":" + s.SessionID }
 
 func (s *Session) DisplayTitle() string {
@@ -76,14 +81,13 @@ func (s *Session) Rec() *fav.Rec {
 	r := &fav.Rec{
 		Provider: s.Provider, SessionID: s.SessionID, Cwd: s.Cwd, GitBranch: s.Branch,
 		Title: s.DisplayTitle(), Summary: strings.Join(strings.Fields(s.First), " "), Project: filepath.Base(s.Cwd),
-		TranscriptPath: s.Path, SessionStartedAt: &started, UpdatedAt: s.LastAt,
-		Status: fav.StatusDoing,
+		TranscriptPath: s.Path, SessionStartedAt: &started, UpdatedAt: s.LastAt, // Status "": not marked until the user does
 	}
 	if s.Cwd == "" {
 		r.Project = ""
 	}
 	r.Attach(s.Turns, s.Turns+s.Replies, s.LastAt, s.Prompts)
-	r.App = s.App
+	r.App, r.CodexArchived = s.App, s.CodexArchived()
 	return r
 }
 
@@ -371,12 +375,13 @@ func (idx *Index) PathsBySession() map[string][]string {
 	return out
 }
 
-// AgentSessions: the one-shot sessions Sessions() drops — SDK / exec / sub-agent runs, newest activity first.
+// AgentSessions: the one-shot sessions Sessions() drops — SDK / exec / sub-agent runs — and the sessions in agent tools' scratch
+// directories (AgentScratch; Attach leaves them out unless favorited); newest activity first.
 // They carry no title of their own more often than not, so DisplayTitle falls back to the first prompt.
 func (idx *Index) AgentSessions() []*Session {
 	byKey := map[string]*Session{}
 	for _, f := range idx.files {
-		if !f.Skip || f.SessionID == "" {
+		if !f.Skip && !AgentScratch(f.Cwd) || f.SessionID == "" {
 			continue
 		}
 		s := byKey[f.Provider+":"+f.SessionID]
@@ -406,7 +411,7 @@ func (idx *Index) AgentSessions() []*Session {
 func (f *File) Rec() *fav.Rec {
 	r := &fav.Rec{Provider: f.Provider, SessionID: f.SessionID, Cwd: f.Cwd, GitBranch: f.Branch, Title: f.Title,
 		Summary: strings.Join(strings.Fields(f.First), " "), Project: filepath.Base(f.Cwd), TranscriptPath: f.Path,
-		SessionStartedAt: &f.StartedAt, UpdatedAt: f.ModTime, Status: fav.StatusDoing}
+		SessionStartedAt: &f.StartedAt, UpdatedAt: f.ModTime}
 	if f.Cwd == "" {
 		r.Project = ""
 	}
@@ -603,6 +608,10 @@ func candidates() []candidate {
 			out = append(out, candidate{p, fav.ProviderCodex, ""})
 		}
 	}
+	hits, _ = filepath.Glob(filepath.Join(codexArchivedDir(), "rollout-*.jsonl")) // flat: archiving moves the file here
+	for _, p := range hits {
+		out = append(out, candidate{p, fav.ProviderCodex, ""})
+	}
 	return out
 }
 
@@ -623,6 +632,8 @@ func codexHome() string {
 }
 
 func codexSessionsDir() string { return filepath.Join(codexHome(), "sessions") }
+
+func codexArchivedDir() string { return filepath.Join(codexHome(), "archived_sessions") }
 
 // session_index.jsonl: {"id":…,"thread_name":…}
 func codexThreadNames() map[string]string {
@@ -669,6 +680,9 @@ func (idx *Index) Attach(store *fav.Store, prev []*fav.Rec) []*fav.Rec {
 				r.SessionID, r.TranscriptPath = s.SessionID, s.Path
 			}
 		}
+		if r == nil && AgentScratch(s.Cwd) {
+			continue // a scratch run, not a project: status:agent lists it
+		}
 		if r != nil {
 			if r.TranscriptPath == "" { // favorited from the Agents page before the index saw it: fill in the file location
 				r.TranscriptPath, r.SessionStartedAt = s.Path, &s.StartedAt
@@ -676,8 +690,11 @@ func (idx *Index) Attach(store *fav.Store, prev []*fav.Rec) []*fav.Rec {
 					r.Cwd = s.Cwd
 				}
 			}
+			if r.TranscriptPath != s.Path && !fileExists(r.TranscriptPath) { // moved: Codex archive / unarchive
+				r.TranscriptPath = s.Path
+			}
 			r.Attach(s.Turns, s.Turns+s.Replies, s.LastAt, s.Prompts)
-			r.App = s.App
+			r.App, r.CodexArchived = s.App, s.CodexArchived()
 			continue
 		}
 		r = s.Rec()
@@ -709,6 +726,33 @@ func SessionFiles(provider, sessionID string) []string {
 		add(filepath.Join(h, "file-history", sessionID))
 	case fav.ProviderCodex:
 		add(filepath.Join(codexSessionsDir(), "*", "[0-9][0-9]", "[0-9][0-9]", "rollout-*-"+sessionID+".jsonl"))
+		add(filepath.Join(codexArchivedDir(), "rollout-*-"+sessionID+".jsonl"))
 	}
 	return out
+}
+
+func fileExists(p string) bool {
+	_, err := os.Stat(p)
+	return err == nil
+}
+
+// AgentScratch: cwd is a tool's scratch directory — under the system temp directory (macOS /var/folders and /private/tmp, /tmp,
+// %TEMP%) with a path element named claude-… (Claude Code's scratchpad /private/tmp/claude-<uid>/…, review runs
+// claude-review-…). A session a person started in /tmp itself is not one.
+func AgentScratch(cwd string) bool {
+	if cwd == "" {
+		return false
+	}
+	for _, d := range []string{filepath.Clean(os.TempDir()), "/tmp", "/private/tmp", "/var/folders", "/private/var/folders"} {
+		rest, ok := strings.CutPrefix(cwd, d+string(filepath.Separator))
+		if !ok {
+			continue
+		}
+		for _, el := range strings.Split(rest, string(filepath.Separator)) {
+			if strings.HasPrefix(el, "claude-") {
+				return true
+			}
+		}
+	}
+	return false
 }

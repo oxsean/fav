@@ -121,7 +121,7 @@ func (m *Model) synthLive(q fav.Query) []*fav.Rec {
 			if m.synth == nil {
 				m.synth = map[string]*fav.Rec{}
 			}
-			r = &fav.Rec{Provider: l.Agent, SessionID: id, Status: fav.StatusDoing}
+			r = &fav.Rec{Provider: l.Agent, SessionID: id}
 			m.synth[id] = r
 		}
 		r.Title, r.Cwd, r.Project = l.Title, l.Cwd, ""
