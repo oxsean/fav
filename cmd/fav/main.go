@@ -52,6 +52,10 @@ func run(args []string) error {
 		return cmdList(args)
 	case "sessions":
 		return cmdSessions(args)
+	case "grep":
+		return cmdGrep(args)
+	case "text-sync":
+		return cmdTextSync()
 	case "show":
 		return cmdShow(args)
 	case "preview":

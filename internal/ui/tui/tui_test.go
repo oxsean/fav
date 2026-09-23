@@ -65,6 +65,9 @@ func noIndex(t *testing.T) *index.Index {
 
 func sized(t *testing.T, w, h int) *Model {
 	t.Helper()
+	if os.Getenv("FAV_HOME") == "" || !strings.HasPrefix(os.Getenv("FAV_HOME"), os.TempDir()) {
+		t.Setenv("FAV_HOME", t.TempDir()) // ⚠️ never the real ~/.agent/fav
+	}
 	m := New(fixture(t), noIndex(t), fav.DefaultConfig(), "")
 	m.Update(tea.WindowSizeMsg{Width: w, Height: h})
 	return m
@@ -410,10 +413,18 @@ func TestConventionalKeys(t *testing.T) {
 		t.Fatal("l 应把焦点切到右栏")
 	}
 	key("/")
-	if !m.chat.typing {
-		t.Fatal("右栏有焦点时 / 应搜对话")
+	if !m.typing || m.chat.typing {
+		t.Fatal("/ 在哪都是搜会话，右栏有焦点时也一样")
 	}
 	m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	key(">")
+	if !m.typing || !m.msgMode() {
+		t.Fatal("> 打开搜消息")
+	}
+	m.search.SetValue("")
+	m.refresh()
+	m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	key("l")
 	key("h")
 	m.cursor = 0
 	m.clampCursor()

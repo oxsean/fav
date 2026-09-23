@@ -27,6 +27,20 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.wheelTick = false
 		m.applyWheel()
 
+	case msgTickMsg:
+		cmd = m.runMsgSearch(int(msg))
+
+	case msgResultMsg:
+		cmd = m.applyMsgResult(msg)
+
+	case textDoneMsg:
+		cmd = m.applyTextDone(msg)
+
+	case textTickMsg:
+		if m.msg.textRun {
+			cmd = textTick() // redraws the progress in the title
+		}
+
 	case tea.KeyMsg:
 		if isMouseFragment(msg) {
 			tracef("fragment %q", msg.String())
@@ -93,6 +107,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		cmd = tea.Tick(indexEvery, func(time.Time) tea.Msg { return indexTickMsg{} })
+		if msg.changed && msg.gen == m.idxGen {
+			cmd = tea.Batch(cmd, m.syncText(msg.idx))
+		}
 
 	case indexTickMsg:
 		cmd = m.refreshIndex()
@@ -101,21 +118,26 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		tracef("probe %s msgs=%d cur=%v", msg.rec.SessionID, len(msg.page.Msgs), msg.rec == m.current())
 		if p := m.probes[msg.rec]; p != nil {
 			p.checks, p.msgs, p.from, p.full, p.done = msg.checks, msg.page.Msgs, msg.page.From, msg.page.Done, true
-			if m.chat.query() != "" && msg.rec == m.current() {
-				cmd = tea.Batch(cmd, m.ensureFull(msg.rec)) // changing record with a query active: the new record reads its full text too
+			if m.findQuery() != "" && msg.rec == m.current() {
+				cmd = tea.Batch(cmd, m.landHit())
 			}
 		}
 
 	case pageMsg:
 		tracef("page %s +%d done=%v cur=%v %s", msg.rec.SessionID, len(msg.page.Msgs), msg.page.Done, msg.rec == m.current(), m.traceChat())
 		m.applyPage(msg)
-		if msg.rec == m.current() && m.chat.query() != "" {
-			if p := m.probes[msg.rec]; p != nil && p.full {
-				m.jumpHit(0)
-			} else {
-				cmd = tea.Batch(cmd, m.ensureFull(msg.rec)) // paging holds loading; the query needs the full text
+		if msg.rec == m.current() && m.findQuery() != "" {
+			switch {
+			case m.msg.seek == msg.rec:
+				cmd = tea.Batch(cmd, m.resumeSeek(msg.rec))
 			}
 		}
+
+	case textRetryMsg:
+		cmd = m.syncText(m.idx)
+
+	case hitsMsg:
+		cmd = m.applyHits(msg)
 
 	case probeTickMsg:
 		if int(msg) == m.probeSeq {
@@ -143,9 +165,23 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if m.pending != nil {
 		cmd, m.pending = tea.Batch(cmd, m.pending), nil
 	}
+	cmd = tea.Batch(cmd, m.issueMsgSearch())
+	if m.msg.hl.key != "" && !m.hitsOpen() {
+		m.dropHits()
+	}
+	if m.pane == paneChat && m.hitsOpen() {
+		m.followChat()
+	}
+	if kw := m.msgKeywords(); kw != m.msg.hitQ {
+		m.msg.hitQ, m.msg.seek = kw, nil
+		if r := m.current(); r == m.probeWant && m.findQuery() != "" {
+			cmd = tea.Batch(cmd, m.landHit())
+		}
+	}
 	if r := m.current(); r != m.probeWant {
-		if p := m.probes[r]; p != nil && p.done && !p.full && m.chat.query() != "" {
-			cmd = tea.Batch(cmd, m.ensureFull(r))
+		m.msg.seek = nil
+		if m.findQuery() != "" {
+			cmd = tea.Batch(cmd, m.landHit())
 		}
 		m.probeWant = r
 		m.probeSeq++
@@ -180,6 +216,10 @@ func (m *Model) searchKey(msg tea.KeyMsg) tea.Cmd {
 		m.typing = false
 		m.search.Blur()
 		m.refresh()
+		if m.msgMode() { // message search: Enter only ends typing, so n/N and → reach the hits
+			m.pane = paneList
+			return nil
+		}
 		if m.chipFocus < 0 && m.current() != nil && m.moved {
 			return m.navKey(msg)
 		}
@@ -194,7 +234,7 @@ func (m *Model) searchKey(msg tea.KeyMsg) tea.Cmd {
 	return cmd
 }
 
-// navKey: list navigation. ⚠️ Every action needs a non-letter key (letters never reach here under a CJK IME); 、？；， count as \ ? ; ,.
+// navKey: list navigation. ⚠️ Every action needs a non-letter key (letters never reach here under a CJK IME); 、？；， count as / ? ; , (a CJK input method types / as 、); ctrl+s stands in for \.
 func (m *Model) navKey(msg tea.KeyMsg) tea.Cmd {
 	if m.inTrash() && m.current() != nil && m.chipFocus < 0 && m.pane != paneChat {
 		switch msg.String() {
@@ -203,12 +243,23 @@ func (m *Model) navKey(msg tea.KeyMsg) tea.Cmd {
 			return nil
 		}
 	}
+	if m.hitsOpen() && m.pane == paneList && m.chipFocus < 0 {
+		if cmd, ok := m.hitKey(msg.String()); ok {
+			return cmd
+		}
+	}
 	switch msg.String() {
-	case "\\", "、":
+	case "\\", "ctrl+s":
 		return m.startChatSearch()
 	case "n":
-		m.jumpHit(m.chat.cur + 1)
+		if m.hitsOpen() {
+			return m.selectHit(m.msg.hl.cur + 1)
+		}
+		return m.findHit(m.chat.cur + 1)
 	case "N":
+		if m.hitsOpen() {
+			return m.selectHit(m.msg.hl.cur - 1)
+		}
 		m.jumpHit(m.chat.cur - 1)
 	case "q", "ctrl+c":
 		m.quitting = true
@@ -227,11 +278,10 @@ func (m *Model) navKey(msg tea.KeyMsg) tea.Cmd {
 			m.search.SetValue("")
 			m.refresh()
 		}
-	case "/":
-		if m.pane == paneChat {
-			return m.startChatSearch()
-		}
+	case "/", "、": // a CJK input method turns / into 、
 		m.focusSearch()
+	case ">", "》":
+		m.focusMsgSearch()
 	case "j", "down", "ctrl+n":
 		switch {
 		case m.projectFocus():
@@ -269,6 +319,8 @@ func (m *Model) navKey(msg tea.KeyMsg) tea.Cmd {
 		switch {
 		case m.chipFocus >= 0:
 			m.moveChip(1)
+		case m.pane == paneList && m.msgMode() && m.current() != nil:
+			return m.openHits(m.msgKeywords())
 		case m.view == viewProjects && m.current() == nil && !m.open[m.groupUnderCursor()]:
 			m.openGroup()
 		case m.pane == paneChat && m.current() != nil:
@@ -394,11 +446,13 @@ func (m *Model) navKey(msg tea.KeyMsg) tea.Cmd {
 	case "d":
 		m.pickDate()
 	case "o", "ctrl+o":
-		switch m.view {
-		case viewLive:
+		switch {
+		case m.msgMode():
+			m.msg.byTime, m.msg.toTop = !m.msg.byTime, true
+		case m.view == viewLive:
 			m.cfg.LiveSort = liveSorts[(indexOf(liveSorts, m.cfg.LiveSort)+1)%len(liveSorts)]
 			m.saveConfig()
-		case viewProjects:
+		case m.view == viewProjects:
 			m.cfg.ProjectSort = projSorts[(indexOf(projSorts, m.cfg.ProjectSort)+1)%len(projSorts)]
 			m.saveConfig()
 		default:
@@ -728,6 +782,11 @@ func (m *Model) wheel(dir, x int) bool {
 		return false
 	}
 	m.chipFocus = -1
+	if m.hitsOpen() {
+		before := m.msg.hl.cur
+		m.pending = tea.Batch(m.pending, m.selectHit(before+dir))
+		return m.msg.hl.cur != before
+	}
 	if dir < 0 && m.atTop() {
 		return false
 	}
@@ -742,7 +801,7 @@ func (m *Model) wheelChat(dir int) bool {
 	if r == nil || p == nil || len(p.msgs) == 0 || m.chatW <= 0 {
 		return false
 	}
-	q := m.chat.query()
+	q := m.findQuery()
 	m.chatFollow = false
 	if dir > 0 {
 		next, skip := m.chatScroll, m.chatSkip+1
@@ -774,7 +833,7 @@ func (m *Model) chatFills(scroll, skip int) bool {
 	avail := m.chatRoom - 2
 	lines := -skip
 	for i := scroll; i < len(p.msgs) && lines <= avail; i++ {
-		lines += len(m.chatBlock(p.msgs[i], m.chatW, m.chat.query(), false))
+		lines += len(m.chatBlock(p.msgs[i], m.chatW, m.findQuery(), false))
 	}
 	return lines > avail
 }

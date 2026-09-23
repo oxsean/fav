@@ -115,7 +115,12 @@ func (m *Model) searchBox(y0 int) []string {
 	if m.typing {
 		sty = panelSty.BorderForeground(cAccent)
 	}
-	lines := strings.Split(sty.Width(m.w-2).Render(fit(m.search.View(), m.w-4)), "\n")
+	content := fit(m.search.View(), m.w-4)
+	if m.msgMode() { // the > prefix switched the box: say so at its right end
+		tag := " " + i18n.T("search.msg_tag") + " "
+		content = fit(m.search.View(), m.w-4-render.Width(tag)) + selTitle.Render(tag)
+	}
+	lines := strings.Split(sty.Width(m.w-2).Render(content), "\n")
 	m.markRows(y0, 0, m.w, len(lines), func(mm *Model) { mm.focusSearch(); mm.placeCursor(&mm.search, 2) })
 	return lines
 }
@@ -276,6 +281,9 @@ func (m *Model) body(y0, h int) []string {
 }
 
 func (m *Model) listBlock(y0, x0, w, h int) []string {
+	if m.hitsOpen() {
+		return append([]string{fit(dimmed.Render(m.hitTitle()), w)}, m.hitPane(y0+1, x0, w, h-1)...)
+	}
 	if m.view == viewProjects && m.w >= compactCols {
 		return panel(m.listTitle(), m.listPane(y0+1, x0+2, w-4, h-2), w, h)
 	}
@@ -287,6 +295,9 @@ func (m *Model) listBlock(y0, x0, w, h int) []string {
 }
 
 func (m *Model) listTitle() string {
+	if m.msgMode() {
+		return m.msgTitle()
+	}
 	n := m.countRecs()
 	switch m.view {
 	case viewProjects:
@@ -494,6 +505,10 @@ func (m *Model) cardBox(r *fav.Rec, sel bool, w int) []string {
 	if !r.Favorite() && len(r.Tags) == 0 {
 		tags = fit(shortenHome(r.Cwd), inner) // cwd when there are no tags
 	}
+	snip, isHit := m.msgHit(r)
+	if isHit && m.msgMode() { // message search: hit count and the best hit instead of tags
+		tags = fit(i18n.F("msg.card_hits", snip.Hits)+"  "+snip.Snippet, inner)
+	}
 
 	sty, tSty, mSty, gSty := cardSty, boldSty, tagSty, dimmed
 	if sel {
@@ -503,7 +518,11 @@ func (m *Model) cardBox(r *fav.Rec, sel bool, w int) []string {
 	if a, b, ok := strings.Cut(metaLine, liveText); ok && liveText != "" {
 		metaOut = gSty.Render(a) + liveTone[tone].Inherit(gSty).Render(liveText) + gSty.Render(b)
 	}
-	content := tSty.Render(title) + brokenSty.Inherit(tSty).Render(mark) + "\n" + metaOut + "\n" + mSty.Render(tags)
+	tagsOut := mSty.Render(tags)
+	if isHit && m.msgMode() {
+		tagsOut = highlightWith(tags, m.msgKeywords(), gSty, hitSty.Inherit(gSty))
+	}
+	content := tSty.Render(title) + brokenSty.Inherit(tSty).Render(mark) + "\n" + metaOut + "\n" + tagsOut
 	return strings.Split(sty.Width(w-2).Render(content), "\n")
 }
 
@@ -555,7 +574,8 @@ func (m *Model) detailBlock(y0, x0, w, h int) []string {
 	body = append(body, boldSty.Foreground(cText).Render(render.Truncate(r.Title, inner)), "")
 	body = append(body, m.statusLine(r, inner))
 	body = append(body, frame.Render(strings.Repeat(hRule, inner)))
-	if r.Summary != "" {
+	searching := m.msgMode() || m.hitsOpen() // message search wants the room for the chat
+	if r.Summary != "" && !searching {
 		label := i18n.T("card.summary")
 		if r.ID == "" {
 			label = i18n.T("detail.first_message") // unfavorited sessions have no summary: show the first prompt
@@ -566,7 +586,9 @@ func (m *Model) detailBlock(y0, x0, w, h int) []string {
 		}
 		body = append(body, "")
 	}
-	body = append(body, m.fieldLines(r, inner)...)
+	if !searching {
+		body = append(body, m.fieldLines(r, inner)...)
+	}
 	chatStart := len(body)
 	chat, owners := m.chatLines(r, inner, avail-len(body))
 	body = append(body, chat...)
@@ -672,7 +694,7 @@ func (m *Model) chatLines(r *fav.Rec, w, room int) (lines []string, owners []int
 	m.chatScroll = min(max(m.chatScroll, 0), len(p.msgs)-1)
 	m.chatCur = min(max(m.chatCur, 0), len(p.msgs)-1)
 	m.chatW, m.chatRoom = w, room
-	q := m.chat.query()
+	q := m.findQuery()
 
 	// keyboard moved the highlight: the viewport follows it; wheel moved the viewport: the highlight is clamped into view
 	var out []string
@@ -705,6 +727,8 @@ func (m *Model) chatLines(r *fav.Rec, w, room int) (lines []string, owners []int
 	switch {
 	case m.chat.typing:
 		tail = m.chat.input.View()
+	case q != "" && m.hitsOpen() && !m.msg.hl.loading:
+		tail = i18n.F("chat.find_hits", q, m.msg.hl.cur+1, len(m.msg.hl.items))
 	case q != "":
 		hs := m.hits()
 		if len(hs) == 0 {
@@ -772,6 +796,11 @@ func (m *Model) chatBlock(msg capture.Message, w int, q string, sel bool) []stri
 	}
 	out := []string{head}
 	body := render.Wrap(plainText(msg.Text), w-2)
+	if k := firstHitLine(body, q); k >= chatBodyRows { // the hit lies deep in a long message: show the lines around it
+		start := min(k-1, len(body)-chatBodyRows)
+		body = body[start:]
+		body[0] = render.Truncate("… "+body[0], w-2)
+	}
 	if len(body) > chatBodyRows {
 		body = body[:chatBodyRows]
 		last := &body[chatBodyRows-1]
@@ -841,6 +870,8 @@ func (m *Model) footer() string {
 		keys = []string{i18n.T("footer.chip_switch"), i18n.T("footer.chip_open"), i18n.T("footer.chip_back")}
 	case m.projectFocus():
 		keys = []string{i18n.T("footer.select_session"), i18n.T("footer.enter_jump"), i18n.T("footer.back_to_list"), i18n.T("footer.help")}
+	case m.hitsOpen() && m.pane == paneList:
+		keys = []string{i18n.T("footer.select_hit"), i18n.T("footer.full_text"), i18n.T("footer.hit_chat"), i18n.T("footer.hit_back"), i18n.T("footer.help")}
 	case m.pane == paneChat:
 		keys = []string{i18n.T("footer.select_message"), i18n.T("footer.full_text"), i18n.T("footer.copy"), i18n.T("footer.find"), i18n.T("footer.jump"), i18n.T("footer.back_to_list"), i18n.T("footer.help")}
 	case m.view == viewProjects && m.current() == nil:
@@ -849,6 +880,9 @@ func (m *Model) footer() string {
 		keys = []string{i18n.T("footer.restore"), i18n.T("footer.status"), i18n.T("footer.search"), i18n.T("footer.tab"), i18n.T("footer.help")}
 	default:
 		keys = m.sessionKeys(m.current())
+		if m.msgMode() && m.current() != nil {
+			keys = append([]string{i18n.T("footer.all_hits")}, keys...)
+		}
 	}
 	count := "" // compact mode has no list title: the count goes to the footer
 	if m.w < compactCols {
@@ -895,7 +929,7 @@ func (m *Model) sessionKeys(r *fav.Rec) []string {
 	if m.view == viewProjects {
 		keys = append(keys, i18n.T("footer.fold_all"))
 	}
-	return append(keys, i18n.T("footer.search"), i18n.T("footer.tab"), i18n.T("footer.help"))
+	return append(keys, i18n.T("footer.search"), i18n.T("footer.msg_search"), i18n.T("footer.tab"), i18n.T("footer.help"))
 }
 
 func renderKeys(keys []string) string {

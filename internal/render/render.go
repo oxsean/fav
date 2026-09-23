@@ -308,6 +308,9 @@ func tagString(tags []string) string {
 	return b.String()
 }
 
+// Provider is the short provider name shown on cards: Claude / Codex.
+func Provider(p string) string { return providerShort(p) }
+
 func providerShort(p string) string {
 	switch p {
 	case fav.ProviderClaude:

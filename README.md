@@ -65,6 +65,8 @@ plus a resume button that lands in the right place.
 - **Favorite**: `/fav` inside a session; the AI writes the title / summary / tags in the conversation's language, `fav` itself collects provider, session id, cwd, git branch and Herdr workspace. `/fav` again updates the same record.
 - **Every session**: unfavorited ones are listed too — the whole Claude and Codex history, indexed incrementally by reading heads, tails and new bytes only; a multi-hundred-MB session is never read whole.
 - **Search**: one query syntax across the TUI, fzf and the CLI: keywords, `#tag`, `project:`, `provider:`, `status:`, `last:7d`, `turns:`.
+- **Search keys**: `/` searches sessions (title, summary, project, tags), `>` searches the messages of every session, `\` (or `ctrl+s`) the messages of the selected session — the same wherever the focus is; `/` typed as `、` by a CJK input method still searches sessions.
+- **Search messages**: press `>` (or start the query with `>`) to search inside every message and command of the sessions the rest of the query picks; results are ranked sessions with hit counts and snippets, the right pane opens on the hit the card shows, `n`/`N` walk the hits, `→` lists every hit of the session with its surrounding text and `Enter` opens the full message at the keyword. Chinese needs no word segmentation.
 - **Read**: the right pane shows the session's chat, paged backwards from the end, searchable; you know whether it is the one before opening it.
 - **Resume**: Herdr running → a new tab in its workspace; no Herdr → `exec` in this terminal; already running → focus that tab; background session → `claude attach`. Directory, transcript and branch are checked first.
 - **Organise**: todo / doing / done / archived, edit titles and tags, group by project.
@@ -164,6 +166,7 @@ Rule: `Ctrl-letter` = the TUI's letter, `Alt-letter` = a picker. After unfavorit
 fav list '#notes-api last:7d' --json    # favorites
 fav sessions 'webapp oauth' --json      # every session
 fav show <id> --json
+fav grep '滚轮 加速 project:fav'      # message search: keywords + filters, ranked sessions with snippets (--json, --limit)
 fav open <id>                           # the TUI on that session, right pane focused (sessions the lists hide too)
 fav resume <id> --dry-run               # print the command and checks only
 fav resume <id> --no-herdr              # resume in this terminal
@@ -198,6 +201,9 @@ fav doctor [--compact]                  # check data files, dead sessions, trash
 
 `#tag`, `project:x`, `provider:claude|codex`, `status:open|active|done|archived|trash|all|live|agent`,
 `after:2026-09-01`, `before:…`, `last:7d`, `turns:3`, plus plain keywords. All ANDed; CJK matches by substring.
+Starting the query with `>` (or `》`) searches message text instead: keywords are looked up in every message and tool command, the filter tokens only pick the
+sessions (default `status:all turns:0`). Every keyword must occur somewhere in the session; a keyword matches when 60% of its terms do (Chinese is cut into
+character pairs, so word order inside a Chinese keyword does not matter; quote a keyword — `"…"`, `“…”` or `「…」` — to require it verbatim; `a|b` matches either, `-x` drops messages holding x, `who:me`, `who:ai` or `who:tool` keep one speaker; a misspelt English word the sessions barely use also searches the known words one letter away, and the title says so); ranking is BM25 with bonuses for keywords close together, newer messages, what you said yourself (tool commands, tool output and Claude's context recaps count less) and sessions whose title, summary or tags hold the keywords; sessions with one message holding every keyword come first, `o` switches to the newest hit first.
 Unarchived by default; keywords also search the prompts in the index, so remembering "I had it do X" is enough. All three front-ends share one parser.
 
 ## How it works
@@ -206,6 +212,10 @@ Unarchived by default; keywords also search the prompts in the index, so remembe
 cwd, branch, start time, human turns, title and every prompt (capped at 8KB, search only). Transcripts are append-only, so the index remembers
 its offset and only reads what is new; the chat preview reads backwards from the end in chunks, as far as you scroll. `-p` / SDK sessions,
 Codex sub-agent threads and sessions with no human message are not listed.
+
+**Message text.** `internal/fulltext` keeps a plain-text copy of the prose and tool commands of every transcript under `~/.agent/fav/text/`
+(one TSV per transcript: offset, role, time, text), updated incrementally after every index refresh like the index itself; tool output is not kept.
+A search streams the candidate files in parallel, so there is no inverted index to maintain; a few hundred MB are scanned in well under a second.
 
 **Favorites.** The skill only understands the conversation and emits JSON; validation, environment capture, storage and idempotency (provider + session id)
 live in `fav add`. `records.jsonl` is append-only, last line wins.
@@ -225,13 +235,14 @@ the favorite follows) and does not count the parked process as running.
 |---|---|
 | `~/.agent/fav/records.jsonl` | favorites, append-only, one per line; grep it, edit it, sync it with git |
 | `~/.agent/fav/sessions.jsonl` | index cache, prompts only; delete it and the next start rebuilds it |
+| `~/.agent/fav/text/` | message text for `>` search, one file per transcript, plus `vocab.json` (English words seen, for spelling fixes); delete it and it is rebuilt |
 | `~/.agent/fav/trash/` | deleted session files moved as-is, `manifest.jsonl` records where they came from |
 | `~/.agent/fav/config.json` | written by the settings panel |
 
 Environment: `FAV_HOME` moves the data directory, `FAV_UI=fzf|tui` sets the default front-end, `FAV_ICONS=nerd|ascii` picks icons.
 The UI language follows the system (`LANG` etc. starting with zh → Chinese, otherwise English) and can be pinned in settings.
 
-No full chat content is stored and nothing is uploaded; session files are only modified when you explicitly move a directory (the cwd field), and the originals go to the trash first. `fav pin` is a local hard link.
+Chat text is kept only in the local `text/` copy for search, and nothing is uploaded; session files are only modified when you explicitly move a directory (the cwd field), and the originals go to the trash first. `fav pin` is a local hard link.
 
 ## Development
 

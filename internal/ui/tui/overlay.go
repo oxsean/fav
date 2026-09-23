@@ -297,7 +297,7 @@ func (m *Model) renderMessage() string {
 		title += i18n.F("overlay.line_range", m.ov.cursor+1, end, len(lines))
 	}
 	body := []string{boldSty.Foreground(cText).Render(title), ""}
-	q := m.chat.query()
+	q := m.findQuery()
 	inner := w - 4
 	bar := scrollbar(len(lines), m.ov.cursor, room)
 	for i := m.ov.cursor; i < end; i++ {
@@ -494,6 +494,7 @@ func (m *Model) renderHelp() string {
 	inner := w - 4
 	rows := [][2]string{
 		{"/", i18n.T("help.search")},
+		{"> 》", i18n.T("help.msg_search")},
 		{"j / k / ↑ ↓（ctrl+n / ctrl+p）", i18n.T("help.move")},
 		{"PgUp / PgDn（ctrl+b / ctrl+f）· ctrl+u / ctrl+d · g / G（Home / End）", i18n.T("help.page")},
 		{i18n.T("help.key_chip_row"), i18n.T("help.chip_row")},

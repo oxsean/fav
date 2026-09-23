@@ -14,6 +14,7 @@ import (
 
 	"github.com/oxsean/fav/internal/capture"
 	"github.com/oxsean/fav/internal/fav"
+	"github.com/oxsean/fav/internal/fulltext"
 	"github.com/oxsean/fav/internal/i18n"
 	"github.com/oxsean/fav/internal/index"
 	"github.com/oxsean/fav/internal/render"
@@ -111,11 +112,12 @@ func cmdUI(cmd string, args []string) error {
 func cmdFzfList(args []string) error {
 	fs := flag.NewFlagSet("fzf-list", flag.ContinueOnError)
 	keep := fs.String("keep", "", "")
-	rest, err := parseMixed(fs, args)
+	flags, words := queryDashes(fs, args)
+	rest, err := parseMixed(fs, flags)
 	if err != nil {
 		return err
 	}
-	query := strings.Join(rest, " ")
+	query := strings.Join(append(rest, words...), " ")
 	s, err := openStore()
 	if err != nil {
 		return err
@@ -125,7 +127,29 @@ func cmdFzfList(args []string) error {
 		return err
 	}
 	now := time.Now()
-	switch fzfui.TabOf(os.Getenv("FZF_PROMPT")) {
+	tab := fzfui.TabOf(os.Getenv("FZF_PROMPT"))
+	if q, ok := fulltext.Prefixed(query); ok && tab != fzfui.TabLive { // message search, run on every keystroke
+		kw, scope := fulltext.Split(q)
+		if kw == "" {
+			return nil
+		}
+		if fulltext.TooLong(kw) { // a keyless row: shown, never resolved to a session
+			fmt.Println(render.Sep + i18n.T("msg.too_long"))
+			return nil
+		}
+		idx = refreshed(idx)
+		if !syncText(s, idx, 300*time.Millisecond, false) { // a first build: search what is there, finish it in the background
+			finishTextInBackground()
+		}
+		recs, res := grep(s, idx, kw, scope)
+		for _, x := range res {
+			if r := recs[x.Cand]; tab == fzfui.TabSessions || r.Favorite() {
+				fmt.Println(render.Line(r, now))
+			}
+		}
+		return nil
+	}
+	switch tab {
 	case fzfui.TabSessions:
 		for _, r := range sessionRecs(s, refreshed(idx), query, *keep) {
 			fmt.Println(render.Line(r, now))

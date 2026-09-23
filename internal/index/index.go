@@ -335,6 +335,38 @@ func (idx *Index) FileByPrefix(ref string) *File {
 	return hit
 }
 
+// Paths is every transcript the index knows, one-shot runs included: the full-text store follows this list.
+func (idx *Index) Paths() []string {
+	out := make([]string, 0, len(idx.files))
+	for p := range idx.files {
+		out = append(out, p)
+	}
+	return out
+}
+
+// PathsBySession maps provider:session id to its transcripts; a Claude continuation chain sits under its newest id,
+// the id its record carries after Attach.
+func (idx *Index) PathsBySession() map[string][]string {
+	canon := map[string]string{}
+	for _, s := range idx.Sessions() {
+		for _, a := range s.Aliases {
+			canon[s.Provider+":"+a] = s.Key()
+		}
+	}
+	out := map[string][]string{}
+	for _, f := range idx.files {
+		if f.SessionID == "" {
+			continue
+		}
+		k := f.Provider + ":" + f.SessionID
+		if c, ok := canon[k]; ok {
+			k = c
+		}
+		out[k] = append(out[k], f.Path)
+	}
+	return out
+}
+
 // AgentSessions: the one-shot sessions Sessions() drops — SDK / exec / sub-agent runs, newest activity first.
 // They carry no title of their own more often than not, so DisplayTitle falls back to the first prompt.
 func (idx *Index) AgentSessions() []*Session {

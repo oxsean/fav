@@ -29,6 +29,7 @@ var langs = []string{"", i18n.ZH, i18n.EN}
 var turnsOpts = []int{1, 2, 3, 5, 8}
 var wheelOpts = []int{1, 2, 3, 5}
 var trashOpts = []int{7, 30, 90, 0}
+var outputOpts = []int{0, 3, 10, 30}
 
 func indexOf[T comparable](xs []T, x T) int {
 	for i, v := range xs {
@@ -90,6 +91,9 @@ func settingsTable() []setting {
 		{i18n.T("settings.trash_days"), []string{i18n.T("settings.trash_7"), i18n.T("settings.trash_30"), i18n.T("settings.trash_90"), i18n.T("settings.trash_forever")},
 			func(m *Model) int { return indexOf(trashOpts, m.cfg.TrashDays) },
 			func(m *Model, i int) tea.Cmd { m.cfg.TrashDays = trashOpts[i]; return nil }, nil, ""},
+		{i18n.T("settings.tool_output"), append([]string{i18n.T("settings.tool_output_off")}, intLabels(outputOpts[1:], i18n.T("settings.tool_output_suffix"))...),
+			func(m *Model) int { return indexOf(outputOpts, m.cfg.ToolOutput) },
+			func(m *Model, i int) tea.Cmd { m.cfg.ToolOutput = outputOpts[i]; return m.syncText(m.idx) }, nil, ""},
 		{i18n.T("settings.icons"), []string{"ASCII", "Nerd Font"},
 			func(m *Model) int { return map[bool]int{false: 0, true: 1}[m.cfg.Icons == "nerd"] },
 			func(m *Model, i int) tea.Cmd {

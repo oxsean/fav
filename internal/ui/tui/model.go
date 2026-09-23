@@ -15,6 +15,7 @@ import (
 
 	"github.com/oxsean/fav/internal/capture"
 	"github.com/oxsean/fav/internal/fav"
+	"github.com/oxsean/fav/internal/fulltext"
 	"github.com/oxsean/fav/internal/i18n"
 	"github.com/oxsean/fav/internal/index"
 	"github.com/oxsean/fav/internal/render"
@@ -134,6 +135,7 @@ type Model struct {
 	unfav     []*fav.Rec          // unfavorited sessions from the index (empty ID); objects survive refreshes
 	extra     *fav.Rec            // a session opened by id that the lists would not show (fav open)
 	agents    map[string]*fav.Rec // status:agent rows, by session key
+	msg       msgState            // > message search and the full-text store updates
 	// a just-edited record stays in place until the cursor leaves, the filter or the tab changes
 	pin     *fav.Rec
 	pinKey  string
@@ -192,7 +194,7 @@ func (m *Model) Init() tea.Cmd {
 	if m.idx.Len() == 0 {
 		m.flash(i18n.T("flash.building_index"))
 	}
-	return tea.Batch(textinput.Blink, m.pollLive(), watchStore(), m.refreshIndex())
+	return tea.Batch(textinput.Blink, m.pollLive(), watchStore(), m.refreshIndex(), m.syncText(m.idx))
 }
 
 const indexEvery = 10 * time.Second
@@ -310,7 +312,11 @@ func (m *Model) recount() {
 func (m *Model) pinContext() string { return strconv.Itoa(int(m.view)) + "\x00" + m.search.Value() }
 
 func (m *Model) query() fav.Query {
-	q := fav.Parse(m.search.Value())
+	s := m.search.Value()
+	if rest, ok := m.msgQuery(); ok { // message search: the keywords are searched in the text, the rest picks the sessions
+		_, s = fulltext.Split(rest)
+	}
+	q := fav.Parse(s)
 	q.All, q.Live = m.view != viewFavorites, m.isLive
 	if m.view == viewLive {
 		q.Status, q.Turns = "live", 0
@@ -347,7 +353,11 @@ func (m *Model) refresh() {
 	if m.pin != nil && !slices.Contains(recs, m.pin) {
 		recs = append(recs, m.pin)
 	}
-	if m.view == viewLive {
+	if m.msgMode() {
+		m.msg.cands, m.msg.candKey = recs, candKey(recs)
+		_, m.at = m.sortBy.sorted(recs)
+		m.rows = m.msgRows(recs)
+	} else if m.view == viewLive {
 		recs = append(recs, m.synthLive(q)...)
 		recs, m.at = m.sortBy.sorted(recs)
 		m.rows = m.liveRows(recs)
@@ -364,6 +374,9 @@ func (m *Model) refresh() {
 		default:
 			m.rows = timelineRows(recs, m.at, m.now)
 		}
+	}
+	if m.msg.toTop { // a new message search: its results start at the top
+		m.msg.toTop, m.cursor, m.scroll, cur, curGroup = false, 0, 0, nil, ""
 	}
 	// the cursor follows the record (or group), not the row index, and keeps its screen position so the list does not jump
 	for i, r := range m.rows {
@@ -774,6 +787,19 @@ func (m *Model) dropUnfav(r *fav.Rec) {
 func (m *Model) focusSearch() {
 	m.typing, m.moved = true, false
 	m.search.Focus()
+}
+
+// focusMsgSearch opens the search box in message-search mode, keeping keywords already typed after >.
+func (m *Model) focusMsgSearch() {
+	if m.view == viewLive { // Agents has no message search
+		m.setView(viewSessions)
+	}
+	if !m.msgMode() {
+		m.search.SetValue("> ")
+		m.search.CursorEnd()
+		m.refresh()
+	}
+	m.focusSearch()
 }
 
 // clickRow: a click selects, a second click on the same row within a short time resumes.

@@ -19,8 +19,9 @@ type transcriptLine struct {
 	Type       string    `json:"type"`
 	Timestamp  time.Time `json:"timestamp"`
 	Cwd        string    `json:"cwd"`
-	Entrypoint string    `json:"entrypoint"` // Claude: cli = a human, sdk-cli = -p / SDK
-	IsMeta     bool      `json:"isMeta"`     // Claude: injected content, not typed
+	Entrypoint string    `json:"entrypoint"`       // Claude: cli = a human, sdk-cli = -p / SDK
+	IsMeta     bool      `json:"isMeta"`           // Claude: injected content, not typed
+	IsSummary  bool      `json:"isCompactSummary"` // Claude: the recap written when the context ran out
 	Message    struct {
 		Content json.RawMessage `json:"content"`
 	} `json:"message"`

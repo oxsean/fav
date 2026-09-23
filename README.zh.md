@@ -63,6 +63,8 @@ fav 不是新的聊天客户端，不替代 Claude / Codex，也不上传任何�
 - **收藏**：会话里 `/fav`，AI 按对话语言写标题 / 摘要 / 标签，`fav` 自己采集 provider、session id、目录、git 分支、Herdr workspace。同一会话再 `/fav` 是更新。
 - **全部会话**：不用收藏也都在列表里——Claude 和 Codex 的全部历史增量索引，只读文件头尾和新增部分，几百 MB 的会话也不整读。
 - **搜**：同一套查询语法贯穿 TUI、fzf、命令行：关键词、`#标签`、`project:`、`provider:`、`status:`、`last:7d`、`turns:`。
+- **三个搜索键**：`/` 搜会话（标题、摘要、项目、标签），`>` 搜所有会话的消息，`\`（或 `ctrl+s`）搜当前会话的消息；焦点在哪含义都一样，中文输入法把 `/` 打成 `、` 也照样是搜会话。
+- **搜消息**：按 `>` 或查询以 `>` 开头，就在其余条件选出的会话里搜每条消息和命令；结果是按相关度排的会话，带命中数和片段，右栏停在卡片片段那一处，`n`/`N` 跳转；`→` 列出这个会话的全部命中和前后文，`Enter` 打开整条消息并停在关键词处。中文不用分词。
 - **看**：右栏是这条会话的对话，从尾往前翻，句内可搜；不用打开就知道是不是它。
 - **恢复**：Herdr 在跑 → 它的 workspace 里开新 tab；没有 → 当前终端 `exec` 接管；已经在跑 → 切 tab；后台会话 → `claude attach`。恢复前逐项校验目录、记录文件、分支。
 - **整理**：待办 / 进行中 / 已完成 / 已归档四态，改标题标签，按项目分组。
@@ -161,6 +163,7 @@ fav tui --no-mouse
 fav list '#notes-api last:7d' --json    # 收藏
 fav sessions 'webapp oauth' --json      # 全部会话
 fav show <id> --json
+fav grep '滚轮 加速 project:fav'      # 搜消息：关键词 + 筛选，按相关度列会话和片段（--json、--limit）
 fav open <id>                           # 直接打开这个会话的界面，右栏聚焦（列表不显示的也行）
 fav resume <id> --dry-run               # 只打印要执行的命令和检查项
 fav resume <id> --no-herdr              # 当前终端恢复
@@ -195,6 +198,8 @@ fav doctor [--compact]                  # 体检：数据文件、失效会话�
 
 `#标签`、`project:x`、`provider:claude|codex`、`status:open|active|done|archived|trash|all|live|agent`、
 `after:2026-09-01`、`before:…`、`last:7d`、`turns:3`，以及普通关键词。全部 AND，中文直接子串匹配。
+以 `>`（或 `》`）开头改搜消息正文：关键词在每条消息和工具命令里找，筛选词只限定会话范围（默认 `status:all turns:0`）。每个关键词都要在会话里出现；
+关键词的词项命中六成就算中（中文按相邻两字切，关键词内部不讲词序；用引号包起来——`"…"`、`“…”` 或 `「…」`——就必须原样连着出现；`a|b` 两个有一个就算，`-x` 去掉含 x 的消息，`who:me`、`who:ai` 或 `who:tool` 只看某一方说的；英文词拼错、会话里又几乎没出现过时，也会顺带搜只差一个字母的常见词，标题里写明「也搜了 …」）；BM25 排序，关键词挨得近、消息越新、是你自己说的（工具命令、工具输出和 Claude 的续接摘要权重低）、标题摘要标签里也有关键词的，都加分；有一条消息同时含全部关键词的会话排前面，`o` 切到按最近命中排。
 默认看未归档的；关键词也搜索引里的用户提示语——记得「让它做过 X」就能搜到。三个前端共用同一个解析器。
 
 ## 工作原理
@@ -202,6 +207,9 @@ fav doctor [--compact]                  # 体检：数据文件、失效会话�
 **索引。** `internal/index` 扫 `~/.claude/projects/*/*.jsonl` 和 `~/.codex/sessions/**/rollout-*.jsonl`，每个文件记 session id、
 cwd、分支、开始时间、人说话的轮数、标题、全部提示语（封顶 8KB，只用来搜）。transcript 是 append-only 的，索引记「读到哪了」，
 下次只补读新增；对话预览从文件尾向前分块读，翻到哪读到哪。`-p` / SDK 会话、Codex 子代理线程、一句话没说过的不列。
+
+**消息正文。** `internal/fulltext` 在 `~/.agent/fav/text/` 给每个 transcript 存一份正文（TSV：偏移、角色、时间、文本），
+只含说的话和工具命令，不含工具输出；跟索引一样在每次刷新后增量补读。搜索时并行流式扫候选文件，不维护倒排索引，几百 MB 不到一秒。
 
 **收藏。** Skill 只负责理解会话，输出一段 JSON；校验、采集环境、存储、幂等（provider + session id）都在 `fav add`。
 `records.jsonl` append-only，最后一行为准。
@@ -220,13 +228,14 @@ fav 把这条链合成一个会话（轮数相加、用最新的 id 恢复、收
 |---|---|
 | `~/.agent/fav/records.jsonl` | 收藏，append-only 一行一条；可以 grep、手改、git 同步 |
 | `~/.agent/fav/sessions.jsonl` | 会话索引缓存，只存提示语；删了下次启动重建 |
+| `~/.agent/fav/text/` | `>` 搜消息用的正文副本，一个 transcript 一个文件，外加 `vocab.json`（出现过的英文词，用于纠正拼写）；删了自动重建 |
 | `~/.agent/fav/trash/` | 回收站：被删的会话文件按原样挪进来，`manifest.jsonl` 记着来处 |
 | `~/.agent/fav/config.json` | 设置面板写的 |
 
 环境变量：`FAV_HOME` 改数据目录，`FAV_UI=fzf|tui` 改默认前端，`FAV_ICONS=nerd|ascii` 选图标。
 界面语言默认跟系统（`LANG` 等以 zh 开头是中文，否则英文），设置里可固定。
 
-不存完整聊天内容，不上传任何东西；只在你点名移动目录时改会话文件里的 cwd，改之前原件先进回收站。`fav pin` 只在本机做硬链。
+聊天正文只在本机 `text/` 里存一份供搜索，不上传任何东西；只在你点名移动目录时改会话文件里的 cwd，改之前原件先进回收站。`fav pin` 只在本机做硬链。
 
 ## 文档与开发
 

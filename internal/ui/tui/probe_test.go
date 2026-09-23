@@ -156,8 +156,12 @@ func TestChatSearch(t *testing.T) {
 	}
 	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("cursor")})
 	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	if m.chat.typing || m.chatScroll != 3 {
-		t.Fatalf("Enter 应定位到最近一处命中（第 4 句），chatScroll=%d", m.chatScroll)
+	if m.chat.typing || !m.msg.hl.loading {
+		t.Fatal("Enter 应在左栏列出本会话的命中")
+	}
+	loadHits(t, m) // the messages are not in the text store: the loaded ones are searched
+	if !m.hitsOpen() || len(m.msg.hl.items) != 2 || m.chatScroll != 3 {
+		t.Fatalf("应定位到最近一处命中（第 4 句）：items=%d chatScroll=%d", len(m.msg.hl.items), m.chatScroll)
 	}
 	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("n")})
 	if m.chatScroll != 9 {
@@ -167,13 +171,14 @@ func TestChatSearch(t *testing.T) {
 		t.Fatal("标题里应显示命中计数")
 	}
 	m.Update(tea.KeyMsg{Type: tea.KeyEsc})
-	if m.chat.query() != "" {
-		t.Fatal("Esc 应清掉右栏查询")
+	if m.chat.query() != "" || m.hitsOpen() {
+		t.Fatal("Esc 应关掉命中列表并清掉查询")
 	}
 	for i := recentMsgs; i < 60; i++ {
 		m.probes[a].msgs = append(m.probes[a].msgs, capture.Message{Role: "assistant", Text: "旧" + strconv.Itoa(i), Off: int64(1000 - i)})
 	}
 	m.probes[a].full, m.probes[a].loading = true, false
+	m.cursor = 2 // b's page lands after the cursor moved to b
 	m.applyPage(pageMsg{rec: b, page: capture.Page{Msgs: []capture.Message{{Text: "x"}}, Done: true}})
 	if m.probes[a].full || len(m.probes[a].msgs) != recentMsgs || m.probes[a].from != 1000-(recentMsgs-1) || !m.probes[b].full || len(m.probes[b].msgs) != 2 {
 		t.Fatalf("b 补页后 a 应退回尾 40 句且记住偏移：a=%d from=%d full=%v b=%d", len(m.probes[a].msgs), m.probes[a].from, m.probes[a].full, len(m.probes[b].msgs))
