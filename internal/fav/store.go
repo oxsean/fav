@@ -26,12 +26,31 @@ type Store struct {
 	seen string // mtime+size after the last read or write
 }
 
+// HomeMarker, inside ~/.agent/tend, says the directory is this program's data (not the older TEND's).
+const HomeMarker = "tend-home"
+
+// Home is the data directory: $TEND_HOME, $FAV_HOME, a marked ~/.agent/tend, ~/.agent/fav while it exists (not yet
+// migrated), else ~/.agent/tend.
 func Home() string {
-	if h := os.Getenv("FAV_HOME"); h != "" {
-		return h
+	for _, k := range []string{"TEND_HOME", "FAV_HOME"} {
+		if h := os.Getenv(k); h != "" {
+			return h
+		}
 	}
+	tend, old := DefaultHomes()
+	if _, err := os.Stat(filepath.Join(tend, HomeMarker)); err == nil {
+		return tend
+	}
+	if _, err := os.Stat(old); err == nil {
+		return old
+	}
+	return tend
+}
+
+// DefaultHomes are ~/.agent/tend and the older ~/.agent/fav.
+func DefaultHomes() (tend, fav string) {
 	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".agent", "fav")
+	return filepath.Join(home, ".agent", "tend"), filepath.Join(home, ".agent", "fav")
 }
 
 func Open() (*Store, error) { return OpenAt(filepath.Join(Home(), "records.jsonl")) }

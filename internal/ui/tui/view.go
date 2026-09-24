@@ -101,7 +101,7 @@ func (m *Model) header() string {
 		widths = append(widths, ansi.StringWidth(t))
 	}
 
-	left := " " + accent.Bold(true).Render(render.GlyphBrand+" Fav") + dimmed.Render(" Session Manager")
+	left := " " + accent.Bold(true).Render(render.GlyphBrand+" tend")
 	right := m.liveSummary()
 	if right != "" {
 		right += "  "

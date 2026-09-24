@@ -1,12 +1,13 @@
-# Fav Session Manager
+# tend
 
 [English](README.md)
 
-**管好你所有的 Claude Code / Codex 会话：收藏、检索、一键恢复。** 命令行叫 `fav`。 本机所有 AI 编码会话一个列表，值得留的一句 `/fav` 收进来，
+**管好你所有的 Claude Code / Codex 会话：收藏、检索、一键恢复；再把任务派给任意一台机器上的 agent 去跑。** 命令行叫 `tend`（`fav` 是同一个程序）。 本机所有 AI 编码会话一个列表，值得留的一句 `/fav` 收进来，
 一周后凭「做过什么」两秒找回，在正确的目录和 Herdr workspace 里接着聊。
+任务写一次，派给本机或另一台机器上的 agent，看它的输出，跑完后接手它的会话。
 
 ```
- * Fav Session Manager       [ 收藏 58 ]   会话 505   项目 57   Agents 3
+ * tend                      [ 收藏 58 ]   会话 505   项目 57   Agents 3
  ╭────────────────────────────────────────────────────────────────────────────────────╮
  │ /  webapp oauth last:7d                                                            │
  ╰────────────────────────────────────────────────────────────────────────────────────╯
@@ -25,13 +26,13 @@
  ╰──────────────────────────────────────╯ │ ~ 目录      ~/dev/webapp                  │
  昨天 ─────────────────────────────────── │ @ 最后活动  今天 17:03                    │
  ╭──────────────────────────────────────╮ │                                           │
- │ ✓ fav 索引增量扫描                   │ │ 恢复目标                                  │
- │   Claude  ·  fav  ·  31 轮     21:38 │ │ Herdr webapp  ->  新 tab  ->  Codex CLI   │
+ │ ✓ tend 索引增量扫描                   │ │ 恢复目标                                  │
+ │   Claude  ·  tend  ·  31 轮     21:38 │ │ Herdr webapp  ->  新 tab  ->  Codex CLI   │
  │   #index #perf                       │ │ + 已识别会话来源                          │
  ╰──────────────────────────────────────╯ │ + 项目目录存在                            │
  ╭──────────────────────────────────────╮ │ + 会话记录文件可用                        │
- │ ✓ shell-init：Ctrl+G 弹出 fav fzf    │ │ ! 当前分支 main，收藏时是 feat/oauth      │
- │   Codex  ·  fav  ·  6 轮       20:11 │ │                                           │
+ │ ✓ shell-init：Ctrl+G 弹出 tend fzf    │ │ ! 当前分支 main，收藏时是 feat/oauth      │
+ │   Codex  ·  tend  ·  6 轮       20:11 │ │                                           │
  │   #shell #zsh                        │ │ ── 对话 · 第 1-40/128 句 · J/K 翻 · \ 找  │
  ╰──────────────────────────────────────╯ │ 你  ·  17:01  ~ 42                        │
                                           │   跳转之后 state 还是丢                   │
@@ -46,21 +47,21 @@
 
 每天开十几个 Claude Code / Codex 会话，一周之后：
 
-| 之前 | 用 fav 之后 |
+| 之前 | 用 tend 之后 |
 |---|---|
 | 自动标题是「继续」「ok」「帮我看下」，不知道哪条是哪条 | `/fav` 时 AI 还记得整段对话，标题、摘要、标签一次写好，一周后仍认得出 |
 | 只记得「让它排查过 OAuth」，不记得日期、项目、用的哪个工具 | 关键词直接搜索引里的提示语和摘要，`#标签` `project:` `last:7d` 层层收窄 |
 | Claude 在 `~/.claude/projects`、Codex 在 `~/.codex/sessions`，两边各自的历史列表都只看得到本目录 | 全机所有会话一张表，按时间或按项目看，不分工具 |
 | 找到了还要 `cd` 到对的目录、想起是 `claude --resume` 还是 `codex resume`、再切到 Herdr 那个 workspace | `Enter`：目录、命令、workspace 全替你选好；已经在跑的直接切过去 |
-| 项目目录一挪，之前的会话全部恢复不了；Claude 30 天悄悄清 transcript | `M` 把会话跟着目录一起搬；`!` 标出坏掉的，`fav fix` / `fav clean` 一键修或清；`fav pin` 保住重要的 |
+| 项目目录一挪，之前的会话全部恢复不了；Claude 30 天悄悄清 transcript | `M` 把会话跟着目录一起搬；`!` 标出坏掉的，`tend fix` / `tend clean` 一键修或清；`tend pin` 保住重要的 |
 | 开了六个 agent 在跑，得一个个 tab 翻 | Agents 页：谁在等你、谁在干活、谁空了多久，3 秒一刷 |
 
-fav 不是新的聊天客户端，不替代 Claude / Codex，也不上传任何东西：它是一份**本地的、可 grep 的个人会话索引**，
+tend 不是新的聊天客户端，不替代 Claude / Codex，也不上传任何东西：它是一份**本地的、可 grep 的个人会话索引**，
 外加一个「按下去就在对的地方」的恢复按钮。
 
 ## 能做什么
 
-- **收藏**：会话里 `/fav`，AI 按对话语言写标题 / 摘要 / 标签，`fav` 自己采集 provider、session id、目录、git 分支、Herdr workspace。同一会话再 `/fav` 是更新。
+- **收藏**：会话里 `/fav`，AI 按对话语言写标题 / 摘要 / 标签，`tend` 自己采集 provider、session id、目录、git 分支、Herdr workspace。同一会话再 `/fav` 是更新。
 - **全部会话**：不用收藏也都在列表里——Claude 和 Codex 的全部历史增量索引，只读文件头尾和新增部分，几百 MB 的会话也不整读。
 - **搜**：同一套查询语法贯穿 TUI、fzf、命令行：关键词、`#标签`、`project:`、`provider:`、`status:`、`last:7d`、`turns:`、`file:`（AI 改过路径里含这段的文件的会话）。
 - **三个搜索键**：`/` 搜会话（标题、摘要、项目、标签），`>` 搜所有会话的消息，`\`（或 `Ctrl+S`）搜当前会话的消息；焦点在哪含义都一样，中文输入法把 `/` 打成 `、` 也照样是搜会话。
@@ -68,7 +69,7 @@ fav 不是新的聊天客户端，不替代 Claude / Codex，也不上传任何�
 - **看**：右栏是这条会话的对话，从尾往前翻，句内可搜；不用打开就知道是不是它。
 - **恢复**：Herdr 在跑 → 它的 workspace 里开新 tab；没有 → 当前终端 `exec` 接管；已经在跑 → 切 tab；后台会话 → `claude attach`。恢复前逐项校验目录、记录文件、分支。
 - **桌面 App**：恢复框里也能在 Claude 桌面版或 ChatGPT 桌面版（Codex）里打开这个会话；设置里可以让 App 成为默认，或只对在 App 里建的会话默认用 App——这些会话的卡片标着 `Claude App`、`Codex App`。需要会话的工作目录还在、记录文件在默认的 `~/.claude/projects` 或 `~/.codex/sessions` 下，并且系统把 `claude://`、`codex://` 交给对应 App 处理时才显示这个按钮（macOS、Windows，Linux 走 xdg-mime）。
-- **分叉与交接**：恢复框里按 `b` 分叉（`claude --resume … --fork-session` / `codex fork`），得到一个带着同样历史的新会话，原会话不动。按 `s` 写一份交接包（摘要、最近 5 条要求、最后一条回复、改过的文件、`git status`，不含工具输出），放在 `~/.agent/fav/handoff/`，先给你看、可以编辑，再在同一目录开一个新的 Claude 或 Codex 会话，第一条消息让它先读交接包。命令行：`fav resume --fork <id>`、`fav handoff <id> [--to claude|codex]`。
+- **分叉与交接**：恢复框里按 `b` 分叉（`claude --resume … --fork-session` / `codex fork`），得到一个带着同样历史的新会话，原会话不动。按 `s` 写一份交接包（摘要、最近 5 条要求、最后一条回复、改过的文件、`git status`，不含工具输出），放在 `~/.agent/tend/handoff/`，先给你看、可以编辑，再在同一目录开一个新的 Claude 或 Codex 会话，第一条消息让它先读交接包。命令行：`tend resume --fork <id>`、`tend handoff <id> [--to claude|codex]`。
 - **瞄一眼 / 回一句**：在 Herdr 里跑的会话上按 `` ` ``（输入法下的 `·` 也行）看它的终端（每秒刷新；权限确认只出现在终端里，记录文件里没有），`:` 输入一句作为它的下一句话发过去，`1`–`3` 按两次回答编号选项（画面一变或过 5 秒就作废）。
 - **清理空闲**：Agents 页按 `Z` 一次关掉 4 小时没写东西、也没有没看过的输出的 Herdr tab（先确认，焦点在取消）。
 - **在这里开新会话**：项目页分组标题或任意会话上按 `w`（`Ctrl+W`），先列出那个目录里已经在跑的会话（↑↓ Enter 直接过去），再选 Claude 或 Codex（`1` / `2` 选中，再按一次或 Enter 才开）在那里开新会话；那里有 Herdr workspace 就开在新 tab 里。
@@ -81,13 +82,15 @@ fav 不是新的聊天客户端，不替代 Claude / Codex，也不上传任何�
 
 ```bash
 # macOS / Linux：从 Releases 下载最新版到 ~/.local/bin
-curl -fsSL https://github.com/oxsean/fav/releases/latest/download/fav_$(uname -s | tr A-Z a-z)_$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/').tar.gz | tar xz -C ~/.local/bin fav
-# 或者有 Go：
+curl -fsSL https://github.com/oxsean/fav/releases/latest/download/fav_$(uname -s | tr A-Z a-z)_$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/').tar.gz | tar xz -C ~/.local/bin tend && ln -sf tend ~/.local/bin/fav
+# 或者有 Go（装出来的二进制叫 fav，再把 tend 链接过去）：
 go install github.com/oxsean/fav/cmd/fav@latest
 
-fav install-skill                            # /fav Skill 装进 ~/.claude/skills 和 ~/.codex/skills（设了 $CLAUDE_CONFIG_DIR / $CODEX_HOME 就装到那里）
-fav install-hook                             # 可选：Claude Code 问你问题时告诉 fav，没有 Herdr 也能在 Agents 页标出权限确认（fav uninstall-hook 删掉）
-fav                                          # 第一次启动后台建索引，几秒后「会话」页就有你所有历史
+tend migrate-home                            # 从 fav 升级时跑一次：备份 ~/.agent/fav 并迁到 ~/.agent/tend
+
+tend install-skill                            # /fav Skill 装进 ~/.claude/skills 和 ~/.codex/skills（设了 $CLAUDE_CONFIG_DIR / $CODEX_HOME 就装到那里）
+tend install-hook                             # 可选：Claude Code 问你问题时告诉 tend，没有 Herdr 也能在 Agents 页标出权限确认（tend uninstall-hook 删掉）
+tend                                          # 第一次启动后台建索引，几秒后「会话」页就有你所有历史
 ```
 
 Windows：到 [Releases](https://github.com/oxsean/fav/releases/latest) 下 `fav_windows_amd64.zip`，解压到 PATH 里的目录。
@@ -95,39 +98,40 @@ Windows：到 [Releases](https://github.com/oxsean/fav/releases/latest) 下 `fav
 然后：
 
 1. 在任何 Claude Code / Codex 会话里做完一件事，输入 `/fav`。
-2. 下周想接着做：`fav`，打几个词，`Enter`。
+2. 下周想接着做：`tend`，打几个词，`Enter`。
 
-想在 shell 里一键弹出：`.zshrc` 加一行 `eval "$(fav shell-init zsh)"`（bash 用 `shell-init bash`），之后按 `Ctrl+G` 弹出 fzf 版，退出回到提示符。
+想在 shell 里一键弹出：`.zshrc` 加一行 `eval "$(tend shell-init zsh)"`（bash 用 `shell-init bash`），之后按 `Ctrl+G` 弹出 fzf 版，退出回到提示符。
 换键 `--key alt-f`（或直接给 shell 自己的记法），`--ui tui` 改弹 TUI。
 
 可选依赖：`fzf`（fzf 模式）、Herdr（恢复到 workspace、看谁在跑、切 tab）、
-Nerd Font（设置里把图标从 ASCII 切成 Nerd Font，或 `FAV_ICONS=nerd`）。卸载 Skill：`fav uninstall-skill`。
+Nerd Font（设置里把图标从 ASCII 切成 Nerd Font，或 `FAV_ICONS=nerd`）。卸载 Skill：`tend uninstall-skill`。
 
 ## 用法
 
 ### 收藏：`/fav`
 
 在会话里输入 `/fav`（或说「收藏这个会话」）。Skill 回顾整段对话，写标题（12–40 字，说清对象和做了什么）、
-一段摘要（结论和下一步，不是流水账）、2–5 个标签，交给 `fav add` 入库。
-provider、session id、目录、git、Herdr 上下文由 `fav` 自己采集，AI 不猜。
+一段摘要（结论和下一步，不是流水账）、2–5 个标签，交给 `tend add` 入库。
+provider、session id、目录、git、Herdr 上下文由 `tend` 自己采集，AI 不猜。
 
 没 `/fav` 过的会话也在「会话」页，随时按 `f` 收进来，标题用第一句提示语；恢复进去再 `/fav` 补摘要。在那之前，有 Claude 自动回顾（目标 · 已做 · 下一步）或 Codex 最后一轮总结的，摘要就先用它。
 
-### 找回来、恢复：`fav`（TUI）
+### 找回来、恢复：`tend`（TUI）
 
 ```
-fav            # 默认 TUI；FAV_UI=fzf 改默认
-fav tui --no-mouse
+tend            # 默认 TUI；FAV_UI=fzf 改默认
+tend tui --no-mouse
 ```
 
-四个页面，`Tab` / `1`–`4` 切：
+五个页面，`Tab` / `1`–`5` 切：
 
 | 页 | 看什么 |
 |---|---|
 | 收藏 | `/fav` 过的，按最后活跃排（`o` 切排序） |
 | 会话 | 本机全部会话（短于 3 轮的默认不列，`turns:1` 全列） |
-| 项目 | 按目录分组（git worktree 里的会话归到主仓库，卡片标 `worktree <分支>`；worktree 删了，`fav fix` 把会话移回主仓库）：`→` 展开、`←` 折叠、再 `→` 到右栏看项目信息（目录 / 会话数 / 来源 / 最近会话）；在哪个目录里启动 `fav`，那个项目的分组自动展开并滚到顶上 |
+| 项目 | 按目录分组（git worktree 里的会话归到主仓库，卡片标 `worktree <分支>`；worktree 删了，`tend fix` 把会话移回主仓库）：`→` 展开、`←` 折叠、再 `→` 到右栏看项目信息（目录 / 会话数 / 来源 / 最近会话）；在哪个目录里启动 `tend`，那个项目的分组自动展开并滚到顶上 |
 | Agents | 现在谁在跑：等你 / 工作中 / 空闲多久，本轮跑了多久、上下文用了多少、AI 最后说了什么，每 3 秒刷；等你回答、跑完了还没看的会提醒（标签页 `Agents 5 !2`），`.` 标已处理、`H` 暂缓 1 小时 |
+| 任务 | 任务和它们的运行记录（见[任务](#任务把-agent-派到你的机器上)） |
 
 一条典型流程：`/` 搜（`webapp oauth last:7d`）或 `;` 进 chip 行按项目 / 标签 / 来源 / 状态 / 时间筛；
 `↑↓` 挑到那条，右栏就是它的对话（`→` 进去逐句看，`Enter` 全文，`\` 在对话里找）；
@@ -139,7 +143,7 @@ fav tui --no-mouse
 项目目录挪了：项目页分组标题上 `M`（会话上 `M` 只动这一条），目录选择器里 `Enter` / `→` 进子目录，第一行「就是这个目录」或「移动到这里」按钮选定；
 确认框列出从哪到哪、多少会话 / 文件、要不要重启开着的 Claude / Codex，`y` 才动。原件先进回收站，有会话在跑的项目拒绝。
 
-删除与回收站：`D` 确认后（`y`，焦点默认在取消）把会话文件挪进 `~/.agent/fav/trash/`，状态筛「回收站」能看被删的对话，`D` 还原；默认 30 天后彻底清。
+删除与回收站：`D` 确认后（`y`，焦点默认在取消）把会话文件挪进 `~/.agent/tend/trash/`，状态筛「回收站」能看被删的对话，`D` 还原；默认 30 天后彻底清。
 目录或记录文件没了的会话标题后有暗红 `!`，操作框只给「移动」「删除」。
 
 中文输入法开着时小写字母会被拿去组词：收藏用 `*`，`Ctrl+X` 完成 / `Ctrl+E` 编辑 / `Ctrl+Y` 复制 /
@@ -171,7 +175,7 @@ TUI 里的 `?` 只列简短版；这里是逐条的完整说明，包括操作�
 | `j / k` `↓ / ↑` `Ctrl+N / Ctrl+P` | 上下选择；搜索框里用 Ctrl+N / Ctrl+P |
 | `PgDn / PgUp` `Ctrl+F / Ctrl+B` `Ctrl+D / Ctrl+U` `g / G` `Home / End` | 翻页 / 半页 / 到顶到底；右栏对话同样 |
 | `h / l` `← / →` | 左右栏切焦点；筛选行里换 chip |
-| `Tab / Shift+Tab` `1` `2` `3` `4` | 切标签页：收藏 / 会话 / 项目 / Agents |
+| `Tab / Shift+Tab` `1` `2` `3` `4` `5` | 切标签页：收藏 / 会话 / 项目 / Agents / 任务 |
 
 **视图与筛选**
 
@@ -259,10 +263,10 @@ TUI 里的 `?` 只列简短版；这里是逐条的完整说明，包括操作�
 
 </details>
 
-### 两秒找一条：`fav fzf`
+### 两秒找一条：`tend fzf`
 
 同样三个页面（收藏 / 会话 / Agents，`Tab` / `Shift+Tab` 轮换，`F1`–`F3` 直达），没有对话预览和项目视图，适合 SSH、低资源、或者你已经知道要找什么。
-输入框直接写查询语法，边打边筛，过滤仍由 `fav` 做（和 TUI 同一个解析器）；Agents 页每 3 秒自动刷新。需要 fzf 0.46+，0.73+ 才有自动刷新。
+输入框直接写查询语法，边打边筛，过滤仍由 `tend` 做（和 TUI 同一个解析器）；Agents 页每 3 秒自动刷新。需要 fzf 0.46+，0.73+ 才有自动刷新。
 
 | 键 | 动作 |
 |---|---|
@@ -277,66 +281,122 @@ TUI 里的 `?` 只列简短版；这里是逐条的完整说明，包括操作�
 ### 脚本和维护：命令行
 
 ```bash
-fav list '#notes-api last:7d' --json    # 收藏
-fav sessions 'webapp oauth' --json      # 全部会话
-fav show <id> --json
-fav grep '滚轮 加速 project:fav'      # 搜消息：关键词 + 筛选，按相关度列会话和片段（--json、--limit）
-fav today / fav week [查询]             # 按项目看今天 / 本周做了什么：会话、AI 改的文件、提交；还没收藏的长会话（--json）
-fav open <id>                           # 直接打开这个会话的界面，右栏聚焦（列表不显示的也行）
-fav resume <id> --dry-run               # 只打印要执行的命令和检查项
-fav resume <id> --no-herdr              # 当前终端恢复
-fav resume <id> --workspace api         # 目录下有多个 Herdr workspace 时指定一个
-fav resume <id> --app                   # 在桌面 App 里打开（Claude，Codex 用 ChatGPT）；--terminal 不管设置走终端
+tend list '#notes-api last:7d' --json    # 收藏
+tend sessions 'webapp oauth' --json      # 全部会话
+tend show <id> --json
+tend grep '滚轮 加速 project:tend'      # 搜消息：关键词 + 筛选，按相关度列会话和片段（--json、--limit）
+tend today / tend week [查询]             # 按项目看今天 / 本周做了什么：会话、AI 改的文件、提交；还没收藏的长会话（--json）
+tend open <id>                           # 直接打开这个会话的界面，右栏聚焦（列表不显示的也行）
+tend resume <id> --dry-run               # 只打印要执行的命令和检查项
+tend resume <id> --no-herdr              # 当前终端恢复
+tend resume <id> --workspace api         # 目录下有多个 Herdr workspace 时指定一个
+tend resume <id> --app                   # 在桌面 App 里打开（Claude，Codex 用 ChatGPT）；--terminal 不管设置走终端
 
-fav status <id> todo|doing|done  ·  fav done <id>  ·  fav archive|unarchive <id>  ·  fav fav|unfav <id>
-fav edit <id>                           # $EDITOR 里改标题 / 标签 / 摘要
-fav pin <id>                            # 硬链保住会话记录文件（Claude 默认 30 天清 transcript）
+tend status <id> todo|doing|done  ·  tend done <id>  ·  tend archive|unarchive <id>  ·  tend fav|unfav <id>
+tend edit <id>                           # $EDITOR 里改标题 / 标签 / 摘要
+tend pin <id>                            # 硬链保住会话记录文件（Claude 默认 30 天清 transcript）
 ```
 
 坏会话（目录挪了 / 记录文件没了）：`fix` 和 `clean` 用同一张表，默认只列，选中才动：
 
 ```bash
-fav clean                               # 列出所有恢复不了的会话：编号、原因、猜到的去向
-fav clean provider:codex last:30d       # 筛选和 fav list 一样；目录参数只看它下面
-fav fix 1 3                             # 目录挪走的：移到猜到的去向（先打印这几条，y/N 确认）
-fav fix 2 --to ~/dev/proj               # 没猜到或猜错了就指定
-fav fix all                             # 有唯一去向的全修，其余列出来跳过
-fav clean 01a07dcf -y                   # 按会话 id 前缀清，-y 不问；进回收站，可还原
-fav trash --restore 01a07dcf
+tend clean                               # 列出所有恢复不了的会话：编号、原因、猜到的去向
+tend clean provider:codex last:30d       # 筛选和 tend list 一样；目录参数只看它下面
+tend fix 1 3                             # 目录挪走的：移到猜到的去向（先打印这几条，y/N 确认）
+tend fix 2 --to ~/dev/proj               # 没猜到或猜错了就指定
+tend fix all                             # 有唯一去向的全修，其余列出来跳过
+tend clean 01a07dcf -y                   # 按会话 id 前缀清，-y 不问；进回收站，可还原
+tend trash --restore 01a07dcf
 ```
 
 编号跟着筛选变，要和刚才同样的目录 / 筛选词一起用。stdin 不是终端又没 `-y` 会直接报错；有失败项非零退出。
 
 ```bash
-fav mv <旧目录> <新目录>                 # 等于 TUI 的 M
-fav rm <id>                              # 单条进回收站；所有 <id> 也认会话 id 前缀
-fav trash [--json]                      # 看回收站；--purge 清过期的，--purge --all 清空（会确认）
-fav doctor [--compact]                  # 体检：数据文件、失效会话、回收站过期、空闲几小时的 agent、没人留的大文件；--compact 压实
+tend mv <旧目录> <新目录>                 # 等于 TUI 的 M
+tend rm <id>                              # 单条进回收站；所有 <id> 也认会话 id 前缀
+tend trash [--json]                      # 看回收站；--purge 清过期的，--purge --all 清空（会确认）
+tend doctor [--compact]                  # 体检：数据文件、失效会话、回收站过期、空闲几小时的 agent、没人留的大文件；--compact 压实
 ```
 
 ### 其它机器：`hosts`
 
-别的机器上的会话出现在同一个列表里，经 ssh 从那台机器上装的 fav 读取。每台机器要先在 `~/.ssh/config` 里有一个用密钥登录（不弹密码）的别名，然后：
+别的机器上的会话出现在同一个列表里，经 ssh 从那台机器上装的 tend 读取。每台机器要先在 `~/.ssh/config` 里有一个用密钥登录（不弹密码）的别名，然后：
 
 ```bash
-fav hosts add mba mba --fav /Users/me/.local/bin/fav                          # 名字、ssh 别名、那边 fav 的绝对路径
-fav hosts add win win-pc --fav 'C:\Users\me\.local\bin\fav.exe'
-fav hosts add wsl win-pc --wsl Debian --fav /home/me/.local/bin/fav            # 那台 Windows 里的一个 WSL 发行版
-fav hosts add box nas --docker dev --fav /usr/local/bin/fav                    # 那边的一个容器（--docker-cmd podman 或完整路径）
-fav hosts install mba [--dry-run]       # 用当前源码按那边的系统编译 fav 并装过去（WSL、容器里也行），最后核对版本
-fav hosts                               # 机器列表、各自应答的 fav 版本、列表上次什么时候取的
-fav hosts check [名字…]                 # 连接、版本、系统、claude/codex 是否在 PATH、中文往返、列表和读消息耗时
-fav hosts rm <名字…> · fav hosts clear [名字…]   # 删掉机器 / 清掉缓存的列表
+tend hosts add mba mba --fav /Users/me/.local/bin/fav                          # 名字、ssh 别名、那边 tend 的绝对路径
+tend hosts add win win-pc --fav 'C:\Users\me\.local\bin\fav.exe'
+tend hosts add wsl win-pc --wsl Debian --fav /home/me/.local/bin/fav            # 那台 Windows 里的一个 WSL 发行版
+tend hosts add box nas --docker dev --fav /usr/local/bin/fav                    # 那边的一个容器（--docker-cmd podman 或完整路径）
+tend hosts install mba [--dry-run]       # 用当前源码按那边的系统编译 tend 并装过去（WSL、容器里也行），最后核对版本
+tend hosts                               # 机器列表、各自应答的 tend 版本、列表上次什么时候取的
+tend hosts check [名字…]                 # 连接、版本、系统、claude/codex 是否在 PATH、中文往返、列表和读消息耗时
+tend hosts rm <名字…> · tend hosts clear [名字…]   # 删掉机器 / 清掉缓存的列表
 ```
 
-`add` 会把机器写进 `~/.agent/fav/config.json` 的 `hosts` 并检查一遍（`--no-check` 跳过）；机器上还没有 fav 时，第一次 `install` 要带 `--os` 和 `--arch`。`--fav` 要写绝对路径：ssh 在那边起的 shell 常常不把 `~/.local/bin` 放进 PATH。远端 shell 按 `--fav` 猜（Windows 路径或 `wsl` 用 cmd），也可用 `--shell posix|cmd|powershell` 指定。
+`add` 会把机器写进 `~/.agent/tend/config.json` 的 `hosts` 并检查一遍（`--no-check` 跳过）；机器上还没有 tend 时，第一次 `install` 要带 `--os` 和 `--arch`。`--fav` 要写绝对路径：ssh 在那边起的 shell 常常不把 `~/.local/bin` 放进 PATH。远端 shell 按 `--fav` 猜（Windows 路径或 `wsl` 用 cmd），也可用 `--shell posix|cmd|powershell` 指定。
 
 ```bash
-fav sessions host:all                   # 所有机器；host:mba 只看它；不写 host: 只看本机
-fav show mba:<id> · fav resume mba:<id> # 远端会话：预览和检查来自那台机器，恢复执行 `ssh -t mba fav resume …`
+tend sessions host:all                   # 所有机器；host:mba 只看它；不写 host: 只看本机
+tend show mba:<id> · tend resume mba:<id> # 远端会话：预览和检查来自那台机器，恢复执行 `ssh -t mba tend resume …`
 ```
 
-TUI 里用机器筹码（`m`）选本机、全部或某一台；远端行带 `@名字`，预览和 Agents 从那台机器读，恢复在新的 Herdr tab 或当前终端里开 `ssh -t`。远端会话只读：收藏、打标签、归档、删除、搬目录都到它自己的机器上做。筛选里看得到的机器每 30 秒在后台取一次列表（失败后间隔翻倍，最长 5 分钟），缓存在 `~/.agent/fav/hosts/`；连不上时显示缓存的行和“离线 · 多久前”。
+TUI 里用机器筹码（`m`）选本机、全部或某一台；远端行带 `@名字`，预览和 Agents 从那台机器读，恢复在新的 Herdr tab 或当前终端里开 `ssh -t`。远端会话只读：收藏、打标签、归档、删除、搬目录都到它自己的机器上做。筛选里看得到的机器每 30 秒在后台取一次列表（失败后间隔翻倍，最长 5 分钟），缓存在 `~/.agent/tend/hosts/`；连不上时显示缓存的行和“离线 · 多久前”。
+
+## 任务：把 agent 派到你的机器上
+
+任务是一件写下来的事：标题、任务书（要 agent 做什么）、目录，以及默认的机器和 agent 档案。一次运行（run）是做它的一次尝试：
+在某台机器上带着任务书启动一个 agent，一直跟到它结束。一个任务同时最多一个 run 在跑；每个 run 留着输出和它创建的会话，
+可以看、可以恢复，也可以换台机器再跑一次。
+
+```bash
+tend task add "修掉不稳定的分页测试" --dir ~/dev/webapp --brief-file brief.md --agent claude
+tend run start <task> --machine mba --wait   # 排到 mba 上，一直跟到结束
+tend run list · tend run logs <run> -f · tend run stop <run> · tend run abandon <run>
+tend task list [--all] · tend task show <id> · tend task edit <id> --title … · tend task done|reopen|cancel <id>
+tend agent list · tend machine list [--connect]
+```
+
+TUI 里第 `5` 页是任务：`w` 新建，`e` 编辑，`x` 标完成 / 重新打开，`Enter` 打开任务对话框（选机器和档案跑起来、停止、放弃、接手），
+`X` 停止当前 run，`Space` 到会话页看这次 run 的对话。右栏是任务书、最近几次 run 和最近一次 run 的输出。
+接手就是打开这次 run 会话的恢复框；run 还在驱动它时，恢复框会提示先停掉 run。
+
+**档案。** 内置 `claude`（无界面的 `claude -p`；目录在某个 Herdr workspace 里时，改在新 Herdr tab 里开交互式 Claude）、
+`codex`（`codex exec --json`）、`fake`（测试用）。更多的写进 `config.json`：
+
+```json
+{"agents": [
+  {"name": "opus", "provider": "claude", "model": "opus", "permission": "acceptEdits"},
+  {"name": "lint", "provider": "command", "command": ["my-agent", "--prompt-file", "{prompt_file}", "--dir", "{dir}"], "machine": "mba"}
+]}
+```
+
+`command` 可以跑任意命令行：`{prompt_file}`、`{model}`、`{dir}` 会被填上，任务书从不出现在命令行上（`"stdin": true` 改成从标准输入给）；
+`machine` 表示这个档案只在那台机器上跑。`machines.<名>.slots`（默认 2）限制一台机器同时跑几个 run；同一目录的 run 排队等前一个结束。
+
+**谁在协调。** 同一时刻只有一个进程记任务日志、派发 run：谁拿到 `~/.agent/tend/coord/` 里的锁就是谁——打开任务页的 TUI、
+执行期间的 `tend task|run …` 命令，或你常驻的 `tend service`。其它进程经本机 socket 找它。run 不依赖它：
+每个 run 在自己的机器上有一个监督进程，记下 run 怎么结束；下一个协调器读到后补上记录。
+
+**机器，模式一（ssh）。** 本机加上配置里的每台主机（上面的 `tend hosts add`）。协调器用 `ssh <别名> tend node --stdio` 连过去；
+连接断了 run 照常跑。
+
+**机器，模式二（server）。** 常驻的 `tend server` 保存任务日志，各台机器连上来：
+
+```bash
+# server 上（回环或 tailnet 地址；其它地址要 --tls-cert/--tls-key，或在转发之后用 --plain）
+tend server token add --node mba          # token 只打印这一次，只存它的哈希
+tend server token add --client laptop
+tend server --listen 100.101.8.10:7788
+
+# 每台跑 agent 的机器：config.json 里要有 "node": {"allow_dirs": ["~/dev"]}
+tend node --connect ws://100.101.8.10:7788 --token-file ~/.config/tend/node-token
+
+# 客户端：config.json {"coordinator": {"url": "ws://100.101.8.10:7788", "token_file": "~/.config/tend/client-token"}}
+tend task list   # 命令行和 TUI 的任务页都改为和 server 说话
+```
+
+节点只在 `allow_dirs` 里跑；档案权限是 `bypassPermissions` / `danger-full-access` 的一律拒绝，除非设了 `node.allow_bypass`；
+`node.allow_profiles` 可以只放行某些档案。`tend server token rm <名>` 吊销 token 并断开它的连接。
 
 ## 查询语法
 
@@ -344,7 +404,7 @@ TUI 里用机器筹码（`m`）选本机、全部或某一台；远端行带 `@�
 `after:2026-09-01`、`before:…`（按会话开始时间）、`last:7d` / `last:2026-09-01`（按最近活动：上周开始、今天还在用的也算）、`turns:3`、`file:internal/index`（AI 写过路径含这段的文件），以及普通关键词。筛选行的时间框里还能手输 `09-01`、`09-01..09-15`、`..09-15`、`7d`。全部 AND，中文直接子串匹配。
 以 `>`（或 `》`）开头改搜消息正文：关键词在每条消息和工具命令里找，筛选词只限定会话范围（默认 `status:all turns:0`）。每个关键词都要在会话里出现；
 关键词的词项命中六成就算中（中文按相邻两字切，关键词内部不讲词序；用引号包起来——`"…"`、`“…”` 或 `「…」`——就必须原样连着出现；`a|b` 两个有一个就算，`-x` 去掉含 x 的消息，`who:me`、`who:ai` 或 `who:tool` 只看某一方说的；英文词拼错、会话里又几乎没出现过时，也会顺带搜只差一个字母的常见词，标题里写明「也搜了 …」）；BM25 排序，关键词挨得近、消息越新、是你自己说的（工具命令、工具输出和 Claude 的续接摘要权重低）、标题摘要标签里也有关键词的，都加分；有一条消息同时含全部关键词的会话排前面，`o` 切到按最近命中排。
-默认看未归档的；关键词也搜索引里的用户提示语——记得「让它做过 X」就能搜到。三个前端共用同一个解析器。这份语法在 TUI 里也有（`?` → 搜索语法），搜索框只输入 `>` 时列表区也会显示，`fav grep --help` 同样会列出。
+默认看未归档的；关键词也搜索引里的用户提示语——记得「让它做过 X」就能搜到。三个前端共用同一个解析器。这份语法在 TUI 里也有（`?` → 搜索语法），搜索框只输入 `>` 时列表区也会显示，`tend grep --help` 同样会列出。
 
 ## 工作原理
 
@@ -352,10 +412,10 @@ TUI 里用机器筹码（`m`）选本机、全部或某一台；远端行带 `@�
 cwd、分支、开始时间、人说话的轮数、标题、全部提示语（封顶 8KB，只用来搜）。transcript 是 append-only 的，索引记「读到哪了」，
 下次只补读新增；对话预览从文件尾向前分块读，翻到哪读到哪。`-p` / SDK 会话、Codex 子代理线程、一句话没说过的不列。
 
-**消息正文。** `internal/fulltext` 在 `~/.agent/fav/text/` 给每个 transcript 存一份正文（TSV：偏移、角色、时间、文本），
+**消息正文。** `internal/fulltext` 在 `~/.agent/tend/text/` 给每个 transcript 存一份正文（TSV：偏移、角色、时间、文本），
 只含说的话和工具命令，不含工具输出；跟索引一样在每次刷新后增量补读。搜索时并行流式扫候选文件，不维护倒排索引，几百 MB 不到一秒。
 
-**收藏。** Skill 只负责理解会话，输出一段 JSON；校验、采集环境、存储、幂等（provider + session id）都在 `fav add`。
+**收藏。** Skill 只负责理解会话，输出一段 JSON；校验、采集环境、存储、幂等（provider + session id）都在 `tend add`。
 `records.jsonl` append-only，最后一行为准。
 
 **恢复。** 先校验（provider 在 PATH、目录存在、记录文件还在、分支是否变了），再决定路由：
@@ -364,29 +424,32 @@ TUI 不退出；否则 `cd` 到记录目录在当前终端 `exec`。路径或 wo
 
 **在跑的会话。** Claude 写 `~/.claude/sessions/<pid>.json`（busy / idle），Codex 开着的线程持有 `thread-writer-locks/*.lock`，
 Herdr 多知道 tab 和「等你」；三者非空字段叠加。Claude Code 上下文用完时会把对话交给一个后台工作进程、换一个 session id，原进程只当终端：
-fav 把这条链合成一个会话（轮数相加、用最新的 id 恢复、收藏跟着走），停车的原进程不算在跑。
+tend 把这条链合成一个会话（轮数相加、用最新的 id 恢复、收藏跟着走），停车的原进程不算在跑。
 
 ## 数据
 
 | 文件 | 是什么 |
 |---|---|
-| `~/.agent/fav/records.jsonl` | 收藏，append-only 一行一条；可以 grep、手改、git 同步 |
-| `~/.agent/fav/sessions.jsonl` | 会话索引缓存，只存提示语；删了下次启动重建 |
-| `~/.agent/fav/text/` | `>` 搜消息用的正文副本，一个 transcript 一个文件，外加 `vocab.json`（出现过的英文词，用于纠正拼写）；删了自动重建 |
-| `~/.agent/fav/trash/` | 回收站：被删的会话文件按原样挪进来，`manifest.jsonl` 记着来处 |
-| `~/.agent/fav/config.json` | 设置面板写的 |
-| `~/.agent/fav/hosts/` | 从每台其它机器最近取到的列表（只有列表字段：标题、摘要、标签、路径；没有消息）、ssh 连接复用的 socket |
+| `~/.agent/tend/records.jsonl` | 收藏，append-only 一行一条；可以 grep、手改、git 同步 |
+| `~/.agent/tend/sessions.jsonl` | 会话索引缓存，只存提示语；删了下次启动重建 |
+| `~/.agent/tend/text/` | `>` 搜消息用的正文副本，一个 transcript 一个文件，外加 `vocab.json`（出现过的英文词，用于纠正拼写）；删了自动重建 |
+| `~/.agent/tend/trash/` | 回收站：被删的会话文件按原样挪进来，`manifest.jsonl` 记着来处 |
+| `~/.agent/tend/config.json` | 设置面板写的 |
+| `~/.agent/tend/coord/` | 协调器的任务日志（`events.jsonl`，每次变化一行，带校验和） |
+| `~/.agent/tend/node/runs/` | 本机每个 run 一个目录：冻结的命令、状态、输出日志；结束一周后删除 |
+| `~/.agent/tend/server/tokens.json` | 模式二：token 的名字、角色和哈希 |
+| `~/.agent/tend/hosts/` | 从每台其它机器最近取到的列表（只有列表字段：标题、摘要、标签、路径；没有消息）、ssh 连接复用的 socket |
 
-环境变量：`FAV_HOME` 改数据目录，`FAV_UI=fzf|tui` 改默认前端，`FAV_ICONS=nerd|ascii` 选图标，`FAV_TRACE=1` 把按键、滚轮和后台事件的时间线记到 `~/.agent/fav/trace.log`（报告界面卡顿时用）。
+环境变量：`TEND_HOME`（或 `FAV_HOME`）改数据目录，`FAV_UI=fzf|tui` 改默认前端，`FAV_ICONS=nerd|ascii` 选图标，`FAV_TRACE=1` 把按键、滚轮和后台事件的时间线记到 `~/.agent/tend/trace.log`（报告界面卡顿时用）。
 界面语言默认跟系统（`LANG` 等以 zh 开头是中文，否则英文），设置里可固定。
 
-聊天正文只在本机 `text/` 里存一份供搜索，不上传任何东西；只在你点名移动目录时改会话文件里的 cwd，改之前原件先进回收站。`fav pin` 只在本机做硬链。
+聊天正文只在本机 `text/` 里存一份供搜索，不上传任何东西；只在你点名移动目录时改会话文件里的 cwd，改之前原件先进回收站。`tend pin` 只在本机做硬链。
 
 ## 文档与开发
 
 ```bash
 go build ./... && go vet ./... && go test ./...
 HERDR_LIVE=1 go test ./internal/herdr/   # 实跑 Herdr 建 tab → 执行 → 清理
-go run ./tools/fixture -o ~/fav-demo     # 造一台合成机器（Claude + Codex 会话、收藏）；~/fav-demo/fav.sh tui 在它上面跑 fav
+go run ./tools/fixture -o ~/fav-demo     # 造一台合成机器（Claude + Codex 会话、收藏）；~/fav-demo/fav.sh tui 在它上面跑 tend
 scripts/test-hosts.sh ssh:host wsl:host:Debian win:host docker:host:ctr   # 同步工作区，在各目标机本地编译并测试
 ```

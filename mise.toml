@@ -10,7 +10,7 @@ run = "go run ./tools/test-host"
 [tasks.gate]
 run = "go build ./... && go vet ./... && GOOS=windows go vet ./... && GOOS=linux go vet ./... && go test ./..."
 
-# this Mac's fav, stamped with the checkout it was built from, after the gate
+# this Mac's tend (fav links to it), stamped with the checkout it was built from, after the gate
 [tasks.install]
 depends = ["gate"]
-run = 'go build -ldflags "-X main.version=$(git describe --tags --always --dirty)" -o ~/.local/bin/fav ./cmd/fav && ~/.local/bin/fav version'
+run = 'go build -ldflags "-X main.version=$(git describe --tags --always --dirty)" -o ~/.local/bin/tend ./cmd/fav && ln -sf tend ~/.local/bin/fav && ~/.local/bin/tend version'

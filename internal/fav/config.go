@@ -36,15 +36,14 @@ type Config struct {
 
 // AgentProfile is one way to run an agent.
 type AgentProfile struct {
-	Name        string   `json:"name"`
-	Provider    string   `json:"provider"`
-	Model       string   `json:"model,omitempty"`
-	Permission  string   `json:"permission,omitempty"` // claude: --permission-mode; codex: --sandbox
-	Args        []string `json:"args,omitempty"`       // added to every launch
-	Command     []string `json:"command,omitempty"`    // provider "command": the argv template
-	Stdin       bool     `json:"stdin,omitempty"`      // provider "command": the task brief goes to stdin
-	Machine     string   `json:"machine,omitempty"`    // default machine
-	Interactive bool     `json:"interactive,omitempty"`
+	Name       string   `json:"name"`
+	Provider   string   `json:"provider"`
+	Model      string   `json:"model,omitempty"`
+	Permission string   `json:"permission,omitempty"` // claude: --permission-mode; codex: --sandbox
+	Args       []string `json:"args,omitempty"`       // added to every launch
+	Command    []string `json:"command,omitempty"`    // provider "command": the argv template
+	Stdin      bool     `json:"stdin,omitempty"`      // provider "command": the task brief goes to stdin
+	Machine    string   `json:"machine,omitempty"`    // the only machine it runs on
 }
 
 // MachineConfig tunes one machine the coordinator runs agents on ("local" is this one).

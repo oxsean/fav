@@ -26,7 +26,7 @@ func usage() string { return i18n.T("cli.usage") }
 // newFlags: a subcommand's flag set; -h prints its lines of the usage text, then its flags.
 func newFlags(name string) *flag.FlagSet {
 	fs := flag.NewFlagSet(name, flag.ContinueOnError)
-	own := regexp.MustCompile(`\bfav (\S+\|)?` + regexp.QuoteMeta(name) + `(\||\s|$)`)
+	own := regexp.MustCompile(`\btend (\S+\|)?` + regexp.QuoteMeta(name) + `(\||\s|$)`)
 	fs.Usage = func() {
 		for l := range strings.Lines(usage()) {
 			if own.MatchString(l) {
@@ -45,7 +45,7 @@ func main() {
 		if errors.Is(err, flag.ErrHelp) { // the subcommand already printed its usage
 			return
 		}
-		fmt.Fprintln(os.Stderr, "fav: "+err.Error())
+		fmt.Fprintln(os.Stderr, "tend: "+err.Error())
 		os.Exit(1)
 	}
 }
@@ -130,6 +130,8 @@ func run(args []string) error {
 		return cmdService(args)
 	case "server":
 		return cmdServer(args)
+	case "migrate-home":
+		return cmdMigrateHome(args)
 	case "install-hook":
 		return cmdInstallHook(args)
 	case "uninstall-hook":
@@ -143,7 +145,7 @@ func run(args []string) error {
 	case "shell-init":
 		return cmdShellInit(args)
 	case "version", "--version":
-		fmt.Println("Fav Session Manager " + version)
+		fmt.Println("tend " + version)
 		return nil
 	case "help", "-h", "--help":
 		fmt.Print(usage())

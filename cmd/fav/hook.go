@@ -28,10 +28,11 @@ const hookVerb = "hook-event"
 
 func claudeSettings() string { return filepath.Join(capture.ClaudeHome(), "settings.json") }
 
-// isFavHook: a hook command fav installed (any fav binary path).
+// isFavHook: a hook command this program installed (any fav or tend binary path).
 func isFavHook(cmd string) bool {
 	bin, ok := strings.CutSuffix(strings.TrimSpace(cmd), " "+hookVerb)
-	return ok && strings.HasPrefix(filepath.Base(strings.Trim(bin, `"'`)), "fav")
+	base := filepath.Base(strings.Trim(bin, `"'`))
+	return ok && (strings.HasPrefix(base, "fav") || strings.HasPrefix(base, "tend"))
 }
 
 func loadSettings(path string) (*object, []byte, error) {

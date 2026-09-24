@@ -22,7 +22,7 @@ var notCode = []string{"Width", "Height", "TestName", "RESULT", "fav.sh", "fav.c
 	"LC_ALL", "LC_MESSAGES", "NO_COLOR", "HERDR_ENV", "FZF_PROMPT", "FZF_PREVIEW_COLUMNS", "CLAUDE_CODE_SESSION_ID",
 	"WSL_DISTRO_NAME", "LOCALAPPDATA", "USERPROFILE", "TMPDIR", "GOOS", "GOARCH", "EDITOR", "Nerd", "Rebased", "Herdr",
 	"Claude", "Codex", "ChatGPT", "BM25", "JSON", "JSONL", "UUID", "TODO", "CJK", "IME", "ASCII", "OSC", "ControlMaster",
-	"LockFileEx", "OpenSSH", "PowerShell", "WSL", "Debian", "Ubuntu", "OrbStack", "README", "SKILL", "GitHub"}
+	"LockFileEx", "OpenSSH", "PowerShell", "WSL", "Debian", "Ubuntu", "OrbStack", "README", "SKILL", "GitHub", "bypassPermissions"}
 
 var (
 	backtick = regexp.MustCompile("`([^`\n]+)`")
@@ -34,7 +34,7 @@ var (
 	ident    = regexp.MustCompile(`^(?:[a-z][a-z0-9]*\.)?([A-Za-z_][A-Za-z0-9_]*)(?:\.([A-Za-z_][A-Za-z0-9_]*))?(?:\(\))?$`)
 	envVar   = regexp.MustCompile(`^[A-Z][A-Z0-9]*_[A-Z0-9_]+$`)
 	testRun  = regexp.MustCompile(`-run '?\^?(Test\w+)`)
-	favCmd   = regexp.MustCompile(`^fav ([a-z][a-z-]+)(?: \[?([a-z][a-z-]+))?`)
+	favCmd   = regexp.MustCompile(`^(?:fav|tend) ([a-z][a-z-]+)(?: \[?([a-z][a-z-]+))?`)
 	caseLine = regexp.MustCompile(`case ((?:"[^"]*"(?:, )?)+):`)
 	quoted   = regexp.MustCompile(`"([^"]*)"`)
 )
@@ -196,8 +196,8 @@ func checkFav(t *testing.T, doc, snippet string, top, hosts map[string]bool) {
 		return
 	}
 	if !top[m[1]] {
-		t.Errorf("%s: fav %s is not a subcommand", doc, m[1])
+		t.Errorf("%s: tend %s is not a subcommand", doc, m[1])
 	} else if m[1] == "hosts" && m[2] != "" && !hosts[m[2]] {
-		t.Errorf("%s: fav hosts %s is not a subcommand", doc, m[2])
+		t.Errorf("%s: tend hosts %s is not a subcommand", doc, m[2])
 	}
 }

@@ -34,14 +34,14 @@ func TestEverySubcommandHasHelp(t *testing.T) {
 		t.Setenv(k, filepath.Join(root, k))
 	}
 	for name, want := range map[string]string{
-		"tui": "fav tui | fav fzf", "fzf": "fav tui | fav fzf", "add": "fav add", "list": "fav list", "sessions": "fav sessions",
-		"grep": "fav grep", "show": "fav show", "preview": "fav preview", "open": "fav open", "edit": "fav edit",
-		"status": "fav status", "done": "fav done", "archive": "fav archive|unarchive", "unarchive": "fav archive|unarchive",
-		"fav": "fav fav|unfav", "unfav": "fav fav|unfav", "pin": "fav pin|unpin", "unpin": "fav pin|unpin", "rm": "fav rm",
-		"trash": "fav trash", "mv": "fav mv", "fix": "fav fix", "clean": "fav clean", "resume": "fav resume",
-		"handoff": "fav handoff", "today": "fav today | fav week", "week": "fav today | fav week", "doctor": "fav doctor",
-		"install-skill": "fav install-skill", "uninstall-skill": "fav uninstall-skill", "install-hook": "fav install-hook",
-		"uninstall-hook": "fav install-hook", "shell-init": "fav shell-init",
+		"tui": "tend tui | tend fzf", "fzf": "tend tui | tend fzf", "add": "tend add", "list": "tend list", "sessions": "tend sessions",
+		"grep": "tend grep", "show": "tend show", "preview": "tend preview", "open": "tend open", "edit": "tend edit",
+		"status": "tend status", "done": "tend done", "archive": "tend archive|unarchive", "unarchive": "tend archive|unarchive",
+		"fav": "tend fav|unfav", "unfav": "tend fav|unfav", "pin": "tend pin|unpin", "unpin": "tend pin|unpin", "rm": "tend rm",
+		"trash": "tend trash", "mv": "tend mv", "fix": "tend fix", "clean": "tend clean", "resume": "tend resume",
+		"handoff": "tend handoff", "today": "tend today | tend week", "week": "tend today | tend week", "doctor": "tend doctor",
+		"install-skill": "tend install-skill", "uninstall-skill": "tend uninstall-skill", "install-hook": "tend install-hook",
+		"uninstall-hook": "tend install-hook", "shell-init": "tend shell-init",
 	} {
 		var err error
 		out := stderrOf(t, func() { stdoutOf(t, func() { err = run([]string{name, "-h"}) }) })
@@ -49,7 +49,7 @@ func TestEverySubcommandHasHelp(t *testing.T) {
 			t.Errorf("%s -h: %v", name, err)
 			continue
 		}
-		if !strings.Contains(out, want) || name != "grep" && strings.Contains(out, "fav grep") {
+		if !strings.Contains(out, want) || name != "grep" && strings.Contains(out, "tend grep") {
 			t.Errorf("%s help:\n%s", name, out)
 		}
 	}

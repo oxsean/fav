@@ -62,7 +62,7 @@ func TestInstallIntoWSLAndContainers(t *testing.T) {
 	tg, _ := installTarget(w)
 	steps, cleanup := tg.steps(w, "linux", "/tmp/x/fav")
 	want := []string{"pc:" + tmpName,
-		`wsl -d Debian -e sh -c "mkdir -p /home/me/.local/bin && cp fav-install.tmp /home/me/.local/bin/fav.new && chmod 755 /home/me/.local/bin/fav.new && mv -f /home/me/.local/bin/fav.new /home/me/.local/bin/fav"`}
+		`wsl -d Debian -e sh -c "mkdir -p /home/me/.local/bin && cp fav-install.tmp /home/me/.local/bin/fav.new && chmod 755 /home/me/.local/bin/fav.new && mv -f /home/me/.local/bin/fav.new /home/me/.local/bin/fav && ln -sf fav /home/me/.local/bin/tend"`}
 	if got := join(steps); !slices.Equal(got, want) || cleanup.Args[len(cleanup.Args)-1] != "del /q "+tmpName {
 		t.Errorf("wsl:\n%q\n%q", got, cleanup.Args)
 	}
@@ -72,7 +72,7 @@ func TestInstallIntoWSLAndContainers(t *testing.T) {
 	steps, cleanup = tg.steps(d, "linux", "/tmp/x/fav")
 	want = []string{"nas:" + tmpName,
 		"/usr/local/bin/docker exec -u me dev mkdir -p /home/me && /usr/local/bin/docker cp fav-install.tmp dev:/home/me/fav.new && " +
-			"/usr/local/bin/docker exec -u me dev sh -c 'chmod 755 /home/me/fav.new && mv -f /home/me/fav.new /home/me/fav'"}
+			"/usr/local/bin/docker exec -u me dev sh -c 'chmod 755 /home/me/fav.new && mv -f /home/me/fav.new /home/me/fav && ln -sf fav /home/me/tend'"}
 	if got := join(steps); !slices.Equal(got, want) || cleanup.Args[len(cleanup.Args)-1] != "rm -f "+tmpName {
 		t.Errorf("container:\n%q\n%q", got, cleanup.Args)
 	}
@@ -202,5 +202,21 @@ func TestFavSourceRefusesOtherTrees(t *testing.T) {
 	os.WriteFile(filepath.Join(other, "go.mod"), []byte("module example.com/fav\n\ngo 1.27\n"), 0o644)
 	if _, err := favSource(other); err == nil {
 		t.Error("another module")
+	}
+}
+
+func TestInstallPutsTendNextToFav(t *testing.T) {
+	for k, want := range map[shell.Kind]string{
+		shell.POSIX: "ln -sf fav .local/bin/tend",
+		shell.Cmd: `copy /y .local\bin\fav.exe .local\bin\tend.exe.new >nul & (if exist .local\bin\tend.exe move /y .local\bin\tend.exe .local\bin\tend.exe.old >nul) & ` +
+			`move /y .local\bin\tend.exe.new .local\bin\tend.exe`,
+	} {
+		dest := ".local/bin/fav"
+		if k == shell.Cmd {
+			dest += ".exe"
+		}
+		if got := tendLine(k, dest); got != want {
+			t.Errorf("%v:\n%s\n%s", k, got, want)
+		}
 	}
 }

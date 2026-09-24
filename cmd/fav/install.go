@@ -231,10 +231,12 @@ func (t target) steps(h fav.Host, goos, local string) (steps []*exec.Cmd, cleanu
 	dest := t.destFor(goos)
 	if t.via == "" {
 		k := remoteKind(h, goos)
-		return []*exec.Cmd{sshCmd(h.SSH, prepLine(k, dest)), scpCmd(h.SSH, local, dest+".new"), sshCmd(h.SSH, swapLine(k, dest))}, nil
+		return []*exec.Cmd{sshCmd(h.SSH, prepLine(k, dest)), scpCmd(h.SSH, local, dest+".new"), sshCmd(h.SSH, swapLine(k, dest)),
+			sshCmd(h.SSH, tendLine(k, dest))}, nil
 	}
 	sh := shell.POSIX
-	swap := sh.Join([]string{"chmod", "755", dest + ".new"}) + " && " + sh.Join([]string{"mv", "-f", dest + ".new", dest})
+	swap := sh.Join([]string{"chmod", "755", dest + ".new"}) + " && " + sh.Join([]string{"mv", "-f", dest + ".new", dest}) +
+		" && " + tendLine(sh, dest)
 	var line string
 	k := remote.RemoteShell(h)
 	if t.via == "wsl" { // wsl starts in the Windows directory ssh logged in to, where the copy waits
@@ -253,6 +255,21 @@ func (t target) steps(h fav.Host, goos, local string) (steps []*exec.Cmd, cleanu
 			k.Join(inCtr("sh", "-c", swap)))
 	}
 	return []*exec.Cmd{scpCmd(h.SSH, local, tmpName), sshCmd(h.SSH, line)}, sshCmd(h.SSH, removeLine(k, tmpName))
+}
+
+// tendLine puts tend next to the fav at dest: a symlink, or on Windows a copy (swapped in like fav itself).
+func tendLine(k shell.Kind, dest string) string {
+	dir := path.Dir(dest)
+	switch k {
+	case shell.Cmd:
+		w := strings.ReplaceAll(dest, "/", `\`)
+		t := strings.ReplaceAll(dir, "/", `\`) + `\tend.exe`
+		return "copy /y " + k.Quote(w) + " " + k.Quote(t+".new") + " >nul & " + swapLine(k, strings.ReplaceAll(t, `\`, "/"))
+	case shell.PowerShell:
+		t := dir + "/tend.exe"
+		return "Copy-Item -Force " + k.Quote(dest) + " " + k.Quote(t+".new") + "; " + swapLine(k, t)
+	}
+	return k.Join([]string{"ln", "-sf", path.Base(dest), dir + "/tend"})
 }
 
 // andThen runs lines in turn in k's shell, stopping at the first that fails.
