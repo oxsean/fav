@@ -72,7 +72,9 @@ func smoke(dir string) error {
 	if err := run(env, bin, "sessions"); err != nil {
 		return err
 	}
-	run(env, bin, "doctor")
+	if err := run(env, bin, "doctor"); err != nil {
+		return err
+	}
 	return hostsSmoke(d, env, bin)
 }
 

@@ -5,3 +5,12 @@ go = "1.27.1"
 [tasks.test-host]
 tools = { claude = "2.1.278", codex = "0.155.1", fzf = "0.74.4" }
 run = "go run ./tools/test-host"
+
+# every commit passes the gate; CI runs this same task
+[tasks.gate]
+run = "go build ./... && go vet ./... && GOOS=windows go vet ./... && GOOS=linux go vet ./... && go test ./..."
+
+# this Mac's fav, stamped with the checkout it was built from, after the gate
+[tasks.install]
+depends = ["gate"]
+run = 'go build -ldflags "-X main.version=$(git describe --tags --always --dirty)" -o ~/.local/bin/fav ./cmd/fav && ~/.local/bin/fav version'

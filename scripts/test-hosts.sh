@@ -44,9 +44,13 @@ for t in "$@"; do
 	run "$t" </dev/null 2>&1 | tr -d '\000' >"$log" &
 done
 wait
+failed=0
 for t in "$@"; do
 	log="$logs/$(printf %s "$t" | tr ':/' '__').log"
-	printf '%-24s %s\n' "$t" "$(grep 'RESULT ' "$log" | tail -1 | sed 's/.*RESULT //')"
+	result=$(grep 'RESULT ' "$log" | tail -1 | sed 's/.*RESULT //')
+	printf '%-24s %s\n' "$t" "${result:-no RESULT}"
 	grep -E '(--- FAIL|FAIL[[:space:]]|panic:|mise ERROR)' "$log" | sed 's/^/    /' | head -20
+	[ "$result" = "vet=ok test=ok smoke=ok" ] || failed=$((failed + 1))
 done
 echo "$(($(date +%s) - start))s, logs in $logs"
+[ "$failed" -eq 0 ] || { echo "$failed of $# targets failed"; exit 1; }
