@@ -408,6 +408,12 @@ A node only runs in `allow_dirs`. Unless `node.allow_bypass` is set, it runs `co
 known bypass flag. With `node.allow_profiles` it runs just those names, each as its own config defines it (define them
 there, with the permission they need). `tend server token rm <name>` revokes a token and drops its connections.
 
+**Web UI.** The server also serves a page at its own address (`http://100.101.8.10:7788/`). Sign in with a client
+token (`tend server token add --client web`); the browser keeps it in an HttpOnly cookie for 30 days, and signing out or
+`tend server token rm web` ends the session. The page lists tasks and their runs; creates, edits and dispatches tasks;
+follows a run's output and conversation; stops or abandons runs; marks tasks done, reopens or cancels them; and shows the
+machines and agent profiles. It follows the journal live and reconnects on its own.
+
 A client token is as good as a shell on every node within those limits: run the server only inside a tailnet, and
 with `--plain` let only a forwarder bound to the tailnet address reach it.
 

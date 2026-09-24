@@ -34,6 +34,7 @@ token() { cexec env TEND_HOME=$server_home /root/.local/bin/fav server token add
 [ $# -gt 0 ] || set -- mba linux win
 nodes=$#
 for h in "$@"; do eval "tok_$h=\$(token --node $h)"; done
+eval "tok_node=\$tok_$1"
 tok_me=$(token --client mac)
 [ -n "$tok_me" ] || { echo "token add failed"; exit 1; }
 # ckill PATTERN: the container has no pkill / kill binary; the shell's kill and /proc do
@@ -126,6 +127,15 @@ wait_connected() {
 }
 wait_connected 60
 check "$nodes nodes connected" "$(all_connected)" "$nodes"
+
+web="http://$tailnet:$port"
+jar="$root/cookies"
+check "the web page is served" "$(curl -s -m 5 $web/ | grep -o '<title>tend</title>')" "<title>tend</title>"
+check "the web page forbids inline code" "$(curl -s -m 5 -D - -o /dev/null $web/ | grep -ci "content-security-policy: default-src 'self'")" 1
+check "a node token cannot sign in" "$(curl -s -m 5 -o /dev/null -w '%{http_code}' --data-urlencode "token=$tok_node" $web/login)" 401
+check "a client token signs in" "$(curl -s -m 5 -c "$jar" -o /dev/null -w '%{http_code}' --data-urlencode "token@$root/client-token" $web/login)" 204
+check "the session names the client" "$(curl -s -m 5 -b "$jar" $web/session | python3 -c 'import json,sys; print(json.load(sys.stdin)["name"])')" mac
+check "signing out ends the session" "$(curl -s -m 5 -b "$jar" -c "$jar" -o /dev/null -X POST $web/logout; curl -s -m 5 -b "$jar" -o /dev/null -w '%{http_code}' $web/session)" 401
 
 dir_of() { if [ "$1" = win ]; then printf '%s\\proj' "$w"; else printf '%s/%s/proj' "$r" "$1"; fi; }
 jq_runs() { "$fav" run list --all --json | python3 -c "import json,sys; rs=json.load(sys.stdin); $1"; }

@@ -400,6 +400,11 @@ tend task list   # 命令行和 TUI 的任务页都改为和 server 说话
 带已知绕过参数的命令行拒绝。设了 `node.allow_profiles` 时只跑这些名字，且都按节点自己的定义（要在节点上定义好，带上需要的权限）。
 `tend server token rm <名>` 吊销 token 并断开它的连接。
 
+**Web UI。** server 在自己的地址上还提供一个网页（`http://100.101.8.10:7788/`）。用 client token 登录
+（`tend server token add --client web`）；浏览器把它存在 HttpOnly cookie 里 30 天，退出登录或 `tend server token rm web` 即失效。
+网页列出任务和它们的 run；新建、编辑、派发任务；跟看 run 的输出和对话；停止或放弃 run；把任务标为完成、重开或取消；
+查看机器和 agent 档案。它实时跟随任务日志，断线后自动重连。
+
 client token 在上述限制内等同于每个节点上的 shell：服务器只部署在 tailnet 内；用 `--plain` 时只让绑定在 tailnet 地址上的转发器连到它。
 
 ## 查询语法

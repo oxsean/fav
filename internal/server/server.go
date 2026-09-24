@@ -209,13 +209,26 @@ func modTime(p string) int64 {
 	return 0
 }
 
-// auth is the token of r's bearer, when it has role.
+// auth is the token r comes with (a bearer header, or for a client the browser's session cookie), when it has role.
 func (s *Server) auth(r *http.Request, role string) (Token, bool) {
 	bearer, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
-	if !ok || bearer == "" {
+	if !ok && role == RoleClient {
+		if c, err := r.Cookie(sessionCookie); err == nil {
+			bearer, ok = c.Value, true
+		}
+	}
+	if !ok {
 		return Token{}, false
 	}
-	want := sum(strings.TrimSpace(bearer))
+	return s.check(strings.TrimSpace(bearer), role)
+}
+
+// check is the token whose hash token has, when it has role.
+func (s *Server) check(token, role string) (Token, bool) {
+	if token == "" {
+		return Token{}, false
+	}
+	want := sum(token)
 	for _, t := range s.tokens() {
 		if subtle.ConstantTimeCompare([]byte(t.Sum), []byte(want)) == 1 && t.Role == role {
 			return t, true
@@ -284,6 +297,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/node", s.handleNode)
 	mux.HandleFunc("/client", s.handleClient)
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) { w.Write([]byte("ok\n")) })
+	mux.HandleFunc("/login", s.login)
+	mux.HandleFunc("/logout", s.logout)
+	mux.HandleFunc("/session", s.session)
+	mux.Handle("/", page())
 	return mux
 }
 

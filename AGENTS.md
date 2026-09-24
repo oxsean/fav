@@ -65,7 +65,7 @@ HERDR_LIVE=1 go test ./internal/herdr -run TestLiveCreateTabAndRun   # inside He
 | `internal/proc` | detached starts, process trees, liveness, per OS |
 | `internal/journal`, `internal/task` | the coordinator's event log and the task / run state folded from it |
 | `internal/coord` | the coordinator (whoever holds `coord/lock`): client commands with receipts, dispatch, reconcile, subscribe, socket |
-| `internal/server` | mode 2: the coordinator over HTTP / WebSocket (`/node`, `/client`), hashed tokens, listen-address rule, dialing |
+| `internal/server` | mode 2: the coordinator over HTTP / WebSocket (`/node`, `/client`), hashed tokens, listen-address rule, dialing; the Web UI (`web/`, embedded: `api.js` speaks the wire protocol, `app.js` holds the page and its own `zh` / `en` strings; the CSP allows no inline script or `style` attribute) |
 | `internal/fulltext` | message search: text mirror, parallel scan, BM25 |
 | `internal/ui/tui` | bubbletea `Model`; key table `keys.go` |
 | `internal/ui/fzf` | fzf orchestration only, no business logic |

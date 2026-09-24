@@ -66,6 +66,7 @@ type rig struct {
 	home   string
 	url    string
 	c      *coord.Coord
+	srv    *Server
 	nodeT  string
 	client string
 }
@@ -87,6 +88,7 @@ func newRig(t *testing.T) *rig {
 	ctx, cancel := context.WithCancel(context.Background())
 	go r.c.Run(ctx)
 	srv := New(Options{Home: r.home, Coord: r.c})
+	r.srv = srv
 	hs := httptest.NewServer(srv.Handler())
 	go func() {
 		tick := time.NewTicker(50 * time.Millisecond)
