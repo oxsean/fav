@@ -19,7 +19,7 @@ fav add <<'EOF'
 EOF
 ```
 
-4. Report the line `fav add` prints (saved / updated / continued + title). If `fav` is missing, say so and stop; do not write the data file yourself.
+4. Report the line `fav add` prints (Favorited / Updated / Continued + title). If `fav` is missing, say so and stop; do not write the data file yourself.
 
 Never write `~/.agent/fav/records.jsonl` directly and never guess the session id or paths: provider, session id, cwd, git and Herdr context are collected by `fav` itself, anything you pass for them is ignored.
 
@@ -41,7 +41,7 @@ Never write `~/.agent/fav/records.jsonl` directly and never guess the session id
 - `title` required. 12–40 CJK characters or 6–14 English words: the object plus what was done to it. Never reuse the automatic session title; that is the problem this tool exists to fix. It must be recognizable a week later, so no filler like "continue previous work".
 - `label` short title, ≤ 10 CJK characters or ≤ 20 columns of English, a compression of `title` rather than a different phrasing. Shown where only a word or two fits (the Herdr tab bar). Omitted → `title` truncated.
 - `summary` required. 80–250 CJK characters or 50–150 English words: goal, key conclusions, current state or next step. Conclusions, not a play-by-play.
-- `tags` 2–5 topic words, lowercase kebab-case. Do not repeat the project name or the work type (they have their own fields) and do not put ticket numbers in tags (pr-382, issue-369 belong in the summary). Reuse existing tags before inventing one: `fav list --json status:all | jq '[.[].tags[]] | unique'` (go, not golang; worktree, not branch-cleanup).
+- `tags` 2–5 topic words, lowercase kebab-case. Do not repeat the project name or the work type (they have their own fields) and do not put ticket numbers in tags (pr-382, issue-369 belong in the summary). Reuse existing tags before inventing one: `fav list --json status:all | jq '[.[] | .tags[]?] | unique'` (go, not golang; worktree, not branch-cleanup).
 - `project` project name; `work_type` one of debug / design / implementation / research / ops or similar.
 - `status` `todo` / `doing` / `done`; default `done` (/fav is usually called when a piece of work is finished; write `doing` if it is not).
 - Omit anything you are not sure about; never invent. Never include passwords, tokens, connection strings or the full text of private files.
@@ -50,7 +50,7 @@ Never write `~/.agent/fav/records.jsonl` directly and never guess the session id
 
 Running `/fav` again in the same session **updates** the existing record; the idempotency key is provider + session id, and a normal resume keeps the session id. Re-read the conversation and rewrite the summary and status from the current state instead of replaying the previous JSON; the favorited time is refreshed too.
 
-Only `/clear` or `--fork-session` moves the same work onto a new session id. Then find the old record with `fav list --json` and run:
+`/clear` moves the same work onto a new session id. When the new session continues the same work, find the old record with `fav list --json status:all` and run:
 
 ```bash
 fav add --supersede <old record id> <<'EOF'
@@ -58,7 +58,7 @@ fav add --supersede <old record id> <<'EOF'
 EOF
 ```
 
-so the new session inherits the old record instead of splitting into two.
+so the new session inherits the old record instead of splitting into two. A fork (`--fork-session`, `fav resume --fork`) is a separate copy that goes its own way: favorite it with a plain `fav add`; the original keeps its record.
 
 ## After saving
 

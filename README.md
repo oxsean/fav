@@ -339,7 +339,7 @@ fav sessions host:all                   # every machine; host:mba one of them; n
 fav show mba:<id> · fav resume mba:<id> # a remote session: preview and checks come from there, resume runs `ssh -t mba fav resume …`
 ```
 
-In the TUI the machine chip (`m`) picks this machine, all of them or one; remote rows carry `@name`, the preview and Agents read from their machine, and resume opens `ssh -t` in a new Herdr tab or this terminal. Remote sessions are read-only: favorite, tag, archive, delete and move are done on their own machine. Each list is fetched in the background every 30 s and cached under `~/.agent/fav/hosts/`; a machine that cannot be reached shows its cached rows and "offline since".
+In the TUI the machine chip (`m`) picks this machine, all of them or one; remote rows carry `@name`, the preview and Agents read from their machine, and resume opens `ssh -t` in a new Herdr tab or this terminal. Remote sessions are read-only: favorite, tag, archive, delete and move are done on their own machine. The machines the filter shows are fetched in the background every 30 s (after a failure the interval doubles, up to 5 min), and cached under `~/.agent/fav/hosts/`; a machine that cannot be reached shows its cached rows and "offline since".
 
 ## Query syntax
 
