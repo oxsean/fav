@@ -37,13 +37,16 @@ func WriteAtomic(path string, perm os.FileMode, fill func(io.Writer) error) erro
 		err = os.Chmod(tmp, perm)
 	}
 	if err == nil {
-		err = os.Rename(tmp, path)
+		err = replace(tmp, path)
 	}
 	if err != nil {
 		os.Remove(tmp)
 	}
 	return err
 }
+
+// Rename moves from to to, replacing it; on Windows it tries again while a reader briefly holds either.
+func Rename(from, to string) error { return replace(from, to) }
 
 func WriteFile(path string, data []byte, perm os.FileMode) error {
 	return WriteAtomic(path, perm, func(w io.Writer) error {

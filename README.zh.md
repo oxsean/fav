@@ -395,8 +395,12 @@ tend node --connect ws://100.101.8.10:7788 --token-file ~/.config/tend/node-toke
 tend task list   # 命令行和 TUI 的任务页都改为和 server 说话
 ```
 
-节点只在 `allow_dirs` 里跑；档案权限是 `bypassPermissions` / `danger-full-access` 的一律拒绝，除非设了 `node.allow_bypass`；
-`node.allow_profiles` 可以只放行某些档案。`tend server token rm <名>` 吊销 token 并断开它的连接。
+节点只在 `allow_dirs` 里跑。没设 `node.allow_bypass` 时：`command` 档案只按节点自己 `config.json` 里的定义运行；claude / codex 的
+`args` 只接受节点自己档案里的；权限模式只放行 `default` / `acceptEdits` / `plan`（claude）和 `read-only` / `workspace-write`（codex）；
+带已知绕过参数的命令行拒绝。设了 `node.allow_profiles` 时只跑这些名字，且都按节点自己的定义（要在节点上定义好，带上需要的权限）。
+`tend server token rm <名>` 吊销 token 并断开它的连接。
+
+client token 在上述限制内等同于每个节点上的 shell：服务器只部署在 tailnet 内；用 `--plain` 时只让绑定在 tailnet 地址上的转发器连到它。
 
 ## 查询语法
 

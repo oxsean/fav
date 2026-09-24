@@ -402,9 +402,14 @@ tend node --connect ws://100.101.8.10:7788 --token-file ~/.config/tend/node-toke
 tend task list   # the CLI and the TUI's Tasks view now talk to the server
 ```
 
-A node only runs in `allow_dirs`, refuses profiles with `bypassPermissions` / `danger-full-access` unless
-`node.allow_bypass` is set, and can narrow profiles with `node.allow_profiles`. `tend server token rm <name>` revokes a token and
-drops its connections.
+A node only runs in `allow_dirs`. Unless `node.allow_bypass` is set, it runs `command` profiles only as its own
+`config.json` defines them, takes claude / codex `args` only from its own profiles, allows the permission modes
+`default` / `acceptEdits` / `plan` (claude) and `read-only` / `workspace-write` (codex), and refuses a command line with a
+known bypass flag. With `node.allow_profiles` it runs just those names, each as its own config defines it (define them
+there, with the permission they need). `tend server token rm <name>` revokes a token and drops its connections.
+
+A client token is as good as a shell on every node within those limits: run the server only inside a tailnet, and
+with `--plain` let only a forwarder bound to the tailnet address reach it.
 
 ## Query syntax
 

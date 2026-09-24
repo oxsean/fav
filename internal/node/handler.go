@@ -22,7 +22,8 @@ const (
 )
 
 type RunRef struct {
-	Run string `json:"run"`
+	Run         string `json:"run"`
+	Coordinator string `json:"coordinator,omitempty"` // run.stop: whose run a stop before its start leaves behind
 }
 
 type ListParams struct {
@@ -63,7 +64,7 @@ func (n *Node) Handler(sessions remote.Handler) wire.Handler {
 			if err := r.Decode(&p); err != nil {
 				return nil, err
 			}
-			return n.Stop(p.Run)
+			return n.Stop(p)
 		case MRunList:
 			var p ListParams
 			if err := r.Decode(&p); err != nil {

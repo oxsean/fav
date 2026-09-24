@@ -14,6 +14,7 @@ import (
 	"github.com/oxsean/fav/internal/i18n"
 	"github.com/oxsean/fav/internal/remote"
 	"github.com/oxsean/fav/internal/render"
+	"github.com/oxsean/fav/internal/shell"
 	"github.com/oxsean/fav/internal/wire"
 )
 
@@ -301,8 +302,24 @@ func remoteBlocked(a act) bool {
 // openRemoteResume: resume over ssh (a new Herdr tab when fav runs inside Herdr, else this terminal) or copy the command.
 func (m *Model) openRemoteResume(r *fav.Rec) {
 	cmd, ok := m.hosts.ResumeCommand(r)
-	if !ok {
-		m.flash(i18n.F("remote.unreachable", r.Host, remote.Reason(&wire.Error{Code: wire.CodeNotFound})))
+	if !ok { // a node with no ssh host here (mode 2): the command to run on that machine
+		spec, err := agent.ResumeOf(r, "")
+		if err != nil {
+			m.flash(i18n.F("remote.unreachable", r.Host, remote.Reason(&wire.Error{Code: wire.CodeNotFound})))
+			return
+		}
+		sh := shell.POSIX // the shell of that machine, not this one's
+		for _, mc := range m.tasks.machines {
+			if mc.Name == r.Host && mc.OS == "windows" {
+				sh = shell.PowerShell
+			}
+		}
+		line := sh.Line(spec.Cwd, spec.Argv())
+		if copyText(line) != nil {
+			m.flash(i18n.F("remote.run_there", r.Host, line))
+			return
+		}
+		m.flash(i18n.F("remote.run_there_copied", r.Host, line))
 		return
 	}
 	plan := capture.Plan{Spec: agent.CommandSpec{Exec: cmd.Args[0], Args: cmd.Args[1:]}, Ws: herdrHere()}

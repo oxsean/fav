@@ -33,6 +33,8 @@ type Receipt struct {
 	Method string          `json:"method"`
 	Digest string          `json:"digest"` // sha256 of the params: the same id with other params is a conflict
 	Result json.RawMessage `json:"result,omitempty"`
+	// Answer, when set, makes Result from the envelope being appended (its seq and time are known only then).
+	Answer func(Envelope) json.RawMessage `json:"-"`
 }
 
 type Event struct {
@@ -104,15 +106,20 @@ func Open(path string, fold func(Envelope) error) (*Log, error) {
 		return nil, err
 	}
 	l.f, l.size = f, fi.Size()
-	if l.readOnly == nil && next < l.size { // a torn last line
+	if l.readOnly == nil && next < l.size { // a torn last line: kept next to the log, then cut
 		tail := make([]byte, l.size-next)
-		f.ReadAt(tail, next)
-		fileio.WriteFile(fmt.Sprintf("%s.torn-%d", path, time.Now().Unix()), tail, 0o600)
-		if err := f.Truncate(next); err != nil {
-			f.Close()
-			return nil, err
+		_, err := f.ReadAt(tail, next)
+		if err == nil {
+			err = fileio.WriteFile(fmt.Sprintf("%s.torn-%d", path, time.Now().Unix()), tail, 0o600)
 		}
-		l.size = next
+		if err == nil {
+			err = f.Truncate(next)
+		}
+		if err != nil {
+			l.readOnly = fmt.Errorf("%w: torn line at %d not cut: %v", ErrReadOnly, next, err)
+		} else {
+			l.size = next
+		}
 	}
 	return l, nil
 }
@@ -163,6 +170,9 @@ func (l *Log) Append(cmd *Receipt, events []Event) (Envelope, error) {
 		return Envelope{}, l.readOnly
 	}
 	env := Envelope{V: 1, Seq: l.seq + 1, At: time.Now().UTC(), Command: cmd, Events: events}
+	if cmd != nil && cmd.Answer != nil {
+		cmd.Result = cmd.Answer(env)
+	}
 	body, err := json.Marshal(env)
 	if err != nil {
 		return Envelope{}, err
@@ -190,9 +200,8 @@ func (l *Log) Append(cmd *Receipt, events []Event) (Envelope, error) {
 // fn returning false stops it.
 func (l *Log) ReadAfter(after, upTo int64, fn func(Envelope) bool) error {
 	l.mu.Lock()
-	if upTo > l.seq {
-		upTo = l.seq
-	}
+	upTo = min(upTo, l.seq)
+	after = max(after, 0)
 	if after >= upTo {
 		l.mu.Unlock()
 		return nil

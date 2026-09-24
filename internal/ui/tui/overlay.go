@@ -17,6 +17,7 @@ import (
 	"github.com/oxsean/fav/internal/fav"
 	"github.com/oxsean/fav/internal/i18n"
 	"github.com/oxsean/fav/internal/render"
+	"github.com/oxsean/fav/internal/task"
 )
 
 type ovKind int
@@ -74,6 +75,7 @@ type overlay struct {
 	armed     string     // peek: the digit pressed once, sent on the second press
 	armedAt   time.Time
 	taskID    string     // task form: the task edited ("" = a new one); run dialog: the task to run
+	taskWas   *task.Task // task form: the task as task.get read it; only fields changed from it are saved
 	opts      [][]string // task form and run dialog: the choices (machines, agents)
 	pick      []int      // the chosen index of each
 

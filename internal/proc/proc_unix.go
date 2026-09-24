@@ -45,3 +45,6 @@ func (t *Tree) stop(hard bool) error {
 
 // KillPID ends process pid now.
 func KillPID(pid int) error { return syscall.Kill(pid, syscall.SIGKILL) }
+
+// CheckArgs: argv goes to the program as it is; nothing to refuse.
+func CheckArgs([]string) error { return nil }

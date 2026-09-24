@@ -66,6 +66,7 @@ type Conn struct {
 	serve  map[int64]context.CancelFunc
 	busy   sync.WaitGroup // requests being handled
 	queued atomic.Int32   // requests waiting for a handler slot
+	oob    chan struct{}  // answers sent outside the handler slots (pings, busy) being written
 	done   chan struct{}
 	err    *Error
 	closed sync.Once
@@ -83,7 +84,7 @@ func New(rw io.ReadWriteCloser, opt Options) *Conn {
 		opt.WriteTimeout = 30 * time.Second
 	}
 	c := &Conn{opt: opt, rw: rw, wmu: make(chan struct{}, 1), sem: make(chan struct{}, opt.MaxInflight),
-		wait: map[int64]chan *Frame{}, serve: map[int64]context.CancelFunc{}, done: make(chan struct{})}
+		oob: make(chan struct{}, max(opt.MaxQueued, 64)), wait: map[int64]chan *Frame{}, serve: map[int64]context.CancelFunc{}, done: make(chan struct{})}
 	c.seen.Store(time.Now().UnixNano())
 	go c.read()
 	if opt.Keepalive > 0 {
@@ -205,6 +206,19 @@ func (c *Conn) Push(method string, params any) error {
 	return c.send(context.Background(), &Frame{Kind: KindPush, Method: method, Params: b})
 }
 
+// reply sends an answer that takes no handler slot; with MaxQueued of them already being written (the other end reads
+// nothing) it is dropped and the caller's call times out.
+func (c *Conn) reply(f *Frame) {
+	select {
+	case c.oob <- struct{}{}:
+		go func() {
+			defer func() { <-c.oob }()
+			c.sendQuiet(f)
+		}()
+	default:
+	}
+}
+
 func (c *Conn) sendQuiet(f *Frame) {
 	ctx, cancel := context.WithTimeout(context.Background(), c.opt.WriteTimeout)
 	defer cancel()
@@ -217,6 +231,12 @@ func (c *Conn) send(ctx context.Context, f *Frame) error {
 	b, err := json.Marshal(f)
 	if err != nil {
 		return err
+	}
+	if len(b) >= MaxFrame { // the other end would drop the connection
+		if f.Kind != KindRes {
+			return &Error{Code: CodeBadRequest, Detail: fmt.Sprintf("frame of %d bytes", len(b))}
+		}
+		b, _ = json.Marshal(&Frame{Kind: KindRes, ID: f.ID, Error: &Error{Code: CodeInternal, Detail: fmt.Sprintf("answer of %d bytes", len(b))}})
 	}
 	b = append(b, '\n')
 	select {
@@ -346,17 +366,19 @@ func (c *Conn) drain() {
 
 func (c *Conn) handle(f *Frame) {
 	if f.Method == MPing { // answered even when every handler slot is taken: it proves the connection, not the handlers
-		go c.sendQuiet(&Frame{Kind: KindRes, ID: f.ID, OK: true})
+		c.reply(&Frame{Kind: KindRes, ID: f.ID, OK: true})
 		return
 	}
-	if int(c.queued.Load()) >= c.opt.MaxQueued {
-		go c.sendQuiet(&Frame{Kind: KindRes, ID: f.ID, Error: &Error{Code: CodeBusy}})
+	if int(c.queued.Add(1)) > c.opt.MaxQueued {
+		c.queued.Add(-1)
+		c.reply(&Frame{Kind: KindRes, ID: f.ID, Error: &Error{Code: CodeBusy}})
 		return
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	c.mu.Lock()
 	if c.err != nil {
 		c.mu.Unlock()
+		c.queued.Add(-1)
 		cancel()
 		return
 	}
@@ -371,7 +393,6 @@ func (c *Conn) handle(f *Frame) {
 			delete(c.serve, f.ID)
 			c.mu.Unlock()
 		}()
-		c.queued.Add(1)
 		select {
 		case c.sem <- struct{}{}:
 			c.queued.Add(-1)
@@ -379,8 +400,8 @@ func (c *Conn) handle(f *Frame) {
 			c.queued.Add(-1)
 			return
 		}
+		defer func() { <-c.sem }() // held until the answer is written: a peer that does not read holds the slots
 		res := c.answer(ctx, f)
-		<-c.sem
 		if ctx.Err() != nil && c.Err() != nil {
 			return
 		}

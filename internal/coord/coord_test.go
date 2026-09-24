@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -15,6 +16,7 @@ import (
 	"github.com/oxsean/fav/internal/fav"
 	"github.com/oxsean/fav/internal/journal"
 	"github.com/oxsean/fav/internal/node"
+	"github.com/oxsean/fav/internal/proc"
 	"github.com/oxsean/fav/internal/remote"
 	"github.com/oxsean/fav/internal/task"
 	"github.com/oxsean/fav/internal/testkit"
@@ -56,7 +58,23 @@ func newEnv(t *testing.T, cfg fav.Config) *env {
 		fav.AgentProfile{Name: "slow", Provider: agent.ProviderFake, Args: []string{"--steps", "1", "--every", "50ms", "--ask"}})
 	e.cfg = cfg
 	t.Cleanup(e.stop)
+	t.Cleanup(func() { killRuns(e.home) })
 	return e
+}
+
+// killRuns ends every supervisor and agent a test left running (a failed test would leave --ask agents for good).
+func killRuns(home string) {
+	dirs, _ := filepath.Glob(filepath.Join(home, "node", "runs", "*"))
+	for _, d := range dirs {
+		var st node.State
+		if b, err := os.ReadFile(filepath.Join(d, "state.json")); err == nil && json.Unmarshal(b, &st) == nil {
+			for _, pid := range []int{st.Pid, st.Sup} {
+				if pid > 0 {
+					proc.KillPID(pid)
+				}
+			}
+		}
+	}
 }
 
 func (e *env) start() {
@@ -187,9 +205,6 @@ func TestAnOpenRunHoldsItsTask(t *testing.T) {
 		t.Fatalf("second run of an open task: %v", err)
 	}
 	e.wait(r.ID, state(task.Running))
-	if err := e.call(MRunAbandon, task.RunRef{ID: r.ID}, nil); wire.Code(err) != wire.CodeConflict {
-		t.Fatalf("abandoning a running run: %v", err)
-	}
 	e.must(MRunStop, task.RunRef{ID: r.ID}, nil)
 	end := e.wait(r.ID, ended)
 	if end.State != task.Stopped || end.Reason != "asked" {
@@ -231,7 +246,7 @@ func TestRunsGoOnWithoutTheCoordinator(t *testing.T) {
 	e.wait(r.ID, state(task.Running))
 	e.stop()
 	n := node.New(e.home)
-	if _, err := n.Stop(r.ID); err != nil {
+	if _, err := n.Stop(node.RunRef{Run: r.ID}); err != nil {
 		t.Fatal(err)
 	}
 	deadline := time.Now().Add(20 * time.Second)
@@ -258,6 +273,12 @@ type far struct {
 	fail  error
 	conns []*wire.Conn
 	dials int
+}
+
+func newFar(t *testing.T) *far {
+	f := &far{home: t.TempDir()}
+	t.Cleanup(func() { killRuns(f.home) })
+	return f
 }
 
 func (f *far) dial(h fav.Host, opt wire.Options) (Conn, error) {
@@ -289,7 +310,7 @@ func (f *far) cut() {
 }
 
 func TestAMachineThatCannotBeReachedKeepsItsRunsQueued(t *testing.T) {
-	f := &far{home: t.TempDir()}
+	f := newFar(t)
 	f.set(&wire.Error{Code: wire.CodeOffline, Detail: "no route"})
 	e := newEnv(t, fav.Config{Hosts: []fav.Host{{Name: "far", SSH: "far"}}})
 	e.dial = f.dial
@@ -322,14 +343,14 @@ func TestAMachineThatCannotBeReachedKeepsItsRunsQueued(t *testing.T) {
 }
 
 func TestALostConnectionIsReconciledOnReconnect(t *testing.T) {
-	f := &far{home: t.TempDir()}
+	f := newFar(t)
 	e := newEnv(t, fav.Config{Hosts: []fav.Host{{Name: "far", SSH: "far"}}})
 	e.dial = f.dial
 	e.start()
 	r := e.dispatch(Dispatch{Task: e.task("x", "slow").ID, Machine: "far"})
 	e.wait(r.ID, state(task.Running))
 	f.cut()
-	if _, err := node.New(f.home).Stop(r.ID); err != nil {
+	if _, err := node.New(f.home).Stop(node.RunRef{Run: r.ID}); err != nil {
 		t.Fatal(err)
 	}
 	e.c.mu.Lock()
@@ -350,7 +371,7 @@ func TestALostConnectionIsReconciledOnReconnect(t *testing.T) {
 }
 
 func TestAStopAskedWhileOfflineIsDeliveredLater(t *testing.T) {
-	f := &far{home: t.TempDir()}
+	f := newFar(t)
 	e := newEnv(t, fav.Config{Hosts: []fav.Host{{Name: "far", SSH: "far"}}})
 	e.dial = f.dial
 	e.start()
@@ -476,5 +497,281 @@ func TestAStartThatNeverReachedTheNodeIsSentAgain(t *testing.T) {
 	e.start()
 	if end := e.wait(run.ID, ended); end.State != task.Exited {
 		t.Fatalf("%+v", end)
+	}
+}
+
+func TestAnAbandonedRunIsAskedToStop(t *testing.T) {
+	e := newEnv(t, fav.Config{})
+	e.start()
+	tk := e.task("x", "slow")
+	r := e.dispatch(Dispatch{Task: tk.ID})
+	e.wait(r.ID, state(task.Running))
+	if err := e.call(MRunAbandon, task.RunRef{ID: r.ID}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := e.c.State().Runs[r.ID].State; got != task.Abandoned {
+		t.Fatal(got)
+	}
+	if end := e.wait(r.ID, state(task.Stopped)); end.Reason != "asked" {
+		t.Fatalf("%+v", end)
+	}
+}
+
+func TestARunGoneFromItsNodeCanBeGivenUp(t *testing.T) {
+	e := newEnv(t, fav.Config{})
+	e.start()
+	r := e.dispatch(Dispatch{Task: e.task("x", "slow").ID})
+	e.wait(r.ID, state(task.Running))
+	killRuns(e.home)
+	dir := filepath.Join(e.home, "node", "runs", r.ID)
+	for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(50 * time.Millisecond) {
+		if os.RemoveAll(dir) == nil { // ⚠️ Windows: a killed process's files close a little later
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the run directory stays")
+		}
+	}
+	if got := e.wait(r.ID, state(task.Unknown)); got.Reason != "missing" {
+		t.Fatalf("%+v", got)
+	}
+	e.must(MRunAbandon, task.RunRef{ID: r.ID}, nil)
+	if got := e.c.State().Runs[r.ID].State; got != task.Abandoned {
+		t.Fatal(got)
+	}
+}
+
+func TestAStopOfAStartThatNeverArrivedEndsTheRun(t *testing.T) {
+	e := newEnv(t, fav.Config{})
+	e.start()
+	tk := e.task("x", "quick")
+	e.stop()
+	c, err := Open(Options{Home: e.home, Config: e.cfg, Node: node.New(e.home)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	prof, _ := c.profile("quick")
+	run := task.Run{ID: node.NewRunID(), Task: tk.ID, Machine: Local, Agent: "quick", Profile: prof, Dir: tk.Dir, Brief: "x",
+		Runner: node.RunnerBackground}
+	c.mu.Lock()
+	err = c.commit(nil, journal.NewEvent(task.ERunQueued, run), journal.NewEvent(task.ERunStarting, task.RunStarting{ID: run.ID, Dir: run.Dir}),
+		journal.NewEvent(task.ERunStopAsked, task.RunRef{ID: run.ID}))
+	c.mu.Unlock()
+	c.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.start()
+	if end := e.wait(run.ID, ended); end.State != task.Stopped || end.Reason != "never_started" {
+		t.Fatalf("%+v", end)
+	}
+}
+
+func TestADirectoryIsMappedFromTheMachineItWasWrittenFor(t *testing.T) {
+	e := newEnv(t, fav.Config{Hosts: []fav.Host{{Name: "far", SSH: "far"}}})
+	c, err := Open(Options{Home: e.home, Config: e.cfg, Node: node.New(e.home), Sessions: remote.NewLocal("test")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	home, _ := os.UserHomeDir()
+	c.ms["far"].hello = remote.Hello{OS: "linux", Home: "/root"}
+	r := &task.Run{Task: "t_1", Dir: filepath.Join(home, "dev", "fav"), From: Local}
+	if got, ok := c.mapDir(r, c.ms["far"]); !ok || got != "/root/dev/fav" {
+		t.Fatalf("this machine never connected: %s", got)
+	}
+}
+
+func TestADirectoryIsBusyWhateverItsCase(t *testing.T) {
+	if dirKey(`C:\Work\A`, "windows") != dirKey(`c:/work/a/`, "windows") || dirKey("/w/A", "linux") == dirKey("/w/a", "linux") {
+		t.Fatal("dirKey")
+	}
+}
+
+func TestAReplayedCommandAnswersWhatItAnsweredFirst(t *testing.T) {
+	e := newEnv(t, fav.Config{})
+	e.start()
+	ctx := context.Background()
+	var a, b task.Task
+	if err := e.cli.CallCommand(ctx, MTaskCreate, "k1", TaskCreate{Title: "one", Dir: t.TempDir()}, &a); err != nil {
+		t.Fatal(err)
+	}
+	title := "renamed"
+	e.must(MTaskEdit, task.TaskEdit{ID: a.ID, Title: &title}, nil)
+	if err := e.cli.CallCommand(ctx, MTaskCreate, "k1", TaskCreate{Title: "one", Dir: a.Dir}, &b); err != nil || b.Title != "one" || b.Rev != 1 {
+		t.Fatalf("%+v %v", b, err)
+	}
+}
+
+func TestStateWithoutBriefsAndOneTask(t *testing.T) {
+	e := newEnv(t, fav.Config{})
+	e.start()
+	var tk task.Task
+	e.must(MTaskCreate, TaskCreate{Title: "x", Brief: "the brief", Dir: t.TempDir()}, &tk)
+	if err := e.call(MTaskCreate, TaskCreate{Title: "big", Brief: strings.Repeat("x", maxBrief+1)}, nil); wire.Code(err) != wire.CodeBadRequest {
+		t.Fatalf("a brief over the limit: %v", err)
+	}
+	var st task.State
+	if err := e.cli.Call(context.Background(), MStateGet, StateParams{NoBriefs: true}, &st); err != nil || st.Tasks[tk.ID].Brief != "" {
+		t.Fatalf("%+v %v", st.Tasks[tk.ID], err)
+	}
+	var got task.Task
+	if err := e.cli.Call(context.Background(), MTaskGet, task.RunRef{ID: tk.ID}, &got); err != nil || got.Brief != "the brief" {
+		t.Fatalf("%+v %v", got, err)
+	}
+	if err := e.cli.Call(context.Background(), MTaskGet, task.RunRef{ID: "t_nope"}, &got); wire.Code(err) != wire.CodeNotFound {
+		t.Fatal(err)
+	}
+}
+
+func TestACallWaitsOutTheBackoff(t *testing.T) {
+	f := newFar(t)
+	f.set(&wire.Error{Code: wire.CodeOffline})
+	e := newEnv(t, fav.Config{Hosts: []fav.Host{{Name: "far", SSH: "far"}}})
+	e.dial = f.dial
+	e.start()
+	var ms Machines
+	e.must(MMachineList, MachinesParams{Connect: true}, &ms)
+	f.mu.Lock()
+	dials := f.dials
+	f.mu.Unlock()
+	for range 3 {
+		var out json.RawMessage
+		if err := e.cli.Call(context.Background(), MNodeCall, NodeCall{Machine: "far", Method: remote.MHello}, &out); wire.Code(err) != wire.CodeOffline {
+			t.Fatal(err)
+		}
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.dials != dials {
+		t.Fatalf("calls dialed %d more times while backing off", f.dials-dials)
+	}
+}
+
+func TestAnAbandonedStartThatLandsLateIsStopped(t *testing.T) {
+	e := newEnv(t, fav.Config{})
+	e.start()
+	tk := e.task("x", "slow")
+	e.stop()
+	c, err := Open(Options{Home: e.home, Config: e.cfg, Node: node.New(e.home), Sessions: remote.NewLocal("test")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	prof, _ := c.profile("slow")
+	run := task.Run{ID: node.NewRunID(), Task: tk.ID, Machine: Local, Agent: "slow", Profile: prof, Dir: tk.Dir, Brief: "x",
+		Runner: node.RunnerBackground}
+	c.mu.Lock()
+	err = c.commit(nil, journal.NewEvent(task.ERunQueued, run), journal.NewEvent(task.ERunStarting, task.RunStarting{ID: run.ID, Dir: run.Dir}),
+		journal.NewEvent(task.ERunAbandoned, task.RunRef{ID: run.ID}))
+	c.mu.Unlock()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range 4 {
+		c.Pass(context.Background())
+		c.waitDials(context.Background())
+	}
+	n := node.New(e.home)
+	s, err := n.Start(node.StartParams{Run: run.ID, Task: tk.ID, Coordinator: c.id, Profile: prof, Dir: tk.Dir, Brief: "x", Runner: node.RunnerBackground})
+	if err != nil || s.State.State != node.StateStopped || s.Reason != "never_started" {
+		t.Fatalf("the late start finds the tombstone: %+v %v", s, err)
+	}
+	if got := c.State().Runs[run.ID]; got.State != task.Stopped {
+		t.Fatalf("%+v", got)
+	}
+}
+
+func TestAnAbandonedRunKeepsItsDirectoryUntilItStops(t *testing.T) {
+	e := newEnv(t, fav.Config{})
+	e.start()
+	dir := t.TempDir()
+	a := e.dispatch(Dispatch{Task: e.taskIn("a", "slow", dir).ID})
+	e.wait(a.ID, state(task.Running))
+	e.must(MRunAbandon, task.RunRef{ID: a.ID}, nil)
+	b := e.dispatch(Dispatch{Task: e.taskIn("b", "slow", dir).ID})
+	for deadline := time.Now().Add(20 * time.Second); ; time.Sleep(20 * time.Millisecond) {
+		st := e.c.State()
+		if st.Runs[a.ID].State == task.Stopped {
+			break
+		}
+		if st.Runs[b.ID].State != task.Queued {
+			t.Fatalf("b started while a still ran in its directory: a %s, b %s", st.Runs[a.ID].State, st.Runs[b.ID].State)
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("%+v", st.Runs[a.ID])
+		}
+		e.c.poke()
+	}
+	e.wait(b.ID, state(task.Running))
+	e.must(MRunStop, task.RunRef{ID: b.ID}, nil)
+	e.wait(b.ID, ended)
+}
+
+func TestARunGoneFromAFarNodeIsNoticedWhileOthersRun(t *testing.T) {
+	f := newFar(t)
+	e := newEnv(t, fav.Config{Hosts: []fav.Host{{Name: "far", SSH: "far"}}})
+	e.dial = f.dial
+	e.start()
+	here := e.dispatch(Dispatch{Task: e.task("here", "slow").ID})
+	there := e.dispatch(Dispatch{Task: e.task("there", "slow").ID, Machine: "far"})
+	e.wait(here.ID, state(task.Running))
+	e.wait(there.ID, state(task.Running))
+	killRuns(f.home)
+	dir := filepath.Join(f.home, "node", "runs", there.ID)
+	for deadline := time.Now().Add(10 * time.Second); os.RemoveAll(dir) != nil; time.Sleep(50 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatal("the run directory stays")
+		}
+	}
+	if got := e.wait(there.ID, state(task.Unknown)); got.Reason != "missing" {
+		t.Fatalf("%+v", got)
+	}
+	e.must(MRunStop, task.RunRef{ID: here.ID}, nil)
+	e.wait(here.ID, ended)
+}
+
+func TestAReadOnlyCommandLeavesAtOnce(t *testing.T) {
+	f := newFar(t)
+	f.set(&wire.Error{Code: wire.CodeOffline})
+	e := newEnv(t, fav.Config{Hosts: []fav.Host{{Name: "far", SSH: "far"}}})
+	e.dial = func(h fav.Host, opt wire.Options) (Conn, error) {
+		time.Sleep(3 * time.Second) // an ssh that never answers
+		return f.dial(h, opt)
+	}
+	e.start()
+	e.dispatch(Dispatch{Task: e.task("x", "quick").ID, Machine: "far"})
+	e.stop()
+	opt := Options{Home: e.home, Version: "test", Config: e.cfg, Node: node.New(e.home), Sessions: remote.NewLocal("test"), Dial: e.dial}
+	cl, err := Connect(opt, wire.Options{})
+	if err != nil || cl.Coord == nil {
+		t.Fatal(err)
+	}
+	var st task.State
+	if err := cl.Call(context.Background(), MStateGet, StateParams{NoBriefs: true}, &st); err != nil {
+		t.Fatal(err)
+	}
+	began := time.Now()
+	cl.Close()
+	if d := time.Since(began); d > time.Second {
+		t.Fatalf("a read-only command waited %s to leave", d)
+	}
+}
+
+func TestADirectoryKeyFollowsTheTargetsRules(t *testing.T) {
+	if dirKey(`C:\Work\A`, "windows") != dirKey(`c:/work/./b/../a//`, "windows") {
+		t.Fatal("windows")
+	}
+}
+
+func TestTitlesAreCappedAndHerdrRunsClaudeOnly(t *testing.T) {
+	e := newEnv(t, fav.Config{})
+	e.start()
+	if err := e.call(MTaskCreate, TaskCreate{Title: strings.Repeat("x", maxTitle+1)}, nil); wire.Code(err) != wire.CodeBadRequest {
+		t.Fatal(err)
+	}
+	tk := e.task("x", "codex")
+	if err := e.call(MRunDispatch, Dispatch{Task: tk.ID, Runner: node.RunnerHerdr}, nil); wire.Code(err) != wire.CodeBadRequest {
+		t.Fatal(err)
 	}
 }

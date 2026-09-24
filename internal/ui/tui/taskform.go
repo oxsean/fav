@@ -44,14 +44,14 @@ func (m *Model) openTaskForm(x *task.Task) tea.Cmd {
 		return nil
 	}
 	title := newInput()
-	title.CharLimit = 200
+	title.CharLimit = 1 << 10
 	title.Prompt = ""
 	title.Placeholder = i18n.T("tasks.title_placeholder")
 	dir := newInput()
 	dir.CharLimit = 1000
 	dir.Prompt = ""
 	brief := newArea()
-	brief.CharLimit = 20000
+	brief.CharLimit = 256 << 10 // the coordinator's limit: a longer brief would be cut when the form loads it
 	brief.ShowLineNumbers = false
 	brief.Prompt = ""
 	brief.Placeholder = i18n.T("tasks.brief_placeholder")
@@ -59,13 +59,15 @@ func (m *Model) openTaskForm(x *task.Task) tea.Cmd {
 	machines, agents := m.machineNames(), m.agentNames()
 	ov := overlay{kind: ovTaskForm, focus: -1, opts: [][]string{machines, agents}}
 	if x != nil {
-		ov.taskID = x.ID
+		ov.taskID, ov.taskWas = x.ID, x
 		title.SetValue(x.Title)
 		dir.SetValue(x.Dir)
 		brief.SetValue(x.Brief)
 		ov.pick = []int{choice(machines, firstNonEmpty(x.Machine, coord.Local)), choice(agents, x.Agent)}
 	} else {
-		dir.SetValue(m.startDir)
+		if !m.remoteCoordinator() { // mode 2: the directory is written the way the chosen machine names it
+			dir.SetValue(m.startDir)
+		}
 		ov.pick = []int{choice(machines, coord.Local), choice(agents, "claude")}
 	}
 	ov.edit, ov.edit2, ov.area = title, dir, brief
@@ -131,40 +133,35 @@ func (m *Model) formStop() int {
 
 func (m *Model) taskFormKey(msg tea.KeyPressMsg) tea.Cmd {
 	f := m.ov.field
-	switch k := msg.String(); k {
-	case "esc":
+	switch a := keyAct(inTaskForm, msg.String()); a {
+	case actClose:
 		m.closeOverlay()
 		return nil
-	case "ctrl+s":
+	case actSave:
 		return m.saveTaskForm()
-	case "enter":
+	case actEnter:
 		if f != formBrief {
 			if !m.pressFocused() {
 				return m.saveTaskForm()
 			}
 			return nil
 		}
-	case "tab":
+	case actFocusNext:
 		return m.formField(m.formStop() + 1)
-	case "shift+tab":
+	case actFocusPrev:
 		return m.formField(m.formStop() - 1)
-	case "up", "down":
+	case actUp, actDown:
 		if f != formBrief {
-			return m.formField(m.formStop() + map[string]int{"up": -1, "down": 1}[k])
+			return m.formField(m.formStop() + map[act]int{actUp: -1, actDown: 1}[a])
 		}
-	case "left", "right", "h", "l":
-		d := map[string]int{"left": -1, "h": -1, "right": 1, "l": 1}[k]
+	case actLeft, actRight:
+		d := map[act]int{actLeft: -1, actRight: 1}[a]
 		switch f {
 		case formMachine, formAgent:
 			m.pickNext(f-formMachine, d)
 			return nil
 		case formButtons:
 			m.moveFocus(d)
-			return nil
-		}
-	case "space":
-		if f == formMachine || f == formAgent {
-			m.pickNext(f-formMachine, 1)
 			return nil
 		}
 	}
@@ -180,6 +177,29 @@ func (m *Model) taskFormKey(msg tea.KeyPressMsg) tea.Cmd {
 	return cmd
 }
 
+// placeAreaCursor puts the brief's cursor at the clicked place: row counts the area's visible rows from 0, lead the
+// columns before its text.
+func (m *Model) placeAreaCursor(row, lead int) {
+	a := &m.ov.area
+	row = max(row, 0) + a.ScrollYOffset()
+	a.MoveToBegin()
+	for range row {
+		a.CursorDown()
+	}
+	li := a.LineInfo() // the visual row: where it starts in its line, how wide it is
+	line := []rune(strings.Split(a.Value(), "\n")[a.Line()])
+	col, w, want := li.StartColumn, 0, max(m.clickX-lead, 0)
+	for col < len(line) {
+		rw := render.Width(string(line[col]))
+		if w+rw > want || w+rw > li.Width {
+			break
+		}
+		w += rw
+		col++
+	}
+	a.SetCursorColumn(col)
+}
+
 func (m *Model) saveTaskForm() tea.Cmd {
 	title := strings.TrimSpace(m.ov.edit.Value())
 	if title == "" {
@@ -189,7 +209,7 @@ func (m *Model) saveTaskForm() tea.Cmd {
 	dir := strings.TrimSpace(m.ov.edit2.Value())
 	machine, agentName := m.picked(0), m.picked(1)
 	brief := strings.TrimSpace(m.ov.area.Value())
-	id := m.ov.taskID
+	id, was := m.ov.taskID, m.ov.taskWas
 	m.closeOverlay()
 	if machine == coord.Local {
 		machine = ""
@@ -201,8 +221,19 @@ func (m *Model) saveTaskForm() tea.Cmd {
 				return nil
 			})
 	}
-	return m.write(coord.MTaskEdit, task.TaskEdit{ID: id, Title: &title, Brief: &brief, Dir: &dir, Machine: &machine, Agent: &agentName},
-		i18n.F("edit.saved", render.Truncate(title, 40)), nil)
+	e := task.TaskEdit{ID: id}
+	if was != nil {
+		for _, f := range []struct {
+			now, was string
+			dst      **string
+		}{{title, was.Title, &e.Title}, {brief, strings.TrimSpace(was.Brief), &e.Brief}, {dir, was.Dir, &e.Dir},
+			{machine, was.Machine, &e.Machine}, {agentName, was.Agent, &e.Agent}} {
+			if f.now != f.was {
+				*f.dst = &f.now
+			}
+		}
+	}
+	return m.write(coord.MTaskEdit, e, i18n.F("edit.saved", render.Truncate(title, 40)), nil)
 }
 
 // selector draws a choice as "< value >"; a click moves to the next value.
@@ -240,16 +271,19 @@ func (m *Model) renderTaskForm() string {
 		}
 		lines := strings.Split(sty.Width(inner).Render(view), "\n")
 		body = append(body, dimmed.Render(label))
-		m.markRows(len(body)+1, ovPad, inner, len(lines), func(mm *Model) {
-			mm.pending = mm.formField(i)
-			if input != nil {
-				if i == formTitle {
+		for row := range lines {
+			m.mark(len(body)+1+row, ovPad, inner, func(mm *Model) {
+				mm.pending = mm.formField(i)
+				switch {
+				case i == formBrief:
+					mm.placeAreaCursor(row-1, 2)
+				case i == formTitle:
 					mm.placeCursor(&mm.ov.edit, 2)
-				} else {
+				case input != nil:
 					mm.placeCursor(&mm.ov.edit2, 2)
 				}
-			}
-		})
+			})
+		}
 		body = append(body, lines...)
 		body = append(body, "")
 	}
@@ -262,7 +296,7 @@ func (m *Model) renderTaskForm() string {
 	m.selector(&body, i18n.T("tasks.field_agent"), formAgent, 1, inner, m.ov.field == formAgent)
 	field(i18n.T("tasks.field_brief"), m.ov.area.View(), formBrief, nil)
 	body = append(body, m.buttons(len(body)+1, []btn{
-		{keyed(keyName("ctrl+s"), i18n.T("edit.btn_save")), true, func(mm *Model) { mm.pending = mm.saveTaskForm() }},
+		{keyed(keyOf(inTaskForm, actSave), i18n.T("edit.btn_save")), true, func(mm *Model) { mm.pending = mm.saveTaskForm() }},
 		cancelBtn(),
 	})...)
 	return ovRender(body, w)
@@ -287,25 +321,22 @@ func (m *Model) runTask() tea.Cmd {
 
 func (m *Model) taskRunKey(msg tea.KeyPressMsg) tea.Cmd {
 	f := m.ov.field
-	switch k := msg.String(); k {
-	case "esc", "q":
+	switch a := keyAct(inTaskRun, msg.String()); a {
+	case actClose:
 		m.closeOverlay()
-	case "enter":
+	case actEnter:
 		if !m.pressFocused() {
 			return m.runTask()
 		}
-	case "tab", "down", "j":
+	case actFocusNext:
 		m.runStop(1)
-	case "shift+tab", "up", "k":
+	case actFocusPrev:
 		m.runStop(-1)
-	case "left", "right", "h", "l", "space":
-		d := map[string]int{"left": -1, "h": -1}[k]
-		if d == 0 {
-			d = 1
-		}
+	case actLeft, actRight:
+		d := map[act]int{actLeft: -1, actRight: 1}[a]
 		if f < runButtons {
 			m.pickNext(f, d)
-		} else if k != "space" {
+		} else {
 			m.moveFocus(d)
 		}
 	}

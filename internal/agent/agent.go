@@ -5,6 +5,7 @@ package agent
 import (
 	"errors"
 	"os/exec"
+	"slices"
 	"strings"
 
 	"github.com/oxsean/fav/internal/fav"
@@ -174,17 +175,55 @@ func AttachOf(r *fav.Rec, backgroundID string) CommandSpec {
 	return CommandSpec{Exec: "claude", Args: []string{"attach", backgroundID}, Cwd: r.Cwd}
 }
 
-// Bypass: p runs with every permission prompt skipped.
-func Bypass(p Profile) bool {
-	switch p.Permission {
-	case "bypassPermissions", "danger-full-access":
-		return true
-	}
-	for _, a := range p.Args {
-		switch a {
-		case "--dangerously-skip-permissions", "--dangerously-bypass-approvals-and-sandbox", "--yolo":
+// BypassArgv: the command line runs its agent with every permission prompt skipped or without a sandbox, however the
+// flag is spelled.
+func BypassArgv(argv []string) bool {
+	for i, a := range argv {
+		k, v, joined := strings.Cut(a, "=")
+		if len(a) > 2 && a[0] == '-' && a[1] != '-' { // clap's -sVALUE
+			k, v, joined = a[:2], a[2:], true
+		}
+		if !joined && i+1 < len(argv) {
+			v = argv[i+1]
+		}
+		switch k {
+		case "--settings", "--allowedTools", "--allowed-tools", "--permission-prompts", "--mcp-config", "--plugin-url", "-p", "--profile":
+			if k != "-p" || argv[0] == "codex" { // claude's -p is --print; codex's names a config profile
+				return true
+			}
+		case "--dangerously-skip-permissions", "--allow-dangerously-skip-permissions", "--dangerously-bypass-approvals-and-sandbox", "--yolo":
 			return true
+		case "--permission-mode":
+			if v == "bypassPermissions" {
+				return true
+			}
+		case "-s", "--sandbox":
+			if v == "danger-full-access" {
+				return true
+			}
+		case "-c", "--config":
+			if strings.Contains(v, "danger-full-access") {
+				return true
+			}
 		}
 	}
 	return false
+}
+
+// Profiles are the agents one can run: the built-in ones, then config's (a config profile replaces a built-in one of
+// the same name).
+func Profiles(config []Profile) []Profile {
+	out := []Profile{
+		{Name: fav.ProviderClaude, Provider: fav.ProviderClaude},
+		{Name: fav.ProviderCodex, Provider: fav.ProviderCodex},
+		{Name: ProviderFake, Provider: ProviderFake},
+	}
+	for _, p := range config {
+		if i := slices.IndexFunc(out, func(q Profile) bool { return q.Name == p.Name }); i >= 0 {
+			out[i] = p
+		} else {
+			out = append(out, p)
+		}
+	}
+	return out
 }

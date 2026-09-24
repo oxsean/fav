@@ -29,11 +29,19 @@ type Migration struct {
 // ErrHomeBusy: another process holds a lock in the home.
 var ErrHomeBusy = errors.New("in use")
 
+// ErrHomeFromEnv: TEND_HOME or FAV_HOME names the data directory; there is nothing to move.
+var ErrHomeFromEnv = errors.New("set by the environment")
+
 // MigrateHome moves ~/.agent/fav to ~/.agent/tend: an unmarked ~/.agent/tend (an older TEND) is renamed out of the
 // way first, the old home is backed up to a tar.gz (without the rebuildable text mirror and ssh sockets), renamed,
 // marked, and left behind as a link. It refuses while a lock in the old home is held.
 func MigrateHome(now time.Time) (Migration, error) {
 	var m Migration
+	for _, k := range []string{"TEND_HOME", "FAV_HOME"} {
+		if os.Getenv(k) != "" {
+			return m, fmt.Errorf("%w: %s", ErrHomeFromEnv, k)
+		}
+	}
 	tend, old := DefaultHomes()
 	marked := exists(filepath.Join(tend, HomeMarker))
 	oldReal := realDir(old)
@@ -59,8 +67,13 @@ func MigrateHome(now time.Time) (Migration, error) {
 		}
 		return m, markHome(tend, &m, "")
 	}
-	if busy := heldLocks(old); len(busy) > 0 {
+	release, busy := lockAll(old)
+	defer release()
+	if len(busy) > 0 {
 		return m, fmt.Errorf("%w: %s", ErrHomeBusy, strings.Join(busy, ", "))
+	}
+	if !filelock.SurvivesRename {
+		release() // the rename below fails while anyone has a file in it open
 	}
 	m.Backup = unique(filepath.Join(filepath.Dir(old), "fav-backup-"+now.Format("20060102-150405")+".tar.gz"))
 	if err := backup(old, m.Backup); err != nil {
@@ -77,6 +90,9 @@ func MigrateHome(now time.Time) (Migration, error) {
 	}
 	m.Marked = ""
 	m.LinkErr = fileio.LinkDir(tend, old)
+	if m.LinkErr != nil && exists(old) {
+		return m, fmt.Errorf("%s was written to again during the move: merge what it holds into %s", old, tend)
+	}
 	return m, nil
 }
 
@@ -100,9 +116,13 @@ func realDir(p string) bool {
 	return err == nil && fi.IsDir() && fi.Mode()&(os.ModeSymlink|os.ModeIrregular) == 0
 }
 
-// ours: dir holds this program's files (a home made before the marker existed), not an older TEND's.
+// ours: dir holds this program's files (a home made before the marker existed), not an older TEND's (whose journal
+// and service lock sit at its top; both keep records.jsonl and config.json too).
 func ours(dir string) bool {
-	for _, n := range []string{"records.jsonl", "sessions.jsonl", "config.json", "coord", "node", "hosts"} {
+	if exists(filepath.Join(dir, "events.jsonl")) || exists(filepath.Join(dir, "service.lock")) {
+		return false
+	}
+	for _, n := range []string{"sessions.jsonl", "coord", "node", "hosts", "text", "trash"} {
 		if exists(filepath.Join(dir, n)) {
 			return true
 		}
@@ -125,18 +145,33 @@ func unique(p string) string {
 	}
 }
 
-// heldLocks are the locks in home another process holds.
-func heldLocks(home string) []string {
+// lockAll takes every lock in home that exists; busy are the ones another process holds. release gives back what it
+// took (calling it again does nothing).
+func lockAll(home string) (release func(), busy []string) {
 	cands := []string{filepath.Join(home, "records.jsonl.lock"), filepath.Join(home, "text", ".lock"),
 		filepath.Join(home, "coord", "lock"), filepath.Join(home, "trash", "manifest.jsonl.lock")}
 	runs, _ := filepath.Glob(filepath.Join(home, "node", "runs", "*", "lock"))
-	var out []string
+	var held []func()
 	for _, p := range append(cands, runs...) {
-		if filelock.Held(p) {
-			out = append(out, p)
+		if !exists(p) {
+			continue
+		}
+		unlock, err := filelock.TryLock(p)
+		switch {
+		case errors.Is(err, filelock.ErrLocked):
+			busy = append(busy, p)
+		case err != nil:
+			busy = append(busy, p+": "+err.Error()) // not held means not proven idle
+		default:
+			held = append(held, unlock)
 		}
 	}
-	return out
+	return func() {
+		for _, u := range held {
+			u()
+		}
+		held = nil
+	}, busy
 }
 
 // skipInBackup: the full-text mirror is rebuilt from the transcripts; ssh control sockets are not files.

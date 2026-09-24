@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"strings"
 	"time"
 
@@ -23,8 +24,14 @@ func FakeAgent(args []string) error {
 	every := fs.Duration("every", time.Second, "time between replies")
 	exit := fs.Int("exit", 0, "exit code")
 	ask := fs.Bool("ask", false, "end by asking the user a question and waiting")
+	leave := fs.Duration("leave-child", 0, "leave a child this long holding the output when it exits")
+	sleep := fs.Duration("sleep", 0, "only sleep this long (the child --leave-child leaves)")
 	if err := fs.Parse(args); err != nil {
 		return err
+	}
+	if *sleep > 0 {
+		time.Sleep(*sleep)
+		return nil
 	}
 	brief := ""
 	if *promptFile != "" {
@@ -60,6 +67,17 @@ func FakeAgent(args []string) error {
 		fmt.Println("waiting for an answer")
 		for {
 			time.Sleep(time.Hour) // ⚠️ not select{}: with no other goroutine the runtime ends it as a deadlock
+		}
+	}
+	if *leave > 0 {
+		self, err := os.Executable()
+		if err != nil {
+			return err
+		}
+		c := exec.Command(self, "_fake-agent", "--sleep", leave.String())
+		c.Stdout, c.Stderr = os.Stdout, os.Stderr
+		if err := c.Start(); err != nil {
+			return err
 		}
 	}
 	os.Exit(*exit)

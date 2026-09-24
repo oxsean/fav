@@ -4,6 +4,7 @@
 package node
 
 import (
+	"cmp"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -12,14 +13,17 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"time"
 
 	"github.com/oxsean/fav/internal/agent"
+	"github.com/oxsean/fav/internal/capture"
 	"github.com/oxsean/fav/internal/fav"
 	"github.com/oxsean/fav/internal/fileio"
 	"github.com/oxsean/fav/internal/filelock"
 	"github.com/oxsean/fav/internal/paths"
+	"github.com/oxsean/fav/internal/proc"
 	"github.com/oxsean/fav/internal/wire"
 )
 
@@ -107,6 +111,8 @@ var runID = regexp.MustCompile(`^r_[0-9a-f]{8,32}$`)
 type Node struct {
 	Dir    string // <home>/node
 	Limits Limits
+	// Profiles are the agents this machine defines: with allow_profiles a run gets its profile from here by name.
+	Profiles []agent.Profile
 	// Launch starts the supervisor for a run directory; tests replace it.
 	Launch func(dir string, spec Spec) (pane string, err error)
 }
@@ -132,10 +138,14 @@ func (n *Node) Start(p StartParams) (Snapshot, error) {
 	if _, err := os.Stat(dir); err == nil {
 		return n.Snapshot(p.Run)
 	}
+	if err := n.admit(&p); err != nil {
+		return Snapshot{}, err
+	}
 	if fi, err := os.Stat(p.Dir); err != nil || !fi.IsDir() {
 		return Snapshot{}, &wire.Error{Code: wire.CodeNotFound, Detail: "dir " + p.Dir}
 	}
-	if err := check(n.Limits, p); err != nil {
+	spec, err := n.spec(p, dir)
+	if err != nil {
 		return Snapshot{}, err
 	}
 	if err := os.MkdirAll(filepath.Dir(dir), 0o700); err != nil {
@@ -147,10 +157,7 @@ func (n *Node) Start(p StartParams) (Snapshot, error) {
 		}
 		return Snapshot{}, err
 	}
-	spec, err := n.spec(p, dir)
-	if err == nil {
-		err = fileio.WriteFile(filepath.Join(dir, "prompt.md"), []byte(p.Brief), 0o600)
-	}
+	err = fileio.WriteFile(filepath.Join(dir, "prompt.md"), []byte(p.Brief), 0o600)
 	if err == nil {
 		err = writeJSON(filepath.Join(dir, "spec.json"), spec)
 	}
@@ -163,22 +170,61 @@ func (n *Node) Start(p StartParams) (Snapshot, error) {
 	}
 	if err != nil {
 		now := time.Now()
-		writeJSON(filepath.Join(dir, "state.json"), State{Rev: 1, State: StateFailed, Reason: err.Error(), EndedAt: &now})
+		decide(dir, State{Rev: 1, State: StateFailed, Reason: err.Error(), EndedAt: &now})
 	}
 	return n.Snapshot(p.Run)
 }
 
-func check(l Limits, p StartParams) error {
-	if len(l.AllowProfiles) > 0 && !contains(l.AllowProfiles, p.Profile.Name) {
-		return &wire.Error{Code: wire.CodeUnauthorized, Detail: "profile " + p.Profile.Name}
+// admit applies this machine's limits to p: the profile it runs (with allow_profiles, this machine's own of that
+// name), its directory, and no command profile it does not define itself unless bypass is allowed.
+func (n *Node) admit(p *StartParams) error {
+	l := n.Limits
+	own, defined := n.profile(p.Profile.Name)
+	if len(l.AllowProfiles) > 0 {
+		if !contains(l.AllowProfiles, p.Profile.Name) || !defined {
+			return &wire.Error{Code: wire.CodeUnauthorized, Detail: "profile " + p.Profile.Name}
+		}
+		p.Profile = own
 	}
-	if !l.AllowBypass && agent.Bypass(p.Profile) {
-		return &wire.Error{Code: wire.CodeUnauthorized, Detail: "permission " + p.Profile.Permission}
+	if !l.AllowBypass && !(defined && sameRun(own, p.Profile)) {
+		switch p.Profile.Provider {
+		case agent.ProviderCommand:
+			return &wire.Error{Code: wire.CodeUnauthorized, Detail: "profile " + p.Profile.Name}
+		case fav.ProviderClaude, fav.ProviderCodex: // only the node's own profiles carry args; permissions from a short list
+			if len(p.Profile.Args) > 0 || !contains(safePermissions[p.Profile.Provider], p.Profile.Permission) {
+				return &wire.Error{Code: wire.CodeUnauthorized, Detail: "profile " + p.Profile.Name}
+			}
+		}
 	}
 	if len(l.AllowDirs) > 0 && !underAny(p.Dir, l.AllowDirs) {
 		return &wire.Error{Code: wire.CodeUnauthorized, Detail: "dir " + p.Dir}
 	}
 	return nil
+}
+
+// safePermissions are the permission modes a coordinator may ask for on a node that allows no bypass.
+var safePermissions = map[string][]string{
+	fav.ProviderClaude: {"", "default", "acceptEdits", "plan"},
+	fav.ProviderCodex:  {"", "read-only", "workspace-write"},
+}
+
+// sameRun: a and b start the same command line (their names and the machine they are pinned to aside).
+func sameRun(a, b agent.Profile) bool {
+	return a.Provider == b.Provider && a.Model == b.Model && a.Permission == b.Permission && a.Stdin == b.Stdin &&
+		slices.Equal(a.Command, b.Command) && slices.Equal(a.Args, b.Args)
+}
+
+func (n *Node) profile(name string) (agent.Profile, bool) {
+	profiles := n.Profiles
+	if profiles == nil {
+		profiles = agent.Profiles(nil)
+	}
+	for _, p := range profiles {
+		if p.Name == name {
+			return p, true
+		}
+	}
+	return agent.Profile{}, false
 }
 
 // spec builds the frozen command line.
@@ -188,6 +234,9 @@ func (n *Node) spec(p StartParams, dir string) (Spec, error) {
 		return Spec{}, &wire.Error{Code: wire.CodeBadRequest, Detail: "provider " + p.Profile.Provider}
 	}
 	runner := p.Runner
+	if runner == RunnerHerdr && p.Profile.Provider != fav.ProviderClaude {
+		return Spec{}, &wire.Error{Code: wire.CodeBadRequest, Detail: "runner herdr runs claude only"}
+	}
 	if runner == "" {
 		runner = RunnerBackground
 		if p.Profile.Provider == fav.ProviderClaude && herdrFits(p.Dir) {
@@ -213,6 +262,12 @@ func (n *Node) spec(p StartParams, dir string) (Spec, error) {
 	if err != nil {
 		return Spec{}, err
 	}
+	if !n.Limits.AllowBypass && agent.BypassArgv(cmd.Argv()) {
+		return Spec{}, &wire.Error{Code: wire.CodeUnauthorized, Detail: "permission"}
+	}
+	if err := proc.CheckArgs(cmd.Argv()); err != nil {
+		return Spec{}, &wire.Error{Code: wire.CodeBadRequest, Detail: err.Error()}
+	}
 	return Spec{Run: p.Run, Task: p.Task, Coordinator: p.Coordinator, Argv: cmd.Argv(), Dir: p.Dir, Runner: runner,
 		Stdin: stdin, Thread: p.Profile.Provider == fav.ProviderCodex, Provider: agent.SessionProvider(p.Profile.Provider),
 		Session: ls.SessionID, Title: p.Title, Created: time.Now()}, nil
@@ -221,47 +276,101 @@ func (n *Node) spec(p StartParams, dir string) (Spec, error) {
 // readBrief is an interactive agent's first message; the brief itself stays in the file (argv shows in ps).
 const readBrief = "Read the task brief in %s and do the task it describes."
 
-// Stop asks run id to stop; the supervisor ends it. Stopping a finished run changes nothing.
-func (n *Node) Stop(id string) (Snapshot, error) {
-	if !runID.MatchString(id) {
+// Stop asks run r.Run to stop; the supervisor ends it. Stopping a finished run changes nothing; stopping a run whose
+// start never arrived leaves it stopped, so a start arriving later starts nothing.
+func (n *Node) Stop(r RunRef) (Snapshot, error) {
+	if !runID.MatchString(r.Run) {
 		return Snapshot{}, &wire.Error{Code: wire.CodeBadRequest, Detail: "run id"}
 	}
-	dir := n.runDir(id)
-	if _, err := os.Stat(dir); err != nil {
-		return Snapshot{}, &wire.Error{Code: wire.CodeNotFound, Detail: id}
+	dir := n.runDir(r.Run)
+	if err := os.MkdirAll(filepath.Dir(dir), 0o700); err != nil {
+		return Snapshot{}, err
+	}
+	if err := os.Mkdir(dir, 0o700); err == nil {
+		if err := writeJSON(filepath.Join(dir, "spec.json"), Spec{Run: r.Run, Coordinator: r.Coordinator, Created: time.Now()}); err != nil {
+			return Snapshot{}, err
+		}
+		now := time.Now()
+		if _, err := decide(dir, State{Rev: 1, State: StateStopped, Reason: "never_started", EndedAt: &now}); err != nil {
+			return Snapshot{}, err
+		}
+	} else if !errors.Is(err, os.ErrExist) {
+		return Snapshot{}, err
 	}
 	if err := fileio.WriteFile(filepath.Join(dir, "stop"), nil, 0o600); err != nil {
 		return Snapshot{}, err
 	}
-	return n.Snapshot(id)
+	return n.Snapshot(r.Run)
+}
+
+// claim takes the one right to decide how run directory dir goes: its supervisor claims it before it writes a state,
+// and so does the node when it records that no supervisor came. The first to claim wins.
+func claim(dir string) bool {
+	f, err := os.OpenFile(filepath.Join(dir, "claim"), os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	if err != nil {
+		return false
+	}
+	f.Close()
+	return true
+}
+
+// decide records st as how a run no supervisor runs ended, unless a live supervisor claimed it first; it answers the
+// state the run has.
+func decide(dir string, st State) (State, error) {
+	state := filepath.Join(dir, "state.json")
+	if claim(dir) || !paths.Exists(state) && !filelock.Held(filepath.Join(dir, "lock")) { // a claimant that died unwritten
+		if err := writeJSON(state, st); err != nil {
+			return State{}, err
+		}
+	}
+	var got State
+	err := readJSON(filepath.Join(dir, "state.json"), &got)
+	return got, err
 }
 
 // Snapshot reads run id as it stands.
 func (n *Node) Snapshot(id string) (Snapshot, error) {
 	dir := n.runDir(id)
+	if _, err := os.Stat(dir); err != nil {
+		return Snapshot{}, &wire.Error{Code: wire.CodeNotFound, Detail: id}
+	}
 	var spec Spec
-	if err := readJSON(filepath.Join(dir, "spec.json"), &spec); err != nil && !errors.Is(err, os.ErrNotExist) {
+	created := time.Time{}
+	switch err := readJSON(filepath.Join(dir, "spec.json"), &spec); {
+	case err == nil:
+		created = spec.Created
+	case errors.Is(err, os.ErrNotExist): // Start is still writing it, or died before it did
+		if fi, err := os.Stat(dir); err == nil {
+			created = fi.ModTime()
+		}
+	default:
 		return Snapshot{}, err
 	}
-	s := Snapshot{Run: id, Task: spec.Task}
-	_, err := os.Stat(filepath.Join(dir, "stop"))
-	s.StopAsked = err == nil
-	if err := readJSON(filepath.Join(dir, "state.json"), &s.State); err != nil {
-		if !errors.Is(err, os.ErrNotExist) {
+	s := Snapshot{Run: id, Task: spec.Task, StopAsked: paths.Exists(filepath.Join(dir, "stop"))}
+	err := readJSON(filepath.Join(dir, "state.json"), &s.State)
+	held := filelock.Held(filepath.Join(dir, "lock"))
+	if !held && (err != nil || !Terminal(s.State.State)) { // the supervisor may have written and left in between
+		err = readJSON(filepath.Join(dir, "state.json"), &s.State)
+	}
+	switch {
+	case err == nil:
+		if !Terminal(s.State.State) && !held {
+			s.State.State, s.Reason = StateUnknown, "supervisor_gone"
+		}
+	case !errors.Is(err, os.ErrNotExist):
+		return Snapshot{}, err
+	case held || !paths.Exists(filepath.Join(dir, "claim")) && time.Since(created) <= notLaunched:
+		s.State = State{State: StateStarting, Provider: spec.Provider, Session: spec.Session}
+	default: // the agent starts only after its first state is written: it never started
+		now := time.Now()
+		st, err := decide(dir, State{Rev: 1, State: StateFailed, Reason: "not_launched", Provider: spec.Provider,
+			Session: spec.Session, EndedAt: &now})
+		if errors.Is(err, os.ErrNotExist) {
+			st = State{State: StateStarting, Provider: spec.Provider, Session: spec.Session}
+		} else if err != nil {
 			return Snapshot{}, err
 		}
-		fi, serr := os.Stat(dir)
-		if serr != nil {
-			return Snapshot{}, &wire.Error{Code: wire.CodeNotFound, Detail: id}
-		}
-		s.State = State{State: StateStarting, Provider: spec.Provider, Session: spec.Session}
-		if time.Since(fi.ModTime()) > notLaunched && !filelock.Held(filepath.Join(dir, "lock")) {
-			s.State.State, s.Reason = StateFailed, "not_launched"
-		}
-		return s, nil
-	}
-	if !Terminal(s.State.State) && !filelock.Held(filepath.Join(dir, "lock")) {
-		s.State.State, s.Reason = StateUnknown, "supervisor_gone"
+		s.State = st
 	}
 	return s, nil
 }
@@ -271,7 +380,7 @@ func (n *Node) List(coordinator string, ack []string) ([]Snapshot, error) {
 	for _, id := range ack {
 		if runID.MatchString(id) {
 			acked := filepath.Join(n.runDir(id), "acked")
-			if s, err := n.Snapshot(id); err == nil && Terminal(s.State.State) && !paths.Exists(acked) {
+			if s, err := n.Snapshot(id); err == nil && (Terminal(s.State.State) || s.State.State == StateUnknown) && !paths.Exists(acked) {
 				fileio.WriteFile(acked, nil, 0o600) // its mtime starts the keepDone clock
 			}
 		}
@@ -291,7 +400,7 @@ func (n *Node) List(coordinator string, ack []string) ([]Snapshot, error) {
 		}
 		dir := n.runDir(id)
 		if fi, err := os.Stat(filepath.Join(dir, "acked")); err == nil && time.Since(fi.ModTime()) > keepDone {
-			os.RemoveAll(dir)
+			n.forget(id)
 			continue
 		}
 		var spec Spec
@@ -306,6 +415,24 @@ func (n *Node) List(coordinator string, ack []string) ([]Snapshot, error) {
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Run < out[j].Run })
 	return out, nil
+}
+
+// forget removes run id's directory; its session stays listed as a run's session.
+func (n *Node) forget(id string) {
+	dir := n.runDir(id)
+	var spec Spec
+	var st State
+	readJSON(filepath.Join(dir, "spec.json"), &spec)
+	readJSON(filepath.Join(dir, "state.json"), &st)
+	if !Terminal(st.State) && proc.Alive(st.Pid) {
+		return // its agent outlived the supervisor: its session stays guarded while it runs
+	}
+	if sid := cmp.Or(st.Session, spec.Session); sid != "" {
+		if err := capture.KeepRunSession(n.Dir, sid, capture.RunSession{Run: id, Provider: spec.Provider, Dir: spec.Dir, Title: spec.Title}); err != nil {
+			return
+		}
+	}
+	os.RemoveAll(dir)
 }
 
 func writeJSON(path string, v any) error {

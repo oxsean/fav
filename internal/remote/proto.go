@@ -24,9 +24,8 @@ const (
 
 type HelloParams struct {
 	Proto int    `json:"proto"`
-	Role  string `json:"role,omitempty"`  // client | coordinator | node
-	Lang  string `json:"lang,omitempty"`  // the caller's language: check texts come back in it
-	Token string `json:"token,omitempty"` // mode 2: who the caller is
+	Role  string `json:"role,omitempty"` // client | coordinator | node
+	Lang  string `json:"lang,omitempty"` // the caller's language: check texts come back in it
 }
 
 type Hello struct {

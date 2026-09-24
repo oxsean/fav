@@ -19,18 +19,18 @@ winhome='C:\Users\Administrator'
 r=/tmp/$id
 mkdir -p "$root/home" "$root/claude" "$root/codex" "$root/bin"
 printf '#!/bin/sh\nexit 1\n' >"$root/bin/herdr" && chmod +x "$root/bin/herdr"
-export FAV_HOME=$root/home CLAUDE_CONFIG_DIR=$root/claude CODEX_HOME=$root/codex PATH=$root/bin:$PATH
-unset HERDR_SOCKET HERDR_PANE_ID HERDR_WORKSPACE_ID TEND_HOME
+export TEND_HOME=$root/home CLAUDE_CONFIG_DIR=$root/claude CODEX_HOME=$root/codex PATH=$root/bin:$PATH
+unset HERDR_SOCKET HERDR_PANE_ID HERDR_WORKSPACE_ID FAV_HOME
 pids=""
 bg() { "$@" </dev/null >>"$root/bg.log" 2>&1 & pids="$pids $!"; }
 fail=0
 check() { if [ "$2" = "$3" ]; then echo "ok   $1"; else echo "FAIL $1: got '$2', want '$3'"; fail=$((fail + 1)); fi; }
-envs() { printf 'FAV_HOME=%s/%s/home CLAUDE_CONFIG_DIR=%s/%s/claude CODEX_HOME=%s/%s/codex' "$r" "$1" "$r" "$1" "$r" "$1"; }
+envs() { printf 'TEND_HOME=%s/%s/home CLAUDE_CONFIG_DIR=%s/%s/claude CODEX_HOME=%s/%s/codex' "$r" "$1" "$r" "$1" "$r" "$1"; }
 cexec() { ssh mba "$docker exec -i fav-linux $*"; }
 
 server_home=$r/server
 cexec mkdir -p "$server_home"
-token() { cexec env FAV_HOME=$server_home /root/.local/bin/fav server token add "$@" 2>/dev/null; }
+token() { cexec env TEND_HOME=$server_home /root/.local/bin/fav server token add "$@" 2>/dev/null; }
 [ $# -gt 0 ] || set -- mba linux win
 nodes=$#
 for h in "$@"; do eval "tok_$h=\$(token --node $h)"; done
@@ -41,7 +41,9 @@ ckill() { # the first character in brackets keeps the pattern from matching this
 	pat="[$(printf %s "$1" | cut -c1)]$(printf %s "$1" | cut -c2-)"
 	ssh mba "$docker exec fav-linux sh -c 'for p in /proc/[0-9]*; do tr \"\\000\" \" \" <\$p/cmdline 2>/dev/null | grep -q -- \"$pat\" && kill \${p#/proc/}; done; true'"
 }
-start_server() { bg ssh mba "$docker exec -i fav-linux env FAV_HOME=$server_home /root/.local/bin/fav server --listen 0.0.0.0:$port --plain"; }
+# the server records its pid in its throwaway home: only this test's server is ever stopped
+start_server() { bg ssh mba "$docker exec -i fav-linux sh -c 'echo \$\$ >$server_home/pid; exec env TEND_HOME=$server_home /root/.local/bin/fav server --listen 0.0.0.0:$port --plain'"; }
+stop_server() { ssh mba "$docker exec fav-linux sh -c 'kill \$(cat $server_home/pid)'"; }
 start_server
 ctr_ip=$(ssh mba "$docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' fav-linux")
 cat >"$root/fwd.py" <<'EOF'
@@ -99,7 +101,7 @@ has linux && posix_node linux "ssh mba $docker exec -i fav-linux" /root/.local/b
 has wsl && posix_node wsl "ssh lg-win wsl -d Debian -e" /home/admin/.local/bin/fav "$url" "$tok_wsl"
 w="$winhome\\$id\\win"
 if has win; then
-printf '@echo off\r\nset "FAV_HOME=%s\\home"\r\nset "CLAUDE_CONFIG_DIR=%s\\claude"\r\nset "CODEX_HOME=%s\\codex"\r\n"%s\\.local\\bin\\fav.exe" %%*\r\n' "$w" "$w" "$w" "$winhome" >"$root/fav.cmd"
+printf '@echo off\r\nset "TEND_HOME=%s\\home"\r\nset "CLAUDE_CONFIG_DIR=%s\\claude"\r\nset "CODEX_HOME=%s\\codex"\r\n"%s\\.local\\bin\\fav.exe" %%*\r\n' "$w" "$w" "$w" "$winhome" >"$root/fav.cmd"
 printf '%s' "$tok_win" >"$root/token.win"
 wj=$(printf '%s' "$w" | sed 's/\\/\\\\/g')
 printf '{"node":{"allow_dirs":["%s"]}}' "$wj" >"$root/config.win.json"
@@ -109,7 +111,7 @@ bg ssh -N -R "7789:$tailnet:$port" lg-win
 bg ssh lg-win "$w\\fav.cmd node --connect ws://127.0.0.1:7789 --token-file $w\\token"
 fi
 
-printf '{"coordinator": {"url": "%s", "token_file": "%s/client-token"}}\n' "$url" "$root" >"$FAV_HOME/config.json"
+printf '{"coordinator": {"url": "%s", "token_file": "%s/client-token"}}\n' "$url" "$root" >"$TEND_HOME/config.json"
 printf '%s\n' "$tok_me" >"$root/client-token"
 
 all_connected() {
@@ -148,7 +150,7 @@ for h in $hosts; do
 	check "$h output" "$("$fav" run logs "$run" | grep -c 'fake step')" 2
 done
 
-ckill "server --listen 0.0.0.0:$port"
+stop_server
 sleep 2
 start_server
 wait_connected 90
@@ -160,7 +162,7 @@ wait_runs
 check "a run on $last after the restart" "$(jq_runs "print(sum(1 for r in rs if r['machine']=='$last' and r['state']=='exited'))")" 2
 
 for p in $pids; do kill "$p" 2>/dev/null; done
-ckill "server --listen 0.0.0.0:$port"
+stop_server
 ckill "$id"
 cexec rm -rf "$r"
 ssh mba "pkill -f '$id'; rm -rf $r" || true

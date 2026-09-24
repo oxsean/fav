@@ -223,3 +223,20 @@ func TestTheLaterNodeConnectionWinsAndRevokingDropsIt(t *testing.T) {
 		t.Fatal("a revoked token keeps its connection")
 	}
 }
+
+func TestATokenReplacedUnderTheSameNameDropsTheOldConnection(t *testing.T) {
+	r := newRig(t)
+	old := r.node(r.nodeT)
+	r.waitMachine("n1", coord.MachineConnected)
+	if err := RemoveToken(r.home, "n1"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := AddToken(r.home, RoleNode, "n1"); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-old.Done():
+	case <-time.After(10 * time.Second):
+		t.Fatal("the replaced token keeps its connection")
+	}
+}

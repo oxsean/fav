@@ -58,6 +58,7 @@ type Run struct {
 	Agent     string           `json:"agent"`
 	Profile   fav.AgentProfile `json:"profile"`
 	Dir       string           `json:"dir"`
+	From      string           `json:"from,omitempty"`  // the machine Dir was written for; "": the run's own
 	Brief     string           `json:"brief,omitempty"` // frozen at dispatch
 	Title     string           `json:"title,omitempty"`
 	Runner    string           `json:"runner,omitempty"` // "": the node picks
@@ -227,7 +228,7 @@ func (s *State) apply(e journal.Event, at time.Time) error {
 	case ERunAbandoned:
 		return s.run(e, func(r *Run) {
 			if Open(r.State) {
-				r.State, r.EndedAt = Abandoned, &at
+				r.State, r.Want, r.EndedAt = Abandoned, "stop", &at
 			}
 		})
 	default:
@@ -263,7 +264,7 @@ func (r *Run) observe(o Observation) {
 		if rank[o.State] < 3 {
 			return
 		}
-	} else if rank[o.State] < rank[r.State] && !(r.State == Unknown && o.State == Running) {
+	} else if rank[o.State] < rank[r.State] {
 		return
 	}
 	r.State, r.NodeRev = o.State, o.NodeRev

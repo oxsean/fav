@@ -67,3 +67,28 @@ func TestResumeForkStart(t *testing.T) {
 		t.Fatal("session providers")
 	}
 }
+
+func TestBypassIsReadFromTheCommandLine(t *testing.T) {
+	for _, argv := range [][]string{
+		{"claude", "--permission-mode", "bypassPermissions"}, {"claude", "--permission-mode=bypassPermissions"},
+		{"claude", "--dangerously-skip-permissions"}, {"codex", "exec", "-s", "danger-full-access"},
+		{"codex", "exec", "--sandbox=danger-full-access"}, {"codex", "-c", `sandbox_mode="danger-full-access"`},
+		{"codex", "--config=sandbox_mode=danger-full-access"}, {"codex", "--yolo"},
+		{"codex", "exec", "-sdanger-full-access"}, {"codex", "exec", "-csandbox_mode=danger-full-access"},
+		{"claude", "-p", "--settings", "{}"}, {"claude", "-p", "--allowedTools", "Bash"}, {"codex", "exec", "-p", "wide"},
+	} {
+		if !BypassArgv(argv) {
+			t.Errorf("%v", argv)
+		}
+	}
+	for _, argv := range [][]string{{"claude", "-p", "--permission-mode", "acceptEdits"}, {"codex", "exec", "-s", "workspace-write"},
+		{"claude", "-p", "--permission-mode"}} {
+		if BypassArgv(argv) {
+			t.Errorf("%v", argv)
+		}
+	}
+	got := Profiles([]Profile{{Name: "claude", Provider: "claude", Model: "opus"}, {Name: "mine", Provider: "command"}})
+	if len(got) != 4 || got[0].Model != "opus" || got[3].Name != "mine" {
+		t.Fatalf("%+v", got)
+	}
+}

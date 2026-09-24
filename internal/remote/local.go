@@ -134,6 +134,9 @@ func decode(params json.RawMessage, v any) error {
 	return nil
 }
 
+// LocalHello is how this machine greets.
+func LocalHello(version string) Hello { return hello(version) }
+
 func hello(version string) Hello {
 	host, _ := os.Hostname()
 	home, _ := os.UserHomeDir()

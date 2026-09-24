@@ -1,29 +1,67 @@
 package capture
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
 
 	"github.com/oxsean/fav/internal/fav"
+	"github.com/oxsean/fav/internal/fileio"
 	"github.com/oxsean/fav/internal/filelock"
+	"github.com/oxsean/fav/internal/proc"
 )
 
 // RunSession is a session a tend run started on this machine.
 type RunSession struct {
-	Run      string
-	Provider string
-	Dir      string
-	Title    string
-	Open     bool // its supervisor is alive and has not recorded an end
+	Run      string `json:"run"`
+	Provider string `json:"provider,omitempty"`
+	Dir      string `json:"dir,omitempty"`
+	Title    string `json:"title,omitempty"`
+	Open     bool   `json:"-"` // it has not recorded an end, and its supervisor or its agent is alive
 }
 
-// RunSessions are the sessions of this machine's runs (<home>/node/runs, written by internal/node), by session id.
-// Their CLIs mark them one-shot, but tend started them for a task: they are listed and guarded like any session.
+// keptSessions lists, one JSON line each, the sessions of runs whose directories are gone.
+const keptSessions = "sessions.jsonl"
+
+// KeepRunSession records session sid of a run whose directory under nodeDir is about to go.
+func KeepRunSession(nodeDir, sid string, r RunSession) error {
+	b, err := json.Marshal(struct {
+		Session string `json:"session"`
+		RunSession
+	}{sid, r})
+	if err != nil {
+		return err
+	}
+	f, err := os.OpenFile(filepath.Join(nodeDir, keptSessions), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		return err
+	}
+	_, err = f.Write(append(b, '\n'))
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	return err
+}
+
+// RunSessions are the sessions of this machine's runs (<home>/node/runs, written by internal/node, and the ones kept
+// after their directories went), by session id. Their CLIs mark them one-shot, but tend started them for a task:
+// they are listed and guarded like any session.
 func RunSessions() map[string]RunSession {
-	root := filepath.Join(fav.Home(), "node", "runs")
-	ents, _ := os.ReadDir(root)
+	nodeDir := filepath.Join(fav.Home(), "node")
 	out := map[string]RunSession{}
+	fileio.Lines(context.Background(), filepath.Join(nodeDir, keptSessions), 0, 64<<10, func(_ int64, line []byte) bool {
+		var k struct {
+			Session string `json:"session"`
+			RunSession
+		}
+		if json.Unmarshal(line, &k) == nil && k.Session != "" {
+			out[k.Session] = k.RunSession
+		}
+		return true
+	})
+	root := filepath.Join(nodeDir, "runs")
+	ents, _ := os.ReadDir(root)
 	for _, e := range ents {
 		dir := filepath.Join(root, e.Name())
 		var spec struct {
@@ -35,6 +73,7 @@ func RunSessions() map[string]RunSession {
 		var st struct {
 			State   string `json:"state"`
 			Session string `json:"session"`
+			Pid     int    `json:"pid"`
 		}
 		readJSONFile(filepath.Join(dir, "spec.json"), &spec)
 		ended := readJSONFile(filepath.Join(dir, "state.json"), &st) &&
@@ -47,7 +86,7 @@ func RunSessions() map[string]RunSession {
 			continue
 		}
 		out[sid] = RunSession{Run: e.Name(), Provider: spec.Provider, Dir: spec.Dir, Title: spec.Title,
-			Open: !ended && filelock.Held(filepath.Join(dir, "lock"))}
+			Open: !ended && (filelock.Held(filepath.Join(dir, "lock")) || proc.Alive(st.Pid))}
 	}
 	return out
 }

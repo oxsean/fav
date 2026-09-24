@@ -4,6 +4,7 @@ package proc
 
 import (
 	"errors"
+	"fmt"
 	"os/exec"
 	"syscall"
 	"unsafe"
@@ -44,7 +45,10 @@ func Alive(pid int) bool {
 
 type tree struct{ job windows.Handle }
 
-// start puts c in a job that is killed as a whole, and killed when this process ends (no orphans).
+var ntResumeProcess = windows.NewLazySystemDLL("ntdll.dll").NewProc("NtResumeProcess")
+
+// start puts c in a job that is killed as a whole, and killed when this process ends (no orphans). c starts suspended
+// and runs only once it is in the job, so nothing it starts escapes.
 func (t *Tree) start(bool) error {
 	job, err := windows.CreateJobObject(nil, nil)
 	if err != nil {
@@ -57,13 +61,22 @@ func (t *Tree) start(bool) error {
 		windows.CloseHandle(job)
 		return err
 	}
+	if t.Cmd.SysProcAttr == nil {
+		t.Cmd.SysProcAttr = &syscall.SysProcAttr{}
+	}
+	t.Cmd.SysProcAttr.CreationFlags |= windows.CREATE_SUSPENDED
 	if err := t.Cmd.Start(); err != nil {
 		windows.CloseHandle(job)
 		return err
 	}
-	h, err := windows.OpenProcess(windows.PROCESS_SET_QUOTA|windows.PROCESS_TERMINATE, false, uint32(t.Cmd.Process.Pid))
+	h, err := windows.OpenProcess(windows.PROCESS_SET_QUOTA|windows.PROCESS_TERMINATE|windows.PROCESS_SUSPEND_RESUME, false, uint32(t.Cmd.Process.Pid))
 	if err == nil {
 		err = windows.AssignProcessToJobObject(job, h)
+		if err == nil {
+			if st, _, _ := ntResumeProcess.Call(uintptr(h)); st != 0 {
+				err = fmt.Errorf("NtResumeProcess: 0x%x", st)
+			}
+		}
 		windows.CloseHandle(h)
 	}
 	if err != nil {
@@ -85,4 +98,19 @@ func KillPID(pid int) error {
 	}
 	defer windows.CloseHandle(h)
 	return windows.TerminateProcess(h, 1)
+}
+
+// CheckArgs refuses argv whose program resolves to a batch file that one of its arguments would break out of.
+func CheckArgs(argv []string) error {
+	if len(argv) == 0 {
+		return nil
+	}
+	exe, err := exec.LookPath(argv[0])
+	if err != nil {
+		return nil // starting it reports that
+	}
+	if batchUnsafe(exe, argv[1:]) {
+		return ErrBatchArgs
+	}
+	return nil
 }

@@ -75,7 +75,34 @@ func smoke(dir string) error {
 	if err := run(env, bin, "doctor"); err != nil {
 		return err
 	}
+	if err := taskSmoke(d, env, bin); err != nil {
+		return fmt.Errorf("task: %w", err)
+	}
 	return hostsSmoke(d, env, bin)
+}
+
+// taskSmoke: a task run to its end by the fake agent, this process being the coordinator for the command.
+func taskSmoke(d *fixture.Dataset, env []string, bin string) error {
+	proj := filepath.Join(d.Root, "task-smoke")
+	if err := os.MkdirAll(proj, 0o755); err != nil {
+		return err
+	}
+	if err := run(env, bin, "task", "add", "--agent", "fake", "--dir", proj, "smoke"); err != nil {
+		return err
+	}
+	c := exec.Command(bin, "task", "list", "--json")
+	c.Env, c.Stderr = env, os.Stderr
+	out, err := c.Output()
+	if err != nil {
+		return err
+	}
+	var tasks []struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(out, &tasks); err != nil || len(tasks) != 1 {
+		return fmt.Errorf("task list: %s", out)
+	}
+	return run(env, bin, "run", "start", "--runner", "background", "--wait", tasks[0].ID)
 }
 
 // hostsSmoke: this machine as both ends of the multi-host path, fav reaching its own launcher as a process.

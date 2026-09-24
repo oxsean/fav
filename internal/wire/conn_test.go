@@ -335,3 +335,51 @@ func TestPastTheQueueTheAnswerIsBusyAndPingsStillWork(t *testing.T) {
 		t.Fatalf("ping goes past a full queue: %v", err)
 	}
 }
+
+func TestABurstPastTheQueueIsBusyAtOnce(t *testing.T) {
+	release := make(chan struct{})
+	defer close(release)
+	var handled atomic.Int32
+	h := func(ctx context.Context, r *Request) (any, error) {
+		handled.Add(1)
+		select {
+		case <-release:
+		case <-ctx.Done():
+		}
+		return nil, nil
+	}
+	c, _ := pair(t, Options{}, Options{Handler: h, MaxInflight: 1, MaxQueued: 2})
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	var busy atomic.Int32
+	var wg sync.WaitGroup
+	for range 50 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if Code(c.Call(ctx, "x", nil, nil)) == CodeBusy {
+				busy.Add(1)
+			}
+		}()
+	}
+	wg.Wait()
+	if busy.Load() < 47 {
+		t.Fatalf("%d of 50 answered busy with room for 3", busy.Load())
+	}
+}
+
+func TestAnAnswerOverTheFrameLimitIsAnErrorNotABrokenConnection(t *testing.T) {
+	big := strings.Repeat("x", MaxFrame)
+	c, _ := pair(t, Options{}, Options{Handler: func(ctx context.Context, r *Request) (any, error) { return text{big}, nil }})
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := c.Call(ctx, "big", nil, nil); Code(err) != CodeInternal {
+		t.Fatal(err)
+	}
+	if err := c.Call(ctx, MPing, nil, nil); err != nil {
+		t.Fatalf("the connection stays: %v", err)
+	}
+	if err := c.Call(ctx, "x", text{big}, nil); Code(err) != CodeBadRequest {
+		t.Fatalf("a request over the limit: %v", err)
+	}
+}

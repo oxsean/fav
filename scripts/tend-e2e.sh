@@ -1,6 +1,6 @@
 #!/bin/sh
 # End to end over ssh (mode 1): this Mac is the coordinator in a throwaway home; each remote runs its installed fav with
-# FAV_HOME / CLAUDE_CONFIG_DIR / CODEX_HOME in a throwaway directory, so no real session or run is touched. Each host
+# TEND_HOME / CLAUDE_CONFIG_DIR / CODEX_HOME in a throwaway directory, so no real session or run is touched. Each host
 # runs a fake agent to its end, one run is stopped, and the runs' sessions must be listed by `sessions host:<name>`.
 # Hosts: mba (macOS), linux (container on mba), wsl and win (lg-win); pass names to run a subset.
 # Needs fav installed on every remote (`fav hosts install <name>`) at the same protocol.
@@ -12,18 +12,18 @@ fav=${FAV_BIN:-$HOME/.local/bin/fav}
 [ $# -gt 0 ] || set -- mba linux wsl win
 mkdir -p "$root/home" "$root/claude" "$root/codex" "$root/bin"
 printf '#!/bin/sh\nexit 1\n' >"$root/bin/herdr" && chmod +x "$root/bin/herdr"
-export FAV_HOME=$root/home CLAUDE_CONFIG_DIR=$root/claude CODEX_HOME=$root/codex PATH=$root/bin:$PATH
-unset HERDR_SOCKET HERDR_PANE_ID HERDR_WORKSPACE_ID TEND_HOME
+export TEND_HOME=$root/home CLAUDE_CONFIG_DIR=$root/claude CODEX_HOME=$root/codex PATH=$root/bin:$PATH
+unset HERDR_SOCKET HERDR_PANE_ID HERDR_WORKSPACE_ID FAV_HOME
 docker=/Applications/OrbStack.app/Contents/MacOS/xbin/docker
 winhome='C:\Users\Administrator'
 
 # host: name ssh-alias remote-root project-dir fav-argv(json)
 hostdef() {
 	r=/tmp/$id
-	envs="\"FAV_HOME=$r/home\", \"CLAUDE_CONFIG_DIR=$r/claude\", \"CODEX_HOME=$r/codex\""
+	envs="\"TEND_HOME=$r/home\", \"CLAUDE_CONFIG_DIR=$r/claude\", \"CODEX_HOME=$r/codex\""
 	case $1 in
 	mba) printf '%s\n' "mba|$r|$r/proj|[\"env\", $envs, \"/Users/ozn/.local/bin/fav\"]" ;;
-	linux) printf '%s\n' "mba|$r|$r/proj|[\"$docker\", \"exec\", \"-i\", \"-e\", \"FAV_HOME=$r/home\", \"-e\", \"CLAUDE_CONFIG_DIR=$r/claude\", \"-e\", \"CODEX_HOME=$r/codex\", \"fav-linux\", \"/root/.local/bin/fav\"]" ;;
+	linux) printf '%s\n' "mba|$r|$r/proj|[\"$docker\", \"exec\", \"-i\", \"-e\", \"TEND_HOME=$r/home\", \"-e\", \"CLAUDE_CONFIG_DIR=$r/claude\", \"-e\", \"CODEX_HOME=$r/codex\", \"fav-linux\", \"/root/.local/bin/fav\"]" ;;
 	wsl) printf '%s\n' "lg-win|$r|$r/proj|[\"wsl\", \"-d\", \"Debian\", \"-e\", \"env\", $envs, \"/home/admin/.local/bin/fav\"]" ;;
 	win) printf '%s\n' "lg-win|$winhome\\$id|$winhome\\$id\\proj|[\"$(printf '%s' "$winhome\\$id\\fav.cmd" | sed 's/\\/\\\\/g')\"]" ;;
 	esac
@@ -38,7 +38,7 @@ EOF
 	linux) ssh "$ssh" "$docker exec fav-linux mkdir -p $proj" ;;
 	wsl) ssh "$ssh" "wsl -d Debian -e mkdir -p $proj" ;;
 	win)
-		printf '@echo off\r\nset "FAV_HOME=%s\\home"\r\nset "CLAUDE_CONFIG_DIR=%s\\claude"\r\nset "CODEX_HOME=%s\\codex"\r\n"%s\\.local\\bin\\fav.exe" %%*\r\n' \
+		printf '@echo off\r\nset "TEND_HOME=%s\\home"\r\nset "CLAUDE_CONFIG_DIR=%s\\claude"\r\nset "CODEX_HOME=%s\\codex"\r\n"%s\\.local\\bin\\fav.exe" %%*\r\n' \
 			"$r" "$r" "$r" "$winhome" >"$root/fav.cmd"
 		ssh "$ssh" "mkdir $proj" && scp -q "$root/fav.cmd" "$ssh:$id/fav.cmd"
 		;;
@@ -65,7 +65,7 @@ EOF
 	hosts="$hosts${hosts:+,}{\"name\": \"$h\", \"ssh\": \"$ssh\", \"fav\": $argv}"
 	prepare "$h" || { echo "prepare $h failed"; exit 1; }
 done
-cat >"$FAV_HOME/config.json" <<EOF
+cat >"$TEND_HOME/config.json" <<EOF
 {"hosts": [$hosts],
  "agents": [{"name": "quick", "provider": "fake", "args": ["--steps", "2", "--every", "300ms"]},
             {"name": "waiter", "provider": "fake", "args": ["--steps", "1", "--every", "300ms", "--ask"]}]}

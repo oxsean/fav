@@ -8,7 +8,8 @@ import (
 	"errors"
 )
 
-// Proto changes whenever a frame or a method's request or result changes shape; both ends must agree.
+// Proto changes whenever a frame changes shape; both ends must agree. Methods are not versioned by it: hello lists
+// them, and a method's params or result only gain fields an older end ignores.
 const Proto = 2
 
 // Frame kinds.

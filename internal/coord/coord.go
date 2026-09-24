@@ -41,6 +41,7 @@ const (
 	MMachineList   = "machine.list"
 	MSubscribe     = "subscribe"
 	MNodeCall      = "node.call"
+	MTaskGet       = "task.get"
 	PushJournal    = "journal"
 	defaultSlots   = 2
 	subscribeQueue = 256
@@ -77,6 +78,7 @@ type Coord struct {
 	sent     map[string]time.Time // runs whose run.start went out, when
 	acked    map[string][]string  // per machine: ended runs recorded, to acknowledge
 	ackDone  map[string]bool
+	missing  map[string]int // open runs by how many lists of their node in a row lacked them
 	passMu   sync.Mutex
 	wake     chan struct{}
 }
@@ -92,8 +94,12 @@ func Open(opt Options) (*Coord, error) {
 		return nil, err
 	}
 	c := &Coord{opt: opt, unlock: unlock, st: task.New(), receipts: map[string]journal.Receipt{}, subs: map[*wire.Conn]*sub{},
-		ms: map[string]*machine{}, sent: map[string]time.Time{}, acked: map[string][]string{}, ackDone: map[string]bool{}, wake: make(chan struct{}, 1)}
-	c.id = coordID(dir)
+		ms: map[string]*machine{}, sent: map[string]time.Time{}, acked: map[string][]string{}, ackDone: map[string]bool{}, missing: map[string]int{},
+		wake: make(chan struct{}, 1)}
+	if c.id, err = coordID(dir); err != nil {
+		unlock()
+		return nil, err
+	}
 	c.log, err = journal.Open(filepath.Join(dir, "events.jsonl"), func(env journal.Envelope) error {
 		if env.Command != nil {
 			c.receipts[env.Command.ID] = *env.Command
@@ -109,16 +115,15 @@ func Open(opt Options) (*Coord, error) {
 }
 
 // coordID names this coordinator to nodes: they list only the runs it started.
-func coordID(dir string) string {
+func coordID(dir string) (string, error) {
 	p := filepath.Join(dir, "id")
 	if b, err := os.ReadFile(p); err == nil && len(strings.TrimSpace(string(b))) > 0 {
-		return strings.TrimSpace(string(b))
+		return strings.TrimSpace(string(b)), nil
 	}
 	var b [8]byte
 	rand.Read(b[:])
 	id := "c_" + hex.EncodeToString(b[:])
-	fileio.WriteFile(p, []byte(id+"\n"), 0o600)
-	return id
+	return id, fileio.WriteFile(p, []byte(id+"\n"), 0o600) // ⚠️ a lost id hides every run from its nodes
 }
 
 func (c *Coord) ID() string { return c.id }
@@ -143,12 +148,23 @@ func (c *Coord) Close() {
 }
 
 // State is a copy of the state.
-func (c *Coord) State() *task.State {
+func (c *Coord) State() *task.State { return c.state(true) }
+
+// state is a copy of the state, with or without the briefs.
+func (c *Coord) state(briefs bool) *task.State {
 	c.mu.Lock()
-	defer c.mu.Unlock()
 	b, _ := json.Marshal(c.st)
+	c.mu.Unlock()
 	s := task.New()
 	json.Unmarshal(b, s)
+	if !briefs {
+		for _, t := range s.Tasks {
+			t.Brief = ""
+		}
+		for _, r := range s.Runs {
+			r.Brief = ""
+		}
+	}
 	return s
 }
 
@@ -178,27 +194,8 @@ func (c *Coord) commit(cmd *journal.Receipt, events ...journal.Event) error {
 	return nil
 }
 
-// Profiles are the agents one can run: the built-in ones, then config's (a config profile replaces a built-in one of
-// the same name).
-func (c *Coord) Profiles() []fav.AgentProfile {
-	out := []fav.AgentProfile{
-		{Name: fav.ProviderClaude, Provider: fav.ProviderClaude},
-		{Name: fav.ProviderCodex, Provider: fav.ProviderCodex},
-		{Name: agent.ProviderFake, Provider: agent.ProviderFake},
-	}
-	for _, p := range c.opt.Config.Agents {
-		replaced := false
-		for i := range out {
-			if out[i].Name == p.Name {
-				out[i], replaced = p, true
-			}
-		}
-		if !replaced {
-			out = append(out, p)
-		}
-	}
-	return out
-}
+// Profiles are the agents one can run.
+func (c *Coord) Profiles() []fav.AgentProfile { return agent.Profiles(c.opt.Config.Agents) }
 
 func (c *Coord) profile(name string) (fav.AgentProfile, bool) {
 	for _, p := range c.Profiles() {

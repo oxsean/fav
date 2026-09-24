@@ -8,6 +8,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/oxsean/fav/internal/agent"
 	"github.com/oxsean/fav/internal/fav"
 	"github.com/oxsean/fav/internal/i18n"
 	"github.com/oxsean/fav/internal/node"
@@ -31,7 +32,8 @@ func cmdNode(args []string) error {
 		return err
 	}
 	n := node.New(fav.Home())
-	n.Limits = loadConfig().Node
+	cfg := loadConfig()
+	n.Limits, n.Profiles = cfg.Node, agent.Profiles(cfg.Agents)
 	if *url != "" {
 		return connectNode(n, *url, *tokenFile)
 	}

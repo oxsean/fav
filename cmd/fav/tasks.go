@@ -17,6 +17,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/oxsean/fav/internal/agent"
 	"github.com/oxsean/fav/internal/coord"
 	"github.com/oxsean/fav/internal/fav"
 	"github.com/oxsean/fav/internal/i18n"
@@ -32,7 +33,7 @@ import (
 func coordOptions() coord.Options {
 	cfg := loadConfig()
 	n := node.New(fav.Home())
-	n.Limits = cfg.Node
+	n.Limits, n.Profiles = cfg.Node, agent.Profiles(cfg.Agents)
 	return coord.Options{Home: fav.Home(), Version: version, Config: cfg, Node: n, Sessions: remote.NewLocal(version)}
 }
 
@@ -46,12 +47,21 @@ func withCoord(wopt wire.Options, f func(cl *coord.Client) error) error {
 		return err
 	}
 	defer cl.Close()
+	if cl.Coord != nil { // no coordinator was running: bring the runs up to date before answering
+		ctx, cancel := context.WithTimeout(context.Background(), freshWait)
+		cl.Coord.Settle(ctx)
+		cancel()
+	}
 	err = f(cl)
 	if wire.Code(err) != "" {
 		return errors.New(reasonOf(err))
 	}
 	return err
 }
+
+// freshWait bounds how long a command that became the coordinator reconciles before it reads: enough for this
+// machine and a reused ssh connection, not for a machine that does not answer.
+const freshWait = 2 * time.Second
 
 func callTimeout() (context.Context, context.CancelFunc) {
 	return context.WithTimeout(context.Background(), time.Minute)
@@ -73,7 +83,7 @@ func readState(cl *coord.Client) (*task.State, error) {
 	ctx, cancel := callTimeout()
 	defer cancel()
 	st := task.New()
-	return st, cl.Call(ctx, coord.MStateGet, nil, st)
+	return st, cl.Call(ctx, coord.MStateGet, coord.StateParams{NoBriefs: true}, st)
 }
 
 // resolve finds the one id in ids that is arg or starts with it.
@@ -291,7 +301,14 @@ func cmdTaskShow(args []string) error {
 		if err != nil {
 			return err
 		}
-		t, runs := st.Tasks[id], st.RunsOf(id)
+		runs := st.RunsOf(id)
+		t := &task.Task{}
+		ctx, cancel := callTimeout()
+		err = cl.Call(ctx, coord.MTaskGet, task.RunRef{ID: id}, t)
+		cancel()
+		if err != nil {
+			return err
+		}
 		if *asJSON {
 			return printJSON(map[string]any{"task": t, "runs": runs})
 		}
@@ -635,7 +652,11 @@ func cmdRunLogs(args []string) error {
 			if t.File != file {
 				file, printed = t.File, t.From
 			}
-			if end > printed && printed >= t.From {
+			if printed < t.From { // more came in a second than one page holds
+				fmt.Fprint(os.Stderr, i18n.F("cli.run.logs_gap", t.From-printed))
+				printed = t.From
+			}
+			if end > printed {
 				fmt.Print(render.Sanitize(t.Text[printed-t.From:]))
 				printed = end
 			}

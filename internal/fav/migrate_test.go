@@ -115,9 +115,32 @@ func TestMigrateOnANewMachineMarksTheHome(t *testing.T) {
 	if err != nil || m.Marked != tend || Home() != tend {
 		t.Fatalf("%+v %v %s", m, err, Home())
 	}
-	put(t, filepath.Join(tend, "records.jsonl"), "{}\n")
+	put(t, filepath.Join(tend, "sessions.jsonl"), "{}\n")
 	os.Remove(filepath.Join(tend, HomeMarker))
 	if m, err := MigrateHome(time.Now()); err != nil || m.OldTend != "" || m.Marked != tend {
 		t.Fatalf("a home of ours without the marker is marked, not moved aside: %+v %v", m, err)
+	}
+}
+
+func TestMigrateLeavesAHomeSetByTheEnvironmentAlone(t *testing.T) {
+	_, old := homeIn(t)
+	put(t, filepath.Join(old, "records.jsonl"), "{}\n")
+	t.Setenv("TEND_HOME", t.TempDir())
+	if _, err := MigrateHome(time.Now()); !errors.Is(err, ErrHomeFromEnv) {
+		t.Fatalf("%v", err)
+	}
+	if !realDir(old) {
+		t.Fatal("nothing moved")
+	}
+}
+
+func TestMigrateTellsAnOlderTendFromOurs(t *testing.T) {
+	tend, _ := homeIn(t)
+	put(t, filepath.Join(tend, "events.jsonl"), "old tend\n")
+	put(t, filepath.Join(tend, "records.jsonl"), "{}\n")
+	put(t, filepath.Join(tend, "config.json"), "{}")
+	m, err := MigrateHome(time.Now())
+	if err != nil || m.OldTend == "" || !exists(filepath.Join(m.OldTend, "events.jsonl")) || exists(filepath.Join(tend, "events.jsonl")) {
+		t.Fatalf("an older TEND with records and config is still moved aside: %+v %v", m, err)
 	}
 }

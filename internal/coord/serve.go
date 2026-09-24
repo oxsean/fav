@@ -54,6 +54,13 @@ type Client struct {
 	*wire.Conn
 	Coord  *Coord // nil: another process is the coordinator
 	cancel context.CancelFunc
+	wrote  bool // a command went through this client
+}
+
+// CallCommand is wire's, noting that this client wrote.
+func (cl *Client) CallCommand(ctx context.Context, method, commandID string, params, out any) error {
+	cl.wrote = true
+	return cl.Conn.CallCommand(ctx, method, commandID, params, out)
 }
 
 // lockedWait: the lock is held but the socket does not answer yet (its holder is starting).
@@ -94,8 +101,12 @@ func (cl *Client) CloseNow() error {
 	return cl.Conn.Close()
 }
 
-// Close ends the connection; a process that became the coordinator first dispatches what it was asked to.
+// Close ends the connection; a process that became the coordinator and was asked to change something first dispatches
+// it (a read-only command leaves at once).
 func (cl *Client) Close() error {
+	if cl.Coord != nil && !cl.wrote {
+		return cl.CloseNow()
+	}
 	if cl.Coord != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), settleWait)
 		cl.Coord.Settle(ctx)

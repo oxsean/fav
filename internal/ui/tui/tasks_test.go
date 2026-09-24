@@ -184,3 +184,46 @@ func TestTasksViewWithoutACoordinatorSaysSo(t *testing.T) {
 		t.Fatal("a session action in the Tasks view says it is not there")
 	}
 }
+
+func TestEditingATaskKeepsTheBriefTheListLacks(t *testing.T) {
+	m, _ := tasksModel(t)
+	key(m, "5")
+	brief := strings.Repeat("a long brief line\n", 2000)
+	if err := m.tasks.cl.CallCommand(t.Context(), coord.MTaskCreate, "c1", coord.TaskCreate{Title: "one", Brief: brief, Dir: t.TempDir()}, nil); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, m, func() bool { return len(m.tasks.list) == 1 })
+	for _, x := range m.tasks.st.Tasks { // as the list reads when the state is too big for one frame
+		x.Brief = ""
+	}
+	key(m, "e")
+	if m.ov.kind != ovTaskForm || len(m.ov.area.Value()) < len(strings.TrimSpace(brief)) {
+		t.Fatalf("the form has the whole brief: %v %d", m.ov.kind, len(m.ov.area.Value()))
+	}
+	m.ov.edit.SetValue("renamed")
+	key(m, "ctrl+s")
+	waitFor(t, m, func() bool { return m.tasks.list[0].Title == "renamed" })
+	var got task.Task
+	m.tasks.cl.Call(t.Context(), coord.MTaskGet, task.RunRef{ID: m.tasks.list[0].ID}, &got)
+	if got.Brief != brief {
+		t.Fatalf("the brief is %d bytes, was %d", len(got.Brief), len(brief))
+	}
+}
+
+func TestAClickInTheBriefPutsTheCursorThere(t *testing.T) {
+	m, _ := tasksModel(t)
+	key(m, "5")
+	key(m, "w")
+	m.ov.area.SetWidth(20)
+	m.ov.area.SetValue("第一行文字\n" + strings.Repeat("x", 30))
+	m.clickX = 2 + 4 // two wide characters in
+	m.placeAreaCursor(0, 2)
+	if m.ov.area.Line() != 0 || m.ov.area.LineInfo().ColumnOffset != 2 {
+		t.Fatalf("line %d col %d", m.ov.area.Line(), m.ov.area.LineInfo().ColumnOffset)
+	}
+	m.clickX = 2 + 3
+	m.placeAreaCursor(2, 2) // the second visual row of the wrapped line
+	if li := m.ov.area.LineInfo(); m.ov.area.Line() != 1 || li.RowOffset != 1 || li.ColumnOffset != 3 {
+		t.Fatalf("line %d %+v", m.ov.area.Line(), li)
+	}
+}

@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"path"
 	"slices"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -58,7 +60,7 @@ func (c *Coord) machines() {
 		}
 		return
 	}
-	c.ms[Local] = &machine{name: Local}
+	c.ms[Local] = &machine{name: Local, hello: remote.LocalHello(c.opt.Version)}
 	for i := range c.opt.Config.Hosts {
 		h := c.opt.Config.Hosts[i]
 		c.ms[h.Name] = &machine{name: h.Name, host: &h}
@@ -254,7 +256,7 @@ func (c *Coord) Pass(ctx context.Context) {
 	c.mu.Lock()
 	work := map[string]bool{}
 	for _, r := range c.st.Runs {
-		if task.Open(r.State) {
+		if task.Open(r.State) || r.State == task.Abandoned && !c.ackDone[r.ID] { // until the node says it ended
 			work[r.Machine] = true
 		}
 	}
@@ -296,10 +298,29 @@ func (c *Coord) Pass(ctx context.Context) {
 	wg.Wait()
 }
 
-// converge reconciles and dispatches one connected machine.
-func (c *Coord) converge(ctx context.Context, m *machine) {
+// missingAfter is how many lists in a row must lack an open run before it is taken for gone from its node.
+const missingAfter = 2
+
+// callNode makes one call to m's node on conn; false when the connection is lost (a call that timed out keeps it).
+func (c *Coord) callNode(ctx context.Context, m *machine, conn Conn, method string, params, out any) (bool, error) {
 	ctx, cancel := context.WithTimeout(ctx, callWait)
 	defer cancel()
+	err := conn.Call(ctx, method, params, out)
+	switch {
+	case err == nil:
+	case transport(err) && wire.Code(err) != wire.CodeTimeout && !errors.Is(err, context.DeadlineExceeded):
+		c.lost(m, conn, err)
+		return false, err
+	default:
+		c.mu.Lock()
+		m.err = err
+		c.mu.Unlock()
+	}
+	return true, err
+}
+
+// converge reconciles and dispatches one connected machine.
+func (c *Coord) converge(ctx context.Context, m *machine) {
 	c.mu.Lock()
 	conn, ack := m.conn, c.acked[m.name]
 	c.mu.Unlock()
@@ -307,14 +328,7 @@ func (c *Coord) converge(ctx context.Context, m *machine) {
 		return
 	}
 	var list node.Runs
-	if err := conn.Call(ctx, node.MRunList, node.ListParams{Coordinator: c.id, Ack: ack}, &list); err != nil {
-		if transport(err) {
-			c.lost(m, conn, err)
-		} else {
-			c.mu.Lock()
-			m.err = err
-			c.mu.Unlock()
-		}
+	if _, err := c.callNode(ctx, m, conn, node.MRunList, node.ListParams{Coordinator: c.id, Ack: ack}, &list); err != nil {
 		return
 	}
 
@@ -335,15 +349,42 @@ func (c *Coord) converge(ctx context.Context, m *machine) {
 			events = append(events, journal.NewEvent(task.ERunObserved, o))
 		}
 	}
+	for _, r := range c.st.Runs {
+		if r.Machine != m.name {
+			continue
+		}
+		if _, onNode := seen[r.ID]; onNode || r.State != task.Running && r.State != task.Unknown {
+			delete(c.missing, r.ID)
+			continue
+		}
+		if c.missing[r.ID]++; c.missing[r.ID] >= missingAfter {
+			if o := (task.Observation{ID: r.ID, State: task.Unknown, Reason: "missing", NodeRev: r.NodeRev}); r.Would(o) {
+				events = append(events, journal.NewEvent(task.ERunObserved, o))
+			}
+		}
+	}
 	err := c.commit(nil, events...)
+	var stops []string
 	for _, s := range list.Runs {
-		if r := c.st.Runs[s.Run]; r != nil && node.Terminal(s.State.State) && !task.Open(r.State) && !c.ackDone[s.Run] &&
-			!slices.Contains(c.acked[m.name], s.Run) {
-			c.acked[m.name] = append(c.acked[m.name], s.Run)
+		r := c.st.Runs[s.Run]
+		if r == nil || r.Machine != m.name || task.Open(r.State) {
+			continue
+		}
+		switch {
+		case node.Terminal(s.State.State) || s.State.State == node.StateUnknown:
+			if !c.ackDone[s.Run] && !slices.Contains(c.acked[m.name], s.Run) {
+				c.acked[m.name] = append(c.acked[m.name], s.Run)
+			}
+		case r.State == task.Abandoned && !s.StopAsked: // given up on, but it runs on
+			stops = append(stops, s.Run)
+		}
+	}
+	for _, r := range c.st.Runs {
+		if _, onNode := seen[r.ID]; r.Machine == m.name && r.State == task.Abandoned && !onNode && !c.ackDone[r.ID] {
+			stops = append(stops, r.ID) // not there (yet): the stop leaves a tombstone a late start finds
 		}
 	}
 
-	var stops []string
 	var starts []*task.Run
 	var mine []*task.Run
 	for _, r := range c.st.Runs {
@@ -353,15 +394,24 @@ func (c *Coord) converge(ctx context.Context, m *machine) {
 	}
 	sort.Slice(mine, func(i, j int) bool { return mine[i].QueuedAt.Before(mine[j].QueuedAt) })
 	used, dirs := 0, map[string]bool{}
+	for _, r := range c.st.Runs { // given up on but still running there: it keeps its slot and directory until it ends
+		if s, onNode := seen[r.ID]; r.Machine == m.name && r.State == task.Abandoned && onNode && !node.Terminal(s.State.State) &&
+			s.State.State != node.StateUnknown {
+			used++
+			dirs[dirKey(r.Dir, m.hello.OS)] = true
+		}
+	}
 	for _, r := range mine {
 		if r.State == task.Queued {
 			continue
 		}
 		used++
-		dirs[paths.Clean(r.Dir)] = true
+		dirs[dirKey(r.Dir, m.hello.OS)] = true
 		s, onNode := seen[r.ID]
 		switch {
 		case r.Want == "stop" && onNode && !node.Terminal(s.State.State) && !s.StopAsked:
+			stops = append(stops, r.ID)
+		case r.Want == "stop" && !onNode && r.State == task.Starting: // the start never arrived: the node records it stopped
 			stops = append(stops, r.ID)
 		case r.State == task.Starting && !onNode && r.Want == "run" && time.Since(c.sent[r.ID]) > resendAfter:
 			starts = append(starts, r)
@@ -372,15 +422,15 @@ func (c *Coord) converge(ctx context.Context, m *machine) {
 		if r.State != task.Queued || r.Want != "run" {
 			continue
 		}
-		dir := c.mapDir(r, m)
 		if used >= c.slots(m.name) {
 			break
 		}
-		if dirs[paths.Clean(dir)] {
+		dir, ok := c.mapDir(r, m)
+		if !ok || dirs[dirKey(dir, m.hello.OS)] {
 			continue
 		}
 		used++
-		dirs[paths.Clean(dir)] = true
+		dirs[dirKey(dir, m.hello.OS)] = true
 		starting = append(starting, journal.NewEvent(task.ERunStarting, task.RunStarting{ID: r.ID, Dir: dir}))
 	}
 	if err == nil {
@@ -406,17 +456,18 @@ func (c *Coord) converge(ctx context.Context, m *machine) {
 
 	for _, id := range stops {
 		var s node.Snapshot
-		if err := conn.Call(ctx, node.MRunStop, node.RunRef{Run: id}, &s); err != nil && transport(err) {
-			c.lost(m, conn, err)
+		if ok, _ := c.callNode(ctx, m, conn, node.MRunStop, node.RunRef{Run: id, Coordinator: c.id}, &s); !ok {
 			return
 		}
 	}
 	for _, p := range params {
 		var s node.Snapshot
-		err := conn.Call(ctx, node.MRunStart, p, &s)
-		if err != nil && transport(err) {
-			c.lost(m, conn, err)
+		ok, err := c.callNode(ctx, m, conn, node.MRunStart, p, &s)
+		if !ok {
 			return
+		}
+		if err != nil && transport(err) {
+			continue // timed out: the next list tells whether it arrived
 		}
 		o := observation(s)
 		if err != nil {
@@ -435,21 +486,34 @@ func observation(s node.Snapshot) task.Observation {
 		Session: s.Session, Pane: s.Pane, NodeRev: s.Rev, StartedAt: s.StartedAt, EndedAt: s.EndedAt}
 }
 
-// mapDir is r's directory as machine m names it: the task's directory is in its own machine's form; the caller
-// holds mu.
-func (c *Coord) mapDir(r *task.Run, m *machine) string {
-	from := Local
-	if t := c.st.Tasks[r.Task]; t != nil && t.Machine != "" {
-		from = t.Machine
+// mapDir is r's directory as machine m names it; false while the machine it was written for has not been reached (it
+// is dialed meanwhile). The caller holds mu.
+func (c *Coord) mapDir(r *task.Run, m *machine) (string, bool) {
+	from := r.From
+	if from == "" || from == m.name {
+		return r.Dir, true
 	}
 	src := c.ms[from]
-	if from == m.name || src == nil || src.hello.Home == "" || m.hello.Home == "" {
-		return r.Dir
+	if src == nil {
+		return r.Dir, true
+	}
+	if src.hello.Home == "" {
+		src.busyAt = time.Now()
+		c.ensure(src)
+		return "", false
 	}
 	if p, ok := pathmap.Map(r.Dir, end(src.hello), end(m.hello)); ok {
-		return p
+		return p, true
 	}
-	return r.Dir
+	return r.Dir, true
+}
+
+// dirKey is dir as a key for the one-run-per-directory rule on a machine running os.
+func dirKey(dir, os string) string {
+	if os == "windows" {
+		return path.Clean(strings.ToLower(strings.ReplaceAll(dir, `\`, "/")))
+	}
+	return paths.Clean(dir)
 }
 
 func end(h remote.Hello) pathmap.End {
@@ -465,7 +529,6 @@ func (c *Coord) call(ctx context.Context, name, method string, params, out any) 
 		return notFound("machine " + name)
 	}
 	m.busyAt = time.Now()
-	m.retryAt = time.Time{}
 	c.ensure(m)
 	c.mu.Unlock()
 	for {

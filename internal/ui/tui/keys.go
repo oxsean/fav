@@ -14,16 +14,18 @@ import (
 type scope uint16
 
 const (
-	inList    scope = 1 << iota // main screen: list, right pane, hits
-	inResume                    // the resume dialog (Enter on a session)
-	inConfirm                   // yes / cancel confirmations
-	inStart                     // new-session dialog
-	inHandoff                   // handoff dialog
-	inPeek                      // peek at a Herdr agent (outside its reply input)
-	inReader                    // help and the full-message view
+	inList     scope = 1 << iota // main screen: list, right pane, hits
+	inResume                     // the resume dialog (Enter on a session)
+	inConfirm                    // yes / cancel confirmations
+	inStart                      // new-session dialog
+	inHandoff                    // handoff dialog
+	inPeek                       // peek at a Herdr agent (outside its reply input)
+	inReader                     // help and the full-message view
+	inTaskForm                   // the task form (its text fields take every other key)
+	inTaskRun                    // the run dialog: machine, agent, buttons
 )
 
-var scopes = []scope{inList, inResume, inConfirm, inStart, inHandoff, inPeek, inReader}
+var scopes = []scope{inList, inResume, inConfirm, inStart, inHandoff, inPeek, inReader, inTaskForm, inTaskRun}
 
 // tier is how much an action changes. ⚠️ Rules for new keys:
 // tierStart never gets a list key (only a dialog's Enter or the same key pressed twice runs it);
@@ -110,6 +112,7 @@ const (
 	actReply
 	actTabPrev
 	actTabNext
+	actSave
 	// actViaDialog is not a key: an ime route meaning "a button in the resume dialog".
 	actViaDialog
 )
@@ -217,6 +220,19 @@ var bindings = []binding{
 	{act: actTabNext, in: inReader, keys: []string{"tab", "right", "l", "J", "ctrl+j"}},
 	{act: actTabPrev, in: inReader, keys: []string{"shift+tab", "left", "h", "K", "ctrl+k"}},
 	{act: actClose, in: inReader, keys: []string{"esc", "q", "enter"}},
+
+	{act: actSave, in: inTaskForm, keys: []string{"ctrl+s"}},
+	{act: actEnter, in: inTaskForm | inTaskRun, keys: []string{"enter"}},
+	{act: actClose, in: inTaskForm, keys: []string{"esc"}},
+	{act: actClose, in: inTaskRun, keys: []string{"esc", "q"}},
+	{act: actFocusNext, in: inTaskForm, keys: []string{"tab"}},
+	{act: actFocusPrev, in: inTaskForm, keys: []string{"shift+tab"}},
+	{act: actFocusNext, in: inTaskRun, keys: []string{"tab", "down", "j"}},
+	{act: actFocusPrev, in: inTaskRun, keys: []string{"shift+tab", "up", "k"}},
+	{act: actDown, in: inTaskForm, keys: []string{"down"}},
+	{act: actUp, in: inTaskForm, keys: []string{"up"}},
+	{act: actLeft, in: inTaskForm | inTaskRun, keys: []string{"left", "h"}},
+	{act: actRight, in: inTaskForm | inTaskRun, keys: []string{"right", "l"}},
 }
 
 var keyIndex = func() map[scope]map[string]*binding {

@@ -3,7 +3,12 @@
 // signal and probe processes only through here.
 package proc
 
-import "os/exec"
+import (
+	"errors"
+	"os/exec"
+	"path/filepath"
+	"strings"
+)
 
 // Tree is a started process and whatever it starts.
 type Tree struct {
@@ -26,3 +31,21 @@ func (t *Tree) Stop() error { return t.stop(false) }
 
 // Kill ends the tree now.
 func (t *Tree) Kill() error { return t.stop(true) }
+
+// ErrBatchArgs: a .cmd / .bat target would have cmd.exe read an argument as a command.
+var ErrBatchArgs = errors.New("a batch file cannot take this argument safely")
+
+// batchUnsafe: exe is a batch file and one of args holds what cmd.exe interprets.
+func batchUnsafe(exe string, args []string) bool {
+	switch strings.ToLower(filepath.Ext(exe)) {
+	case ".cmd", ".bat":
+	default:
+		return false
+	}
+	for _, a := range args {
+		if strings.ContainsAny(a, "&|<>^%!\"\r\n") {
+			return true
+		}
+	}
+	return false
+}

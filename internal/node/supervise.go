@@ -2,6 +2,7 @@ package node
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"errors"
 	"io"
@@ -9,11 +10,11 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
-	"strings"
 	"sync"
 	"syscall"
 	"time"
 
+	"github.com/oxsean/fav/internal/fileio"
 	"github.com/oxsean/fav/internal/filelock"
 	"github.com/oxsean/fav/internal/herdr"
 	"github.com/oxsean/fav/internal/paths"
@@ -44,8 +45,7 @@ func (n *Node) launch(dir string, spec Spec) (string, error) {
 			}
 			return "", err
 		}
-		spec.Runner = RunnerBackground // the workspace went away between planning and launch
-		writeJSON(filepath.Join(dir, "spec.json"), spec)
+		return "", errors.New("herdr workspace for " + spec.Dir + " is gone")
 	}
 	c := exec.Command(self, "_run", dir)
 	c.Dir = spec.Dir
@@ -66,7 +66,7 @@ func herdrFits(dir string) bool {
 }
 
 func underAny(dir string, roots []string) bool {
-	real, err := filepath.EvalSymlinks(dir)
+	real, err := realPath(dir)
 	if err != nil {
 		return false
 	}
@@ -78,9 +78,31 @@ func underAny(dir string, roots []string) bool {
 	return false
 }
 
+// realPath is dir with its links resolved; a part that does not exist yet is kept as written.
+func realPath(dir string) (string, error) {
+	dir = filepath.Clean(dir)
+	real, err := filepath.EvalSymlinks(dir)
+	if !errors.Is(err, os.ErrNotExist) {
+		return real, err
+	}
+	parent := filepath.Dir(dir)
+	if parent == dir {
+		return "", err
+	}
+	p, err := realPath(parent)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(p, filepath.Base(dir)), nil
+}
+
 // Supervise runs the agent of run directory dir to its end and records it; it is `tend _run <dir>`.
 func Supervise(dir string) error {
 	unlock, err := filelock.TryLock(filepath.Join(dir, "lock"))
+	for deadline := time.Now().Add(time.Second); errors.Is(err, filelock.ErrLocked) && time.Now().Before(deadline); {
+		time.Sleep(20 * time.Millisecond) // ⚠️ Held probes the lock by taking it for a moment
+		unlock, err = filelock.TryLock(filepath.Join(dir, "lock"))
+	}
 	if err != nil {
 		return err // another supervisor has this run
 	}
@@ -89,12 +111,16 @@ func Supervise(dir string) error {
 	if err := readJSON(filepath.Join(dir, "spec.json"), &spec); err != nil {
 		return err
 	}
-	var prev State
-	if readJSON(filepath.Join(dir, "state.json"), &prev) == nil { // a supervisor already ran: never start twice
+	if paths.Exists(filepath.Join(dir, "state.json")) || !claim(dir) { // decided already: never start twice
 		return nil
 	}
 	s := &sup{dir: dir, spec: spec, st: State{State: StateStarting, Provider: spec.Provider, Session: spec.Session, Sup: os.Getpid()}}
-	s.save()
+	if s.stopAsked() {
+		return s.end(StateStopped, "asked", nil)
+	}
+	if err := s.save(); err != nil {
+		return err // ⚠️ the agent starts only after its first state is written: the node reports it not launched
+	}
 	return s.run()
 }
 
@@ -105,22 +131,39 @@ type sup struct {
 	st   State
 }
 
-func (s *sup) save() {
+func (s *sup) save() error {
 	s.st.Rev++
-	writeJSON(filepath.Join(s.dir, "state.json"), s.st)
+	return writeJSON(filepath.Join(s.dir, "state.json"), s.st)
 }
 
-func (s *sup) set(f func(*State)) {
+func (s *sup) set(f func(*State)) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	f(&s.st)
-	s.save()
+	return s.save()
 }
 
-func (s *sup) end(state, reason string, code *int) {
+// end records how the run ended: without it the run reads as unknown.
+func (s *sup) end(state, reason string, code *int) error {
 	now := time.Now()
-	s.set(func(st *State) { st.State, st.Reason, st.ExitCode, st.EndedAt = state, reason, code, &now })
+	return s.keep(func(st *State) { st.State, st.Reason, st.ExitCode, st.EndedAt = state, reason, code, &now })
 }
+
+// keep applies f and writes the state, trying again for a while when the write fails.
+func (s *sup) keep(f func(*State)) error {
+	err := s.set(f)
+	for i := 0; err != nil && i < 10; i++ {
+		time.Sleep(time.Second)
+		err = s.set(func(*State) {})
+	}
+	return err
+}
+
+func (s *sup) stopAsked() bool { return paths.Exists(filepath.Join(s.dir, "stop")) }
+
+// drainWait is how long the agent's output may stay open after it exits (a child it left holds it) before the tree
+// is ended.
+const drainWait = 2 * time.Second
 
 func (s *sup) run() error {
 	c := exec.Command(s.spec.Argv[0], s.spec.Argv[1:]...)
@@ -138,24 +181,37 @@ func (s *sup) run() error {
 	} else if interactive {
 		c.Stdin = os.Stdin
 	}
-	var out *rolling
 	var pipes sync.WaitGroup
+	var readEnds, writeEnds []*os.File
 	if interactive {
 		c.Stdout, c.Stderr = os.Stdout, os.Stderr
 	} else {
-		out = &rolling{path: filepath.Join(s.dir, "output.log")}
+		out := &rolling{path: filepath.Join(s.dir, "output.log")}
 		defer out.Close()
-		stdout, err := c.StdoutPipe()
+		// ⚠️ os.Pipe, not StdoutPipe: Wait then returns when the agent exits, not when every child it left closes
+		// the output
+		or, ow, err := os.Pipe()
 		if err != nil {
 			s.end(StateFailed, err.Error(), nil)
 			return err
 		}
-		c.Stderr = out
-		pipes.Add(1)
-		go func() { defer pipes.Done(); s.copyOut(stdout, out) }()
+		er, ew, err := os.Pipe()
+		if err != nil {
+			or.Close()
+			ow.Close()
+			s.end(StateFailed, err.Error(), nil)
+			return err
+		}
+		c.Stdout, c.Stderr = ow, ew
+		readEnds, writeEnds = []*os.File{or, er}, []*os.File{ow, ew}
+		pipes.Add(2)
+		go func() { defer pipes.Done(); s.copyOut(or, out) }()
+		go func() { defer pipes.Done(); io.Copy(out, er) }()
 	}
 	tree, err := proc.StartTree(c, interactive)
+	closeAll(writeEnds) // the agent has its own copies
 	if err != nil {
+		closeAll(readEnds)
 		pipes.Wait()
 		s.end(StateFailed, err.Error(), nil)
 		return err
@@ -163,7 +219,7 @@ func (s *sup) run() error {
 	now := time.Now()
 	var pane map[string]string
 	readJSON(filepath.Join(s.dir, "pane.json"), &pane)
-	s.set(func(st *State) {
+	s.keep(func(st *State) {
 		st.State, st.Pid, st.StartedAt, st.Pane = StateRunning, c.Process.Pid, &now, pane["pane"]
 	})
 
@@ -171,7 +227,7 @@ func (s *sup) run() error {
 	signal.Notify(sigs, syscall.SIGHUP, syscall.SIGTERM, os.Interrupt)
 	defer signal.Stop(sigs)
 	done := make(chan error, 1)
-	go func() { pipes.Wait(); done <- c.Wait() }()
+	go func() { done <- c.Wait() }()
 	tick := time.NewTicker(time.Second)
 	defer tick.Stop()
 	var asked time.Time
@@ -179,18 +235,19 @@ func (s *sup) run() error {
 	for {
 		select {
 		case err := <-done:
+			s.drain(tree, &pipes, readEnds)
 			code := c.ProcessState.ExitCode()
+			if asked.IsZero() && s.stopAsked() {
+				asked, reason = time.Now(), "asked"
+			}
 			if !asked.IsZero() {
-				s.end(StateStopped, reason, &code)
-				return nil
+				return s.end(StateStopped, reason, &code)
 			}
 			var ee *exec.ExitError
 			if err != nil && !errors.As(err, &ee) {
-				s.end(StateFailed, err.Error(), nil)
-				return nil
+				return s.end(StateFailed, err.Error(), nil)
 			}
-			s.end(StateExited, "", &code)
-			return nil
+			return s.end(StateExited, "", &code)
 		case sig := <-sigs:
 			if asked.IsZero() {
 				asked, reason = time.Now(), "signal"
@@ -201,7 +258,7 @@ func (s *sup) run() error {
 			}
 		case <-tick.C:
 			if asked.IsZero() {
-				if _, err := os.Stat(filepath.Join(s.dir, "stop")); err == nil {
+				if s.stopAsked() {
 					asked, reason = time.Now(), "asked"
 					tree.Stop()
 				}
@@ -212,24 +269,57 @@ func (s *sup) run() error {
 	}
 }
 
-// copyOut writes the agent's stdout to the log and picks codex's thread id out of its JSON events.
+// drain waits for the agent's output to close after it exited; what it left running is ended.
+func (s *sup) drain(tree *proc.Tree, pipes *sync.WaitGroup, readEnds []*os.File) {
+	closed := make(chan struct{})
+	go func() { pipes.Wait(); close(closed) }()
+	select {
+	case <-closed:
+		return
+	case <-time.After(drainWait):
+	}
+	tree.Stop()
+	select {
+	case <-closed:
+		return
+	case <-time.After(stopGrace):
+	}
+	tree.Kill()
+	select {
+	case <-closed:
+	case <-time.After(drainWait):
+		closeAll(readEnds)
+		<-closed
+	}
+}
+
+func closeAll(fs []*os.File) {
+	for _, f := range fs {
+		f.Close()
+	}
+}
+
+// copyOut writes the agent's stdout to the log and picks codex's thread id out of its JSON events; a line longer
+// than the buffer goes to the log in pieces and is not parsed.
 func (s *sup) copyOut(r io.Reader, w io.Writer) {
 	br := bufio.NewReaderSize(r, 64<<10)
+	piece := false
 	for {
-		line, err := br.ReadBytes('\n')
+		line, err := br.ReadSlice('\n')
 		if len(line) > 0 {
 			w.Write(line)
-			if s.spec.Thread && !s.bound() && strings.Contains(string(line), `"thread.started"`) {
+			if err == nil && !piece && s.spec.Thread && !s.bound() && bytes.Contains(line, []byte(`"thread.started"`)) {
 				var ev struct {
 					Type     string `json:"type"`
 					ThreadID string `json:"thread_id"`
 				}
 				if json.Unmarshal(line, &ev) == nil && ev.ThreadID != "" {
-					s.set(func(st *State) { st.Session = ev.ThreadID })
+					s.keep(func(st *State) { st.Session = ev.ThreadID })
 				}
 			}
 		}
-		if err != nil {
+		piece = errors.Is(err, bufio.ErrBufferFull)
+		if err != nil && !piece {
 			return
 		}
 	}
@@ -252,12 +342,13 @@ type rolling struct {
 func (l *rolling) Write(p []byte) (int, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	if l.f == nil || l.n+int64(len(p)) > logCap {
-		if l.f != nil {
-			l.f.Close()
-			os.Rename(l.path, l.path+".1")
-		}
-		f, err := os.OpenFile(l.path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
+	if l.f != nil && l.n+int64(len(p)) > logCap {
+		l.f.Close()
+		l.f = nil
+		fileio.Rename(l.path, l.path+".1") // ⚠️ may fail while a reader holds it (Windows): then it grows on and rolls later
+	}
+	if l.f == nil {
+		f, err := os.OpenFile(l.path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 		if err != nil {
 			return 0, err
 		}

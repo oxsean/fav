@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
-	"slices"
 	"strings"
 	"time"
 
@@ -87,6 +86,40 @@ type runOutMsg struct {
 }
 
 // taskDoneMsg: a command came back; then runs on success.
+// taskLoadedMsg: task.get answered; the edit form opens on the whole task.
+type taskLoadedMsg struct {
+	t   *task.Task
+	err error
+}
+
+func (msg taskLoadedMsg) apply(m *Model) tea.Cmd {
+	if msg.err != nil {
+		m.flash(reasonText(msg.err))
+		return nil
+	}
+	return m.openTaskForm(msg.t)
+}
+
+// editTask reads the selected task whole (the list may lack its brief) and then opens the form on it.
+func (m *Model) editTask() tea.Cmd {
+	x, cl := m.selectedTask(), m.tasks.cl
+	if x == nil {
+		return nil
+	}
+	if cl == nil {
+		m.flash(i18n.T("tasks.unavailable"))
+		return nil
+	}
+	id := x.ID
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), tasksWait)
+		defer cancel()
+		t := &task.Task{}
+		err := cl.Call(ctx, coord.MTaskGet, task.RunRef{ID: id}, t)
+		return taskLoadedMsg{t: t, err: err}
+	}
+}
+
 type taskDoneMsg struct {
 	note string
 	err  error
@@ -125,7 +158,12 @@ func (m *Model) pollTasks() tea.Cmd {
 		defer cancel()
 		var msg tasksStateMsg
 		st := task.New()
-		if msg.err = cl.Call(ctx, coord.MStateGet, nil, st); msg.err != nil {
+		msg.err = cl.Call(ctx, coord.MStateGet, nil, st)
+		if wire.Code(msg.err) == wire.CodeInternal { // too big for one frame: without the briefs (search misses them)
+			st = task.New()
+			msg.err = cl.Call(ctx, coord.MStateGet, coord.StateParams{NoBriefs: true}, st)
+		}
+		if msg.err != nil {
 			return msg
 		}
 		msg.st = st
@@ -179,7 +217,7 @@ func (msg tasksStateMsg) apply(m *Model) tea.Cmd {
 	t.polling = false
 	if msg.err != nil {
 		t.err = msg.err
-		if t.cl != nil && wire.Code(msg.err) == wire.CodeClosed { // the coordinator went away: connect again
+		if t.cl != nil && closed(t.cl.Done()) { // the connection ended (the coordinator went away, keepalive): connect again
 			t.cl.Close()
 			t.cl = nil
 		}
@@ -367,7 +405,7 @@ func (m *Model) taskKey(a act) (tea.Cmd, bool) {
 	case actNew:
 		return m.openTaskForm(nil), true
 	case actEdit:
-		return m.openTaskForm(m.selectedTask()), true
+		return m.editTask(), true
 	case actDone:
 		return m.toggleTaskDone(), true
 	case actCloseTab:
@@ -484,7 +522,7 @@ func (m *Model) taskButtons() []btn {
 	if open && r.Want != "stop" {
 		bs = append(bs, btn{keyed(keyOf(inList, actCloseTab), i18n.T("tasks.btn_stop")), false, func(mm *Model) { mm.closeOverlay(); mm.askStopRun() }})
 	}
-	if r != nil && (r.State == task.Starting || r.State == task.Unknown) {
+	if r != nil && (r.State == task.Starting || r.State == task.Running || r.State == task.Unknown) {
 		id := r.ID
 		bs = append(bs, btn{i18n.T("tasks.btn_abandon"), false, func(mm *Model) {
 			mm.closeOverlay()
@@ -497,7 +535,7 @@ func (m *Model) taskButtons() []btn {
 	}
 	bs = append(bs, btn{keyed(keyOf(inList, actEdit), i18n.T("key.edit")), false, func(mm *Model) {
 		mm.closeOverlay()
-		mm.pending = mm.openTaskForm(mm.selectedTask())
+		mm.pending = mm.editTask()
 	}})
 	done := i18n.T("key.done")
 	if x.Status != task.StatusTodo {
@@ -538,7 +576,7 @@ func (m *Model) taskDialogKey(msg tea.KeyPressMsg) tea.Cmd {
 		return nil
 	case actEdit:
 		m.closeOverlay()
-		return m.openTaskForm(m.selectedTask())
+		return m.editTask()
 	case actDone:
 		m.closeOverlay()
 		return m.toggleTaskDone()
@@ -786,13 +824,27 @@ func (m *Model) tasksStatus() string {
 	return " " + strings.Join(parts, dimmed.Render("   "))
 }
 
+// remoteCoordinator: mode 2, the coordinator is a server; this machine is no node.
+func (m *Model) remoteCoordinator() bool {
+	return m.cfg.Coordinator != nil && m.cfg.Coordinator.URL != ""
+}
+
+func closed(done <-chan struct{}) bool {
+	select {
+	case <-done:
+		return true
+	default:
+		return false
+	}
+}
+
 func (m *Model) machineNames() []string {
 	var out []string
 	for _, mc := range m.tasks.machines {
 		out = append(out, mc.Name)
 	}
-	if !slices.Contains(out, coord.Local) {
-		out = append([]string{coord.Local}, out...)
+	if len(out) == 0 && !m.remoteCoordinator() {
+		out = []string{coord.Local}
 	}
 	return out
 }

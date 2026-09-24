@@ -22,6 +22,9 @@ func cmdMigrateHome(args []string) error {
 	if errors.Is(err, fav.ErrHomeBusy) {
 		return i18n.E("cli.migrate.busy", err)
 	}
+	if errors.Is(err, fav.ErrHomeFromEnv) {
+		return i18n.E("cli.migrate.env", fav.Home())
+	}
 	if err != nil {
 		return err
 	}

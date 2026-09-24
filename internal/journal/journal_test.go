@@ -3,6 +3,7 @@ package journal
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -67,6 +68,31 @@ func TestATornLastLineIsCutAndKept(t *testing.T) {
 	l.Close()
 	if _, got := open(t, path); len(got) != 2 || got[1].Seq != 2 {
 		t.Fatal(got)
+	}
+}
+
+func TestATornTailThatCannotBeKeptIsNotCut(t *testing.T) {
+	if runtime.GOOS == "windows" || os.Geteuid() == 0 {
+		t.Skip("needs a directory this process cannot write")
+	}
+	dir := t.TempDir()
+	path := filepath.Join(dir, "events.jsonl")
+	l, _ := open(t, path)
+	l.Append(nil, []Event{NewEvent("a", 1)})
+	l.Close()
+	f, _ := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0)
+	f.WriteString(`{"v":1,"seq":2,"at`)
+	f.Close()
+	before, _ := os.ReadFile(path)
+	os.Chmod(dir, 0o500)
+	defer os.Chmod(dir, 0o700)
+	l, _ = open(t, path)
+	if l.ReadOnly() == nil {
+		t.Fatal("a tail it could not back up leaves the log read-only")
+	}
+	l.Close()
+	if after, _ := os.ReadFile(path); string(after) != string(before) {
+		t.Fatal("the tail was cut without a backup")
 	}
 }
 

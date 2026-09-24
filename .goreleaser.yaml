@@ -6,7 +6,8 @@ before:
     - go mod tidy
 
 builds:
-  - main: ./cmd/fav
+  - id: tend
+    main: ./cmd/fav
     binary: tend
     env: [CGO_ENABLED=0]
     goos: [darwin, linux, windows]
@@ -16,9 +17,18 @@ builds:
         goarch: arm64
     flags: [-trimpath]
     ldflags: ["-s -w -X main.version={{.Version}}"]
+  - id: fav-windows  # Windows has no symlink to install: fav.exe is the same program under its old name
+    main: ./cmd/fav
+    binary: fav
+    env: [CGO_ENABLED=0]
+    goos: [windows]
+    goarch: [amd64]
+    flags: [-trimpath]
+    ldflags: ["-s -w -X main.version={{.Version}}"]
 
 archives:
-  - formats: [tar.gz]
+  - ids: [tend, fav-windows]
+    formats: [tar.gz]
     name_template: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}"  # no version in the name so releases/latest/download/<name> works
     format_overrides:
       - goos: windows

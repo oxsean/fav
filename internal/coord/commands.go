@@ -43,6 +43,10 @@ type NodeCall struct {
 	Params  json.RawMessage `json:"params,omitempty"`
 }
 
+type StateParams struct {
+	NoBriefs bool `json:"no_briefs,omitempty"` // leave the briefs out (task.get has a task's)
+}
+
 type MachinesParams struct {
 	Connect bool `json:"connect,omitempty"` // try every machine now and wait for the answers
 }
@@ -69,6 +73,11 @@ type Agents struct {
 	Agents []fav.AgentProfile `json:"agents"`
 }
 
+// maxBrief bounds a brief: the journal holds it on one line, and the state it is in goes in one frame.
+const maxBrief = 256 << 10
+
+const maxTitle = 1 << 10
+
 // Machine states.
 const (
 	MachineConnected  = "connected"
@@ -82,7 +91,7 @@ var readMethods = []string{remote.MHello, remote.MList, remote.MMessages, remote
 	remote.MChecks, remote.MLive, remote.MEcho}
 
 // Methods are the client methods.
-var Methods = []string{MStateGet, MTaskCreate, MTaskEdit, MTaskStatus, MRunDispatch, MRunStop, MRunAbandon, MRunTail,
+var Methods = []string{MStateGet, MTaskGet, MTaskCreate, MTaskEdit, MTaskStatus, MRunDispatch, MRunStop, MRunAbandon, MRunTail,
 	MAgentList, MMachineList, MSubscribe, MNodeCall}
 
 // Handler answers clients.
@@ -94,7 +103,22 @@ func (c *Coord) Handler() wire.Handler {
 		case remote.MHello:
 			return remote.Hello{Proto: wire.Proto, Version: c.opt.Version, Role: "coordinator", Methods: Methods}, nil
 		case MStateGet:
-			return c.State(), nil
+			var p StateParams
+			if err := r.Decode(&p); err != nil {
+				return nil, err
+			}
+			return c.state(!p.NoBriefs), nil
+		case MTaskGet:
+			var p task.RunRef
+			if err := r.Decode(&p); err != nil {
+				return nil, err
+			}
+			c.mu.Lock()
+			defer c.mu.Unlock()
+			if t := taskView(c.st, p.ID); t != nil {
+				return t, nil
+			}
+			return nil, notFound(p.ID)
 		case MAgentList:
 			return Agents{Agents: c.Profiles()}, nil
 		case MMachineList:
@@ -131,25 +155,25 @@ func (c *Coord) Handler() wire.Handler {
 			err := c.call(ctx, p.Machine, p.Method, p.Params, &out)
 			return out, err
 		case MTaskCreate:
-			return c.command(r, c.taskCreate, c.taskView)
+			return c.command(r, c.taskCreate, taskView)
 		case MTaskEdit:
-			return c.command(r, c.taskEdit, c.taskView)
+			return c.command(r, c.taskEdit, taskView)
 		case MTaskStatus:
-			return c.command(r, c.taskStatus, c.taskView)
+			return c.command(r, c.taskStatus, taskView)
 		case MRunDispatch:
-			return c.command(r, c.runDispatch, c.runView)
+			return c.command(r, c.runDispatch, runView)
 		case MRunStop:
-			return c.command(r, c.runStop, c.runView)
+			return c.command(r, c.runStop, runView)
 		case MRunAbandon:
-			return c.command(r, c.runAbandon, c.runView)
+			return c.command(r, c.runAbandon, runView)
 		}
 		return nil, &wire.Error{Code: wire.CodeUnknownMethod, Detail: r.Method}
 	}
 }
 
-// command runs a write once per command id: a replay answers from its receipt, the same id with other params is a
-// conflict. do runs under mu and returns the id its answer is about.
-func (c *Coord) command(r *wire.Request, do func(*wire.Request) (string, []journal.Event, error), view func(string) any) (any, error) {
+// command runs a write once per command id: a replay answers what the first run answered, the same id with other
+// params is a conflict. do runs under mu and returns the id its answer is about.
+func (c *Coord) command(r *wire.Request, do func(*wire.Request) (string, []journal.Event, error), view func(*task.State, string) any) (any, error) {
 	if r.CommandID == "" {
 		return nil, errNoCommand
 	}
@@ -160,11 +184,7 @@ func (c *Coord) command(r *wire.Request, do func(*wire.Request) (string, []journ
 		if rc.Method != r.Method || rc.Digest != digest {
 			return nil, conflict("command_id")
 		}
-		var ref struct {
-			ID string `json:"id"`
-		}
-		json.Unmarshal(rc.Result, &ref)
-		return view(ref.ID), nil
+		return rc.Result, nil
 	}
 	if err := c.log.ReadOnly(); err != nil {
 		return nil, &wire.Error{Code: wire.CodeInternal, Detail: err.Error()}
@@ -173,26 +193,42 @@ func (c *Coord) command(r *wire.Request, do func(*wire.Request) (string, []journ
 	if err != nil {
 		return nil, err
 	}
-	if len(events) > 0 {
-		res, _ := json.Marshal(map[string]string{"id": id})
-		if err := c.commit(&journal.Receipt{ID: r.CommandID, Method: r.Method, Digest: digest, Result: res}, events...); err != nil {
-			return nil, err
-		}
-		c.poke()
+	if len(events) == 0 {
+		return view(c.st, id), nil
 	}
-	return view(id), nil
+	rc := &journal.Receipt{ID: r.CommandID, Method: r.Method, Digest: digest, Answer: func(env journal.Envelope) json.RawMessage {
+		st := task.New() // what id is once env applies: its copy with env applied
+		if t := c.st.Tasks[id]; t != nil {
+			cp := *t
+			st.Tasks[id] = &cp
+		}
+		if r := c.st.Runs[id]; r != nil {
+			cp := *r
+			st.Runs[id] = &cp
+		}
+		if st.Apply(env) != nil {
+			return nil
+		}
+		b, _ := json.Marshal(view(st, id))
+		return b
+	}}
+	if err := c.commit(rc, events...); err != nil {
+		return nil, err
+	}
+	c.poke()
+	return rc.Result, nil
 }
 
-func (c *Coord) taskView(id string) any {
-	if t := c.st.Tasks[id]; t != nil {
+func taskView(st *task.State, id string) any {
+	if t := st.Tasks[id]; t != nil {
 		cp := *t
 		return &cp
 	}
 	return nil
 }
 
-func (c *Coord) runView(id string) any {
-	if r := c.st.Runs[id]; r != nil {
+func runView(st *task.State, id string) any {
+	if r := st.Runs[id]; r != nil {
 		cp := *r
 		return &cp
 	}
@@ -219,8 +255,11 @@ func (c *Coord) taskCreate(r *wire.Request) (string, []journal.Event, error) {
 		return "", nil, err
 	}
 	p.Title = strings.TrimSpace(p.Title)
-	if p.Title == "" {
+	if p.Title == "" || len(p.Title) > maxTitle {
 		return "", nil, bad("title")
+	}
+	if len(p.Brief) > maxBrief {
+		return "", nil, bad("brief")
 	}
 	if err := c.checkMachine(p.Machine); err != nil {
 		return "", nil, err
@@ -243,9 +282,12 @@ func (c *Coord) taskEdit(r *wire.Request) (string, []journal.Event, error) {
 		return "", nil, notFound(p.ID)
 	}
 	if p.Title != nil {
-		if *p.Title = strings.TrimSpace(*p.Title); *p.Title == "" {
+		if *p.Title = strings.TrimSpace(*p.Title); *p.Title == "" || len(*p.Title) > maxTitle {
 			return "", nil, bad("title")
 		}
+	}
+	if p.Brief != nil && len(*p.Brief) > maxBrief {
+		return "", nil, bad("brief")
 	}
 	if p.Machine != nil {
 		if err := c.checkMachine(*p.Machine); err != nil {
@@ -315,7 +357,14 @@ func (c *Coord) runDispatch(r *wire.Request) (string, []journal.Event, error) {
 	if !ok {
 		return "", nil, notFound("agent " + name)
 	}
-	machine := firstOf(p.Machine, prof.Machine, t.Machine, Local)
+	machine := firstOf(p.Machine, prof.Machine, t.Machine)
+	if machine == "" && c.opt.Remote {
+		return "", nil, bad("machine")
+	}
+	machine = firstOf(machine, Local)
+	if p.Runner == node.RunnerHerdr && prof.Provider != fav.ProviderClaude {
+		return "", nil, bad("runner herdr runs claude only")
+	}
 	if prof.Machine != "" && machine != prof.Machine {
 		return "", nil, bad("agent " + name + " runs on " + prof.Machine)
 	}
@@ -326,8 +375,12 @@ func (c *Coord) runDispatch(r *wire.Request) (string, []journal.Event, error) {
 	if strings.TrimSpace(brief) == "" {
 		brief = t.Title
 	}
-	run := task.Run{ID: node.NewRunID(), Task: t.ID, Machine: machine, Agent: name, Profile: prof, Dir: t.Dir, Brief: brief,
-		Title: t.Title, Runner: p.Runner}
+	from := t.Machine
+	if from == "" && !c.opt.Remote {
+		from = Local
+	}
+	run := task.Run{ID: node.NewRunID(), Task: t.ID, Machine: machine, Agent: name, Profile: prof, Dir: t.Dir, From: from,
+		Brief: brief, Title: t.Title, Runner: p.Runner}
 	return run.ID, []journal.Event{journal.NewEvent(task.ERunQueued, run)}, nil
 }
 
@@ -364,9 +417,9 @@ func (c *Coord) runAbandon(r *wire.Request) (string, []journal.Event, error) {
 		return "", nil, err
 	}
 	switch run.State {
-	case task.Starting, task.Unknown:
+	case task.Starting, task.Running, task.Unknown: // the node is asked to stop it, if it still runs
 		return run.ID, []journal.Event{journal.NewEvent(task.ERunAbandoned, task.RunRef{ID: run.ID})}, nil
-	case task.Queued, task.Running:
+	case task.Queued:
 		return "", nil, conflict("run " + run.State)
 	}
 	return run.ID, nil, nil

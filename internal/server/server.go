@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -25,6 +26,7 @@ import (
 
 	"github.com/oxsean/fav/internal/coord"
 	"github.com/oxsean/fav/internal/fileio"
+	"github.com/oxsean/fav/internal/filelock"
 	"github.com/oxsean/fav/internal/wire"
 )
 
@@ -82,6 +84,11 @@ func AddToken(home, role, name string) (string, error) {
 	if role != RoleNode && role != RoleClient {
 		return "", fmt.Errorf("role %q", role)
 	}
+	unlock, err := lockTokens(home)
+	if err != nil {
+		return "", err
+	}
+	defer unlock()
 	ts, err := Tokens(home)
 	if err != nil {
 		return "", err
@@ -98,6 +105,11 @@ func AddToken(home, role, name string) (string, error) {
 
 // RemoveToken revokes name's token; a running server drops its connections.
 func RemoveToken(home, name string) error {
+	unlock, err := lockTokens(home)
+	if err != nil {
+		return err
+	}
+	defer unlock()
 	ts, err := Tokens(home)
 	if err != nil {
 		return err
@@ -160,10 +172,10 @@ type Server struct {
 	mu    sync.Mutex
 	stamp string // tokens.json identity when read
 	toks  []Token
-	conns map[*wire.Conn]string // live connections by token name
+	conns map[*wire.Conn]Token // live connections by the token they came with
 }
 
-func New(opt Options) *Server { return &Server{opt: opt, conns: map[*wire.Conn]string{}} }
+func New(opt Options) *Server { return &Server{opt: opt, conns: map[*wire.Conn]Token{}} }
 
 // tokens reads tokens.json again when it changed and drops the connections of tokens no longer there.
 func (s *Server) tokens() []Token {
@@ -172,14 +184,22 @@ func (s *Server) tokens() []Token {
 	if id := fileio.ID(tokensPath(s.opt.Home)) + fmt.Sprint(modTime(tokensPath(s.opt.Home))); id != s.stamp {
 		if ts, err := Tokens(s.opt.Home); err == nil {
 			s.toks, s.stamp = ts, id
-			for c, name := range s.conns {
-				if !slices.ContainsFunc(ts, func(t Token) bool { return t.Name == name }) {
-					c.Close()
-				}
-			}
+		}
+	}
+	for c, tok := range s.conns { // every time: a connection may have been tracked after its token went
+		if !slices.ContainsFunc(s.toks, func(t Token) bool { return t.Sum == tok.Sum && t.Name == tok.Name && t.Role == tok.Role }) {
+			c.Close()
 		}
 	}
 	return s.toks
+}
+
+// lockTokens serializes changes to tokens.json across processes.
+func lockTokens(home string) (func(), error) {
+	if err := os.MkdirAll(filepath.Dir(tokensPath(home)), 0o700); err != nil {
+		return nil, err
+	}
+	return filelock.Lock(tokensPath(home) + ".lock")
 }
 
 func modTime(p string) int64 {
@@ -197,16 +217,16 @@ func (s *Server) auth(r *http.Request, role string) (Token, bool) {
 	}
 	want := sum(strings.TrimSpace(bearer))
 	for _, t := range s.tokens() {
-		if t.Sum == want && t.Role == role {
+		if subtle.ConstantTimeCompare([]byte(t.Sum), []byte(want)) == 1 && t.Role == role {
 			return t, true
 		}
 	}
 	return Token{}, false
 }
 
-func (s *Server) track(c *wire.Conn, name string) {
+func (s *Server) track(c *wire.Conn, t Token) {
 	s.mu.Lock()
-	s.conns[c] = name
+	s.conns[c] = t
 	s.mu.Unlock()
 }
 
@@ -233,7 +253,7 @@ func (s *Server) handleNode(w http.ResponseWriter, r *http.Request) {
 	opt := s.opt.Coord.NodeOptions()
 	opt.Keepalive = keepalive
 	c := wire.New(websocket.NetConn(r.Context(), ws, websocket.MessageText), opt)
-	s.track(c, t.Name)
+	s.track(c, t)
 	defer s.untrack(c)
 	if err := s.opt.Coord.Attach(t.Name, c); err != nil {
 		return
@@ -253,7 +273,7 @@ func (s *Server) handleClient(w http.ResponseWriter, r *http.Request) {
 	}
 	ws.SetReadLimit(wire.MaxFrame + 1)
 	c := wire.New(websocket.NetConn(r.Context(), ws, websocket.MessageText), wire.Options{Handler: s.opt.Coord.Handler(), Keepalive: keepalive})
-	s.track(c, t.Name)
+	s.track(c, t)
 	defer s.untrack(c)
 	<-c.Done()
 }
