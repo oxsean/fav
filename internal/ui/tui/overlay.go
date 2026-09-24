@@ -33,6 +33,9 @@ const (
 	ovHandoff
 	ovStart
 	ovPeek
+	ovTask
+	ovTaskForm
+	ovTaskRun
 )
 
 // ovPad: border + padding columns left of the overlay box; box-local zones add it.
@@ -70,6 +73,9 @@ type overlay struct {
 	running   []*fav.Rec // new session: sessions already running in that directory
 	armed     string     // peek: the digit pressed once, sent on the second press
 	armedAt   time.Time
+	taskID    string     // task form: the task edited ("" = a new one); run dialog: the task to run
+	opts      [][]string // task form and run dialog: the choices (machines, agents)
+	pick      []int      // the chosen index of each
 
 	msg   capture.Message
 	steps []string // the full text of msg's steps
@@ -321,6 +327,12 @@ func (m *Model) renderOverlay() string {
 		return m.renderStart()
 	case ovPeek:
 		return m.renderPeek()
+	case ovTask:
+		return m.renderTask()
+	case ovTaskForm:
+		return m.renderTaskForm()
+	case ovTaskRun:
+		return m.renderTaskRun()
 	}
 	return ""
 }
@@ -424,6 +436,10 @@ func (m *Model) ovWidth() int {
 		w = min(m.w-8, 120)
 	case ovSettings:
 		w = min(m.w-8, 96)
+	case ovTask:
+		w = min(max(w, 64, groupsWidth([]btnGroup{{bs: m.taskButtons()}})), m.w-4)
+	case ovTaskForm:
+		w = min(m.w-8, 100)
 	}
 	return w
 }

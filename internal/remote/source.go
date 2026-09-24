@@ -7,6 +7,7 @@ import (
 	"github.com/oxsean/fav/internal/capture"
 	"github.com/oxsean/fav/internal/fav"
 	"github.com/oxsean/fav/internal/i18n"
+	"github.com/oxsean/fav/internal/wire"
 )
 
 // Source reads one record's transcript and checks, from this machine's files or through the record's host. Every
@@ -72,7 +73,7 @@ func (f far) call(method string, params, out any) error {
 }
 
 // Messages from the end learns which file the transcript is; the offsets of later pages, full texts and steps are
-// asked about that file only. A rewritten transcript answers CodeStale once: read it again from the end.
+// asked about that file only. A rewritten transcript answers wire.CodeStale once: read it again from the end.
 func (f far) Messages(before int64, n int) capture.Page {
 	key := f.on + "\x00" + fav.SessionKey(f.ref.Provider, f.ref.SessionID)
 	known := f.h.file(key, "")
@@ -90,7 +91,7 @@ func (f far) Messages(before int64, n int) capture.Page {
 	if before < 0 {
 		f.h.file(key, p.File)
 		if known != "" && known != "-" && known != p.File {
-			return capture.Page{From: before, Err: &Error{Code: CodeStale}}
+			return capture.Page{From: before, Err: &wire.Error{Code: wire.CodeStale}}
 		}
 	}
 	for i := range p.Msgs {

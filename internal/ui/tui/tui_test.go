@@ -271,8 +271,8 @@ func TestViewHotkeys(t *testing.T) {
 	m := sized(t, 140, 40)
 	key := func(k tea.KeyPressMsg) { m.Update(k) }
 	key(press("shift+tab"))
-	if m.view != viewLive {
-		t.Fatalf("收藏页 Shift+Tab 应绕到最后一页 Agents：%v", m.view)
+	if m.view != viewTasks {
+		t.Fatalf("收藏页 Shift+Tab 应绕到最后一页任务：%v", m.view)
 	}
 	key(press("3"))
 	if m.view != viewProjects {

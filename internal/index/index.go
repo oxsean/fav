@@ -389,8 +389,9 @@ func (idx *Index) PathsBySession() map[string][]string {
 // They carry no title of their own more often than not, so DisplayTitle falls back to the first prompt.
 func (idx *Index) AgentSessions() []*Session {
 	byKey := map[string]*Session{}
+	runs := capture.RunSessions()
 	for _, f := range idx.files {
-		if !f.Skip && !AgentScratch(f.Cwd) || f.SessionID == "" {
+		if !f.Skip && !AgentScratch(f.Cwd) || isRun(runs, f) || f.SessionID == "" {
 			continue
 		}
 		s := byKey[fav.SessionKey(f.Provider, f.SessionID)]
@@ -527,12 +528,19 @@ func (idx *Index) rewrite() error {
 	return nil
 }
 
+// isRun: f is the session of a tend run here; a run is listed even though its CLI marks it one-shot.
+func isRun(runs map[string]capture.RunSession, f *File) bool {
+	_, ok := runs[f.SessionID]
+	return ok
+}
+
 // Sessions merges files into sessions (same id: turns added, newest title, earliest file is canonical), newest activity first; silent and Skip files are dropped.
 func (idx *Index) Sessions() []*Session {
 	byKey := map[string]*Session{}
 	var order []*File
+	runs := capture.RunSessions()
 	for _, f := range idx.files {
-		if f.Skip || f.Turns == 0 || f.SessionID == "" {
+		if f.Skip && !isRun(runs, f) || f.Turns == 0 || f.SessionID == "" {
 			continue
 		}
 		order = append(order, f)

@@ -8,6 +8,7 @@ import (
 
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/oxsean/fav/internal/agent"
 	"github.com/oxsean/fav/internal/capture"
 	"github.com/oxsean/fav/internal/fav"
 	"github.com/oxsean/fav/internal/herdr"
@@ -161,7 +162,7 @@ func TestNoCopyButtonWithoutACommand(t *testing.T) {
 	if !strings.Contains(ansi.Strip(m.screen()), i18n.T("resume.btn_copy")) {
 		t.Fatal("a resumable session offers the command")
 	}
-	m.ov.plan.Spec = capture.CommandSpec{}
+	m.ov.plan.Spec = agent.CommandSpec{}
 	if strings.Contains(ansi.Strip(m.screen()), i18n.T("resume.btn_copy")) {
 		t.Fatal("nothing to copy (a session running in Herdr): no copy button")
 	}

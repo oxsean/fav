@@ -12,6 +12,7 @@ import (
 	"github.com/oxsean/fav/internal/filelock"
 	"github.com/oxsean/fav/internal/herdr"
 	"github.com/oxsean/fav/internal/paths"
+	"github.com/oxsean/fav/internal/proc"
 )
 
 type Live struct {
@@ -22,6 +23,7 @@ type Live struct {
 	Seq           int
 	Since         time.Time
 	BackgroundID  string // short id for claude attach
+	Run           string // a tend run on this machine drives it
 }
 
 // IdleAfter: a running agent whose transcript has not been written for this long counts as idle (cleanup suggestions).
@@ -83,7 +85,7 @@ func ClaudeLive() map[string]Live {
 			JobID           string `json:"jobId"`
 			ParkedJobID     string `json:"parkedJobId"` // the conversation moved on to a background worker; this process is only the terminal
 		}
-		if json.Unmarshal(b, &s) != nil || s.SessionID == "" || s.ParkedJobID != "" || !alive(s.PID) {
+		if json.Unmarshal(b, &s) != nil || s.SessionID == "" || s.ParkedJobID != "" || !proc.Alive(s.PID) {
 			continue
 		}
 		l := Live{Agent: fav.ProviderClaude, Title: s.Name, Cwd: s.Cwd, Since: time.UnixMilli(s.StatusUpdatedAt)}
@@ -149,7 +151,7 @@ func CodexLive() map[string]Live {
 	return out
 }
 
-func LocalLive() map[string]Live { return MergeLive(CodexLive(), ClaudeLive()) }
+func LocalLive() map[string]Live { return MergeLive(RunLive(), CodexLive(), ClaudeLive()) }
 
 // later non-empty fields win
 func MergeLive(maps ...map[string]Live) map[string]Live {
@@ -178,13 +180,11 @@ func MergeLive(maps ...map[string]Live) map[string]Live {
 			if v.BackgroundID != "" {
 				l.BackgroundID = v.BackgroundID
 			}
+			if v.Run != "" {
+				l.Run = v.Run
+			}
 			out[k] = l
 		}
 	}
 	return out
-}
-
-// buildAttach: background sessions cannot --resume.
-func buildAttach(r *fav.Rec, backgroundID string) CommandSpec {
-	return CommandSpec{Exec: "claude", Args: []string{"attach", backgroundID}, Cwd: r.Cwd}
 }

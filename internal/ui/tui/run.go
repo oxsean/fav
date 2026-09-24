@@ -8,10 +8,13 @@ import (
 	"github.com/oxsean/fav/internal/remote"
 )
 
-// Run: hosts are the other machines whose sessions are shown (nil: none, nothing is contacted).
-func Run(s *fav.Store, idx *index.Index, cfg fav.Config, hosts *remote.Hosts, initialQuery string, focus *fav.Rec, mouse bool) (Result, error) {
+// Run: hosts are the other machines whose sessions are shown (nil: none, nothing is contacted); connect reaches the
+// coordinator when the Tasks view opens.
+func Run(s *fav.Store, idx *index.Index, cfg fav.Config, hosts *remote.Hosts, connect Connector, initialQuery string, focus *fav.Rec, mouse bool) (Result, error) {
 	m := New(s, idx, cfg, initialQuery)
 	m.useHosts(hosts)
+	m.SetCoordinator(connect)
+	defer m.CloseCoordinator()
 	m.Focus(focus)
 	m.mouse = mouse && cfg.Mouse
 	var opts []tea.ProgramOption

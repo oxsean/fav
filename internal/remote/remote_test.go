@@ -17,6 +17,7 @@ import (
 	"github.com/oxsean/fav/internal/fav"
 	"github.com/oxsean/fav/internal/shell"
 	"github.com/oxsean/fav/internal/testkit"
+	"github.com/oxsean/fav/internal/wire"
 )
 
 func TestMain(m *testing.M) { testkit.Main(m) }
@@ -33,7 +34,7 @@ func (h echoHandler) Handle(ctx context.Context, method string, params json.RawM
 		<-h.block
 		return nil, nil
 	}
-	return nil, &Error{Code: CodeUnknownMethod}
+	return nil, &wire.Error{Code: wire.CodeUnknownMethod}
 }
 
 func pipeClient(t *testing.T, h Handler) *Client {
@@ -49,22 +50,12 @@ func TestCallRoundTripsAndReportsCodes(t *testing.T) {
 	if err := c.Call(context.Background(), MEcho, Text{"中文 ✓ \"q\" 'x' %PATH% $HOME"}, &got); err != nil || got.Text != "中文 ✓ \"q\" 'x' %PATH% $HOME" {
 		t.Fatalf("echo: %q %v", got.Text, err)
 	}
-	var e *Error
-	if err := c.Call(context.Background(), "nope", nil, nil); !errors.As(err, &e) || e.Code != CodeUnknownMethod {
+	var e *wire.Error
+	if err := c.Call(context.Background(), "nope", nil, nil); !errors.As(err, &e) || e.Code != wire.CodeUnknownMethod {
 		t.Fatalf("unknown method: %v", err)
 	}
 	if c.Err() != nil {
 		t.Fatal("a remote error must not close the client")
-	}
-}
-
-func TestServerRefusesAnotherProto(t *testing.T) {
-	r := answer(context.Background(), []byte(`{"proto":99,"id":7,"method":"echo"}`), echoHandler{})
-	if r.OK || r.ID != 7 || r.Error.Code != CodeProto {
-		t.Fatalf("%+v", r)
-	}
-	if r := answer(context.Background(), []byte(`{"proto":99,"id":8,"method":"hello"}`), echoHandler{}); r.Error.Code != CodeUnknownMethod {
-		t.Fatalf("hello answers whatever the proto, so the caller can tell: %+v", r)
 	}
 }
 
@@ -73,7 +64,7 @@ func TestATimedOutCallOnlyStopsWaiting(t *testing.T) {
 	c := pipeClient(t, echoHandler{block})
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
-	if err := c.Call(ctx, "slow", nil, nil); code(err) != CodeTimeout {
+	if err := c.Call(ctx, "slow", nil, nil); code(err) != wire.CodeTimeout {
 		t.Fatalf("slow: %v", err)
 	}
 	close(block)
@@ -97,40 +88,16 @@ func TestCloseDoesNotWaitForACallInFlight(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("Close waited for the call")
 	}
-	if err := <-errc; code(err) != CodeClosed {
+	if err := <-errc; code(err) != wire.CodeClosed {
 		t.Fatalf("the call in flight ends as closed: %v", err)
-	}
-}
-
-// oneShot answers the first request, then ends: the answer and the end arrive together.
-type oneShot struct{}
-
-func (oneShot) Handle(context.Context, string, json.RawMessage) (any, error) {
-	return Text{"last"}, nil
-}
-
-func TestAnAnswerJustBeforeTheEndIsKept(t *testing.T) {
-	for i := 0; i < 200; i++ {
-		reqR, reqW := io.Pipe()
-		resR, resW := io.Pipe()
-		go func() {
-			Serve(context.Background(), reqR, resW, oneShot{}, true)
-			resW.Close()
-		}()
-		c := NewClient(resR, reqW)
-		var got Text
-		if err := c.Call(context.Background(), MEcho, nil, &got); err != nil || got.Text != "last" {
-			t.Fatalf("run %d: %q %v", i, got.Text, err)
-		}
-		c.Close()
 	}
 }
 
 func TestADeadProcessClosesWithItsReason(t *testing.T) {
 	testkit.PosixOnly(t) // a shell script stands in for fav
 	for _, c := range []struct{ script, code string }{
-		{"echo 'Welcome!'; read x; exit 3", CodeClosed},
-		{"echo 'sh: 1: fav: not found' >&2; exit 127", CodeNoFav},
+		{"echo 'Welcome!'; read x; exit 3", wire.CodeClosed},
+		{"echo 'sh: 1: fav: not found' >&2; exit 127", wire.CodeNoFav},
 	} {
 		cl, err := Dial(fav.Host{Name: "t", Fav: []string{"sh", "-c", c.script, "fav"}})
 		if err != nil {
@@ -161,7 +128,7 @@ func TestHostsRedialAfterAFailure(t *testing.T) {
 	if err := h.Call(ctx, "a", MEcho, Text{"x"}, nil); err != nil || dials.Load() != 2 {
 		t.Fatalf("a closed client is dialed again: %v, %d dials", err, dials.Load())
 	}
-	if err := h.Call(ctx, "b", MEcho, nil, nil); code(err) != CodeNotFound {
+	if err := h.Call(ctx, "b", MEcho, nil, nil); code(err) != wire.CodeNotFound {
 		t.Fatalf("an unknown host: %v", err)
 	}
 }
@@ -170,7 +137,7 @@ type helloHandler struct{}
 
 func (helloHandler) Handle(ctx context.Context, method string, params json.RawMessage) (any, error) {
 	if method == MHello {
-		return Hello{Proto: Proto}, nil
+		return Hello{Proto: wire.Proto}, nil
 	}
 	return echoHandler{}.Handle(ctx, method, params)
 }
@@ -212,9 +179,9 @@ func TestClassifySSHFailures(t *testing.T) {
 	testkit.PosixOnly(t) // needs sh to produce an exit status
 	exit255 := exec.Command("sh", "-c", "exit 255").Run()
 	for _, c := range []struct{ stderr, code string }{
-		{"ssh: connect to host x port 22: Operation timed out", CodeOffline},
-		{"git@x: Permission denied (publickey).", CodeAuth},
-		{"Host key verification failed.", CodeHostKey},
+		{"ssh: connect to host x port 22: Operation timed out", wire.CodeOffline},
+		{"git@x: Permission denied (publickey).", wire.CodeAuth},
+		{"Host key verification failed.", wire.CodeHostKey},
 	} {
 		if got := classify(exit255, c.stderr, true); got.Code != c.code {
 			t.Errorf("%q: %s, want %s", c.stderr, got.Code, c.code)
@@ -222,20 +189,20 @@ func TestClassifySSHFailures(t *testing.T) {
 	}
 	exit1 := exec.Command("sh", "-c", "exit 1").Run()
 	for _, c := range []struct{ stderr, code string }{
-		{"'fav' is not recognized as an internal or external command,", CodeNoFav},
-		{"fav: The term 'fav' is not recognized as a name of a cmdlet, function, script file, or executable program.", CodeNoFav},
-		{"fish: Unknown command: fav", CodeNoFav},
-		{"bash: /x/fav: No such file or directory", CodeNoFav},
-		{"zsh:1: no such file or directory: /x/fav", CodeNoFav},
-		{"<3>WSL (12) ERROR: CreateProcessCommon:640: execvpe(/home/a/fav) failed: No such file or directory", CodeNoFav},
-		{"fav: index not written: open /x/sessions.jsonl: no such file or directory\npanic: boom", CodeClosed},
-		{"fav: open /home/u/.agent/fav/x: No such file or directory", CodeClosed},
+		{"'fav' is not recognized as an internal or external command,", wire.CodeNoFav},
+		{"fav: The term 'fav' is not recognized as a name of a cmdlet, function, script file, or executable program.", wire.CodeNoFav},
+		{"fish: Unknown command: fav", wire.CodeNoFav},
+		{"bash: /x/fav: No such file or directory", wire.CodeNoFav},
+		{"zsh:1: no such file or directory: /x/fav", wire.CodeNoFav},
+		{"<3>WSL (12) ERROR: CreateProcessCommon:640: execvpe(/home/a/fav) failed: No such file or directory", wire.CodeNoFav},
+		{"fav: index not written: open /x/sessions.jsonl: no such file or directory\npanic: boom", wire.CodeClosed},
+		{"fav: open /home/u/.agent/fav/x: No such file or directory", wire.CodeClosed},
 	} {
 		if got := classify(exit1, c.stderr, true); got.Code != c.code {
 			t.Errorf("%q: %s, want %s", c.stderr, got.Code, c.code)
 		}
 	}
-	if got := classify(exit255, "", false); got.Code != CodeClosed {
+	if got := classify(exit255, "", false); got.Code != wire.CodeClosed {
 		t.Errorf("a local process exiting 255 is not an ssh failure: %s", got.Code)
 	}
 }
@@ -280,21 +247,7 @@ func TestAProcessThatStopsTalkingButRunsIsReaped(t *testing.T) {
 		t.Fatal(err)
 	}
 	start := time.Now()
-	if err := cl.Call(context.Background(), MEcho, Text{"x"}, nil); code(err) != CodeClosed || time.Since(start) > reapWait+2*time.Second {
-		t.Fatalf("%v after %v", err, time.Since(start))
-	}
-}
-
-func TestACallWaitingForItsTurnKeepsItsDeadline(t *testing.T) {
-	block := make(chan struct{})
-	defer close(block)
-	c := pipeClient(t, echoHandler{block})
-	go c.Call(context.Background(), "slow", nil, nil)
-	time.Sleep(50 * time.Millisecond)
-	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
-	defer cancel()
-	start := time.Now()
-	if err := c.Call(ctx, MEcho, Text{"x"}, nil); code(err) != CodeTimeout || time.Since(start) > time.Second {
+	if err := cl.Call(context.Background(), MEcho, Text{"x"}, nil); code(err) != wire.CodeClosed || time.Since(start) > reapWait+2*time.Second {
 		t.Fatalf("%v after %v", err, time.Since(start))
 	}
 }
@@ -319,14 +272,14 @@ func TestHostsClosedWhileDialingKeepNothing(t *testing.T) {
 	h.Close()
 	close(release)
 	for range 2 {
-		if err := <-errc; code(err) != CodeClosed {
+		if err := <-errc; code(err) != wire.CodeClosed {
 			t.Fatalf("calls around Close end closed: %v", err)
 		}
 	}
 	if c.Err() == nil || dials.Load() != 1 {
 		t.Fatalf("a client finished after Close is closed, and nobody dials again: %d dials", dials.Load())
 	}
-	if err := h.Call(context.Background(), "a", MEcho, nil, nil); code(err) != CodeClosed {
+	if err := h.Call(context.Background(), "a", MEcho, nil, nil); code(err) != wire.CodeClosed {
 		t.Fatalf("a closed Hosts dials nothing: %v", err)
 	}
 }
@@ -392,7 +345,26 @@ func TestACallWaitingForAnotherDialKeepsItsDeadline(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
 	start := time.Now()
-	if err := h.Call(ctx, "a", MEcho, nil, nil); code(err) != CodeTimeout || time.Since(start) > time.Second {
+	if err := h.Call(ctx, "a", MEcho, nil, nil); code(err) != wire.CodeTimeout || time.Since(start) > time.Second {
 		t.Fatalf("%v after %v", err, time.Since(start))
 	}
+}
+
+func TestAnOlderCallerLearnsItIsOutdated(t *testing.T) {
+	reqR, reqW := io.Pipe()
+	resR, resW := io.Pipe()
+	go Serve(struct {
+		io.Reader
+		io.WriteCloser
+	}{reqR, resW}, helloHandler{})
+	go reqW.Write([]byte(`{"proto":1,"id":1,"method":"hello","params":{"lang":"en"}}` + "\n"))
+	var v1 struct {
+		ID     int64 `json:"id"`
+		OK     bool  `json:"ok"`
+		Result Hello `json:"result"`
+	}
+	if err := json.NewDecoder(resR).Decode(&v1); err != nil || v1.ID != 1 || !v1.OK || v1.Result.Proto != wire.Proto {
+		t.Fatalf("a proto 1 hello is answered in a shape proto 1 reads: %+v %v", v1, err)
+	}
+	reqW.Close()
 }

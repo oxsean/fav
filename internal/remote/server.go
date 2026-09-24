@@ -1,71 +1,30 @@
 package remote
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
-	"errors"
 	"io"
+
+	"github.com/oxsean/fav/internal/wire"
 )
 
-// Handler answers one request; an error that is not an *Error goes back as CodeInternal.
+// Handler answers one request; an error that is not a *wire.Error goes back as internal.
 type Handler interface {
 	Handle(ctx context.Context, method string, params json.RawMessage) (any, error)
 }
 
-// Serve answers requests from in, one JSON line each, until in ends; once stops after the first.
-func Serve(ctx context.Context, in io.Reader, out io.Writer, h Handler, once bool) error {
-	r := bufio.NewReaderSize(in, 1<<20)
-	enc := json.NewEncoder(out)
-	for {
-		line, err := r.ReadBytes('\n')
-		if len(line) > 0 {
-			if werr := enc.Encode(answer(ctx, line, h)); werr != nil {
-				return werr
-			}
-			if once {
-				return nil
-			}
-		}
-		if errors.Is(err, io.EOF) {
-			return nil
-		}
-		if err != nil {
-			return err
-		}
-	}
+// Wire is h as a wire handler.
+func Wire(h Handler) wire.Handler {
+	return func(ctx context.Context, r *wire.Request) (any, error) { return h.Handle(ctx, r.Method, r.Params) }
 }
 
-func answer(ctx context.Context, line []byte, h Handler) Response {
-	var req Request
-	if err := json.Unmarshal(line, &req); err != nil {
-		return Response{Error: &Error{Code: CodeBadRequest, Detail: err.Error()}}
-	}
-	if req.Proto != Proto && req.Method != MHello {
-		return Response{ID: req.ID, Error: &Error{Code: CodeProto}}
-	}
-	res, err := h.Handle(ctx, req.Method, req.Params)
-	if err != nil {
-		var e *Error
-		if !errors.As(err, &e) {
-			e = &Error{Code: CodeInternal, Detail: err.Error()}
-		}
-		return Response{ID: req.ID, Error: e}
-	}
-	b, err := json.Marshal(res)
-	if err != nil {
-		return Response{ID: req.ID, Error: &Error{Code: CodeInternal, Detail: err.Error()}}
-	}
-	return Response{ID: req.ID, OK: true, Result: b}
+// Serve answers requests on rw until the other end hangs up.
+func Serve(rw io.ReadWriteCloser, h Handler) {
+	<-wire.New(rw, wire.Options{Handler: Wire(h)}).Done()
 }
 
 // Pipe is a Client served by h in this process.
 func Pipe(h Handler) *Client {
-	reqR, reqW := io.Pipe()
-	resR, resW := io.Pipe()
-	go func() {
-		Serve(context.Background(), reqR, resW, h, false)
-		resW.Close()
-	}()
-	return NewClient(resR, reqW)
+	c, _ := wire.Pipe(wire.Options{}, wire.Options{Handler: Wire(h)})
+	return &Client{conn: c}
 }

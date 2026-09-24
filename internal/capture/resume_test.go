@@ -7,13 +7,14 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/oxsean/fav/internal/agent"
 	"github.com/oxsean/fav/internal/fav"
 	"github.com/oxsean/fav/internal/i18n"
 )
 
 func TestResumeNamesTheSessionByItsLabel(t *testing.T) {
 	r := &fav.Rec{Provider: fav.ProviderClaude, SessionID: "abc-123", Title: "notes-api 搜索分页游标漂移排障", Label: "geo 排障 it's \"quoted\""}
-	spec, err := buildResume(r)
+	spec, err := agent.ResumeOf(r, TabLabel(r))
 	if err != nil || !slices.Equal(spec.Argv(), []string{"claude", "--resume", "abc-123", "--name", TabLabel(r)}) {
 		t.Fatalf("argv %q: %v", spec.Argv(), err)
 	}
@@ -43,6 +44,10 @@ func TestPlanResumeBlocksASecondWriter(t *testing.T) {
 	}
 	if p, _ := PlanResume(r, map[string]Live{"s1": {BackgroundID: "b1"}}, true); slices.Contains(p.Checks, elsewhere) {
 		t.Fatal("a background session is attached, not resumed twice")
+	}
+	run := Check{Text: i18n.F("resume.check.running_run", "r_1")}
+	if p, _ := PlanResume(r, map[string]Live{"s1": {Run: "r_1"}}, true); !slices.Contains(p.Checks, run) {
+		t.Fatalf("an open run blocks resuming its session: %+v", p.Checks)
 	}
 }
 

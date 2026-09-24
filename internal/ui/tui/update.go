@@ -35,6 +35,9 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case interface{ apply(*Model) tea.Cmd }: // the Tasks view's messages
+		cmd = msg.apply(m)
+
 	case tea.WindowSizeMsg:
 		m.w, m.h = msg.Width, msg.Height
 		m.search.SetWidth(max(10, m.w-6))
@@ -331,6 +334,11 @@ func (m *Model) searchKey(msg tea.KeyPressMsg) tea.Cmd {
 // reach here under a CJK IME).
 func (m *Model) navKey(msg tea.KeyPressMsg) tea.Cmd {
 	a := keyAct(inList, msg.String())
+	if m.view == viewTasks {
+		if cmd, ok := m.taskKey(a); ok {
+			return cmd
+		}
+	}
 	if m.inTrash() && m.current() != nil && m.chipFocus < 0 && trashBlocked(a) {
 		m.flash(i18n.T("trash.in_trash_hint"))
 		return nil
@@ -621,6 +629,12 @@ func (m *Model) overlayKey(msg tea.KeyPressMsg) tea.Cmd {
 		return m.startKey(msg)
 	case ovPeek:
 		return m.peekKey(msg)
+	case ovTask:
+		return m.taskDialogKey(msg)
+	case ovTaskForm:
+		return m.taskFormKey(msg)
+	case ovTaskRun:
+		return m.taskRunKey(msg)
 	case ovMessage:
 		switch a := keyAct(inReader, msg.String()); a {
 		case actClose:

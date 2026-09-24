@@ -5,6 +5,8 @@ package paths
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -151,3 +153,19 @@ func JSON(p string) string {
 	s := strings.TrimSuffix(b.String(), "\n")
 	return s[1 : len(s)-1]
 }
+
+// ⚠️ a Unix socket path holds 104 bytes on macOS (108 on Linux and Windows AF_UNIX); keep a margin for suffixes.
+const socketMax = 100
+
+// Socket is where a socket called name for dir goes: inside dir when the path fits the socket limit, else in the
+// temporary directory under a name derived from dir.
+func Socket(dir, name string) string {
+	if p := filepath.Join(dir, name); len(p) < socketMax {
+		return p
+	}
+	sum := sha256.Sum256([]byte(dir))
+	return filepath.Join(os.TempDir(), "tend-"+hex.EncodeToString(sum[:4])+"-"+name)
+}
+
+// SocketRoom: a socket path in dir may take extra more bytes (ssh's ControlPath adds its own) and still fit.
+func SocketRoom(dir string, extra int) bool { return len(dir)+extra < socketMax+4 }

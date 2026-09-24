@@ -29,7 +29,7 @@ type Dataset struct {
 }
 
 func (d *Dataset) Env() []string {
-	return append([]string{"FAV_HOME=" + d.Home, "CLAUDE_CONFIG_DIR=" + d.Claude, "CODEX_HOME=" + d.Codex}, paths.TempEnv(d.Tmp)...)
+	return append([]string{"TEND_HOME=" + d.Home, "FAV_HOME=" + d.Home, "CLAUDE_CONFIG_DIR=" + d.Claude, "CODEX_HOME=" + d.Codex}, paths.TempEnv(d.Tmp)...)
 }
 
 func (d *Dataset) Get(name string) Session {

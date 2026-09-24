@@ -1,10 +1,7 @@
 package remote
 
 import (
-	"bufio"
-	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"io"
 	"os"
@@ -20,58 +17,41 @@ import (
 
 	"github.com/oxsean/fav/internal/fav"
 	"github.com/oxsean/fav/internal/pathmap"
+	"github.com/oxsean/fav/internal/paths"
 	"github.com/oxsean/fav/internal/shell"
+	"github.com/oxsean/fav/internal/wire"
 )
 
-// Client talks to one `fav rpc --stdio`; one call at a time. A call that times out while waiting for its answer only
-// gives up (the answer is skipped when it comes); one that cannot even send, or a Close, ends the client, as does the
-// other end stopping: Dial again.
+// Client talks to one `tend rpc --stdio`, over ssh or as a local process. Calls run concurrently; one that times out
+// only gives up (the other end is told to cancel it); the process ending, or Close, ends the client: Dial again.
 type Client struct {
-	turn    chan struct{} // holds the one call in progress
-	mu      sync.Mutex    // err and fail
-	r       io.Reader
-	w       io.WriteCloser
-	lines   chan []byte
-	done    chan struct{} // closed when the other end stops answering
-	stop    chan struct{} // closed by fail: the reader stops handing out lines
-	closing chan struct{} // closed by Close: a waiting call returns at once
-	once    sync.Once
-	cmd     *exec.Cmd
-	stderr  *tail
-	ssh     bool
-	next    int64
-	err     *Error // why the client is closed
+	conn   *wire.Conn
+	cmd    *exec.Cmd
+	stderr *tail
+	ssh    bool
+	reaped sync.Once
+	why    *wire.Error // how the process ended, set once reaped
 }
 
 // reapWait: how long a process whose output ended may take to exit before it is killed.
 const reapWait = time.Second
 
-// NewClient speaks the protocol over r and w (an in-process server in tests).
-func NewClient(r io.Reader, w io.WriteCloser) *Client {
-	c := &Client{turn: make(chan struct{}, 1), r: r, w: w, lines: make(chan []byte, 1), done: make(chan struct{}),
-		stop: make(chan struct{}), closing: make(chan struct{})}
-	go func() {
-		defer close(c.done)
-		br := bufio.NewReaderSize(r, 1<<20)
-		for {
-			line, err := br.ReadBytes('\n')
-			if len(line) > 0 {
-				select {
-				case c.lines <- bytes.ReplaceAll(line, []byte{0}, nil): // wsl.exe may interleave UTF-16 NULs
-				case <-c.stop:
-					return
-				}
-			}
-			if err != nil {
-				return
-			}
-		}
-	}()
-	return c
+// stdio is a child's stdout and stdin as one stream.
+type stdio struct {
+	io.ReadCloser
+	io.WriteCloser
 }
 
-// Dial starts `fav rpc --stdio` on h.
-func Dial(h fav.Host) (*Client, error) {
+func (s stdio) Close() error {
+	s.WriteCloser.Close()
+	return s.ReadCloser.Close()
+}
+
+// Dial starts `rpc --stdio` on h.
+func Dial(h fav.Host) (*Client, error) { return DialWith(h, wire.Options{}) }
+
+// DialWith is Dial with the connection's options: a coordinator answers the node's pushes.
+func DialWith(h fav.Host, opt wire.Options) (*Client, error) {
 	cmd := Command(h, false, "rpc", "--stdio")
 	in, err := cmd.StdinPipe()
 	if err != nil {
@@ -85,147 +65,68 @@ func Dial(h fav.Host) (*Client, error) {
 	cmd.Stderr = t
 	cmd.WaitDelay = time.Second // a child left behind may hold stderr open
 	if err := cmd.Start(); err != nil {
-		return nil, &Error{Code: CodeClosed, Detail: err.Error()}
+		return nil, &wire.Error{Code: wire.CodeClosed, Detail: err.Error()}
 	}
-	c := NewClient(out, in)
-	c.cmd, c.stderr, c.ssh = cmd, t, h.SSH != ""
+	c := &Client{cmd: cmd, stderr: t, ssh: h.SSH != ""}
+	c.conn = wire.New(stdio{out, in}, opt)
 	return c, nil
 }
 
-// Call sends method with params and decodes the result into out (nil: ignore it). ctx bounds the whole call,
-// waiting for an earlier one included.
-func (c *Client) Call(ctx context.Context, method string, params, out any) error {
-	select {
-	case c.turn <- struct{}{}:
-	case <-ctx.Done():
-		return &Error{Code: CodeTimeout}
-	case <-c.closing:
-		return c.fail(&Error{Code: CodeClosed})
-	}
-	defer func() { <-c.turn }()
-	if err := c.Err(); err != nil {
-		return err
-	}
-	c.next++
-	req := Request{Proto: Proto, ID: c.next, Method: method}
-	if params != nil {
-		b, err := json.Marshal(params)
-		if err != nil {
-			return err
-		}
-		req.Params = b
-	}
-	b, _ := json.Marshal(req)
-	wrote := make(chan error, 1)
-	go func() {
-		_, err := c.w.Write(append(b, '\n'))
-		wrote <- err
-	}()
-	select {
-	case err := <-wrote:
-		if err != nil {
-			return c.fail(nil)
-		}
-	case <-ctx.Done(): // the other end does not read: a half-sent line breaks the stream
-		return c.fail(&Error{Code: CodeTimeout})
-	case <-c.closing:
-		return c.fail(&Error{Code: CodeClosed})
-	}
-	for {
-		select {
-		case line := <-c.lines:
-			if ok, err := answered(line, req.ID, out); ok {
-				return err
-			}
-		case <-c.done:
-			for { // the answer may have come just before the end
-				select {
-				case line := <-c.lines:
-					if ok, err := answered(line, req.ID, out); ok {
-						return err
-					}
-					continue
-				default:
-				}
-				return c.fail(nil)
-			}
-		case <-c.closing:
-			return c.fail(&Error{Code: CodeClosed})
-		case <-ctx.Done():
-			return &Error{Code: CodeTimeout}
-		}
-	}
-}
+// Done is closed once the connection ended.
+func (c *Client) Done() <-chan struct{} { return c.conn.Done() }
 
-// answered decodes line when it answers call id; a late answer to a timed-out call or noise is not one.
-func answered(line []byte, id int64, out any) (bool, error) {
-	var res Response
-	if err := json.Unmarshal(line, &res); err != nil || res.ID != id {
-		return false, nil
-	}
-	if !res.OK {
-		if res.Error == nil {
-			res.Error = &Error{Code: CodeInternal}
+// Call sends method with params and decodes the result into out (nil: ignore it); ctx bounds the call.
+func (c *Client) Call(ctx context.Context, method string, params, out any) error {
+	err := c.conn.Call(ctx, method, params, out)
+	if wire.Code(err) == wire.CodeClosed {
+		if why := c.Err(); why != nil {
+			return why
 		}
-		return true, res.Error
 	}
-	if out == nil {
-		return true, nil
-	}
-	return true, json.Unmarshal(res.Result, out)
+	return err
 }
 
 // Err is why the client stopped, nil while it works.
-func (c *Client) Err() *Error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.err
+func (c *Client) Err() *wire.Error {
+	why := c.conn.Err()
+	if why == nil || c.cmd == nil {
+		return why
+	}
+	c.reaped.Do(func() { c.why = c.reap(why) })
+	return c.why
+}
+
+// reap waits for the process whose connection ended and says why it ended.
+func (c *Client) reap(closed *wire.Error) *wire.Error {
+	exited := make(chan error, 1)
+	go func() { exited <- c.cmd.Wait() }()
+	var err error
+	select {
+	case err = <-exited:
+	case <-time.After(reapWait): // its output ended but it keeps running
+		c.cmd.Process.Kill()
+		err = <-exited
+	}
+	if closed.Code != wire.CodeClosed {
+		return closed
+	}
+	why := classify(err, c.stderr.String(), c.ssh)
+	if why.Code == wire.CodeClosed && why.Detail == "" {
+		return closed
+	}
+	return why
 }
 
 // Close ends the client; a call in flight returns at once.
 func (c *Client) Close() error {
-	c.once.Do(func() { close(c.closing) })
 	if c.cmd != nil {
-		c.cmd.Process.Kill() // a call may be reaping it with mu held
+		c.cmd.Process.Kill()
 	}
-	c.fail(&Error{Code: CodeClosed})
+	c.conn.Close()
+	if c.cmd != nil {
+		go c.Err() // reap in the background
+	}
 	return nil
-}
-
-// fail closes the client with why, or with what the process's exit says.
-func (c *Client) fail(why *Error) *Error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.err != nil {
-		return c.err
-	}
-	close(c.stop)
-	c.w.Close()
-	if rc, ok := c.r.(io.Closer); ok {
-		rc.Close()
-	}
-	if c.cmd != nil {
-		if why != nil {
-			c.cmd.Process.Kill()
-		}
-		exited := make(chan error, 1)
-		go func() { exited <- c.cmd.Wait() }()
-		var err error
-		select {
-		case err = <-exited:
-		case <-time.After(reapWait): // its output ended but it keeps running
-			c.cmd.Process.Kill()
-			err = <-exited
-		}
-		if why == nil {
-			why = classify(err, c.stderr.String(), c.ssh)
-		}
-	}
-	if why == nil {
-		why = &Error{Code: CodeClosed}
-	}
-	c.err = why
-	return why
 }
 
 var (
@@ -235,22 +136,22 @@ var (
 )
 
 // classify turns a finished process into an error code: ssh exits 255 when it cannot reach or log in.
-func classify(err error, stderr string, ssh bool) *Error {
+func classify(err error, stderr string, ssh bool) *wire.Error {
 	detail := strings.TrimSpace(stderr)
 	var exit *exec.ExitError
 	if ssh && errors.As(err, &exit) && exit.ExitCode() == 255 {
 		switch {
 		case hostKeyBad.MatchString(stderr):
-			return &Error{Code: CodeHostKey, Detail: detail}
+			return &wire.Error{Code: wire.CodeHostKey, Detail: detail}
 		case authFailed.MatchString(stderr):
-			return &Error{Code: CodeAuth, Detail: detail}
+			return &wire.Error{Code: wire.CodeAuth, Detail: detail}
 		}
-		return &Error{Code: CodeOffline, Detail: detail}
+		return &wire.Error{Code: wire.CodeOffline, Detail: detail}
 	}
 	if errors.As(err, &exit) && noCommand.MatchString(stderr) {
-		return &Error{Code: CodeNoFav, Detail: detail}
+		return &wire.Error{Code: wire.CodeNoFav, Detail: detail}
 	}
-	return &Error{Code: CodeClosed, Detail: detail}
+	return &wire.Error{Code: wire.CodeClosed, Detail: detail}
 }
 
 // Command runs fav on h with args: over ssh (tty for an interactive resume), or as a local process when h.SSH is empty.
@@ -317,8 +218,8 @@ func multiplex() []string {
 		return nil
 	}
 	dir := filepath.Join(fav.Home(), "hosts", "ssh")
-	// ⚠️ a Unix socket path holds 104 bytes (macOS); ssh adds "/" + 40 hex (%C) + a 17-byte temp suffix.
-	if len(dir)+58 >= 104 || os.MkdirAll(dir, 0o700) != nil {
+	// ssh adds "/" + 40 hex (%C) + a 17-byte temp suffix to the directory.
+	if !paths.SocketRoom(dir, 58) || os.MkdirAll(dir, 0o700) != nil {
 		return nil
 	}
 	return []string{"-o", "ControlMaster=auto", "-o", "ControlPath=" + filepath.Join(dir, "%C"), "-o", "ControlPersist=60"}

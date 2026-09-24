@@ -402,3 +402,23 @@ func TestAnUnreadableCacheLineIsRewrittenAway(t *testing.T) {
 		t.Fatalf("loaded %d of 3 files", idx.Len())
 	}
 }
+
+func TestARunSessionIsListedThoughItsCLIMarksItOneShot(t *testing.T) {
+	claude, _ := setup(t)
+	home := t.TempDir()
+	t.Setenv("FAV_HOME", home)
+	write(t, filepath.Join(claude, "projects", "-Users-me", "rrrr.jsonl"),
+		`{"type":"user","entrypoint":"sdk-cli","sessionId":"rrrr","timestamp":"2026-09-10T01:00:00Z","cwd":"/Users/me","message":{"content":"修构建"}}`+"\n")
+	idx, err := OpenAt(filepath.Join(t.TempDir(), "sessions.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	idx, _ = idx.Refresh()
+	if len(idx.Sessions()) != 0 || len(idx.AgentSessions()) != 1 {
+		t.Fatalf("an unregistered -p session is an agent session: %d %d", len(idx.Sessions()), len(idx.AgentSessions()))
+	}
+	write(t, filepath.Join(home, "node", "runs", "r_0123456789ab", "spec.json"), `{"provider":"claude","session":"rrrr"}`)
+	if ss := idx.Sessions(); len(ss) != 1 || ss[0].SessionID != "rrrr" || len(idx.AgentSessions()) != 0 {
+		t.Fatalf("a run's session is a session: %+v %d", ss, len(idx.AgentSessions()))
+	}
+}

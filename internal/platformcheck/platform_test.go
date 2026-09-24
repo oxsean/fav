@@ -1,6 +1,7 @@
 // Package platformcheck fails when code outside the owning package repeats a platform rule: paths are compared and
 // shortened in internal/paths, shell command lines are quoted in internal/shell, OS file locks live in internal/filelock,
-// file identity in internal/fileio, another machine's path shapes in internal/pathmap.
+// file identity in internal/fileio, another machine's path shapes in internal/pathmap, starting and ending processes in
+// internal/proc.
 package platformcheck
 
 import (
@@ -24,6 +25,7 @@ var rules = []struct {
 	{regexp.MustCompile(`syscall\.Flock|LockFileEx`), "internal/filelock", "filelock.Lock / TryLock / Held"},
 	{regexp.MustCompile(`syscall\.Stat_t|GetFileInformationByHandle`), "internal/fileio", "fileio.ID"},
 	{regexp.MustCompile(`\[A-Za-z\]:`), "internal/pathmap", "pathmap.Drive / Abs / Base"},
+	{regexp.MustCompile(`Setsid|Setpgid|DETACHED_PROCESS|CREATE_BREAKAWAY|CreateJobObject|OpenProcess|syscall\.Kill\(`), "internal/proc", "proc.StartDetached / StartTree / Alive"},
 }
 
 func TestPlatformRulesHaveOneHome(t *testing.T) {

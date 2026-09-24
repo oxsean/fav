@@ -4,15 +4,11 @@
 package remote
 
 import (
-	"encoding/json"
 	"time"
 
 	"github.com/oxsean/fav/internal/capture"
 	"github.com/oxsean/fav/internal/fav"
 )
-
-// Proto changes whenever a request or result changes shape; both ends must agree.
-const Proto = 1
 
 const (
 	MHello    = "hello"
@@ -26,53 +22,11 @@ const (
 	MEcho     = "echo"
 )
 
-// Request and Response are one line of JSON each.
-type Request struct {
-	Proto  int             `json:"proto"`
-	ID     int64           `json:"id"`
-	Method string          `json:"method"`
-	Params json.RawMessage `json:"params,omitempty"`
-}
-
-type Response struct {
-	ID     int64           `json:"id"`
-	OK     bool            `json:"ok"`
-	Result json.RawMessage `json:"result,omitempty"`
-	Error  *Error          `json:"error,omitempty"`
-}
-
-// Error carries a stable code, never localized text: the two ends may use different languages. Detail is for logs.
-type Error struct {
-	Code   string `json:"code"`
-	Detail string `json:"detail,omitempty"`
-}
-
-func (e *Error) Error() string {
-	if e.Detail == "" {
-		return e.Code
-	}
-	return e.Code + ": " + e.Detail
-}
-
-// Error codes. The first group comes from the remote fav, the second from reaching it.
-const (
-	CodeBadRequest    = "bad_request"
-	CodeUnknownMethod = "unknown_method"
-	CodeProto         = "proto" // the other end speaks another Proto: update fav there
-	CodeNotFound      = "not_found"
-	CodeStale         = "stale" // the transcript was rewritten since the offsets asked about were read
-	CodeInternal      = "internal"
-
-	CodeOffline = "offline" // ssh could not connect
-	CodeAuth    = "auth"    // ssh refused the key
-	CodeHostKey = "hostkey" // the host key changed or is unknown
-	CodeTimeout = "timeout"
-	CodeClosed  = "closed" // the remote process ended (crashed, killed)
-	CodeNoFav   = "no_fav" // the remote shell could not find the fav command
-)
-
 type HelloParams struct {
-	Lang string `json:"lang,omitempty"` // the caller's language: check texts come back in it
+	Proto int    `json:"proto"`
+	Role  string `json:"role,omitempty"`  // client | coordinator | node
+	Lang  string `json:"lang,omitempty"`  // the caller's language: check texts come back in it
+	Token string `json:"token,omitempty"` // mode 2: who the caller is
 }
 
 type Hello struct {
@@ -89,6 +43,7 @@ type Hello struct {
 	Codex    string          `json:"codex_home"`
 	CLIs     map[string]bool `json:"clis"` // claude / codex found on PATH
 	Methods  []string        `json:"methods"`
+	Role     string          `json:"role,omitempty"`
 }
 
 // Ref names a session on the machine that answers.
@@ -161,7 +116,7 @@ func (s Session) Rec(host string) *fav.Rec {
 	return r
 }
 
-// File, in the params that carry offsets, is the Page.File they came from: another file answers CodeStale.
+// File, in the params that carry offsets, is the Page.File they came from: another file answers wire.CodeStale.
 type MessagesParams struct {
 	Ref
 	Before int64  `json:"before"` // < 0: from the end

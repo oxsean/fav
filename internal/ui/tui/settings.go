@@ -25,7 +25,7 @@ type setting struct {
 	hint  string
 }
 
-var views = []string{"favorites", "sessions", "projects", "live"}
+var views = []string{"favorites", "sessions", "projects", "live", "tasks"}
 var sorts = []string{"active", "started", "favorited", "turns"}
 var langs = []string{"", i18n.ZH, i18n.EN}
 var turnsOpts = []int{1, 2, 3, 5, 8}

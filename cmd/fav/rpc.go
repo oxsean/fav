@@ -1,23 +1,14 @@
 package main
 
-import (
-	"context"
-	"os"
+import "os"
 
-	"github.com/oxsean/fav/internal/i18n"
-	"github.com/oxsean/fav/internal/remote"
-)
+// cmdRpc is `node`: older callers start `rpc --stdio`.
+func cmdRpc(args []string) error { return cmdNode(args) }
 
-// cmdRpc answers the remote protocol: one request (`fav rpc`) or until stdin closes (`--stdio`).
-// ⚠️ stdout carries protocol lines only: while serving, os.Stdout points at stderr so a stray print cannot corrupt them.
-func cmdRpc(args []string) error {
-	fs := newFlags("rpc")
-	stdio := fs.Bool("stdio", false, i18n.T("cli.rpc.flag_stdio"))
-	if err := fs.Parse(args); err != nil {
-		return err
-	}
-	out := os.Stdout
-	os.Stdout = os.Stderr
-	defer func() { os.Stdout = out }()
-	return remote.Serve(context.Background(), os.Stdin, out, remote.NewLocal(version), !*stdio)
+type stdPipes struct {
+	*os.File
+	w *os.File
 }
+
+func (s stdPipes) Write(p []byte) (int, error) { return s.w.Write(p) }
+func (s stdPipes) Close() error                { s.w.Close(); return s.File.Close() }

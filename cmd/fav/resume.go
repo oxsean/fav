@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"strings"
 
+	"github.com/oxsean/fav/internal/agent"
 	"github.com/oxsean/fav/internal/capture"
 	"github.com/oxsean/fav/internal/fav"
 	"github.com/oxsean/fav/internal/i18n"
@@ -134,7 +135,7 @@ func runPlan(s *fav.Store, r *fav.Rec, plan capture.Plan, dryRun bool, workspace
 	return resumeHere(plan.Spec)
 }
 
-func resumeHere(spec capture.CommandSpec) error {
+func resumeHere(spec agent.CommandSpec) error {
 	bin, err := exec.LookPath(spec.Exec)
 	if err != nil {
 		return i18n.E("cli.resume.not_on_path", spec.Exec, err)

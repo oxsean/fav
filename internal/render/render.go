@@ -3,6 +3,9 @@ package render
 import (
 	"strconv"
 	"strings"
+	"unicode"
+
+	"github.com/charmbracelet/x/ansi"
 	"time"
 
 	"github.com/oxsean/fav/internal/capture"
@@ -411,4 +414,16 @@ func Chars(n int) string {
 		return strconv.FormatFloat(float64(n)/1000, 'f', 1, 64) + "k"
 	}
 	return strconv.Itoa(n)
+}
+
+// Sanitize makes program output safe to print: escape sequences and control characters other than newline and tab
+// are dropped.
+func Sanitize(s string) string {
+	s = ansi.Strip(s)
+	return strings.Map(func(r rune) rune {
+		if r == '\n' || r == '\t' || !unicode.IsControl(r) {
+			return r
+		}
+		return -1
+	}, s)
 }

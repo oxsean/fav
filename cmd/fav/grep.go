@@ -15,6 +15,7 @@ import (
 	"github.com/oxsean/fav/internal/fulltext"
 	"github.com/oxsean/fav/internal/i18n"
 	"github.com/oxsean/fav/internal/index"
+	"github.com/oxsean/fav/internal/proc"
 	"github.com/oxsean/fav/internal/render"
 )
 
@@ -144,8 +145,7 @@ func finishTextInBackground() {
 		return
 	}
 	c := exec.Command(exe, "text-sync")
-	detach(c)
-	if c.Start() == nil {
+	if proc.StartDetached(c) == nil {
 		c.Process.Release()
 	}
 }

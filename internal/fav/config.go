@@ -27,6 +27,41 @@ type Config struct {
 	ToolOutput   int    `json:"tool_output_lines"`      // lines of each tool output kept for message search; 0 = none
 	ResumeIn     string `json:"resume_in,omitempty"`    // what Enter on resume opens: terminal (default) | app | origin (the app for sessions started there)
 	Hosts        []Host `json:"hosts,omitempty"`
+
+	Agents      []AgentProfile           `json:"agents,omitempty"`
+	Machines    map[string]MachineConfig `json:"machines,omitempty"`
+	Node        NodeConfig               `json:"node,omitempty"`
+	Coordinator *CoordinatorConfig       `json:"coordinator,omitempty"` // mode 2: the server this machine's clients use
+}
+
+// AgentProfile is one way to run an agent.
+type AgentProfile struct {
+	Name        string   `json:"name"`
+	Provider    string   `json:"provider"`
+	Model       string   `json:"model,omitempty"`
+	Permission  string   `json:"permission,omitempty"` // claude: --permission-mode; codex: --sandbox
+	Args        []string `json:"args,omitempty"`       // added to every launch
+	Command     []string `json:"command,omitempty"`    // provider "command": the argv template
+	Stdin       bool     `json:"stdin,omitempty"`      // provider "command": the task brief goes to stdin
+	Machine     string   `json:"machine,omitempty"`    // default machine
+	Interactive bool     `json:"interactive,omitempty"`
+}
+
+// MachineConfig tunes one machine the coordinator runs agents on ("local" is this one).
+type MachineConfig struct {
+	Slots int `json:"slots,omitempty"` // runs at once; default 2
+}
+
+// NodeConfig is what this machine lets a coordinator do; mode 2 requires AllowDirs.
+type NodeConfig struct {
+	AllowDirs     []string `json:"allow_dirs,omitempty"`
+	AllowBypass   bool     `json:"allow_bypass,omitempty"`
+	AllowProfiles []string `json:"allow_profiles,omitempty"`
+}
+
+type CoordinatorConfig struct {
+	URL       string `json:"url"`
+	TokenFile string `json:"token_file,omitempty"`
 }
 
 // Host is another machine whose sessions fav shows, reached with `ssh <SSH> <Fav…> rpc`.

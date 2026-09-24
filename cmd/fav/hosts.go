@@ -17,6 +17,7 @@ import (
 	"github.com/oxsean/fav/internal/remote"
 	"github.com/oxsean/fav/internal/render"
 	"github.com/oxsean/fav/internal/shell"
+	"github.com/oxsean/fav/internal/wire"
 )
 
 // cmdHosts lists the configured hosts; its subcommands add, remove, probe, install fav on and forget them.
@@ -112,7 +113,7 @@ func (r *hostReport) fail(row, reason string) {
 
 // reasonOf: the short reason, then the first line of what the other end said.
 func reasonOf(err error) string {
-	var e *remote.Error
+	var e *wire.Error
 	if errors.As(err, &e) && e.Detail != "" {
 		detail, _, _ := strings.Cut(strings.TrimSpace(e.Detail), "\n")
 		return remote.Reason(err) + " — " + detail
@@ -213,8 +214,8 @@ func checkHost(ctx context.Context, h fav.Host, dial func(fav.Host) (*remote.Cli
 	}
 	r.cells["cli.hosts.row_connect"] = ok + " " + since(start)
 	r.cells["cli.hosts.row_fav"] = i18n.F("cli.hosts.version", hello.Version, hello.Proto)
-	if hello.Proto != remote.Proto {
-		r.fail("cli.hosts.row_fav", remote.Reason(&remote.Error{Code: remote.CodeProto}))
+	if hello.Proto != wire.Proto {
+		r.fail("cli.hosts.row_fav", remote.Reason(&wire.Error{Code: wire.CodeProto}))
 		return r
 	}
 	r.cells["cli.hosts.row_os"] = strings.TrimSpace(hello.OS + "/" + hello.Arch + " " + hello.WSL)

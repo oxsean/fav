@@ -17,6 +17,7 @@ import (
 	"github.com/oxsean/fav/internal/fav"
 	"github.com/oxsean/fav/internal/i18n"
 	"github.com/oxsean/fav/internal/index"
+	"github.com/oxsean/fav/internal/node"
 	"github.com/oxsean/fav/internal/render"
 )
 
@@ -109,8 +110,24 @@ func run(args []string) error {
 		return cmdDoctor(args)
 	case "rpc":
 		return cmdRpc(args)
+	case "node":
+		return cmdNode(args)
+	case "_run":
+		return cmdSupervise(args)
+	case "_fake-agent":
+		return node.FakeAgent(args)
 	case "hosts":
 		return cmdHosts(args)
+	case "task":
+		return cmdTask(args)
+	case "run":
+		return cmdRun(args)
+	case "agent":
+		return cmdAgent(args)
+	case "machine":
+		return cmdMachine(args)
+	case "service":
+		return cmdService(args)
 	case "install-hook":
 		return cmdInstallHook(args)
 	case "uninstall-hook":

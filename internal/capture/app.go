@@ -8,10 +8,11 @@ import (
 	"strings"
 	"sync"
 
+	"uuid"
+
 	"github.com/oxsean/fav/internal/fav"
 	"github.com/oxsean/fav/internal/i18n"
 	"github.com/oxsean/fav/internal/paths"
-	"uuid"
 )
 
 // Desktop apps open a session by URL: Claude's resumes a CLI session (claude://resume?session=<uuid>), ChatGPT's Codex

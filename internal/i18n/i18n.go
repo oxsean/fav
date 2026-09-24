@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync/atomic"
 )
 
 //go:embed locales/*.json
@@ -33,15 +34,22 @@ const (
 	EN = "en"
 )
 
-var lang = ZH
+var lang atomic.Value // string; set once per process in practice, read from many goroutines
 
 // empty or unknown → zh
 func Set(l string) {
 	if l == EN {
-		lang = EN
+		lang.Store(EN)
 		return
 	}
-	lang = ZH
+	lang.Store(ZH)
+}
+
+func current() string {
+	if l, ok := lang.Load().(string); ok {
+		return l
+	}
+	return ZH
 }
 
 // "" follows the system
@@ -72,7 +80,7 @@ func F(key string, a ...any) string { return fmt.Sprintf(T(key), a...) }
 func E(key string, a ...any) error { return fmt.Errorf(T(key), a...) }
 
 func T(key string) string {
-	if s, ok := tables[lang][key]; ok {
+	if s, ok := tables[current()][key]; ok {
 		return s
 	}
 	if s, ok := tables[EN][key]; ok {

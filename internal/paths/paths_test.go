@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -134,5 +135,20 @@ func TestInTemp(t *testing.T) {
 	}
 	if _, ok := InTemp(native("/w/app")); ok {
 		t.Error("a project dir is not a temp path")
+	}
+}
+
+func TestSocketFitsTheLimit(t *testing.T) {
+	short := filepath.Join(string(filepath.Separator)+"h", "tend")
+	if got := Socket(short, "tend.sock"); got != filepath.Join(short, "tend.sock") {
+		t.Fatalf("a short path stays: %s", got)
+	}
+	long := filepath.Join(os.TempDir(), strings.Repeat("d", 120))
+	a, b := Socket(long, "tend.sock"), Socket(long+"x", "tend.sock")
+	if len(a) >= socketMax || a == b || !strings.HasSuffix(a, "tend.sock") {
+		t.Fatalf("a long path moves to a short, distinct one: %s %s", a, b)
+	}
+	if SocketRoom(strings.Repeat("d", 40), 58) != true || SocketRoom(strings.Repeat("d", 50), 58) {
+		t.Fatal("room")
 	}
 }

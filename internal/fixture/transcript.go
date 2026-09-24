@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/oxsean/fav/internal/index"
 )
 
 const tsLayout = "2006-01-02T15:04:05.000Z"
@@ -197,4 +199,62 @@ func (s *codexSession) patch(body string) {
 
 func (s *codexSession) done(last string) {
 	s.line("event_msg", obj{{"type", "task_complete"}, {"last_agent_message", last}, {"duration_ms", 93000}})
+}
+
+// LiveClaude appends a Claude-shaped transcript line by line, as a running session does: the fake agent writes one.
+type LiveClaude struct{ s claudeSession }
+
+// NewLiveClaude starts the transcript of session sid in cwd under claudeHome; entry is its entrypoint ("sdk-cli" for
+// a session started with -p).
+func NewLiveClaude(claudeHome, sid, cwd, entry string) *LiveClaude {
+	l := &LiveClaude{claudeSession{id: sid, cwd: cwd, entry: entry}}
+	l.s.path = filepath.Join(claudeHome, "projects", index.ClaudeProjectName(cwd), sid+".jsonl")
+	l.s.t = time.Now().Add(-time.Minute)
+	return l
+}
+
+func (l *LiveClaude) Path() string { return l.s.path }
+
+// User appends the user's message.
+func (l *LiveClaude) User(text string) error {
+	l.s.t = time.Now().Add(-2 * time.Minute) // user() stamps t + 2 min: now
+	l.s.user(text)
+	return l.flush()
+}
+
+// Reply appends an assistant answer.
+func (l *LiveClaude) Reply(text string) error {
+	l.s.t = time.Now().Add(-20 * time.Second)
+	l.s.assistant(obj{{"type", "text"}, {"text", text}})
+	return l.flush()
+}
+
+// Ask appends an AskUserQuestion call: the session now waits for its user.
+func (l *LiveClaude) Ask(question string) error {
+	l.s.t = time.Now().Add(-20 * time.Second)
+	l.s.assistant(obj{{"type", "tool_use"}, {"id", "toolu_ask" + l.s.id[24:]}, {"name", "AskUserQuestion"},
+		{"input", obj{{"questions", []obj{{{"question", question}}}}}}})
+	return l.flush()
+}
+
+func (l *LiveClaude) flush() error {
+	if err := os.MkdirAll(filepath.Dir(l.s.path), 0o755); err != nil {
+		return err
+	}
+	f, err := os.OpenFile(l.s.path, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0o600)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	for _, o := range l.s.lines {
+		b, err := encode(o)
+		if err != nil {
+			return err
+		}
+		if _, err := f.Write(append(b, '\n')); err != nil {
+			return err
+		}
+	}
+	l.s.lines = nil
+	return nil
 }

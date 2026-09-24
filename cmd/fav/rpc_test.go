@@ -12,6 +12,7 @@ import (
 	"github.com/oxsean/fav/internal/fav"
 	"github.com/oxsean/fav/internal/fixture"
 	"github.com/oxsean/fav/internal/remote"
+	"github.com/oxsean/fav/internal/wire"
 )
 
 func fixtureMachine(t *testing.T) *fixture.Dataset {
@@ -56,30 +57,29 @@ func rpcLines(t *testing.T, in string, args ...string) []string {
 func TestRpcAnswersOnStdoutOnly(t *testing.T) {
 	d := fixtureMachine(t)
 	oauth := d.Get("oauth")
-	msgs, _ := json.Marshal(remote.Request{Proto: remote.Proto, ID: 2, Method: remote.MMessages,
+	msgs, _ := json.Marshal(wire.Frame{Kind: wire.KindReq, ID: 2, Method: remote.MMessages,
 		Params: json.RawMessage(`{"provider":"` + oauth.Provider + `","session_id":"` + oauth.ID + `","before":-1,"n":3}`)})
-	list := `{"proto":1,"id":1,"method":"list"}` + "\n"
+	list := `{"kind":"req","id":1,"method":"list"}` + "\n"
 
-	one := rpcLines(t, list+string(msgs)+"\n", "rpc")
-	if len(one) != 1 {
-		t.Fatalf("fav rpc answers one request and exits: %q", one)
+	all := rpcLines(t, list+"not json\n"+string(msgs)+"\n", "rpc", "--stdio")
+	if len(all) != 2 {
+		t.Fatalf("every request is answered, noise is skipped: %q", all)
 	}
-	var res remote.Response
+	got := map[int64]wire.Frame{}
+	for _, line := range all {
+		var f wire.Frame
+		if json.Unmarshal([]byte(line), &f) != nil || f.Kind != wire.KindRes || !f.OK {
+			t.Fatalf("%.300s", line)
+		}
+		got[f.ID] = f
+	}
 	var l remote.List
-	if json.Unmarshal([]byte(one[0]), &res) != nil || !res.OK || res.ID != 1 || json.Unmarshal(res.Result, &l) != nil || len(l.Sessions) == 0 {
-		t.Fatalf("list: %.300s", one[0])
-	}
-
-	all := rpcLines(t, list+string(msgs)+"\nnot json\n", "rpc", "--stdio")
-	if len(all) != 3 {
-		t.Fatalf("--stdio answers every line: %q", all)
+	if json.Unmarshal(got[1].Result, &l) != nil || len(l.Sessions) == 0 {
+		t.Errorf("list: %.300s", got[1].Result)
 	}
 	var page struct{ Msgs []json.RawMessage }
-	if json.Unmarshal([]byte(all[1]), &res) != nil || !res.OK || res.ID != 2 || json.Unmarshal(res.Result, &page) != nil || len(page.Msgs) != 3 {
-		t.Errorf("messages: %.300s", all[1])
-	}
-	if json.Unmarshal([]byte(all[2]), &res) != nil || res.OK || res.Error.Code != remote.CodeBadRequest {
-		t.Errorf("a line that is not a request: %s", all[2])
+	if json.Unmarshal(got[2].Result, &page) != nil || len(page.Msgs) != 3 {
+		t.Errorf("messages: %.300s", got[2].Result)
 	}
 }
 
@@ -87,7 +87,7 @@ func TestHostsCheck(t *testing.T) {
 	fixtureMachine(t)
 	dial := func(h fav.Host) (*remote.Client, error) {
 		if h.Name == "gone" {
-			return nil, &remote.Error{Code: remote.CodeOffline, Detail: "ssh: connect to host gone port 22: Operation timed out\nmore"}
+			return nil, &wire.Error{Code: wire.CodeOffline, Detail: "ssh: connect to host gone port 22: Operation timed out\nmore"}
 		}
 		return remote.Pipe(remote.NewLocal("test")), nil
 	}

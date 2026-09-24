@@ -22,32 +22,6 @@ const (
 	handoffKeep     = 30 * 24 * time.Hour
 )
 
-// buildFork: a new session with r's history (claude --fork-session, codex fork); r itself is left as it was.
-func buildFork(r *fav.Rec) (CommandSpec, error) {
-	if r.SessionID == "" {
-		return CommandSpec{}, i18n.E("resume.check.no_session")
-	}
-	switch r.Provider {
-	case fav.ProviderClaude:
-		return CommandSpec{Exec: "claude", Args: []string{"--resume", r.SessionID, "--fork-session"}, Cwd: r.Cwd}, nil
-	case fav.ProviderCodex:
-		return CommandSpec{Exec: "codex", Args: []string{"fork", r.SessionID}, Cwd: r.Cwd}, nil
-	}
-	return CommandSpec{}, i18n.E("resume.unknown_provider", r.Provider)
-}
-
-// buildStart: a new session of provider in cwd whose first message is prompt ("" = none).
-func buildStart(provider, cwd, prompt string) (CommandSpec, error) {
-	if !known(provider) {
-		return CommandSpec{}, i18n.E("resume.unknown_provider", provider)
-	}
-	var args []string
-	if prompt != "" {
-		args = []string{prompt}
-	}
-	return CommandSpec{Exec: provider, Args: args, Cwd: cwd}, nil
-}
-
 // HandoffPrompt is the new session's first message; the pack itself stays in the file so it never reaches argv or ps.
 func HandoffPrompt(path string) string { return i18n.F("handoff.prompt", path) }
 

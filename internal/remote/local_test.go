@@ -17,6 +17,7 @@ import (
 	"github.com/oxsean/fav/internal/fileio"
 	"github.com/oxsean/fav/internal/fixture"
 	"github.com/oxsean/fav/internal/i18n"
+	"github.com/oxsean/fav/internal/wire"
 )
 
 func localMachine(t *testing.T) (*fixture.Dataset, *Client) {
@@ -32,7 +33,7 @@ func localMachine(t *testing.T) (*fixture.Dataset, *Client) {
 }
 
 func code(err error) string {
-	var e *Error
+	var e *wire.Error
 	if errors.As(err, &e) {
 		return e.Code
 	}
@@ -49,7 +50,7 @@ func TestLocalHello(t *testing.T) {
 	if err := c.Call(context.Background(), MHello, HelloParams{Lang: i18n.EN}, &h); err != nil {
 		t.Fatal(err)
 	}
-	if h.Proto != Proto || h.Version != "test" || h.OS == "" || h.Arch == "" || len(h.Endpoint) != 12 || h.Home == "" || h.Sep == "" {
+	if h.Proto != wire.Proto || h.Version != "test" || h.OS == "" || h.Arch == "" || len(h.Endpoint) != 12 || h.Home == "" || h.Sep == "" {
 		t.Fatalf("%+v", h)
 	}
 	if _, ok := h.CLIs[fav.ProviderCodex]; !ok || len(h.CLIs) != 2 {
@@ -154,11 +155,11 @@ func TestLocalReadsByRef(t *testing.T) {
 		params any
 		want   string
 	}{
-		{"unknown session", MMessages, MessagesParams{Ref: Ref{fav.ProviderClaude, "nope"}, Before: -1, N: 5}, CodeNotFound},
-		{"no ref", MPulse, Ref{}, CodeBadRequest},
-		{"no page size", MMessages, MessagesParams{Ref: ref("oauth"), Before: -1, N: 0}, CodeBadRequest},
-		{"params of the wrong shape", MChecks, json.RawMessage(`[1]`), CodeBadRequest},
-		{"unknown method", "grep", nil, CodeUnknownMethod},
+		{"unknown session", MMessages, MessagesParams{Ref: Ref{fav.ProviderClaude, "nope"}, Before: -1, N: 5}, wire.CodeNotFound},
+		{"no ref", MPulse, Ref{}, wire.CodeBadRequest},
+		{"no page size", MMessages, MessagesParams{Ref: ref("oauth"), Before: -1, N: 0}, wire.CodeBadRequest},
+		{"params of the wrong shape", MChecks, json.RawMessage(`[1]`), wire.CodeBadRequest},
+		{"unknown method", "grep", nil, wire.CodeUnknownMethod},
 	} {
 		if err := c.Call(ctx, e.method, e.params, nil); code(err) != e.want {
 			t.Errorf("%s: %v, want %s", e.name, err, e.want)
@@ -187,10 +188,10 @@ func TestARewrittenTranscriptIsStale(t *testing.T) {
 	if err := fileio.WriteAtomic(s.Path, 0o644, func(w io.Writer) error { _, err := w.Write(b); return err }); err != nil {
 		t.Fatal(err)
 	}
-	if err := c.Call(ctx, MMessages, MessagesParams{Ref: ref, Before: p.From, N: 2, File: old}, nil); code(err) != CodeStale {
+	if err := c.Call(ctx, MMessages, MessagesParams{Ref: ref, Before: p.From, N: 2, File: old}, nil); code(err) != wire.CodeStale {
 		t.Fatalf("an older page of the old file: %v", err)
 	}
-	if err := c.Call(ctx, MText, TextParams{Ref: ref, Off: p.Msgs[0].Off, File: old}, nil); code(err) != CodeStale {
+	if err := c.Call(ctx, MText, TextParams{Ref: ref, Off: p.Msgs[0].Off, File: old}, nil); code(err) != wire.CodeStale {
 		t.Fatalf("a full text of the old file: %v", err)
 	}
 
@@ -208,7 +209,7 @@ func TestARewrittenTranscriptIsStale(t *testing.T) {
 		t.Fatalf("then reads on: %v", pg.Err)
 	}
 	os.Remove(s.Path)
-	if pg := src.Messages(-1, 2); code(pg.Err) != CodeNotFound {
+	if pg := src.Messages(-1, 2); code(pg.Err) != wire.CodeNotFound {
 		t.Fatalf("a transcript that cannot be read is an error, not an empty head: %v", pg.Err)
 	}
 }

@@ -1,65 +1,16 @@
 package capture
 
 import (
-	"errors"
-	"os/exec"
 	"slices"
 
+	"github.com/oxsean/fav/internal/agent"
 	"github.com/oxsean/fav/internal/fav"
 	"github.com/oxsean/fav/internal/i18n"
 	"github.com/oxsean/fav/internal/paths"
-	"github.com/oxsean/fav/internal/shell"
 )
 
-func known(provider string) bool {
-	return provider == fav.ProviderClaude || provider == fav.ProviderCodex
-}
-
-func Installed(provider string) bool {
-	if !known(provider) {
-		return false
-	}
-	_, err := exec.LookPath(provider)
-	return err == nil
-}
-
-// CommandSpec is a structured command. ⚠️ Never hand an unescaped string to a shell.
-type CommandSpec struct {
-	Exec string
-	Args []string
-	Cwd  string
-}
-
-func (c CommandSpec) Argv() []string { return append([]string{c.Exec}, c.Args...) }
-
-// Display is the command without the cd, quoted for the shell fav was started from; never executed.
-func (c CommandSpec) Display() string { return shell.User().Join(c.Argv()) }
-
-// TerminalLine is the line the user copies into the shell fav was started from; it cds first when Cwd is set.
-func (c CommandSpec) TerminalLine() string { return shell.User().Line(c.Cwd, c.Argv()) }
-
-// ShellLine is the line typed into a Herdr pane (herdr pane run goes through a POSIX shell, not argv).
-func (c CommandSpec) ShellLine() string { return shell.POSIX.Line(c.Cwd, c.Argv()) }
-
-// buildResume: Claude keeps the original session id (no --fork-session).
-func buildResume(r *fav.Rec) (CommandSpec, error) {
-	if r.SessionID == "" {
-		return CommandSpec{}, errors.New(i18n.T("resume.check.no_session"))
-	}
-	switch r.Provider {
-	case fav.ProviderClaude:
-		// --name: the terminal title and the /resume list use fav's short label
-		args := []string{"--resume", r.SessionID}
-		if name := TabLabel(r); name != "" {
-			args = append(args, "--name", name)
-		}
-		return CommandSpec{Exec: "claude", Args: args, Cwd: r.Cwd}, nil
-	case fav.ProviderCodex:
-		return CommandSpec{Exec: "codex", Args: []string{"resume", r.SessionID}, Cwd: r.Cwd}, nil
-	default:
-		return CommandSpec{}, i18n.E("resume.unknown_provider", r.Provider)
-	}
-}
+// Installed: provider is a known agent whose CLI is on PATH.
+func Installed(provider string) bool { return agent.Installed(provider) }
 
 type Check struct {
 	OK   bool

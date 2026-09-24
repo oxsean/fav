@@ -89,7 +89,7 @@ func (m *Model) baseLines() []string {
 }
 
 func (m *Model) header() string {
-	names := []string{i18n.T("view.favorites") + " " + strconv.Itoa(m.nFav), i18n.T("view.sessions") + " " + strconv.Itoa(m.nAll), i18n.T("label.projects") + " " + strconv.Itoa(m.nProj), agentsTab(len(m.live), m.needCount())}
+	names := []string{i18n.T("view.favorites") + " " + strconv.Itoa(m.nFav), i18n.T("view.sessions") + " " + strconv.Itoa(m.nAll), i18n.T("label.projects") + " " + strconv.Itoa(m.nProj), agentsTab(len(m.live), m.needCount()), i18n.T("view.tasks") + " " + strconv.Itoa(m.openTaskCount())}
 	var tabs strings.Builder
 	var widths []int
 	for i, n := range names {
@@ -146,6 +146,13 @@ func (m *Model) searchBox(y0 int) []string {
 }
 
 func (m *Model) chipRow(y0 int) []string {
+	if m.view == viewTasks {
+		out := []string{m.tasksStatus()}
+		for len(out) < chipRows(m.h) {
+			out = append([]string{""}, out...)
+		}
+		return out
+	}
 	cs := m.chipData()
 	if chipRows(m.h) == 1 {
 		var parts []string
@@ -290,6 +297,9 @@ func timeLabel(q fav.Query) string {
 func (m *Model) body(y0, h int) []string {
 	if h < 1 {
 		return nil
+	}
+	if m.view == viewTasks {
+		return m.tasksBody(y0, h)
 	}
 	if m.detail {
 		return m.detailBlock(y0, 0, m.w, h)
@@ -974,6 +984,13 @@ func (m *Model) footer() string {
 		left, right = []footGroup{{fk(enterKey, "footer.enter_find", 0)}, {fk(escKey, "footer.esc_cancel", 0)}}, nil
 	case m.chipFocus >= 0:
 		left, right = []footGroup{{fk(arrowsLR, "footer.chip_switch", 0), fk(enterKey, "footer.chip_open", 0)}, {fk(keyName("down")+"/"+escKey, "footer.chip_back", 0)}}, nil
+	case m.view == viewTasks:
+		left = []footGroup{
+			{fk(enterKey, "footer.enter_actions", 0), fk(keyName("space"), "footer.task_session", 3)},
+			{fk(footKeyOf(inList, actNew), "footer.task_new", 1), fk(footKeyOf(inList, actEdit), "key.edit", 4),
+				fk(footKeyOf(inList, actDone), "key.done", 4), fk(keyOf(inList, actCloseTab), "footer.task_stop", 2)},
+			{fk(keyOf(inList, actSearch), "footer.search", 0)},
+		}
 	case m.hitsOpen() && m.pane == paneList:
 		left = []footGroup{{fk(arrowsUD, "footer.select_hit", 1), fk(enterKey, "footer.full_text", 0)}, {fk(keyName("right"), "footer.hit_chat", 2), fk(keyName("left"), "footer.hit_back", 0)}}
 		right = help

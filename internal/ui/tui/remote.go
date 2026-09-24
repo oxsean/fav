@@ -7,12 +7,14 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/oxsean/fav/internal/agent"
 	"github.com/oxsean/fav/internal/capture"
 	"github.com/oxsean/fav/internal/fav"
 	"github.com/oxsean/fav/internal/herdr"
 	"github.com/oxsean/fav/internal/i18n"
 	"github.com/oxsean/fav/internal/remote"
 	"github.com/oxsean/fav/internal/render"
+	"github.com/oxsean/fav/internal/wire"
 )
 
 // Other machines' sessions: each host's cached list at start, fetched once in the background, then every hostsEvery
@@ -300,10 +302,10 @@ func remoteBlocked(a act) bool {
 func (m *Model) openRemoteResume(r *fav.Rec) {
 	cmd, ok := m.hosts.ResumeCommand(r)
 	if !ok {
-		m.flash(i18n.F("remote.unreachable", r.Host, remote.Reason(&remote.Error{Code: remote.CodeNotFound})))
+		m.flash(i18n.F("remote.unreachable", r.Host, remote.Reason(&wire.Error{Code: wire.CodeNotFound})))
 		return
 	}
-	plan := capture.Plan{Spec: capture.CommandSpec{Exec: cmd.Args[0], Args: cmd.Args[1:]}, Ws: herdrHere()}
+	plan := capture.Plan{Spec: agent.CommandSpec{Exec: cmd.Args[0], Args: cmd.Args[1:]}, Ws: herdrHere()}
 	if p := m.probes[r]; p != nil && p.done {
 		plan.Checks = p.checks
 	}

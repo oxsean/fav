@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/oxsean/fav/internal/agent"
 	"github.com/oxsean/fav/internal/fav"
 	"github.com/oxsean/fav/internal/testkit"
 )
@@ -67,15 +68,15 @@ func TestWriteHandoffPrunesOld(t *testing.T) {
 }
 
 func TestForkAndStartCommands(t *testing.T) {
-	c, _ := buildFork(&fav.Rec{Provider: fav.ProviderClaude, SessionID: "s1", Cwd: "/p"})
+	c, _ := agent.ForkOf(&fav.Rec{Provider: fav.ProviderClaude, SessionID: "s1", Cwd: "/p"})
 	if got := c.ShellLine(); got != "cd /p && claude --resume s1 --fork-session" {
 		t.Errorf("claude fork: %s", got)
 	}
-	c, _ = buildFork(&fav.Rec{Provider: fav.ProviderCodex, SessionID: "s2"})
+	c, _ = agent.ForkOf(&fav.Rec{Provider: fav.ProviderCodex, SessionID: "s2"})
 	if got := c.ShellLine(); got != "codex fork s2" {
 		t.Errorf("codex fork: %s", got)
 	}
-	c, _ = buildStart(fav.ProviderCodex, "/p", "read /x.md")
+	c, _ = agent.StartOf(fav.ProviderCodex, "/p", "read /x.md")
 	if !slices.Equal(c.Argv(), []string{"codex", "read /x.md"}) || c.Cwd != "/p" {
 		t.Errorf("codex start: %q", c.Argv())
 	}

@@ -18,6 +18,7 @@ import (
 	"github.com/oxsean/fav/internal/fav"
 	"github.com/oxsean/fav/internal/fileio"
 	"github.com/oxsean/fav/internal/i18n"
+	"github.com/oxsean/fav/internal/wire"
 )
 
 // Hosts reaches the configured machines: one client per host, dialed on first use and again after it fails.
@@ -70,7 +71,7 @@ func (h *Hosts) client(ctx context.Context, name string) (*Client, error) {
 	h.mu.Lock()
 	if h.closed {
 		h.mu.Unlock()
-		return nil, &Error{Code: CodeClosed}
+		return nil, &wire.Error{Code: wire.CodeClosed}
 	}
 	d := h.dialing[name]
 	if d == nil {
@@ -81,40 +82,40 @@ func (h *Hosts) client(ctx context.Context, name string) (*Client, error) {
 	select {
 	case d <- struct{}{}:
 	case <-ctx.Done():
-		return nil, &Error{Code: CodeTimeout}
+		return nil, &wire.Error{Code: wire.CodeTimeout}
 	}
 	defer func() { <-d }()
 	h.mu.Lock()
 	c, closed := h.clients[name], h.closed
 	h.mu.Unlock()
 	if closed { // closed while this call waited for another one's dial
-		return nil, &Error{Code: CodeClosed}
+		return nil, &wire.Error{Code: wire.CodeClosed}
 	}
 	if c != nil && c.Err() == nil {
 		return c, nil
 	}
 	host, ok := h.Host(name)
 	if !ok {
-		return nil, &Error{Code: CodeNotFound, Detail: name}
+		return nil, &wire.Error{Code: wire.CodeNotFound, Detail: name}
 	}
 	c, err := h.dial(host)
 	if err != nil {
 		return nil, err
 	}
 	var hello Hello
-	if err := c.Call(ctx, MHello, HelloParams{Lang: h.lang}, &hello); err != nil {
+	if err := c.Call(ctx, MHello, HelloParams{Proto: wire.Proto, Role: "client", Lang: h.lang}, &hello); err != nil {
 		c.Close()
 		return nil, err
 	}
-	if hello.Proto != Proto {
+	if hello.Proto != wire.Proto {
 		c.Close()
-		return nil, &Error{Code: CodeProto, Detail: hello.Version}
+		return nil, &wire.Error{Code: wire.CodeProto, Detail: hello.Version}
 	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if h.closed { // Close ran while this one was dialing
 		c.Close()
-		return nil, &Error{Code: CodeClosed}
+		return nil, &wire.Error{Code: wire.CodeClosed}
 	}
 	h.clients[name], h.hellos[name] = c, hello
 	return c, nil
@@ -133,8 +134,8 @@ func (h *Hosts) file(key, set string) string {
 
 // Stale: err says the transcript was rewritten; what was read of it no longer lines up.
 func Stale(err error) bool {
-	var e *Error
-	return errors.As(err, &e) && e.Code == CodeStale
+	var e *wire.Error
+	return errors.As(err, &e) && e.Code == wire.CodeStale
 }
 
 // Call runs one request on name.
@@ -171,8 +172,8 @@ func (h *Hosts) Sessions(ctx context.Context, name string) ([]*fav.Rec, State) {
 		recs, st := h.Cached(name)
 		st.Err = err
 		c := h.load(name)
-		c.Tried, c.Failed = time.Now(), CodeClosed
-		if e := (*Error)(nil); errors.As(err, &e) {
+		c.Tried, c.Failed = time.Now(), wire.CodeClosed
+		if e := (*wire.Error)(nil); errors.As(err, &e) {
 			c.Failed = e.Code
 		}
 		h.save(name, c)
@@ -200,7 +201,7 @@ func ForgetCache(name string) error { return os.RemoveAll(CacheDir(name)) }
 // Failed: when the last fetch of name failed and why; nil when the last one worked.
 func (h *Hosts) Failed(name string) (time.Time, error) {
 	if c := h.load(name); c.Failed != "" {
-		return c.Tried, &Error{Code: c.Failed}
+		return c.Tried, &wire.Error{Code: c.Failed}
 	}
 	return time.Time{}, nil
 }
@@ -280,14 +281,17 @@ func (h *Hosts) Close() {
 }
 
 var reasons = map[string]string{
-	CodeOffline: "remote.err.offline", CodeAuth: "remote.err.auth", CodeHostKey: "remote.err.hostkey",
-	CodeProto: "remote.err.proto", CodeTimeout: "remote.err.timeout", CodeClosed: "remote.err.closed",
-	CodeNotFound: "remote.err.not_found", CodeNoFav: "remote.err.no_fav", CodeStale: "remote.err.stale",
+	wire.CodeOffline: "remote.err.offline", wire.CodeAuth: "remote.err.auth", wire.CodeHostKey: "remote.err.hostkey",
+	wire.CodeProto: "remote.err.proto", wire.CodeTimeout: "remote.err.timeout", wire.CodeClosed: "remote.err.closed",
+	wire.CodeNotFound: "remote.err.not_found", wire.CodeNoFav: "remote.err.no_fav", wire.CodeStale: "remote.err.stale",
+	wire.CodeConflict: "remote.err.conflict", wire.CodeUnauthorized: "remote.err.unauthorized",
+	wire.CodeBadRequest: "remote.err.bad_request", wire.CodeBusy: "remote.err.busy", wire.CodeCanceled: "remote.err.canceled",
+	wire.CodeUnknownMethod: "remote.err.unknown_method",
 }
 
 // Reason is err as a short phrase for the UI.
 func Reason(err error) string {
-	var e *Error
+	var e *wire.Error
 	if errors.As(err, &e) {
 		if k, ok := reasons[e.Code]; ok {
 			return i18n.T(k)

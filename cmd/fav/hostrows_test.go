@@ -14,6 +14,7 @@ import (
 	"github.com/oxsean/fav/internal/fav"
 	"github.com/oxsean/fav/internal/i18n"
 	"github.com/oxsean/fav/internal/remote"
+	"github.com/oxsean/fav/internal/wire"
 )
 
 type fakeHost struct {
@@ -24,13 +25,13 @@ type fakeHost struct {
 func (f fakeHost) Handle(_ context.Context, method string, _ json.RawMessage) (any, error) {
 	switch method {
 	case remote.MHello:
-		return remote.Hello{Proto: remote.Proto}, nil
+		return remote.Hello{Proto: wire.Proto}, nil
 	case remote.MList:
 		return remote.List{Sessions: f.sessions}, nil
 	case remote.MLive:
 		return remote.Live{Live: f.live}, nil
 	}
-	return nil, &remote.Error{Code: remote.CodeUnknownMethod}
+	return nil, &wire.Error{Code: wire.CodeUnknownMethod}
 }
 
 const (
@@ -57,7 +58,7 @@ func fakeHosts(t *testing.T, mbaUp bool) *atomic.Int32 {
 			if host.Name == "mba" && mbaUp {
 				return remote.Pipe(mba), nil
 			}
-			return nil, &remote.Error{Code: remote.CodeOffline}
+			return nil, &wire.Error{Code: wire.CodeOffline}
 		})
 	old := remoteHosts
 	remoteHosts = func() *remote.Hosts { return h }

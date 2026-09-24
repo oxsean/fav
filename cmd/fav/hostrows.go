@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/oxsean/fav/internal/agent"
 	"github.com/oxsean/fav/internal/capture"
 	"github.com/oxsean/fav/internal/fav"
 	"github.com/oxsean/fav/internal/herdr"
@@ -157,12 +158,12 @@ func pickLocal(s *fav.Store, ref string) (*fav.Rec, error) {
 func readOnly(r *fav.Rec) error { return i18n.E("cli.remote.read_only", r.Host) }
 
 // remoteResume is `ssh -t <host> fav resume …` for r, as a command spec.
-func remoteResume(r *fav.Rec) (capture.CommandSpec, error) {
+func remoteResume(r *fav.Rec) (agent.CommandSpec, error) {
 	cmd, ok := remoteHosts().ResumeCommand(r)
 	if !ok {
-		return capture.CommandSpec{}, i18n.E("cli.host.unknown", r.Host)
+		return agent.CommandSpec{}, i18n.E("cli.host.unknown", r.Host)
 	}
-	return capture.CommandSpec{Exec: cmd.Args[0], Args: cmd.Args[1:]}, nil
+	return agent.CommandSpec{Exec: cmd.Args[0], Args: cmd.Args[1:]}, nil
 }
 
 // resumeRemote resumes r on its host over ssh: in a new tab of this Herdr workspace when fav runs inside Herdr

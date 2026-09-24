@@ -49,6 +49,7 @@ func Main(m *testing.M) {
 		os.Setenv(k, filepath.Join(root, sub))
 	}
 	os.Setenv("HERDR_ENV", "")
+	os.Unsetenv("TEND_HOME") // it would outrank every test's own FAV_HOME
 	code := m.Run()
 	os.RemoveAll(root)
 	os.Exit(code)

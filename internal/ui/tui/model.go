@@ -12,6 +12,7 @@ import (
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/oxsean/fav/internal/agent"
 	"github.com/oxsean/fav/internal/capture"
 	"github.com/oxsean/fav/internal/fav"
 	"github.com/oxsean/fav/internal/fulltext"
@@ -37,15 +38,16 @@ const (
 	viewSessions
 	viewProjects
 	viewLive
+	viewTasks
 )
 
-const viewCount = 4
+const viewCount = 5
 
 // Result is what the TUI hands back on exit; resuming happens outside.
 type Result struct {
 	Resume  *fav.Rec
 	NoHerdr bool
-	Start   *capture.CommandSpec // a new session (fork, handoff) to run in this terminal
+	Start   *agent.CommandSpec // a new session (fork, handoff) to run in this terminal
 }
 
 type row struct {
@@ -150,6 +152,8 @@ type Model struct {
 
 	hosts  *remote.Hosts        // other machines; nil = none configured, nothing is contacted
 	remote map[string]*hostRows // by host name
+
+	tasks tasksState
 }
 
 func New(s *fav.Store, idx *index.Index, cfg fav.Config, initialQuery string) *Model {
@@ -362,6 +366,11 @@ func (m *Model) list(q fav.Query) []*fav.Rec {
 }
 
 func (m *Model) refresh() {
+	if m.view == viewTasks {
+		m.rows = nil
+		m.filterTasks()
+		return
+	}
 	q := m.query()
 	recs := m.list(q)
 	if m.extra != nil && q.All && q.Status != fav.StatusTrash && q.Status != fav.StatusAgent && !slices.Contains(recs, m.extra) {
@@ -711,6 +720,9 @@ func (m *Model) setView(v view) {
 	}
 	m.view, m.cursor, m.scroll, m.rows = v, 0, 0, nil
 	m.refresh()
+	if v == viewTasks {
+		m.pending = tea.Batch(m.pending, m.tasksOpen())
+	}
 	if n := len(m.chipData()); m.chipFocus >= n {
 		m.chipFocus = n - 1
 	}

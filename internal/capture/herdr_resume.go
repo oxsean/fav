@@ -5,13 +5,14 @@ import (
 
 	"github.com/mattn/go-runewidth"
 
+	"github.com/oxsean/fav/internal/agent"
 	"github.com/oxsean/fav/internal/fav"
 	"github.com/oxsean/fav/internal/herdr"
 	"github.com/oxsean/fav/internal/i18n"
 )
 
 type Plan struct {
-	Spec CommandSpec
+	Spec agent.CommandSpec
 	Live Live             // running now: TabID set → just focus it, BackgroundID set → attach
 	Ws   *herdr.Workspace // non-nil → new Herdr tab, nil → this terminal
 	// WsChoices: several workspaces fit the directory and Ws is nil — the user picks one (or this terminal).
@@ -27,13 +28,16 @@ func PlanResume(r *fav.Rec, live map[string]Live, noHerdr bool) (Plan, error) {
 	if p.Live.TabID != "" && !noHerdr {
 		return p, nil
 	}
-	if running && p.Live.BackgroundID == "" { // a second resume would write the same session from two processes
+	switch {
+	case running && p.Live.Run != "": // the run's agent is still writing it
+		p.Checks = append(p.Checks, Check{Text: i18n.F("resume.check.running_run", p.Live.Run)})
+	case running && p.Live.BackgroundID == "": // a second resume would write the same session from two processes
 		p.Checks = append(p.Checks, Check{Text: i18n.T("resume.check.running_elsewhere")})
 	}
 	var err error
 	if p.Live.BackgroundID != "" {
-		p.Spec = buildAttach(r, p.Live.BackgroundID)
-	} else if p.Spec, err = buildResume(r); err != nil {
+		p.Spec = agent.AttachOf(r, p.Live.BackgroundID)
+	} else if p.Spec, err = agent.ResumeOf(r, TabLabel(r)); err != nil {
 		return p, err
 	}
 	p.findWorkspace(r, noHerdr)
@@ -44,7 +48,7 @@ func PlanResume(r *fav.Rec, live map[string]Live, noHerdr bool) (Plan, error) {
 func PlanFork(r *fav.Rec, noHerdr bool) (Plan, error) {
 	p := Plan{Checks: Checks(r)}
 	var err error
-	if p.Spec, err = buildFork(r); err != nil {
+	if p.Spec, err = agent.ForkOf(r); err != nil {
 		return p, err
 	}
 	p.findWorkspace(r, noHerdr)
@@ -55,7 +59,7 @@ func PlanFork(r *fav.Rec, noHerdr bool) (Plan, error) {
 func PlanStart(r *fav.Rec, provider, prompt string, noHerdr bool) (Plan, error) {
 	p := Plan{Checks: startChecks(provider, r.Cwd)}
 	var err error
-	if p.Spec, err = buildStart(provider, r.Cwd, prompt); err != nil {
+	if p.Spec, err = agent.StartOf(provider, r.Cwd, prompt); err != nil {
 		return p, err
 	}
 	p.findWorkspace(r, noHerdr)

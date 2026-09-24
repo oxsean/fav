@@ -17,6 +17,7 @@ import (
 	"github.com/oxsean/fav/internal/fav"
 	"github.com/oxsean/fav/internal/i18n"
 	"github.com/oxsean/fav/internal/remote"
+	"github.com/oxsean/fav/internal/wire"
 )
 
 // fakeHost answers like a remote fav: a list, who runs, 60 messages (Off = 100 × index, oldest first), checks.
@@ -50,7 +51,7 @@ func (f *fakeHost) Handle(_ context.Context, method string, params json.RawMessa
 	f.calls[method]++
 	switch method {
 	case remote.MHello:
-		return remote.Hello{Proto: remote.Proto, Version: "test"}, nil
+		return remote.Hello{Proto: wire.Proto, Version: "test"}, nil
 	case remote.MList:
 		return remote.List{Sessions: slices.Clone(f.sessions)}, nil
 	case remote.MLive:
@@ -75,7 +76,7 @@ func (f *fakeHost) Handle(_ context.Context, method string, params json.RawMessa
 	case remote.MText:
 		return remote.Text{Text: "远端全文"}, nil
 	}
-	return nil, &remote.Error{Code: remote.CodeUnknownMethod}
+	return nil, &wire.Error{Code: wire.CodeUnknownMethod}
 }
 
 func (f *fakeHost) called(method string) int {
@@ -89,7 +90,7 @@ func hostsOf(t *testing.T, f *fakeHost, offline *bool) *remote.Hosts {
 	t.Helper()
 	h := remote.NewHostsDial([]fav.Host{{Name: "mba"}}, i18n.ZH, func(fav.Host) (*remote.Client, error) {
 		if offline != nil && *offline {
-			return nil, &remote.Error{Code: remote.CodeOffline}
+			return nil, &wire.Error{Code: wire.CodeOffline}
 		}
 		return remote.Pipe(f), nil
 	})
@@ -309,7 +310,7 @@ func TestHostChipPicksTheHost(t *testing.T) {
 // withRemote shows two hosts under host:all without reaching them: mba's rows (the cursor on one), lg-win offline
 // since five minutes.
 func withRemote(m *Model) {
-	down := func(fav.Host) (*remote.Client, error) { return nil, &remote.Error{Code: remote.CodeOffline} }
+	down := func(fav.Host) (*remote.Client, error) { return nil, &wire.Error{Code: wire.CodeOffline} }
 	m.useHosts(remote.NewHostsDial([]fav.Host{{Name: "mba"}, {Name: "lg-win-workstation"}}, i18n.ZH, down))
 	now := time.Now()
 	var recs []*fav.Rec
@@ -318,7 +319,7 @@ func withRemote(m *Model) {
 			Cwd: "/home/u/dev/notes-api", Turns: 30, LastAt: now.Add(time.Duration(i) * time.Minute), UpdatedAt: now}.Rec("mba"))
 	}
 	m.remote["mba"].merge(recs)
-	m.remote["lg-win-workstation"].err, m.remote["lg-win-workstation"].at = &remote.Error{Code: remote.CodeOffline}, now.Add(-5*time.Minute)
+	m.remote["lg-win-workstation"].err, m.remote["lg-win-workstation"].at = &wire.Error{Code: wire.CodeOffline}, now.Add(-5*time.Minute)
 	m.setView(viewSessions)
 	m.search.SetValue("host:all")
 	m.refresh()
@@ -339,7 +340,7 @@ func TestHostsArePolledWhileShownAndBackOffWhenDown(t *testing.T) {
 		t.Fatal("showing the host fetches it again")
 	}
 	hr.loading = false
-	down := hostMsg{name: "mba", st: remote.State{Err: &remote.Error{Code: remote.CodeOffline}}}
+	down := hostMsg{name: "mba", st: remote.State{Err: &wire.Error{Code: wire.CodeOffline}}}
 	for want := 1; want <= 5; want++ {
 		m.applyHost(down)
 		if hr.fails != min(want, 4) {
@@ -395,7 +396,7 @@ func TestAFailedLiveReadKeepsTheLastAnswer(t *testing.T) {
 	if len(hr.live) != 1 {
 		t.Fatalf("live: %v", hr.live)
 	}
-	m.applyHost(hostMsg{name: "mba", st: remote.State{At: time.Now()}, liveErr: &remote.Error{Code: remote.CodeTimeout}})
+	m.applyHost(hostMsg{name: "mba", st: remote.State{At: time.Now()}, liveErr: &wire.Error{Code: wire.CodeTimeout}})
 	if len(hr.live) != 1 {
 		t.Fatal("a failed live read is not \"nothing runs\"")
 	}
@@ -413,7 +414,7 @@ func TestAFailedFirstReadIsProbedAgainWhenTheHostAnswers(t *testing.T) {
 	showHosts(m, "host:mba")
 	r := cursorOn(t, m, "r-a")
 	m.probes = map[*fav.Rec]*probe{r: {}}
-	m.Update(probeMsg{r, nil, capture.Page{From: -1, Err: &remote.Error{Code: remote.CodeOffline}}})
+	m.Update(probeMsg{r, nil, capture.Page{From: -1, Err: &wire.Error{Code: wire.CodeOffline}}})
 	if p := m.probes[r]; !p.failed || p.full {
 		t.Fatalf("a failed read is not the file head: %+v", p)
 	}
@@ -444,7 +445,7 @@ func TestAFailedPageKeepsItsPlace(t *testing.T) {
 	p := m.probes[r]
 	from, n := p.from, len(p.msgs)
 	p.loading = true
-	m.Update(pageMsg{r, capture.Page{From: from, Err: &remote.Error{Code: remote.CodeTimeout}}})
+	m.Update(pageMsg{r, capture.Page{From: from, Err: &wire.Error{Code: wire.CodeTimeout}}})
 	if p.from != from || p.full || p.loading || len(p.msgs) != n || m.notice == "" {
 		t.Fatalf("a failed page keeps its place: from %d→%d full=%v loading=%v", from, p.from, p.full, p.loading)
 	}
@@ -453,7 +454,7 @@ func TestAFailedPageKeepsItsPlace(t *testing.T) {
 	if p.loading || f.called(remote.MMessages) != 1 {
 		t.Fatalf("no page is asked again on its own after a failure: %d reads", f.called(remote.MMessages))
 	}
-	m.Update(pageMsg{r, capture.Page{Err: &remote.Error{Code: remote.CodeStale}}})
+	m.Update(pageMsg{r, capture.Page{Err: &wire.Error{Code: wire.CodeStale}}})
 	if q := m.probes[r]; q == p || q == nil {
 		t.Fatal("a rewritten transcript is read again from the end")
 	}

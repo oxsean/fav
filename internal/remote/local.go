@@ -17,6 +17,7 @@ import (
 	"github.com/oxsean/fav/internal/fileio"
 	"github.com/oxsean/fav/internal/i18n"
 	"github.com/oxsean/fav/internal/index"
+	"github.com/oxsean/fav/internal/wire"
 )
 
 // NewLocal is this machine answering the protocol (`fav rpc`); version is fav's build version.
@@ -58,7 +59,7 @@ func (h *localHandler) Handle(ctx context.Context, method string, params json.Ra
 			return nil, err
 		}
 		if p.N <= 0 {
-			return nil, &Error{Code: CodeBadRequest, Detail: "n"}
+			return nil, &wire.Error{Code: wire.CodeBadRequest, Detail: "n"}
 		}
 		id, err := sameFile(src, p.File)
 		if err != nil {
@@ -103,7 +104,7 @@ func (h *localHandler) Handle(ctx context.Context, method string, params json.Ra
 		}
 		return Checks{Checks: src.Checks()}, nil
 	}
-	return nil, &Error{Code: CodeUnknownMethod, Detail: method}
+	return nil, &wire.Error{Code: wire.CodeUnknownMethod, Detail: method}
 }
 
 // sameFile is the id of src's transcript; not_found when it cannot be read (not the head of an empty file), stale when
@@ -116,9 +117,9 @@ func sameFile(src Source, want string) (string, error) {
 	id := fileio.ID(path)
 	switch {
 	case id == "":
-		return "", &Error{Code: CodeNotFound, Detail: "transcript"}
+		return "", &wire.Error{Code: wire.CodeNotFound, Detail: "transcript"}
 	case want != "" && want != id:
-		return "", &Error{Code: CodeStale}
+		return "", &wire.Error{Code: wire.CodeStale}
 	}
 	return id, nil
 }
@@ -128,7 +129,7 @@ func decode(params json.RawMessage, v any) error {
 		return nil
 	}
 	if err := json.Unmarshal(params, v); err != nil {
-		return &Error{Code: CodeBadRequest, Detail: err.Error()}
+		return &wire.Error{Code: wire.CodeBadRequest, Detail: err.Error()}
 	}
 	return nil
 }
@@ -139,7 +140,7 @@ func hello(version string) Hello {
 	wsl := os.Getenv("WSL_DISTRO_NAME")
 	claude, codex := capture.ClaudeHome(), capture.CodexHome()
 	sum := sha256.Sum256([]byte(strings.Join([]string{host, runtime.GOOS, wsl, fav.Home(), claude, codex}, "\x00")))
-	return Hello{Proto: Proto, Version: version, OS: runtime.GOOS, Arch: runtime.GOARCH,
+	return Hello{Proto: wire.Proto, Role: "node", Version: version, OS: runtime.GOOS, Arch: runtime.GOARCH,
 		Endpoint: hex.EncodeToString(sum[:6]), Hostname: host, WSL: wsl, Home: home, Sep: string(filepath.Separator),
 		Claude: claude, Codex: codex, Methods: methods,
 		CLIs: map[string]bool{fav.ProviderClaude: capture.Installed(fav.ProviderClaude), fav.ProviderCodex: capture.Installed(fav.ProviderCodex)}}
@@ -198,7 +199,7 @@ func (h *localHandler) source(params json.RawMessage, p any, ref *Ref) (Source, 
 		return nil, err
 	}
 	if ref.Provider == "" || ref.SessionID == "" {
-		return nil, &Error{Code: CodeBadRequest, Detail: "ref"}
+		return nil, &wire.Error{Code: wire.CodeBadRequest, Detail: "ref"}
 	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -215,7 +216,7 @@ func (h *localHandler) source(params json.RawMessage, p any, ref *Ref) (Source, 
 		r = h.find(*ref)
 	}
 	if r == nil {
-		return nil, &Error{Code: CodeNotFound, Detail: ref.Provider + ":" + ref.SessionID}
+		return nil, &wire.Error{Code: wire.CodeNotFound, Detail: ref.Provider + ":" + ref.SessionID}
 	}
 	return Local(r), nil
 }
