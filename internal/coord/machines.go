@@ -52,6 +52,12 @@ type machine struct {
 
 // machines are this machine and every configured host.
 func (c *Coord) machines() {
+	if c.opt.Remote {
+		for _, n := range c.opt.Nodes {
+			c.ms[n] = &machine{name: n, attached: true}
+		}
+		return
+	}
 	c.ms[Local] = &machine{name: Local}
 	for i := range c.opt.Config.Hosts {
 		h := c.opt.Config.Hosts[i]
@@ -128,6 +134,31 @@ func greet(conn Conn) (remote.Hello, error) {
 		return h, &wire.Error{Code: wire.CodeProto, Detail: h.Version}
 	}
 	return h, nil
+}
+
+// NodeOptions are the options of a connection to a node: its pushes wake the coordinator.
+func (c *Coord) NodeOptions() wire.Options { return c.nodeOptions() }
+
+// Attach makes conn machine name's connection (mode 2: the node dialed in); a connection it already had is closed.
+func (c *Coord) Attach(name string, conn Conn) error {
+	h, err := greet(conn)
+	if err != nil {
+		conn.Close()
+		return err
+	}
+	c.mu.Lock()
+	m := c.ms[name]
+	if m == nil {
+		m = &machine{name: name}
+		c.ms[name] = m
+	}
+	if m.conn != nil {
+		m.conn.Close()
+	}
+	m.attached, m.conn, m.hello, m.err = true, conn, h, nil
+	c.mu.Unlock()
+	c.poke()
+	return nil
 }
 
 // local is this machine's node, served in this process.

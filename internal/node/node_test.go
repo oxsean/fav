@@ -1,6 +1,7 @@
 package node
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"slices"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/oxsean/fav/internal/agent"
 	"github.com/oxsean/fav/internal/capture"
+	"github.com/oxsean/fav/internal/filelock"
 	"github.com/oxsean/fav/internal/proc"
 	"github.com/oxsean/fav/internal/testkit"
 	"github.com/oxsean/fav/internal/wire"
@@ -105,7 +107,12 @@ func TestStartingARunAgainStartsNothing(t *testing.T) {
 		t.Fatalf("a replayed start answers the same run: %+v %v", again, err)
 	}
 	end := wait(t, n, first.Run, func(s Snapshot) bool { return Terminal(s.State.State) })
-	if err := Supervise(n.runDir(first.Run)); err != nil {
+	err = Supervise(n.runDir(first.Run))
+	for deadline := time.Now().Add(5 * time.Second); errors.Is(err, filelock.ErrLocked) && time.Now().Before(deadline); {
+		time.Sleep(20 * time.Millisecond) // the first supervisor wrote its end and is exiting
+		err = Supervise(n.runDir(first.Run))
+	}
+	if err != nil {
 		t.Fatal(err)
 	}
 	if after, _ := n.Snapshot(first.Run); after.Rev != end.Rev {

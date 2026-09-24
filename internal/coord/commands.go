@@ -91,6 +91,8 @@ func (c *Coord) Handler() wire.Handler {
 		switch r.Method {
 		case wire.MPing:
 			return nil, nil
+		case remote.MHello:
+			return remote.Hello{Proto: wire.Proto, Version: c.opt.Version, Role: "coordinator", Methods: Methods}, nil
 		case MStateGet:
 			return c.State(), nil
 		case MAgentList:
@@ -399,7 +401,7 @@ func (c *Coord) Machines(ctx context.Context, connect bool) Machines {
 			x.State = MachineConnected
 		case m.dialing:
 			x.State = MachineConnecting
-		case m.err != nil:
+		case m.err != nil || m.attached:
 			x.State = MachineOffline
 			if !m.retryAt.IsZero() {
 				at := m.retryAt

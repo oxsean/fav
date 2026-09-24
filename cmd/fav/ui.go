@@ -10,7 +10,6 @@ import (
 	"github.com/atotto/clipboard"
 
 	"github.com/oxsean/fav/internal/capture"
-	"github.com/oxsean/fav/internal/coord"
 	"github.com/oxsean/fav/internal/fav"
 	"github.com/oxsean/fav/internal/fulltext"
 	"github.com/oxsean/fav/internal/i18n"
@@ -19,7 +18,6 @@ import (
 	"github.com/oxsean/fav/internal/render"
 	fzfui "github.com/oxsean/fav/internal/ui/fzf"
 	tuiui "github.com/oxsean/fav/internal/ui/tui"
-	"github.com/oxsean/fav/internal/wire"
 )
 
 func loadConfig() fav.Config {
@@ -61,8 +59,7 @@ func runTUI(s *fav.Store, query string, focus *fav.Rec, mouse bool) error {
 	if len(cfg.Hosts) > 0 {
 		hosts = remote.NewHosts(cfg.Hosts, i18n.Resolve(cfg.Lang))
 	}
-	connect := func(w wire.Options) (*coord.Client, error) { return coord.Connect(coordOptions(), w) }
-	res, err := tuiui.Run(s, idx, cfg, hosts, connect, query, focus, mouse)
+	res, err := tuiui.Run(s, idx, cfg, hosts, connectCoord, query, focus, mouse)
 	hosts.Close()
 	if err != nil {
 		return err

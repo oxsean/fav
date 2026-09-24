@@ -58,6 +58,10 @@ type Options struct {
 	Sessions remote.Handler
 	// Dial reaches a configured host's node; tests replace it.
 	Dial func(h fav.Host, opt wire.Options) (Conn, error)
+	// Remote: mode 2. The machines are the nodes that dial in (Attach), named by their tokens; there is no local
+	// node and no ssh.
+	Remote bool
+	Nodes  []string
 }
 
 type Coord struct {

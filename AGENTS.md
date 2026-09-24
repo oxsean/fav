@@ -46,6 +46,7 @@ HERDR_LIVE=1 go test ./internal/herdr -run TestLiveCreateTabAndRun   # inside He
 - Other platforms: `scripts/test-hosts.sh [target…]` (targets `local`, `ssh:HOST`, `docker:HOST:CTR`, `wsl:HOST:DISTRO`, `win:HOST`; default: the gitignored `.test-hosts`) tars the working tree to each target, which runs `mise run test-host` natively (`tools/test-host`: vet, test, fixture dataset, `fav sessions` / `doctor`, a hosts smoke over `fav rpc`). It prints one `RESULT` per target and fails unless all are `vet=ok test=ok smoke=ok`. Never cross-compile for it; logs in `~/.cache/fav-test/logs`.
 - Versions live only in `mise.toml`: `[tools]` go for everyone; the `test-host` task pins claude, codex and fzf for test targets only (never top-level, or they shadow the developer's own CLIs).
 - Runs end to end over ssh: `scripts/tend-e2e.sh [host…]` (default mba linux wsl win) makes this Mac the coordinator in a throwaway home, points each remote's installed fav at throwaway homes, runs a fake agent on each, stops one, and checks outputs and listed sessions; remotes need the current build (`fav hosts install`).
+- Mode 2 end to end: `scripts/tend-e2e-server.sh [host…]` (default mba linux win) runs `fav server` in the mba container behind a forwarder on mba's tailnet address, nodes dialing in with tokens, this Mac as the client; it checks runs, output, a refused token and a server restart.
 - Multi-host end to end: after `test-hosts.sh`, run a fixture launcher on this Mac whose `config.json` lists each target's fixture launcher as that host's `fav` (the container via `docker exec -i`, WSL via `wsl -d <distro> -e`), then `fav hosts check`, `fav sessions host:all` and the TUI.
 
 ## Architecture
@@ -64,6 +65,7 @@ HERDR_LIVE=1 go test ./internal/herdr -run TestLiveCreateTabAndRun   # inside He
 | `internal/proc` | detached starts, process trees, liveness, per OS |
 | `internal/journal`, `internal/task` | the coordinator's event log and the task / run state folded from it |
 | `internal/coord` | the coordinator (whoever holds `coord/lock`): client commands with receipts, dispatch, reconcile, subscribe, socket |
+| `internal/server` | mode 2: the coordinator over HTTP / WebSocket (`/node`, `/client`), hashed tokens, listen-address rule, dialing |
 | `internal/fulltext` | message search: text mirror, parallel scan, BM25 |
 | `internal/ui/tui` | bubbletea `Model`; key table `keys.go` |
 | `internal/ui/fzf` | fzf orchestration only, no business logic |

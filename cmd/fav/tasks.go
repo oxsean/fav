@@ -38,7 +38,7 @@ func coordOptions() coord.Options {
 
 // withCoord runs f against the coordinator: the running one, or this process for the length of the command.
 func withCoord(wopt wire.Options, f func(cl *coord.Client) error) error {
-	cl, err := coord.Connect(coordOptions(), wopt)
+	cl, err := connectCoord(wopt)
 	if errors.Is(err, coord.ErrLocked) {
 		return i18n.E("cli.coord.unreachable", coord.SocketPath(fav.Home()))
 	}

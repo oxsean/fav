@@ -128,6 +128,8 @@ func run(args []string) error {
 		return cmdMachine(args)
 	case "service":
 		return cmdService(args)
+	case "server":
+		return cmdServer(args)
 	case "install-hook":
 		return cmdInstallHook(args)
 	case "uninstall-hook":
