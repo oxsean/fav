@@ -19,7 +19,7 @@ import (
 // ovRec is the dialog's record, re-read from the store (ov.rec is stale after a store reload).
 func (m *Model) ovRec() *fav.Rec {
 	r := m.ov.rec
-	if r != nil && r.ID != "" {
+	if r != nil && r.ID != "" && r.Host == "" {
 		if cur := m.store.Get(r.ID); cur != nil {
 			return cur
 		}

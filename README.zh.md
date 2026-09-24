@@ -314,9 +314,33 @@ fav trash [--json]                      # 看回收站；--purge 清过期的，
 fav doctor [--compact]                  # 体检：数据文件、失效会话、回收站过期、空闲几小时的 agent、没人留的大文件；--compact 压实
 ```
 
+### 其它机器：`hosts`
+
+别的机器上的会话出现在同一个列表里，经 ssh 从那台机器上装的 fav 读取。每台机器要先在 `~/.ssh/config` 里有一个用密钥登录（不弹密码）的别名，然后：
+
+```bash
+fav hosts add mba mba --fav /Users/me/.local/bin/fav                          # 名字、ssh 别名、那边 fav 的绝对路径
+fav hosts add win win-pc --fav 'C:\Users\me\.local\bin\fav.exe'
+fav hosts add wsl win-pc --wsl Debian --fav /home/me/.local/bin/fav            # 那台 Windows 里的一个 WSL 发行版
+fav hosts add box nas --docker dev --fav /usr/local/bin/fav                    # 那边的一个容器（--docker-cmd podman 或完整路径）
+fav hosts install mba [--dry-run]       # 用当前源码按那边的系统编译 fav 并装过去（WSL、容器里也行），最后核对版本
+fav hosts                               # 机器列表、各自应答的 fav 版本、列表上次什么时候取的
+fav hosts check [名字…]                 # 连接、版本、系统、claude/codex 是否在 PATH、中文往返、列表和读消息耗时
+fav hosts rm <名字…> · fav hosts clear [名字…]   # 删掉机器 / 清掉缓存的列表
+```
+
+`add` 会把机器写进 `~/.agent/fav/config.json` 的 `hosts` 并检查一遍（`--no-check` 跳过）；机器上还没有 fav 时，第一次 `install` 要带 `--os` 和 `--arch`。`--fav` 要写绝对路径：ssh 在那边起的 shell 常常不把 `~/.local/bin` 放进 PATH。远端 shell 按 `--fav` 猜（Windows 路径或 `wsl` 用 cmd），也可用 `--shell posix|cmd|powershell` 指定。
+
+```bash
+fav sessions host:all                   # 所有机器；host:mba 只看它；不写 host: 只看本机
+fav show mba:<id> · fav resume mba:<id> # 远端会话：预览和检查来自那台机器，恢复执行 `ssh -t mba fav resume …`
+```
+
+TUI 里用机器筹码（`m`）选本机、全部或某一台；远端行带 `@名字`，预览和 Agents 从那台机器读，恢复在新的 Herdr tab 或当前终端里开 `ssh -t`。远端会话只读：收藏、打标签、归档、删除、搬目录都到它自己的机器上做。每台机器的列表每 30 秒在后台取一次，缓存在 `~/.agent/fav/hosts/`；连不上时显示缓存的行和“离线 · 多久前”。
+
 ## 查询语法
 
-`#标签`、`project:x`、`provider:claude|codex`、`status:open|active|done|archived|trash|all|live|agent`、
+`#标签`、`project:x`、`provider:claude|codex`、`host:all|local|<名字>`（其它机器，见上）、`status:open|active|done|archived|trash|all|live|agent`、
 `after:2026-09-01`、`before:…`（按会话开始时间）、`last:7d` / `last:2026-09-01`（按最近活动：上周开始、今天还在用的也算）、`turns:3`、`file:internal/index`（AI 写过路径含这段的文件），以及普通关键词。筛选行的时间框里还能手输 `09-01`、`09-01..09-15`、`..09-15`、`7d`。全部 AND，中文直接子串匹配。
 以 `>`（或 `》`）开头改搜消息正文：关键词在每条消息和工具命令里找，筛选词只限定会话范围（默认 `status:all turns:0`）。每个关键词都要在会话里出现；
 关键词的词项命中六成就算中（中文按相邻两字切，关键词内部不讲词序；用引号包起来——`"…"`、`“…”` 或 `「…」`——就必须原样连着出现；`a|b` 两个有一个就算，`-x` 去掉含 x 的消息，`who:me`、`who:ai` 或 `who:tool` 只看某一方说的；英文词拼错、会话里又几乎没出现过时，也会顺带搜只差一个字母的常见词，标题里写明「也搜了 …」）；BM25 排序，关键词挨得近、消息越新、是你自己说的（工具命令、工具输出和 Claude 的续接摘要权重低）、标题摘要标签里也有关键词的，都加分；有一条消息同时含全部关键词的会话排前面，`o` 切到按最近命中排。
@@ -351,6 +375,7 @@ fav 把这条链合成一个会话（轮数相加、用最新的 id 恢复、收
 | `~/.agent/fav/text/` | `>` 搜消息用的正文副本，一个 transcript 一个文件，外加 `vocab.json`（出现过的英文词，用于纠正拼写）；删了自动重建 |
 | `~/.agent/fav/trash/` | 回收站：被删的会话文件按原样挪进来，`manifest.jsonl` 记着来处 |
 | `~/.agent/fav/config.json` | 设置面板写的 |
+| `~/.agent/fav/hosts/` | 从每台其它机器最近取到的列表（只有列表字段：标题、摘要、标签、路径；没有消息）、ssh 连接复用的 socket |
 
 环境变量：`FAV_HOME` 改数据目录，`FAV_UI=fzf|tui` 改默认前端，`FAV_ICONS=nerd|ascii` 选图标，`FAV_TRACE=1` 把按键、滚轮和后台事件的时间线记到 `~/.agent/fav/trace.log`（报告界面卡顿时用）。
 界面语言默认跟系统（`LANG` 等以 zh 开头是中文，否则英文），设置里可固定。

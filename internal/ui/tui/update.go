@@ -10,10 +10,14 @@ import (
 	"github.com/oxsean/fav/internal/capture"
 	"github.com/oxsean/fav/internal/fav"
 	"github.com/oxsean/fav/internal/i18n"
+	"github.com/oxsean/fav/internal/remote"
 )
 
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	mm, cmd := m.update(msg)
+	if m.hosts != nil {
+		cmd = tea.Batch(cmd, m.wakeHosts())
+	}
 	if m.noticeNew {
 		m.noticeNew = false
 		seq := m.noticeSeq
@@ -151,10 +155,23 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case pulseMsg:
 		m.applyPulses(msg)
 
+	case hostMsg:
+		cmd = m.applyHost(msg)
+
+	case hostTickMsg:
+		cmd = m.hostTick(string(msg))
+
+	case fullMsg:
+		m.applyFull(msg)
+
 	case liveTickMsg:
 		cmd = tea.Batch(m.pollLive(), m.refreshChat())
 
 	case refreshMsg:
+		if remote.Stale(msg.page.Err) {
+			cmd = m.reprobe(msg.rec)
+			break
+		}
 		m.stash(msg)
 		if p := m.probes[msg.rec]; p != nil && len(p.fresh) > 0 {
 			tracef("refresh %s +%d replace=%v", msg.rec.SessionID, len(p.fresh), p.replace)
@@ -185,8 +202,11 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case probeMsg:
 		tracef("probe %s msgs=%d cur=%v", msg.rec.SessionID, len(msg.page.Msgs), msg.rec == m.current())
-		if p := m.probes[msg.rec]; p != nil {
+		if remote.Stale(msg.page.Err) {
+			cmd = m.reprobe(msg.rec)
+		} else if p := m.probes[msg.rec]; p != nil {
 			p.checks, p.msgs, p.from, p.full, p.done = msg.checks, msg.page.Msgs, msg.page.From, msg.page.Done, true
+			p.failed = msg.page.Err != nil
 			if m.findQuery() != "" && msg.rec == m.current() {
 				cmd = tea.Batch(cmd, m.landHit())
 			}
@@ -194,6 +214,10 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case pageMsg:
 		tracef("page %s +%d done=%v cur=%v %s", msg.rec.SessionID, len(msg.page.Msgs), msg.page.Done, msg.rec == m.current(), m.traceChat())
+		if remote.Stale(msg.page.Err) {
+			cmd = m.reprobe(msg.rec)
+			break
+		}
 		m.applyPage(msg)
 		if msg.rec == m.current() && m.findQuery() != "" {
 			switch {
@@ -225,7 +249,7 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	m.applyFresh()
 	// nearing the loaded end (under 10 left or the pane not full): fetch an older page
 	if r := m.current(); r != nil {
-		if p := m.probes[r]; p != nil && p.done && !p.full && !p.loading &&
+		if p := m.probes[r]; p != nil && p.done && !p.full && !p.loading && !p.failed &&
 			(m.chatScroll+m.chatShown >= len(p.msgs)-10 || !m.chatFills(m.chatScroll, m.chatSkip)) {
 			tracef("older %s %s", r.SessionID, m.traceChat())
 			cmd = tea.Batch(cmd, m.load(r, olderMsgs))
@@ -309,6 +333,10 @@ func (m *Model) navKey(msg tea.KeyPressMsg) tea.Cmd {
 	a := keyAct(inList, msg.String())
 	if m.inTrash() && m.current() != nil && m.chipFocus < 0 && trashBlocked(a) {
 		m.flash(i18n.T("trash.in_trash_hint"))
+		return nil
+	}
+	if remoteBlocked(a) && m.remoteRow() { // whatever has focus, these act on the current row
+		m.flash(i18n.T("remote.read_only"))
 		return nil
 	}
 	if m.hitsOpen() && m.pane == paneList && m.chipFocus < 0 {
@@ -462,7 +490,7 @@ func (m *Model) navKey(msg tea.KeyPressMsg) tea.Cmd {
 			m.moveChat(5)
 			return nil
 		}
-		if r := m.current(); r != nil {
+		if r := m.current(); r != nil && r.Host == "" {
 			if l, ok := m.live[r.SessionID]; ok && l.TabID != "" {
 				p, _ := capture.PlanResume(r, m.live, false)
 				m.runPlan(r, p, false)
@@ -519,6 +547,8 @@ func (m *Model) navKey(msg tea.KeyPressMsg) tea.Cmd {
 		m.askStart(m.current())
 	case actProvider:
 		m.cycleProvider()
+	case actHost:
+		m.pickHost()
 	case actPeek:
 		m.askPeek(m.current())
 	case actStatus:
@@ -621,6 +651,10 @@ func (m *Model) overlayKey(msg tea.KeyPressMsg) tea.Cmd {
 			return cmd
 		}
 		a := keyAct(inResume, msg.String())
+		if m.ov.rec.Host != "" && remoteBlocked(a) {
+			m.flash(i18n.T("remote.read_only"))
+			return nil
+		}
 		if b := bindingOf(inResume, a); b != nil && b.tier == tierStart && a != actResume {
 			m.focusKey(a) // its meaning differs from the list: the first press only focuses the button
 			return nil
@@ -908,6 +942,10 @@ func (m *Model) openResume(r *fav.Rec) {
 	}
 	if m.inTrash() {
 		m.flash(i18n.T("trash.in_trash_hint"))
+		return
+	}
+	if r.Host != "" {
+		m.openRemoteResume(r)
 		return
 	}
 	ti := newInput()

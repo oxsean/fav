@@ -27,7 +27,7 @@ func cmdRm(args []string) error {
 	if err != nil {
 		return err
 	}
-	r, err := pick(s, ref)
+	r, err := pickLocal(s, ref)
 	if err != nil {
 		return err
 	}

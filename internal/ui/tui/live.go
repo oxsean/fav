@@ -13,6 +13,7 @@ import (
 	"github.com/oxsean/fav/internal/fav"
 	"github.com/oxsean/fav/internal/herdr"
 	"github.com/oxsean/fav/internal/i18n"
+	"github.com/oxsean/fav/internal/remote"
 	"github.com/oxsean/fav/internal/render"
 )
 
@@ -30,19 +31,19 @@ type pulseMsg map[string]capture.Pulse
 
 // readPulses reads the transcript tails of the running sessions in the background; unchanged files cost a stat.
 func (m *Model) readPulses() tea.Cmd {
-	paths := map[string]string{}
+	srcs := map[string]remote.Source{}
 	for id := range m.live {
 		if r := m.bySession(id); r != nil && transcript(r) != "" {
-			paths[id] = transcript(r)
+			srcs[id] = m.hosts.Source(r)
 		}
 	}
-	if len(paths) == 0 {
+	if len(srcs) == 0 {
 		return nil
 	}
 	return func() tea.Msg {
-		out := make(pulseMsg, len(paths))
-		for id, p := range paths {
-			if pl, ok := capture.ReadPulse(p); ok {
+		out := make(pulseMsg, len(srcs))
+		for id, src := range srcs {
+			if pl, ok := src.Pulse(); ok {
 				pl.Asking = pl.Asking || capture.HookWaiting(id, pl.Size)
 				out[id] = pl
 			}
@@ -120,7 +121,15 @@ func (m *Model) liveOf(r *fav.Rec) (capture.Live, bool) {
 	if r == nil {
 		return capture.Live{}, false
 	}
-	l, ok := m.live[r.SessionID]
+	live := m.live
+	if r.Host != "" {
+		if hr := m.remote[r.Host]; hr != nil {
+			live = hr.live
+		} else {
+			live = nil
+		}
+	}
+	l, ok := live[r.SessionID]
 	return l, ok
 }
 
@@ -210,7 +219,11 @@ func liveGroupNames() []string {
 }
 
 func (m *Model) liveGroup(r *fav.Rec) int {
-	switch m.need(r.SessionID) {
+	need := needNone
+	if r.Host == "" { // attention is this machine's, by session id
+		need = m.need(r.SessionID)
+	}
+	switch need {
 	case needWait:
 		return groupWait
 	case needUnseen:
@@ -270,17 +283,18 @@ type refreshMsg struct {
 func (m *Model) refreshChat() tea.Cmd {
 	r := m.current()
 	p := m.probes[r]
-	if r == nil || p == nil || !p.done || p.loading {
+	if r == nil || p == nil || !p.done || p.loading || p.polling {
 		return nil
 	}
 	if _, ok := m.liveOf(r); !ok {
 		return nil
 	}
-	path := transcript(r)
-	if path == "" {
+	if r.Host == "" && transcript(r) == "" {
 		return nil
 	}
-	return func() tea.Msg { return refreshMsg{r, capture.Messages(path, -1, recentMsgs)} }
+	p.polling = true
+	src := m.hosts.Source(r)
+	return func() tea.Msg { return refreshMsg{r, src.Messages(-1, recentMsgs)} }
 }
 
 // canApply: no merging while the right pane has focus, is scrolled, is searching or shows the full text.
@@ -290,7 +304,10 @@ func (m *Model) canApply() bool {
 
 func (m *Model) stash(msg refreshMsg) {
 	p := m.probes[msg.rec]
-	if p == nil || !p.done {
+	if p != nil {
+		p.polling = false
+	}
+	if p == nil || !p.done || msg.page.Err != nil {
 		return
 	}
 	// keep only what is newer than the current first message; nothing lines up → replace everything

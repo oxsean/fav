@@ -34,7 +34,7 @@ func cmdEdit(args []string) error {
 	if err != nil {
 		return err
 	}
-	r, err := pick(s, first(pos))
+	r, err := pickLocal(s, first(pos))
 	if err != nil {
 		return err
 	}

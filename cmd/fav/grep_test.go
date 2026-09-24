@@ -3,7 +3,6 @@ package main
 import (
 	"errors"
 	"flag"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -27,17 +26,7 @@ func TestQueryDashes(t *testing.T) {
 	}
 }
 
-func stderrOf(t *testing.T, f func()) string {
-	t.Helper()
-	r, w, _ := os.Pipe()
-	old := os.Stderr
-	os.Stderr = w
-	f()
-	w.Close()
-	os.Stderr = old
-	b, _ := io.ReadAll(r)
-	return string(b)
-}
+func stderrOf(t *testing.T, f func()) string { return captured(t, &os.Stderr, f) }
 
 func TestEverySubcommandHasHelp(t *testing.T) {
 	root := t.TempDir()

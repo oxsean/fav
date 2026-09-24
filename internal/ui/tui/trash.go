@@ -42,6 +42,10 @@ func (m *Model) askDelete(r *fav.Rec) {
 	if r == nil {
 		return
 	}
+	if r.Host != "" {
+		m.flash(i18n.T("remote.read_only"))
+		return
+	}
 	if m.inTrash() {
 		m.restoreTrash(r)
 		return

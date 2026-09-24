@@ -96,3 +96,28 @@ func TestWriteAtomicKeepsASymlink(t *testing.T) {
 		t.Fatalf("target %q", b)
 	}
 }
+
+func TestIDChangesWhenAFileIsRenamedOver(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "t.jsonl")
+	os.WriteFile(p, []byte("a\n"), 0o644)
+	id := ID(p)
+	if id == "" {
+		t.Fatal("no id")
+	}
+	f, _ := os.OpenFile(p, os.O_APPEND|os.O_WRONLY, 0)
+	f.WriteString("b\n")
+	f.Close()
+	if ID(p) != id {
+		t.Fatal("appending keeps the file")
+	}
+	if err := WriteAtomic(p, 0o644, func(w io.Writer) error { _, err := w.Write([]byte("a\nb\n")); return err }); err != nil {
+		t.Fatal(err)
+	}
+	if got := ID(p); got == id || got == "" {
+		t.Fatalf("a rewrite is another file: %q %q", id, got)
+	}
+	if ID(filepath.Join(dir, "none")) != "" {
+		t.Fatal("a missing file has no id")
+	}
+}

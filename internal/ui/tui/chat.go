@@ -13,6 +13,7 @@ import (
 	"github.com/oxsean/fav/internal/fav"
 	"github.com/oxsean/fav/internal/fulltext"
 	"github.com/oxsean/fav/internal/i18n"
+	"github.com/oxsean/fav/internal/remote"
 	"github.com/oxsean/fav/internal/render"
 )
 
@@ -38,19 +39,23 @@ func (m *Model) load(r *fav.Rec, n int) tea.Cmd {
 	if r == nil || p == nil || !p.done || p.full || p.loading {
 		return nil
 	}
-	path := transcript(r)
-	if path == "" {
+	if r.Host == "" && transcript(r) == "" {
 		return nil
 	}
 	p.loading = true
-	from := p.from
-	return func() tea.Msg { return pageMsg{r, capture.Messages(path, from, n)} }
+	src, from := m.hosts.Source(r), p.from
+	return func() tea.Msg { return pageMsg{r, src.Messages(from, n)} }
 }
 
 // applyPage appends the page; other expanded records drop back to the tail.
 func (m *Model) applyPage(msg pageMsg) {
 	p := m.probes[msg.rec]
 	if p == nil {
+		return
+	}
+	if err := msg.page.Err; err != nil { // keep the cursor; probed again when the host answers
+		p.loading, p.failed = false, true
+		m.flash(i18n.F("remote.unreachable", msg.rec.Host, remote.Reason(err)))
 		return
 	}
 	for r, o := range m.probes {
@@ -185,10 +190,20 @@ func (m *Model) openMessage() tea.Cmd {
 
 func (m *Model) showMessage(msg capture.Message) {
 	same := m.ov.kind == ovMessage && m.ov.msg.At.Equal(msg.At) && m.ov.msg.Off == msg.Off
-	if capture.Truncated(msg.Text) {
-		msg.Text = capture.TextFull(transcript(m.current()), msg.Off, msg.Text)
+	var steps []string
+	if r := m.current(); r != nil && r.Host != "" { // another machine: shown at once, the full text follows
+		steps = stepHeads(msg.Steps)
+		if capture.Truncated(msg.Text) || len(msg.Steps) > 0 {
+			m.pending = tea.Batch(m.pending, fullMessage(m.hosts.Source(r), msg))
+		}
+	} else {
+		src := m.hosts.Source(r)
+		if capture.Truncated(msg.Text) {
+			msg.Text = src.TextFull(msg.Off, msg.Text)
+		}
+		steps = src.StepsFull(msg.Steps)
 	}
-	ov := overlay{kind: ovMessage, msg: msg, boxW: max(44, m.w-8)}
+	ov := overlay{kind: ovMessage, msg: msg, steps: steps, boxW: max(44, m.w-8)}
 	if same {
 		ov.cursor = m.ov.cursor
 	}
@@ -228,7 +243,7 @@ func (m *Model) layoutMessage() {
 		return
 	}
 	add([]string{""}, 'T')
-	for i, text := range capture.StepsFull(transcript(m.current()), m.ov.msg.Steps) {
+	for i, text := range m.ov.steps {
 		st := m.ov.msg.Steps[i]
 		text = prettyJSON(text)
 		from := len(m.ov.lines)
@@ -245,6 +260,38 @@ func (m *Model) layoutMessage() {
 			add([]string{""}, 'S')
 		}
 	}
+}
+
+func stepHeads(steps []capture.Step) []string {
+	out := make([]string, len(steps))
+	for i, st := range steps {
+		out[i] = st.Text
+	}
+	return out
+}
+
+type fullMsg struct {
+	msg   capture.Message
+	steps []string
+}
+
+// fullMessage reads msg's full text and steps through src (another machine) in the background.
+func fullMessage(src remote.Source, msg capture.Message) tea.Cmd {
+	return func() tea.Msg {
+		if capture.Truncated(msg.Text) {
+			msg.Text = src.TextFull(msg.Off, msg.Text)
+		}
+		return fullMsg{msg, src.StepsFull(msg.Steps)}
+	}
+}
+
+// applyFull lays out the full text when the reader still shows that message.
+func (m *Model) applyFull(f fullMsg) {
+	if m.ov.kind != ovMessage || !m.ov.msg.At.Equal(f.msg.At) || m.ov.msg.Off != f.msg.Off || len(f.steps) != len(m.ov.msg.Steps) {
+		return
+	}
+	m.ov.msg.Text, m.ov.steps = f.msg.Text, f.steps
+	m.layoutMessage()
 }
 
 // longStep: a step longer than this gets a separator line after it.

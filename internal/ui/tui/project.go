@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -43,7 +44,9 @@ func (m *Model) projectBlock(name string, y0, x0, w, h int) []string {
 	dirs := topN(recs, func(r *fav.Rec) string { return r.Cwd }, 1)
 	if len(dirs) > 0 {
 		dir := paths.Tilde(dirs[0].key)
-		if !paths.IsDir(dirs[0].key) {
+		if i := slices.IndexFunc(recs, func(r *fav.Rec) bool { return r.Cwd == dirs[0].key }); recs[i].Host != "" {
+			dir = recs[i].Host + ":" + dirs[0].key // another machine's directory: not checked here
+		} else if !paths.IsDir(dirs[0].key) {
 			dir += errSty.Render(i18n.T("project.missing"))
 		}
 		if extra := distinct(recs, func(r *fav.Rec) string { return r.Cwd }) - 1; extra > 0 {
@@ -86,7 +89,7 @@ func (m *Model) projectBlock(name string, y0, x0, w, h int) []string {
 		default:
 			active++
 		}
-		if m.isLive(r.SessionID) {
+		if _, ok := m.liveOf(r); ok {
 			live++
 		}
 		if t := r.When(); !t.IsZero() && (first.IsZero() || t.Before(first)) {

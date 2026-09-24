@@ -152,6 +152,9 @@ func (s *Store) Put(r *Rec) error {
 
 // ⚠️ put: the caller holds the lock.
 func (s *Store) put(r *Rec) error {
+	if r.Host != "" {
+		return i18n.E("store.remote_record", r.Host)
+	}
 	if !ValidStatus(r.Status) {
 		r.Status = StatusDefault
 	}
@@ -206,6 +209,9 @@ func (s *Store) Update(r *Rec, change func(*Rec)) (*Rec, error) {
 		return r, err
 	}
 	defer unlock()
+	if r.Host != "" {
+		return r, i18n.E("store.remote_record", r.Host)
+	}
 	if s.Changed() {
 		if err := s.load(); err != nil {
 			return r, err

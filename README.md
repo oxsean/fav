@@ -317,9 +317,33 @@ fav trash [--json]                      # list the trash; --purge removes expire
 fav doctor [--compact]                  # check data files, dead sessions, trash expiry, agents idle for hours, big old transcripts nobody kept; --compact rewrites the store
 ```
 
+### Other machines: `hosts`
+
+Sessions on other machines show up in the same lists, read over ssh from the fav installed there. Each machine needs an ssh alias in `~/.ssh/config` that logs in with a key (no password prompt), then:
+
+```bash
+fav hosts add mba mba --fav /Users/me/.local/bin/fav                          # name, ssh alias, fav's absolute path there
+fav hosts add win win-pc --fav 'C:\Users\me\.local\bin\fav.exe'
+fav hosts add wsl win-pc --wsl Debian --fav /home/me/.local/bin/fav            # a WSL distro of that Windows machine
+fav hosts add box nas --docker dev --fav /usr/local/bin/fav                    # a container there (--docker-cmd podman / a full path)
+fav hosts install mba [--dry-run]       # build fav from this checkout for its system and put it there — in the distro or container too — then check the version
+fav hosts                               # the machines, the fav version each answered with, when each list was last fetched
+fav hosts check [name…]                 # connect, versions, system, claude/codex on PATH, a round trip with Chinese text, list and message timings
+fav hosts rm <name…> · fav hosts clear [name…]   # remove machines / forget cached lists
+```
+
+`add` writes `hosts` in `~/.agent/fav/config.json` and checks the machine (`--no-check` skips it); the first `install` of a machine without fav needs `--os` and `--arch`. Write fav's absolute path: the shell ssh starts there often lacks `~/.local/bin` on its PATH. The remote shell is guessed (cmd for a Windows path or `wsl`) or set with `--shell posix|cmd|powershell`.
+
+```bash
+fav sessions host:all                   # every machine; host:mba one of them; no host: this machine only
+fav show mba:<id> · fav resume mba:<id> # a remote session: preview and checks come from there, resume runs `ssh -t mba fav resume …`
+```
+
+In the TUI the machine chip (`m`) picks this machine, all of them or one; remote rows carry `@name`, the preview and Agents read from their machine, and resume opens `ssh -t` in a new Herdr tab or this terminal. Remote sessions are read-only: favorite, tag, archive, delete and move are done on their own machine. Each list is fetched in the background every 30 s and cached under `~/.agent/fav/hosts/`; a machine that cannot be reached shows its cached rows and "offline since".
+
 ## Query syntax
 
-`#tag`, `project:x`, `provider:claude|codex`, `status:open|active|done|archived|trash|all|live|agent`,
+`#tag`, `project:x`, `provider:claude|codex`, `host:all|local|<name>` (other machines, see above), `status:open|active|done|archived|trash|all|live|agent`,
 `after:2026-09-01`, `before:…` (when the session started), `last:7d` / `last:2026-09-01` (active since — a session started last week and used today counts), `turns:3`, `file:internal/index` (the AI wrote a path containing it), plus plain keywords. The time box in the filter row also takes `09-01`, `09-01..09-15`, `..09-15`, `7d`. All ANDed; CJK matches by substring.
 Starting the query with `>` (or `》`) searches message text instead: keywords are looked up in every message and tool command, the filter tokens only pick the
 sessions (default `status:all turns:0`). Every keyword must occur somewhere in the session; a keyword matches when 60% of its terms do (Chinese is cut into
@@ -358,6 +382,7 @@ the favorite follows) and does not count the parked process as running.
 | `~/.agent/fav/text/` | message text for `>` search, one file per transcript, plus `vocab.json` (English words seen, for spelling fixes); delete it and it is rebuilt |
 | `~/.agent/fav/trash/` | deleted session files moved as-is, `manifest.jsonl` records where they came from |
 | `~/.agent/fav/config.json` | written by the settings panel |
+| `~/.agent/fav/hosts/` | the last list fetched from each other machine (list fields: titles, summaries, tags, paths; no messages), ssh connection sockets |
 
 Environment: `FAV_HOME` moves the data directory, `FAV_UI=fzf|tui` sets the default front-end, `FAV_ICONS=nerd|ascii` picks icons, `FAV_TRACE=1` logs a timeline of keys, wheel and background events to `~/.agent/fav/trace.log` (for reporting a slow or stuck UI).
 The UI language follows the system (`LANG` etc. starting with zh → Chinese, otherwise English) and can be pinned in settings.

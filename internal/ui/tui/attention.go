@@ -133,7 +133,7 @@ func (m *Model) markSeen(id string, quiet bool) {
 	p, ok := m.pulse[id]
 	if !ok {
 		if path := m.idx.Transcript(id); path != "" {
-			p, ok = capture.ReadPulse(path)
+			p, ok = m.hosts.Source(&fav.Rec{TranscriptPath: path}).Pulse()
 		}
 	}
 	if !ok {

@@ -286,3 +286,18 @@ func TestUpdateRefusesARecordDeletedElsewhere(t *testing.T) {
 		t.Fatalf("resurrected: %+v", c.All())
 	}
 }
+
+func TestAnotherMachinesRecordIsNeverStored(t *testing.T) {
+	s := tmpStore(t)
+	r := rec("远端", nil)
+	r.Host = "mba"
+	if err := s.Put(r); err == nil {
+		t.Error("Put stored a remote record")
+	}
+	if _, err := s.Update(r, func(r *Rec) { r.Title = "x" }); err == nil {
+		t.Error("Update stored a remote record")
+	}
+	if n := len(reopen(t, s).All()); n != 0 {
+		t.Fatalf("%d records on disk", n)
+	}
+}

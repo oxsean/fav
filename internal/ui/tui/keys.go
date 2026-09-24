@@ -71,6 +71,7 @@ const (
 	actProvider
 	actDate
 	actStatus
+	actHost
 	actFoldAll
 	actFold
 	actUnfold
@@ -153,6 +154,7 @@ var bindings = []binding{
 	{act: actProvider, in: inList, keys: []string{"v"}, ime: actChips},
 	{act: actDate, in: inList, keys: []string{"d"}, ime: actChips},
 	{act: actStatus, in: inList, keys: []string{"s"}, ime: actChips},
+	{act: actHost, in: inList, keys: []string{"m"}, ime: actChips},
 	{act: actFoldAll, in: inList, keys: []string{"z"}, ime: actFold},
 	{act: actFold, in: inList, keys: []string{"-"}},
 	{act: actUnfold, in: inList, keys: []string{"=", "+"}},
@@ -386,6 +388,7 @@ func helpLayout() []helpSection {
 			{"help.chip_row", inList, false, []act{actChips}},
 			{"help.filters", inList, false, []act{actTags, actProjects, actProvider, actDate}},
 			{"help.status", inList, false, []act{actStatus}},
+			{"help.host", inList, false, []act{actHost}},
 			{"help.enter_group", inList, false, []act{actEnter}},
 			{"help.fold_all", inList, false, []act{actFoldAll, actFold, actUnfold}},
 		}},
@@ -549,7 +552,7 @@ func helpName(a act) string {
 func actName(a act) string {
 	return map[act]string{
 		actSort: "key.sort", actDown: "key.down", actUp: "key.up", actCopy: "key.copy", actTags: "key.tags",
-		actProjects: "key.projects", actProvider: "key.provider", actDate: "key.date", actStatus: "key.status",
+		actProjects: "key.projects", actProvider: "key.provider", actDate: "key.date", actStatus: "key.status", actHost: "key.host",
 		actNew: "key.new", actFavorite: "key.favorite", actDone: "key.done", actArchive: "key.archive",
 		actEdit: "key.edit", actQuit: "key.quit",
 	}[a]

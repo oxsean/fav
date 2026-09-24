@@ -21,12 +21,12 @@ import (
 func TestFrameLinesFillWidth(t *testing.T) {
 	st := demoStore(t)
 	states := []string{"", "detail", "projects", "syntax", "picker", "help", "help-input", "resume", "resume-edit", "edit",
-		"edit-summary", "settings", "settings-ide", "status", "delete", "start", "message", "handoff", "peek"}
+		"edit-summary", "settings", "settings-ide", "status", "delete", "start", "message", "handoff", "peek", "remote", "remote-resume"}
 	for _, size := range []struct{ w, h int }{{140, 40}, {120, 34}, {80, 24}, {80, 18}, {56, 20}, {50, 16}} {
 		for _, state := range states {
 			m := newModel(t, st, size.w, size.h)
 			openOverlay(m, state)
-			if layout := state == "" || state == "detail" || state == "projects" || state == "syntax"; layout == m.ov.active() {
+			if layout := state == "" || state == "detail" || state == "projects" || state == "syntax" || state == "remote"; layout == m.ov.active() {
 				t.Fatalf("%q did not open (overlay %d)", state, m.ov.kind)
 			}
 			lines := strings.Split(m.screen(), "\n")
@@ -53,6 +53,11 @@ func openOverlay(m *Model, kind string) {
 	case "syntax":
 		m.search.SetValue("> ")
 		m.refresh()
+	case "remote":
+		withRemote(m)
+	case "remote-resume":
+		withRemote(m)
+		m.askResume()
 	case "picker":
 		m.pickTags()
 	case "help":

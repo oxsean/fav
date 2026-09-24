@@ -16,16 +16,26 @@ import (
 
 func TestMain(m *testing.M) { testkit.Main(m) }
 
-func stdoutOf(t *testing.T, f func()) string {
+func stdoutOf(t *testing.T, f func()) string { return captured(t, &os.Stdout, f) }
+
+// captured reads while f writes: a pipe buffer is only a few KB on Windows.
+func captured(t *testing.T, file **os.File, f func()) string {
 	t.Helper()
-	r, w, _ := os.Pipe()
-	old := os.Stdout
-	os.Stdout = w
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	read := make(chan []byte)
+	go func() {
+		b, _ := io.ReadAll(r)
+		read <- b
+	}()
+	old := *file
+	*file = w
+	defer func() { *file = old }()
 	f()
 	w.Close()
-	os.Stdout = old
-	b, _ := io.ReadAll(r)
-	return string(b)
+	return string(<-read)
 }
 
 func TestBigStaleTranscripts(t *testing.T) {

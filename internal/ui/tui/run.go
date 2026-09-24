@@ -5,10 +5,13 @@ import (
 
 	"github.com/oxsean/fav/internal/fav"
 	"github.com/oxsean/fav/internal/index"
+	"github.com/oxsean/fav/internal/remote"
 )
 
-func Run(s *fav.Store, idx *index.Index, cfg fav.Config, initialQuery string, focus *fav.Rec, mouse bool) (Result, error) {
+// Run: hosts are the other machines whose sessions are shown (nil: none, nothing is contacted).
+func Run(s *fav.Store, idx *index.Index, cfg fav.Config, hosts *remote.Hosts, initialQuery string, focus *fav.Rec, mouse bool) (Result, error) {
 	m := New(s, idx, cfg, initialQuery)
+	m.useHosts(hosts)
 	m.Focus(focus)
 	m.mouse = mouse && cfg.Mouse
 	var opts []tea.ProgramOption

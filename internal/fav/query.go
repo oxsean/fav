@@ -21,6 +21,7 @@ type Query struct {
 	Before  time.Time
 	Active  time.Time // last: — active since (a session started last week and continued today counts)
 	File    string    // file: — the AI wrote a file whose path contains this (lowercase)
+	Host    string    // host: — "" / local = this machine, all, or a configured host name
 	Unknown []string  // unknown qualifiers, already matched as plain keywords
 }
 
@@ -55,6 +56,8 @@ func Parse(s string) Query {
 			q.Provider = v
 		case "file":
 			q.File = v
+		case "host", "machine":
+			q.Host = v
 		case "status":
 			q.Status = normalizeStatus(v)
 		case "turns":
@@ -172,7 +175,7 @@ func ParseDay(v string, now time.Time) (time.Time, bool) {
 }
 
 func (q Query) Match(r *Rec) bool {
-	if !q.matchStatus(r) {
+	if !q.matchHost(r) || !q.matchStatus(r) {
 		return false
 	}
 	for _, t := range q.Tags {
@@ -207,6 +210,22 @@ func (q Query) Match(r *Rec) bool {
 		}
 	}
 	return true
+}
+
+// HostLocal and HostAll are the host: values besides a configured name.
+const (
+	HostLocal = "local"
+	HostAll   = "all"
+)
+
+func (q Query) matchHost(r *Rec) bool {
+	switch q.Host {
+	case HostAll:
+		return true
+	case "", HostLocal:
+		return r.Host == ""
+	}
+	return strings.EqualFold(r.Host, q.Host)
 }
 
 func (q Query) matchStatus(r *Rec) bool {

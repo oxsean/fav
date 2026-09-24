@@ -32,6 +32,12 @@ func cmdResume(args []string) error {
 	if err != nil {
 		return err
 	}
+	if r.Host != "" {
+		if *fork {
+			return readOnly(r)
+		}
+		return resumeRemote(r, *dryRun, *noHerdr, *workspace)
+	}
 	if *fork {
 		plan, err := capture.PlanFork(r, *noHerdr)
 		if err != nil {
@@ -73,6 +79,9 @@ func openInApp(s *fav.Store, r *fav.Rec) error {
 }
 
 func resumeRec(s *fav.Store, r *fav.Rec, dryRun, noHerdr bool, workspace string) error {
+	if r.Host != "" {
+		return resumeRemote(r, dryRun, noHerdr, workspace)
+	}
 	plan, err := capture.PlanResume(r, capture.LiveSessions(), noHerdr)
 	if err != nil {
 		return err
@@ -176,7 +185,7 @@ func cmdHandoff(args []string) error {
 	if err != nil {
 		return err
 	}
-	r, err := pick(s, first(rest))
+	r, err := pickLocal(s, first(rest))
 	if err != nil {
 		return err
 	}

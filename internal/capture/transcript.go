@@ -384,6 +384,8 @@ type Page struct {
 	Msgs []Message
 	From int64
 	Done bool
+	File string `json:"file,omitempty"` // which file was read, when another machine read it (fileio.ID)
+	Err  error  `json:"-"`              // the read failed (another machine out of reach): nothing is known about the rest
 }
 
 // Messages reads chunks backwards from before (< 0 = file end) until n messages or the head;

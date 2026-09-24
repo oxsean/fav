@@ -20,7 +20,7 @@ func (m *Model) exists(p string) bool {
 
 // broken: cwd gone (move it) or transcript gone (delete it); live sessions never count.
 func (m *Model) broken(r *fav.Rec) (dirGone, transcriptGone bool) {
-	if r == nil || m.isLive(r.SessionID) {
+	if r == nil || r.Host != "" || m.isLive(r.SessionID) {
 		return false, false
 	}
 	return r.Broken(m.exists)

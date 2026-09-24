@@ -51,6 +51,10 @@ func (m *Model) openHits(kw string) tea.Cmd {
 	if r == nil || kw == "" {
 		return nil
 	}
+	if r.Host != "" { // another machine's text is not in the local store: step through what the pane has loaded
+		m.jumpHit(0)
+		return nil
+	}
 	paths := fulltext.Cands([]*fav.Rec{r}, m.idx.PathsBySession())[0].Paths
 	var pin fulltext.Hit
 	if x, ok := m.msgHit(r); ok {

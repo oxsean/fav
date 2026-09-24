@@ -7,8 +7,19 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/oxsean/fav/internal/capture"
 	"github.com/oxsean/fav/internal/fav"
 )
+
+type ownFiles struct{ r *fav.Rec }
+
+func (o ownFiles) Pulse() (capture.Pulse, bool) { return capture.ReadPulse(o.r.TranscriptPath) }
+func (o ownFiles) Checks() []capture.Check      { return capture.Checks(o.r) }
+
+type farSource struct{ checks []capture.Check }
+
+func (f farSource) Pulse() (capture.Pulse, bool) { return capture.Pulse{Prompt: "remote prompt"}, true }
+func (f farSource) Checks() []capture.Check      { return f.checks }
 
 func init() { noColor = true }
 
@@ -132,8 +143,38 @@ func TestPreviewReportsDeadTranscript(t *testing.T) {
 		Status: fav.StatusDone, FavoritedAt: new(time.Now()),
 		TranscriptPath: "/nope/definitely-missing.jsonl",
 	}
-	if !strings.Contains(Preview(r, 60, time.Now()), "会话记录文件已失效") {
+	if !strings.Contains(Preview(r, ownFiles{r}, 60, time.Now()), "会话记录文件已失效") {
 		t.Fatal("transcript 失效时 preview 必须提示")
+	}
+}
+
+func TestRemoteRowCarriesItsHost(t *testing.T) {
+	now := time.Now()
+	r := &fav.Rec{ID: "abc", Provider: fav.ProviderClaude, SessionID: "0123-sid", Title: "远端", Project: "notes-api",
+		Host: "mba", TranscriptPath: "/nope/definitely-missing.jsonl"}
+	if k := LineKey(r); k != "mba:0123-sid" {
+		t.Errorf("a remote row's key is host:sid, even when favorited there: %q", k)
+	}
+	if k := LineKey(&fav.Rec{ID: "abc", SessionID: "0123-sid"}); k != "abc" {
+		t.Errorf("a local favorite keeps its record id: %q", k)
+	}
+	line := Line(r, now)
+	if _, vis, _ := strings.Cut(line, Sep); !strings.Contains(vis, "@mba") {
+		t.Errorf("the row shows the host: %q", line)
+	}
+	for _, l := range Card(r, 40, now) {
+		if Width(l) > 40 {
+			t.Errorf("card line wider than 40: %q", l)
+		}
+	}
+	out := Preview(r, farSource{[]capture.Check{{OK: true, Text: "checked there"}}}, 60, now)
+	for _, want := range []string{"@mba", "checked there", "remote prompt", "ssh mba"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("preview misses %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "会话记录文件已失效") {
+		t.Error("a remote row's checks come from its source, not this machine's files")
 	}
 }
 

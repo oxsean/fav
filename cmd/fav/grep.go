@@ -92,7 +92,7 @@ func cmdGrep(args []string) error {
 func grep(s *fav.Store, idx *index.Index, kw, scope string, all bool) ([]*fav.Rec, []fulltext.Result, error) {
 	q := fav.Parse(scope)
 	q.All = all
-	recs, err := listRecs(s, idx, nil, q, "")
+	recs, err := localRecs(s, idx, nil, q, "")
 	return recs, fulltext.Search(context.Background(), fulltext.Dir(), fulltext.Cands(recs, idx.PathsBySession()), kw), err
 }
 

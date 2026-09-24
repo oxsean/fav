@@ -124,14 +124,31 @@ func line(r *fav.Rec, now time.Time, col string) string {
 	return b.String()
 }
 
+// Meta: provider · project, after an @host mark for another machine's session.
 func Meta(r *fav.Rec) string {
-	if r.Project == "" {
-		return fav.ProviderName(r.Provider)
+	meta := fav.ProviderName(r.Provider)
+	if r.Project != "" {
+		meta += " · " + r.Project
 	}
-	return fav.ProviderName(r.Provider) + " · " + r.Project
+	if r.Host != "" {
+		meta = HostMark(r) + " · " + meta
+	}
+	return meta
 }
 
+// HostMark: @name for another machine's session, "" for this one.
+func HostMark(r *fav.Rec) string {
+	if r.Host == "" {
+		return ""
+	}
+	return "@" + r.Host
+}
+
+// LineKey: host:session id for another machine's session (pick() reads it back).
 func LineKey(r *fav.Rec) string {
+	if r.Host != "" {
+		return r.Host + ":" + r.SessionID
+	}
 	if r.ID != "" {
 		return r.ID
 	}
@@ -181,8 +198,14 @@ func Card(r *fav.Rec, width int, now time.Time) []string {
 	return out
 }
 
+// Source is where Preview reads a record's checks and last activity: its own files, or its host (remote.Source).
+type Source interface {
+	Pulse() (capture.Pulse, bool)
+	Checks() []capture.Check
+}
+
 // ⚠️ Preview (fzf preview window, `fav show`) never shows env var values.
-func Preview(r *fav.Rec, width int, now time.Time) string {
+func Preview(r *fav.Rec, src Source, width int, now time.Time) string {
 	if width < 20 {
 		width = 20
 	}
@@ -234,14 +257,14 @@ func Preview(r *fav.Rec, width int, now time.Time) string {
 		field(GlyphTag+i18n.T("card.tags"), TagString(r.Tags))
 	}
 	field(GlyphClock+i18n.T("card.resume"), resumeInfo(r, now))
-	field(GlyphClock+i18n.T("card.last_activity"), ActivityLine(r))
+	field(GlyphClock+i18n.T("card.last_activity"), activityLine(src))
 	line("")
 
 	line(cyan.p(i18n.T("card.resume_target")))
 	line(Truncate(resumeTarget(r), width))
 	line("")
 
-	for _, c := range capture.Checks(r) {
+	for _, c := range src.Checks() {
 		switch {
 		case c.OK:
 			line(green.p(GlyphOK + " " + Truncate(c.Text, width-2)))
@@ -280,6 +303,9 @@ func statusLine(r *fav.Rec, now time.Time) string {
 	if r.PinnedPath != "" {
 		state += cyan.p("  " + GlyphPinned + i18n.T("detail.pinned"))
 	}
+	if r.Host != "" {
+		state += cyan.p("  " + HostMark(r))
+	}
 	return state + dim.p("  ·  "+fav.ProviderLabel(r.Provider)+"  ·  "+When(r.When(), now))
 }
 
@@ -299,6 +325,9 @@ func resumeTarget(r *fav.Rec) string {
 	dir := paths.Tilde(r.Cwd)
 	if dir == "" {
 		dir = i18n.T("resume.where.cwd")
+	}
+	if r.Host != "" {
+		return i18n.T("resume.where.terminal") + " " + GlyphArrow + " ssh " + r.Host + " " + GlyphArrow + " " + dir + " " + GlyphArrow + " " + target
 	}
 	if r.HerdrWorkspace != "" {
 		return "Herdr " + r.HerdrWorkspace + " " + GlyphArrow + " " + i18n.T("resume.where.new_tab") + " " + GlyphArrow + " " + dir + " " + GlyphArrow + " " + target
@@ -346,11 +375,9 @@ func FilesField(r *fav.Rec, n int) string {
 	return i18n.F("card.files_value", len(r.Files), FileList(fav.TopFiles(r.Files, n), base))
 }
 
-func ActivityLine(r *fav.Rec) string {
-	for _, p := range r.Transcripts() {
-		if pl, ok := capture.ReadPulse(p); ok {
-			return strings.TrimSpace(pl.ModTime.Format("2006-01-02 15:04") + "  " + pl.Prompt)
-		}
+func activityLine(src Source) string {
+	if pl, ok := src.Pulse(); ok {
+		return strings.TrimSpace(pl.ModTime.Format("2006-01-02 15:04") + "  " + pl.Prompt)
 	}
 	return ""
 }

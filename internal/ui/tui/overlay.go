@@ -72,6 +72,7 @@ type overlay struct {
 	armedAt   time.Time
 
 	msg   capture.Message
+	steps []string // the full text of msg's steps
 	lines []string
 	kinds []byte // per line: 'T' body, 'H' tool header, 'B' argument continuation, 'R' result, 'S' separator
 	boxW  int
@@ -950,7 +951,9 @@ func (m *Model) renderResume() string {
 	body = append(body, "")
 
 	body = append(body, m.buttonGroups(len(body)+1, m.resumeGroups())...)
-	body = append(body, dimmed.Render(render.Truncate(i18n.F("resume.start_hint", strings.Join(startKeys(), " ")), inner)))
+	if r.Host == "" {
+		body = append(body, dimmed.Render(render.Truncate(i18n.F("resume.start_hint", strings.Join(startKeys(), " ")), inner)))
+	}
 	return ovRender(body, w)
 }
 
@@ -968,6 +971,9 @@ func startKeys() []string {
 // resumeGroups are the resume dialog's buttons: where to continue, the project folder, the record; the overlay width
 // is computed from them.
 func (m *Model) resumeGroups() []btnGroup {
+	if m.ov.rec.Host != "" {
+		return m.remoteGroups()
+	}
 	p := m.ov.plan
 	k := func(a act, text string) string { return keyed(keyOf(inResume, a), text) }
 	project := btnGroup{label: i18n.T("resume.group.project"), bs: []btn{{k(actIDE, "IDE"), false, (*Model).openIDE}, {k(actCode, "VS Code"), false, (*Model).openCode}, {k(actFiles, capture.FileManagerName()), false, (*Model).openFiles}}}
@@ -1125,7 +1131,7 @@ func probeApp(r *fav.Rec) tea.Cmd {
 // appFirst: the resume dialog leads with the desktop app — the setting says so (always, or for sessions started there)
 // and the session is not running in a Herdr tab.
 func (m *Model) appFirst(r *fav.Rec, p capture.Plan) bool {
-	if !appReady(r) || p.Live.TabID != "" {
+	if r.Host != "" || !appReady(r) || p.Live.TabID != "" {
 		return false
 	}
 	return m.cfg.ResumeIn == fav.ResumeApp || m.cfg.ResumeIn == fav.ResumeOrigin && r.App
@@ -1194,6 +1200,9 @@ func (m *Model) copyResume() {
 }
 
 func (m *Model) titleLines(inner, y0 int) []string {
+	if m.ov.rec.Host != "" { // another machine's record: read-only
+		return []string{render.Truncate(m.ov.rec.Title, inner) + "  " + dimmed.Render(hostMark(m.ov.rec))}
+	}
 	if !m.ov.editing {
 		label := keyed(keyOf(inResume, actTitle), i18n.T("resume.btn_edit_title"))
 		text := render.Truncate(m.ov.edit.Value(), inner-render.Width(label)-2)
@@ -1216,6 +1225,10 @@ func (m *Model) editTitle() {
 // doResume persists an edited title before resuming.
 func (m *Model) doResume(noHerdr bool) {
 	r := m.ovRec()
+	if r.Host != "" {
+		m.remoteResume(noHerdr)
+		return
+	}
 	if t := strings.TrimSpace(m.ov.edit.Value()); t != "" && t != r.Title {
 		r.Title = t
 		if r.ID != "" {
@@ -1289,6 +1302,9 @@ func (m *Model) runPlan(r *fav.Rec, p capture.Plan, noHerdr bool) {
 }
 
 func (m *Model) resumeTargetLine(r *fav.Rec) string {
+	if r.Host != "" {
+		return m.remoteTarget(r, "  "+render.GlyphArrow+"  ")
+	}
 	if m.ov.app {
 		return i18n.F("resume.where.app", capture.AppName(r.Provider))
 	}

@@ -90,6 +90,9 @@ type Rec struct {
 	Supersedes string `json:"supersedes,omitempty"`
 	Deleted    bool   `json:"deleted,omitempty"`
 
+	// Host: the configured machine the session lives on; empty = this one. Never written to the local store.
+	Host string `json:"host,omitempty"`
+
 	// From the index, not persisted; re-attached on every refresh.
 	Turns  int       `json:"-"`
 	Msgs   int       `json:"-"`

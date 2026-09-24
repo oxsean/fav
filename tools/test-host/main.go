@@ -3,6 +3,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -72,7 +73,23 @@ func smoke(dir string) error {
 		return err
 	}
 	run(env, bin, "doctor")
-	return nil
+	return hostsSmoke(d, env, bin)
+}
+
+// hostsSmoke: this machine as both ends of the multi-host path, fav reaching its own launcher as a process.
+func hostsSmoke(d *fixture.Dataset, env []string, bin string) error {
+	launcher := filepath.Join(d.Root, "fav.sh")
+	if runtime.GOOS == "windows" {
+		launcher = filepath.Join(d.Root, "fav.cmd")
+	}
+	cfg, _ := json.Marshal(map[string]any{"lang": "zh", "hosts": []map[string]any{{"name": "self", "fav": []string{launcher}}}})
+	if err := os.WriteFile(filepath.Join(d.Home, "config.json"), cfg, 0o644); err != nil {
+		return err
+	}
+	if err := run(env, bin, "hosts", "check"); err != nil {
+		return fmt.Errorf("hosts check: %w", err)
+	}
+	return run(env, bin, "sessions", "host:self", "--limit", "3")
 }
 
 func run(env []string, name string, args ...string) error {

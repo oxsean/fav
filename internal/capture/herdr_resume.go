@@ -78,6 +78,8 @@ func (p Plan) Target(r *fav.Rec, arrow string) string {
 	dir := r.Cwd
 	if dir == "" {
 		dir = i18n.T("resume.where.cwd")
+	} else if r.Host != "" {
+		dir = r.Host + ":" + dir
 	}
 	switch {
 	case p.Live.TabID != "":

@@ -106,6 +106,11 @@ func (m *Model) header() string {
 	if right != "" {
 		right += "  "
 	}
+	if down := m.offlineNote(); down != "" { // dropped when it does not fit
+		if w := ansi.StringWidth(down) + 2 + ansi.StringWidth(right); m.w-ansi.StringWidth(left)-ansi.StringWidth(tabs.String())-w >= 2 {
+			right = down + "  " + right
+		}
+	}
 
 	gap := m.w - ansi.StringWidth(left) - ansi.StringWidth(tabs.String()) - ansi.StringWidth(right)
 	if gap < 2 {
@@ -224,6 +229,16 @@ func (m *Model) chipData() []chip {
 	}
 	if m.view == viewLive {
 		chips = append(chips[:3], chips[4])
+	}
+	if m.hosts != nil {
+		value := m.hostChipValue(q)
+		for _, name := range m.hosts.Names() {
+			if hostSelected(q, name) && m.hostDown(name) != "" {
+				value = render.GlyphWarn + " " + value // the header names it when there is room
+				break
+			}
+		}
+		chips = append(chips, chip{render.GlyphHerdr, i18n.T("label.host"), value, q.Host != "" && q.Host != fav.HostLocal, (*Model).pickHost})
 	}
 	return chips
 }
@@ -503,6 +518,9 @@ func (m *Model) recLine(r *fav.Rec, sel bool, w int) string {
 	if r.Turns > 0 {
 		turns = " " + i18n.F("card.turns", r.Turns)
 	}
+	if r.Host != "" {
+		turns = " " + hostMark(r) + turns
+	}
 	mark := ""
 	if d, t := m.broken(r); d || t {
 		mark = " !"
@@ -523,6 +541,9 @@ func (m *Model) cardBox(r *fav.Rec, sel bool, w int) []string {
 	if r.App {
 		meta += " App"
 	}
+	if r.Host != "" {
+		meta = hostMark(r) + "  ·  " + meta
+	}
 	if r.CodexArchived {
 		meta += "  ·  " + i18n.T("card.codex_archived")
 	}
@@ -537,11 +558,15 @@ func (m *Model) cardBox(r *fav.Rec, sel bool, w int) []string {
 	}
 	liveText, tone, pulse := "", 0, ""
 	if l, ok := m.liveOf(r); ok && m.view == viewLive { // live status only on the Agents page
-		liveText, tone = m.needLabel(r.SessionID, l)
-		meta += "  ·  " + liveText
-		if p, ok := m.pulse[r.SessionID]; ok {
-			pulse = pulseText(p, l, m.now)
+		if r.Host != "" { // pulses and attention are this machine's, by session id
+			liveText, tone = liveLabel(l, m.now)
+		} else {
+			liveText, tone = m.needLabel(r.SessionID, l)
+			if p, ok := m.pulse[r.SessionID]; ok {
+				pulse = pulseText(p, l, m.now)
+			}
 		}
+		meta += "  ·  " + liveText
 	}
 	if r.ID != "" && r.Status != fav.StatusDefault {
 		meta += "  ·  " + render.Glyph(r.Status) + " " + render.StatusLabel(r.Status)
@@ -655,13 +680,17 @@ func (m *Model) detailBlock(y0, x0, w, h int) []string {
 }
 
 func (m *Model) statusLine(r *fav.Rec, w int) string {
+	notFav, done := "detail.not_favorited", "detail.done"
+	if r.Host != "" { // read-only here: no key hints
+		notFav, done = "remote.not_favorited", "remote.done"
+	}
 	state := accent.Render(render.GlyphActive + i18n.T("detail.favorited"))
 	if !r.Favorite() {
-		state = dimmed.Render(render.GlyphSession + i18n.T("detail.not_favorited"))
+		state = dimmed.Render(render.GlyphSession + i18n.T(notFav))
 	}
 	switch {
 	case r.Done():
-		state += dimmed.Render("  " + render.GlyphDone + i18n.T("detail.done"))
+		state += dimmed.Render("  " + render.GlyphDone + i18n.T(done))
 	case r.Status != "": // an unfavorited session nobody marked has no status
 		state += okSty.Render("  " + render.StatusLabel(r.Status))
 	}
@@ -684,6 +713,9 @@ func (m *Model) statusLine(r *fav.Rec, w int) string {
 		}
 	}
 	tail := "  ·  " + fav.ProviderLabel(r.Provider) + "  ·  " + render.WhenFull(r.When())
+	if r.Host != "" {
+		tail = "  ·  " + hostMark(r) + tail
+	}
 	return fit(state+dimmed.Render(tail), w)
 }
 
@@ -715,7 +747,7 @@ func (m *Model) fieldLines(r *fav.Rec, w int) []string {
 		add(render.GlyphHerdr+" Herdr", herdr)
 	}
 	add(render.GlyphTag+i18n.T("card.tags"), render.TagString(r.Tags))
-	if l, ok := m.live[r.SessionID]; ok {
+	if l, ok := m.liveOf(r); ok {
 		where := i18n.T("detail.background")
 		if l.TabID != "" {
 			where = "Herdr tab " + l.TabID
@@ -959,7 +991,7 @@ func (m *Model) footer() string {
 		if m.inTrash() {
 			left = []footGroup{{fk(keyOf(inList, actDelete), "footer.restore", 0)}}
 		} else {
-			left = []footGroup{m.mainKeys(m.current()), {m.favKey(m.current())}}
+			left = []footGroup{m.mainKeys(m.current()), m.favKeys(m.current())}
 		}
 		right = footGroup{fk(escKey, "footer.esc_back", 0), fk(keyOf(inList, actHelp), "footer.help", 0)}
 	case m.inTrash() && m.current() != nil:
@@ -978,9 +1010,9 @@ func (m *Model) footer() string {
 	case m.w < compactCols:
 		left, right = []footGroup{{fk(enterKey, "footer.enter_details", 0)}, {fk(keyOf(inList, actSearch), "footer.search", 0)}}, help
 	case !m.twoColumn():
-		left = []footGroup{{fk(enterKey, "footer.enter_details", 0)}, m.searchKeys(), {m.favKey(m.current())}}
+		left = []footGroup{{fk(enterKey, "footer.enter_details", 0)}, m.searchKeys(), m.favKeys(m.current())}
 	default:
-		left = []footGroup{m.mainKeys(m.current()), m.searchKeys(), {m.favKey(m.current())}}
+		left = []footGroup{m.mainKeys(m.current()), m.searchKeys(), m.favKeys(m.current())}
 	}
 	count := "" // compact mode has no list title: the count goes to the footer
 	if m.w < compactCols && !m.typing {
@@ -996,6 +1028,7 @@ func (m *Model) mainKeys(r *fav.Rec) footGroup {
 	case r == nil:
 	case m.msgMode():
 		g = append(g, fk(keyName("right"), "footer.all_hits", 2), fk(keyOf(inList, actNextHit)+"/"+keyOf(inList, actPrevHit), "footer.jump", 4))
+	case r.Host != "":
 	default:
 		if l, ok := m.liveOf(r); ok && l.TabID != "" {
 			g = append(g, fk(keyName("space"), "footer.space_switch", 2))
@@ -1014,11 +1047,15 @@ func (m *Model) searchKeys() footGroup {
 	return footGroup{fk(keyOf(inList, actSearch), "footer.search", 0), fk(keyOf(inList, actMsgSearch), "footer.msg_search", 5)}
 }
 
-func (m *Model) favKey(r *fav.Rec) footKey {
-	if r != nil && r.Favorite() {
-		return fk(footKeyOf(inList, actFavorite), "footer.unfavorite", 4)
+// favKeys: none on another machine's session, which is read-only here.
+func (m *Model) favKeys(r *fav.Rec) footGroup {
+	switch {
+	case r != nil && r.Host != "":
+		return nil
+	case r != nil && r.Favorite():
+		return footGroup{fk(footKeyOf(inList, actFavorite), "footer.unfavorite", 4)}
 	}
-	return fk(footKeyOf(inList, actFavorite), "key.favorite", 4)
+	return footGroup{fk(footKeyOf(inList, actFavorite), "key.favorite", 4)}
 }
 
 // footLine fits the groups into the width, dropping the highest-ranked hint (the later one on a tie) until they fit; right is

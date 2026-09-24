@@ -107,6 +107,10 @@ func run(args []string) error {
 		return cmdFzfTab(args)
 	case "doctor":
 		return cmdDoctor(args)
+	case "rpc":
+		return cmdRpc(args)
+	case "hosts":
+		return cmdHosts(args)
 	case "install-hook":
 		return cmdInstallHook(args)
 	case "uninstall-hook":
@@ -169,10 +173,13 @@ func recKeys(r *fav.Rec) (string, string) { return r.SessionID, r.ID }
 
 // pick resolves a record id or session id prefix: favorites, indexed sessions, running ones, then any file the index
 // has (one-shot runs, silent sessions, older ids of a chain); more than one session is an error. A session never
-// favorited comes back with an empty ID.
+// favorited comes back with an empty ID. host:ref looks on that configured host (Rec.Host set).
 func pick(s *fav.Store, ref string) (*fav.Rec, error) {
 	if ref == "" {
 		return nil, errors.New(i18n.T("cli.missing_id"))
+	}
+	if r, ok, err := pickHost(ref); ok {
+		return r, err
 	}
 	if r := s.Get(ref); r != nil {
 		return r, nil
@@ -259,7 +266,7 @@ func cmdAdd(args []string) error {
 		action = i18n.T("cli.favorited")
 	}
 	if *supersede != "" {
-		old, err := pick(s, *supersede)
+		old, err := pickLocal(s, *supersede)
 		if err != nil {
 			return err
 		}
@@ -410,8 +417,16 @@ func rescanned(idx *index.Index, force map[string]bool) *index.Index {
 	return idx
 }
 
-// listRecs lists what q shows; keep, the fzf key of the row just acted on, stays listed so the action can be undone.
+// listRecs lists what q shows, with the rows of the hosts a host: token selects; keep, the fzf key of the row just
+// acted on, stays listed so the action can be undone.
 func listRecs(s *fav.Store, idx *index.Index, live map[string]capture.Live, q fav.Query, keep string) ([]*fav.Rec, error) {
+	recs, err := localRecs(s, idx, live, q, keep)
+	far, _ := hostRows(q)
+	return append(recs, far...), err
+}
+
+// localRecs is listRecs on this machine only.
+func localRecs(s *fav.Store, idx *index.Index, live map[string]capture.Live, q fav.Query, keep string) ([]*fav.Rec, error) {
 	if live == nil && q.Status == fav.StatusLive {
 		live = capture.LiveSessions()
 	}
@@ -456,7 +471,7 @@ func cmdShow(args []string) error {
 	if *asJSON {
 		return printJSON(r)
 	}
-	fmt.Print(render.Preview(r, min(termWidth(), 100), time.Now()))
+	fmt.Print(render.Preview(r, remoteHosts().Source(r), min(termWidth(), 100), time.Now()))
 	return nil
 }
 
@@ -479,8 +494,9 @@ func cmdPreview(args []string) error {
 	if w == 0 {
 		w = termWidth()
 	}
-	fmt.Print(render.Preview(r, w, time.Now()))
-	if page := capture.Messages(first(r.Transcripts()), -1, previewMsgs); len(page.Msgs) > 0 {
+	src := remoteHosts().Source(r)
+	fmt.Print(render.Preview(r, src, w, time.Now()))
+	if page := src.Messages(-1, previewMsgs); len(page.Msgs) > 0 {
 		fmt.Println()
 		fmt.Println(i18n.F("preview.chat", len(page.Msgs)))
 		for _, l := range render.Chat(page.Msgs, w, 6) {
@@ -544,7 +560,7 @@ func update(ref string, change func(*fav.Rec)) (*fav.Rec, error) {
 	if err != nil {
 		return nil, err
 	}
-	r, err := pick(s, ref)
+	r, err := pickLocal(s, ref)
 	if err != nil {
 		return nil, err
 	}
@@ -562,7 +578,7 @@ func cmdPin(cmd string, args []string) error {
 	if err != nil {
 		return err
 	}
-	r, err := pick(s, first(pos))
+	r, err := pickLocal(s, first(pos))
 	if err != nil {
 		return err
 	}

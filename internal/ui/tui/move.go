@@ -19,6 +19,10 @@ func (m *Model) askMove(r *fav.Rec) {
 	if m.view == viewLive || m.inTrash() {
 		return
 	}
+	if m.remoteRow() {
+		m.flash(i18n.T("remote.read_only"))
+		return
+	}
 	old := ""
 	var only *fav.Rec
 	switch {

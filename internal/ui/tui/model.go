@@ -18,6 +18,7 @@ import (
 	"github.com/oxsean/fav/internal/i18n"
 	"github.com/oxsean/fav/internal/index"
 	"github.com/oxsean/fav/internal/paths"
+	"github.com/oxsean/fav/internal/remote"
 	"github.com/oxsean/fav/internal/render"
 )
 
@@ -146,6 +147,9 @@ type Model struct {
 	pinKey  string
 	groups  map[string][]*fav.Rec // records per project group incl. collapsed ones, for the right-pane project info
 	projCur int                   // highlighted session in the project info; active when the right pane has focus on a group header
+
+	hosts  *remote.Hosts        // other machines; nil = none configured, nothing is contacted
+	remote map[string]*hostRows // by host name
 }
 
 func New(s *fav.Store, idx *index.Index, cfg fav.Config, initialQuery string) *Model {
@@ -202,7 +206,7 @@ func (m *Model) Init() tea.Cmd {
 			capture.AppAvailable(fav.ProviderCodex)
 		}()
 	}
-	return tea.Batch(textinput.Blink, askTheme(), m.pollLive(), watchStore(), m.refreshIndex(), m.syncText(m.idx))
+	return tea.Batch(textinput.Blink, askTheme(), m.pollLive(), watchStore(), m.refreshIndex(), m.syncText(m.idx), m.fetchHosts())
 }
 
 const indexEvery = 10 * time.Second
@@ -275,8 +279,10 @@ type probe struct {
 	done    bool
 	full    bool
 	loading bool
+	polling bool              // a re-read of a live session's tail is in flight
 	fresh   []capture.Message // new messages of a live session, merged when the pane can refresh
 	replace bool              // fresh does not line up with the existing messages (40+ new at once): replace everything
+	failed  bool              // a read failed: no more pages until the host answers again and it is probed anew
 }
 
 type probeMsg struct {
@@ -302,14 +308,18 @@ func (m *Model) probeCurrent() tea.Cmd {
 		m.probes = map[*fav.Rec]*probe{}
 	}
 	m.probes[r] = &probe{}
-	cp, path := *r, transcript(r) // ⚠️ rows are reused and refreshed in place: the background reads a copy
+	src := m.hosts.Source(r) // ⚠️ rows are reused and refreshed in place: the source reads a copy
 	return func() tea.Msg {
-		var page capture.Page
-		if path != "" {
-			page = capture.Messages(path, -1, recentMsgs)
-		}
-		return probeMsg{r, capture.Checks(&cp), page}
+		page := src.Messages(-1, recentMsgs)
+		return probeMsg{r, src.Checks(), page}
 	}
+}
+
+// reprobe reads r again from the end: its transcript was rewritten, the offsets held no longer line up.
+func (m *Model) reprobe(r *fav.Rec) tea.Cmd {
+	delete(m.probes, r)
+	m.chatScroll, m.chatSkip = 0, 0
+	return m.probeCurrent()
 }
 
 func (m *Model) isLive(sessionID string) bool { _, ok := m.live[sessionID]; return ok }
@@ -348,7 +358,7 @@ func (m *Model) list(q fav.Query) []*fav.Rec {
 	if err != nil {
 		m.flash(i18n.F("flash.trash_read_failed", err))
 	}
-	return recs
+	return append(recs, m.remoteList(q)...)
 }
 
 func (m *Model) refresh() {
@@ -755,6 +765,10 @@ func (m *Model) toggleStatus(r *fav.Rec, target string) {
 // An unsaved session gets a record, not a favorite.
 func (m *Model) editRec(r *fav.Rec, change func(*fav.Rec)) *fav.Rec {
 	if r == nil {
+		return nil
+	}
+	if r.Host != "" {
+		m.flash(i18n.T("remote.read_only"))
 		return nil
 	}
 	m.syncStore()

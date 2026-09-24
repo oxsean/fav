@@ -26,6 +26,15 @@ type Config struct {
 	TrashDays    int    `json:"trash_days"`             // days kept in trash; 0 = never auto-purge
 	ToolOutput   int    `json:"tool_output_lines"`      // lines of each tool output kept for message search; 0 = none
 	ResumeIn     string `json:"resume_in,omitempty"`    // what Enter on resume opens: terminal (default) | app | origin (the app for sessions started there)
+	Hosts        []Host `json:"hosts,omitempty"`
+}
+
+// Host is another machine whose sessions fav shows, reached with `ssh <SSH> <Fav…> rpc`.
+type Host struct {
+	Name  string   `json:"name"`            // shown on cards and in host:<name>
+	SSH   string   `json:"ssh,omitempty"`   // an alias from ~/.ssh/config; empty runs Fav here (another config dir, tests)
+	Fav   []string `json:"fav,omitempty"`   // the remote command that runs fav, one argument per element; default ["fav"]
+	Shell string   `json:"shell,omitempty"` // how the remote login shell quotes: posix | cmd | powershell; guessed from Fav when empty
 }
 
 // ResumeIn values.

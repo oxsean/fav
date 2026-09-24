@@ -14,6 +14,7 @@ import (
 	"github.com/oxsean/fav/internal/fulltext"
 	"github.com/oxsean/fav/internal/i18n"
 	"github.com/oxsean/fav/internal/index"
+	"github.com/oxsean/fav/internal/remote"
 	"github.com/oxsean/fav/internal/render"
 	fzfui "github.com/oxsean/fav/internal/ui/fzf"
 	tuiui "github.com/oxsean/fav/internal/ui/tui"
@@ -41,7 +42,7 @@ func cmdOpen(args []string) error {
 	if err != nil {
 		return err
 	}
-	r, err := pick(s, first(pos))
+	r, err := pickLocal(s, first(pos))
 	if err != nil {
 		return err
 	}
@@ -53,7 +54,13 @@ func runTUI(s *fav.Store, query string, focus *fav.Rec, mouse bool) error {
 	if err != nil {
 		return err
 	}
-	res, err := tuiui.Run(s, idx, loadConfig(), query, focus, mouse)
+	cfg := loadConfig()
+	var hosts *remote.Hosts
+	if len(cfg.Hosts) > 0 {
+		hosts = remote.NewHosts(cfg.Hosts, i18n.Resolve(cfg.Lang))
+	}
+	res, err := tuiui.Run(s, idx, cfg, hosts, query, focus, mouse)
+	hosts.Close()
 	if err != nil {
 		return err
 	}
@@ -105,6 +112,8 @@ func cmdUI(cmd string, args []string) error {
 
 // cmdFzfList is the candidate source of all three fzf tabs, run on every keystroke; the tab comes from FZF_PROMPT.
 func cmdFzfList(args []string) error {
+	cachedFor = 30 * time.Second
+	defer func() { cachedFor = 0 }()
 	fs := newFlags("fzf-list")
 	keep := fs.String("keep", "", "")
 	flags, words := queryDashes(fs, args)
@@ -148,10 +157,17 @@ func cmdFzfList(args []string) error {
 		recs, err = sessionRecs(s, refreshed(idx), query, *keep)
 	case fzfui.TabLive:
 		live := capture.LiveSessions()
-		recs, err = listRecs(s, idx, live, tabQuery(tab, query), "")
+		q := tabQuery(tab, query)
+		recs, err = localRecs(s, idx, live, q, "")
+		far, farLive := hostRows(q)
+		recs = append(recs, far...)
 		fav.SortByStart(recs)
 		for _, r := range recs {
-			fmt.Println(render.LiveLine(r, live[r.SessionID], now))
+			l := live[r.SessionID]
+			if r.Host != "" {
+				l = farLive[r.Host][r.SessionID]
+			}
+			fmt.Println(render.LiveLine(r, l, now))
 		}
 		return err
 	default:
@@ -194,7 +210,7 @@ func cmdFzfPick(args []string) error {
 
 	switch kind {
 	case "togglefav", "togglearchive", "toggledone":
-		r, err := pick(s, query)
+		r, err := pickLocal(s, query)
 		if err != nil {
 			return err
 		}
@@ -214,6 +230,13 @@ func cmdFzfPick(args []string) error {
 		r, err := pick(s, query)
 		if err != nil {
 			return err
+		}
+		if r.Host != "" {
+			spec, err := remoteResume(r)
+			if err != nil {
+				return err
+			}
+			return clipboard.WriteAll(spec.TerminalLine())
 		}
 		plan, err := capture.PlanResume(r, capture.LiveSessions(), true)
 		if err != nil {
