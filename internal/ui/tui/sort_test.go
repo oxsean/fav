@@ -4,16 +4,16 @@ import (
 	"testing"
 	"time"
 
-	"github.com/oxsean/fav/internal/fav"
+	"github.com/oxsean/fav/internal/tend"
 )
 
 func TestSortByOrders(t *testing.T) {
 	now := time.Now()
 	at := func(h int) *time.Time { x := now.Add(-time.Duration(h) * time.Hour); return &x }
-	a := &fav.Rec{Title: "a", FavoritedAt: at(4), SessionStartedAt: at(30), LastAt: *at(1)}
-	b := &fav.Rec{Title: "b", FavoritedAt: at(5), SessionStartedAt: at(10), LastAt: *at(2)}
-	c := &fav.Rec{Title: "c", FavoritedAt: at(6), SessionStartedAt: at(20), LastAt: *at(3)}
-	in := []*fav.Rec{c, a, b}
+	a := &tend.Rec{Title: "a", FavoritedAt: at(4), SessionStartedAt: at(30), LastAt: *at(1)}
+	b := &tend.Rec{Title: "b", FavoritedAt: at(5), SessionStartedAt: at(10), LastAt: *at(2)}
+	c := &tend.Rec{Title: "c", FavoritedAt: at(6), SessionStartedAt: at(20), LastAt: *at(3)}
+	in := []*tend.Rec{c, a, b}
 	for s, want := range map[sortBy]string{sortFavorited: "abc", sortStarted: "bca", sortActive: "abc"} {
 		got := ""
 		recs, _ := s.sorted(in)

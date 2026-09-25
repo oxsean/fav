@@ -14,13 +14,13 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/oxsean/fav/internal/capture"
-	"github.com/oxsean/fav/internal/fav"
 	"github.com/oxsean/fav/internal/i18n"
 	"github.com/oxsean/fav/internal/remote"
+	"github.com/oxsean/fav/internal/tend"
 	"github.com/oxsean/fav/internal/wire"
 )
 
-// fakeHost answers like a remote fav: a list, who runs, 60 messages (Off = 100 × index, oldest first), checks.
+// fakeHost answers like a remote tend: a list, who runs, 60 messages (Off = 100 × index, oldest first), checks.
 type fakeHost struct {
 	mu       sync.Mutex
 	sessions []remote.Session
@@ -34,7 +34,7 @@ func newFakeHost() *fakeHost {
 	f := &fakeHost{calls: map[string]int{}, live: map[string]capture.Live{"r-live": {Status: "working"}}}
 	for i, title := range []string{"远端分页排障", "remote websocket fix", "远端正在跑的"} {
 		id := []string{"r-a", "r-b", "r-live"}[i]
-		f.sessions = append(f.sessions, remote.Session{Provider: fav.ProviderClaude, SessionID: id, Title: title,
+		f.sessions = append(f.sessions, remote.Session{Provider: tend.ProviderClaude, SessionID: id, Title: title,
 			Project: "notes-api", Cwd: "/home/u/dev/notes-api", Turns: 12, Msgs: 60, LastAt: now.Add(-time.Duration(i) * time.Hour),
 			UpdatedAt: now})
 	}
@@ -88,7 +88,7 @@ func (f *fakeHost) called(method string) int {
 // hostsOf reaches one host "mba" through f; offline makes every dial fail.
 func hostsOf(t *testing.T, f *fakeHost, offline *bool) *remote.Hosts {
 	t.Helper()
-	h := remote.NewHostsDial([]fav.Host{{Name: "mba"}}, i18n.ZH, func(fav.Host) (*remote.Client, error) {
+	h := remote.NewHostsDial([]tend.Host{{Name: "mba"}}, i18n.ZH, func(tend.Host) (*remote.Client, error) {
 		if offline != nil && *offline {
 			return nil, &wire.Error{Code: wire.CodeOffline}
 		}
@@ -116,8 +116,8 @@ func fetch(t *testing.T, m *Model) {
 	m.Update(cmd())
 }
 
-func remoteRows(m *Model) []*fav.Rec {
-	var out []*fav.Rec
+func remoteRows(m *Model) []*tend.Rec {
+	var out []*tend.Rec
 	for _, r := range m.rows {
 		if r.rec != nil && r.rec.Host != "" {
 			out = append(out, r.rec)
@@ -131,7 +131,7 @@ func showHosts(m *Model, q string) {
 	m.refresh()
 }
 
-func cursorOn(t *testing.T, m *Model, sid string) *fav.Rec {
+func cursorOn(t *testing.T, m *Model, sid string) *tend.Rec {
 	t.Helper()
 	for i, r := range m.rows {
 		if r.rec != nil && r.rec.SessionID == sid {
@@ -255,7 +255,7 @@ func TestRemoteResumeDialogOffersOnlyRemoteActions(t *testing.T) {
 	}
 	_, cmd := m.Update(press("enter"))
 	s := m.result.Start
-	if !m.quitting || cmd == nil || s == nil || s.Exec != "fav" || !slices.Equal(s.Args, []string{"resume", "--terminal", "--no-herdr", "r-a"}) {
+	if !m.quitting || cmd == nil || s == nil || s.Exec != "tend" || !slices.Equal(s.Args, []string{"resume", "--terminal", "--no-herdr", "r-a"}) {
 		t.Fatalf("outside Herdr Enter quits and runs the resume command here: %+v", s)
 	}
 }
@@ -277,7 +277,7 @@ func TestWriteKeysOnARemoteRowOnlyFlash(t *testing.T) {
 	if r.Favorite() || r.Archived() || len(m.store.All()) != 4 {
 		t.Fatal("nothing is written for another machine's session")
 	}
-	if m.editRec(r, func(r *fav.Rec) { r.Title = "x" }) != nil {
+	if m.editRec(r, func(r *tend.Rec) { r.Title = "x" }) != nil {
 		t.Fatal("editRec refuses a remote record")
 	}
 }
@@ -310,12 +310,12 @@ func TestHostChipPicksTheHost(t *testing.T) {
 // withRemote shows two hosts under host:all without reaching them: mba's rows (the cursor on one), lg-win offline
 // since five minutes.
 func withRemote(m *Model) {
-	down := func(fav.Host) (*remote.Client, error) { return nil, &wire.Error{Code: wire.CodeOffline} }
-	m.useHosts(remote.NewHostsDial([]fav.Host{{Name: "mba"}, {Name: "lg-win-workstation"}}, i18n.ZH, down))
+	down := func(tend.Host) (*remote.Client, error) { return nil, &wire.Error{Code: wire.CodeOffline} }
+	m.useHosts(remote.NewHostsDial([]tend.Host{{Name: "mba"}, {Name: "lg-win-workstation"}}, i18n.ZH, down))
 	now := time.Now()
-	var recs []*fav.Rec
+	var recs []*tend.Rec
 	for i, title := range []string{"远端会话：分页游标在另一台机器上的排查，标题很长很长很长很长", "remote session"} {
-		recs = append(recs, remote.Session{Provider: fav.ProviderCodex, SessionID: fmt.Sprintf("0199a0c2-7e1f-7a31-9d44-00000000000%d", i), Title: title, Project: "notes-api",
+		recs = append(recs, remote.Session{Provider: tend.ProviderCodex, SessionID: fmt.Sprintf("0199a0c2-7e1f-7a31-9d44-00000000000%d", i), Title: title, Project: "notes-api",
 			Cwd: "/home/u/dev/notes-api", Turns: 30, LastAt: now.Add(time.Duration(i) * time.Minute), UpdatedAt: now}.Rec("mba"))
 	}
 	m.remote["mba"].merge(recs)
@@ -374,10 +374,10 @@ func TestRemoteRowsStayReadOnlyWithAChipFocused(t *testing.T) {
 
 func TestARemoteDialogNeverLeadsWithThisMachinesApp(t *testing.T) {
 	m := sized(t, 140, 40)
-	m.cfg.ResumeIn = fav.ResumeApp
-	capture.SetAppAvailable(fav.ProviderClaude, true)
-	t.Cleanup(func() { capture.ForgetAppAvailable(fav.ProviderClaude) })
-	r := &fav.Rec{Provider: fav.ProviderClaude, SessionID: "c5126b86-64bb-46a8-9a69-fc421c8f4f9a", Cwd: t.TempDir()}
+	m.cfg.ResumeIn = tend.ResumeApp
+	capture.SetAppAvailable(tend.ProviderClaude, true)
+	t.Cleanup(func() { capture.ForgetAppAvailable(tend.ProviderClaude) })
+	r := &tend.Rec{Provider: tend.ProviderClaude, SessionID: "c5126b86-64bb-46a8-9a69-fc421c8f4f9a", Cwd: t.TempDir()}
 	appFiles(t, r) // a copy of the session here, so the app could open it
 	if !m.appFirst(r, capture.Plan{}) {
 		t.Fatal("the fixture: this machine's session leads with the app")
@@ -413,7 +413,7 @@ func TestAFailedFirstReadIsProbedAgainWhenTheHostAnswers(t *testing.T) {
 	fetch(t, m)
 	showHosts(m, "host:mba")
 	r := cursorOn(t, m, "r-a")
-	m.probes = map[*fav.Rec]*probe{r: {}}
+	m.probes = map[*tend.Rec]*probe{r: {}}
 	m.Update(probeMsg{r, nil, capture.Page{From: -1, Err: &wire.Error{Code: wire.CodeOffline}}})
 	if p := m.probes[r]; !p.failed || p.full {
 		t.Fatalf("a failed read is not the file head: %+v", p)

@@ -14,7 +14,7 @@ type SyntaxSection struct {
 	Rows  []SyntaxRow
 }
 
-// SearchSyntax is the query language of the search box and `fav grep`: session filters, then message search.
+// SearchSyntax is the query language of the search box and `tend grep`: session filters, then message search.
 func SearchSyntax() []SyntaxSection {
 	rows := func(pairs ...[2]string) []SyntaxRow {
 		out := make([]SyntaxRow, len(pairs))

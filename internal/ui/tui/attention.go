@@ -8,10 +8,10 @@ import (
 	"time"
 
 	"github.com/oxsean/fav/internal/capture"
-	"github.com/oxsean/fav/internal/fav"
 	"github.com/oxsean/fav/internal/fileio"
 	"github.com/oxsean/fav/internal/i18n"
 	"github.com/oxsean/fav/internal/render"
+	"github.com/oxsean/fav/internal/tend"
 )
 
 // attnEntry: what the user has taken in of a running session, by transcript size. Seen moves when they switch to it or
@@ -30,7 +30,7 @@ const (
 
 const snoozeFor = time.Hour
 
-func attnPath() string { return filepath.Join(fav.Home(), "attention.json") }
+func attnPath() string { return filepath.Join(tend.Home(), "attention.json") }
 
 func loadAttn() map[string]attnEntry {
 	out := map[string]attnEntry{}
@@ -123,7 +123,7 @@ func (m *Model) announce(id string, n int) {
 		key = "live.finished_flash"
 	}
 	m.flash(render.GlyphWarn + i18n.F(key, render.Truncate(title, 40)))
-	if m.cfg.Notify == fav.NotifyBell {
+	if m.cfg.Notify == tend.NotifyBell {
 		fmt.Fprint(os.Stderr, "\a")
 	}
 }
@@ -133,7 +133,7 @@ func (m *Model) markSeen(id string, quiet bool) {
 	p, ok := m.pulse[id]
 	if !ok {
 		if path := m.idx.Transcript(id); path != "" {
-			p, ok = m.hosts.Source(&fav.Rec{TranscriptPath: path}).Pulse()
+			p, ok = m.hosts.Source(&tend.Rec{TranscriptPath: path}).Pulse()
 		}
 	}
 	if !ok {
@@ -148,7 +148,7 @@ func (m *Model) markSeen(id string, quiet bool) {
 	m.saveAttn()
 }
 
-func (m *Model) handleAttn(r *fav.Rec, snooze bool) {
+func (m *Model) handleAttn(r *tend.Rec, snooze bool) {
 	if r == nil {
 		return
 	}

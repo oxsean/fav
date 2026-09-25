@@ -13,22 +13,22 @@ import (
 	"sync"
 
 	"github.com/oxsean/fav/internal/capture"
-	"github.com/oxsean/fav/internal/fav"
 	"github.com/oxsean/fav/internal/fileio"
 	"github.com/oxsean/fav/internal/i18n"
 	"github.com/oxsean/fav/internal/index"
+	"github.com/oxsean/fav/internal/tend"
 	"github.com/oxsean/fav/internal/wire"
 )
 
-// NewLocal is this machine answering the protocol (`fav rpc`); version is fav's build version.
+// NewLocal is this machine answering the protocol (`tend rpc`); version is tend's build version.
 func NewLocal(version string) Handler { return &localHandler{version: version} }
 
 type localHandler struct {
 	version string
 	mu      sync.Mutex
-	store   *fav.Store
+	store   *tend.Store
 	idx     *index.Index
-	unfav   []*fav.Rec
+	unfav   []*tend.Rec
 }
 
 var methods = []string{MHello, MList, MMessages, MText, MSteps, MPulse, MChecks, MLive, MEcho}
@@ -142,17 +142,17 @@ func hello(version string) Hello {
 	home, _ := os.UserHomeDir()
 	wsl := os.Getenv("WSL_DISTRO_NAME")
 	claude, codex := capture.ClaudeHome(), capture.CodexHome()
-	sum := sha256.Sum256([]byte(strings.Join([]string{host, runtime.GOOS, wsl, fav.Home(), claude, codex}, "\x00")))
+	sum := sha256.Sum256([]byte(strings.Join([]string{host, runtime.GOOS, wsl, tend.Home(), claude, codex}, "\x00")))
 	return Hello{Proto: wire.Proto, Role: "node", Version: version, OS: runtime.GOOS, Arch: runtime.GOARCH,
 		Endpoint: hex.EncodeToString(sum[:6]), Hostname: host, WSL: wsl, Home: home, Sep: string(filepath.Separator),
 		Claude: claude, Codex: codex, Methods: methods,
-		CLIs: map[string]bool{fav.ProviderClaude: capture.Installed(fav.ProviderClaude), fav.ProviderCodex: capture.Installed(fav.ProviderCodex)}}
+		CLIs: map[string]bool{tend.ProviderClaude: capture.Installed(tend.ProviderClaude), tend.ProviderCodex: capture.Installed(tend.ProviderCodex)}}
 }
 
 // load opens the store and the index once, then brings both up to date; the caller holds mu.
 func (h *localHandler) load() error {
 	if h.store == nil {
-		s, err := fav.Open()
+		s, err := tend.Open()
 		if err != nil {
 			return err
 		}
@@ -185,7 +185,7 @@ func (h *localHandler) list() (List, error) {
 		return List{}, err
 	}
 	var rows index.Rows
-	recs, err := rows.List(h.store, h.idx, h.unfav, nil, fav.Query{Status: "all", All: true, Host: fav.HostLocal})
+	recs, err := rows.List(h.store, h.idx, h.unfav, nil, tend.Query{Status: "all", All: true, Host: tend.HostLocal})
 	if err != nil {
 		return List{}, err
 	}
@@ -225,7 +225,7 @@ func (h *localHandler) source(params json.RawMessage, p any, ref *Ref) (Source, 
 }
 
 // find: the store record, else the indexed session, else a file the list leaves out (an agent run); the caller holds mu.
-func (h *localHandler) find(ref Ref) *fav.Rec {
+func (h *localHandler) find(ref Ref) *tend.Rec {
 	if r := h.store.BySession(ref.Provider, ref.SessionID); r != nil && !r.Deleted {
 		return r
 	}

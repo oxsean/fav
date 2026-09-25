@@ -7,13 +7,13 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/oxsean/fav/internal/capture"
-	"github.com/oxsean/fav/internal/fav"
 	"github.com/oxsean/fav/internal/render"
+	"github.com/oxsean/fav/internal/tend"
 )
 
 func TestSettingsPanel(t *testing.T) {
-	t.Setenv("FAV_HOME", t.TempDir())
-	defer func() { render.RelativeTime = true; fav.DefaultTurns = 3 }()
+	t.Setenv("TEND_HOME", t.TempDir())
+	defer func() { render.RelativeTime = true; tend.DefaultTurns = 3 }()
 	m := sized(t, 120, 40)
 	m.Update(press(","))
 	if m.ov.kind != ovSettings {
@@ -27,10 +27,10 @@ func TestSettingsPanel(t *testing.T) {
 	m.Update(press("down"))
 	m.Update(press("down"))
 	m.Update(press("right"))
-	if m.cfg.MinTurns != 5 || fav.DefaultTurns != 5 {
-		t.Fatalf("阈值没生效：cfg=%d global=%d", m.cfg.MinTurns, fav.DefaultTurns)
+	if m.cfg.MinTurns != 5 || tend.DefaultTurns != 5 {
+		t.Fatalf("阈值没生效：cfg=%d global=%d", m.cfg.MinTurns, tend.DefaultTurns)
 	}
-	if got := fav.LoadConfig(); got.RelativeTime || got.MinTurns != 5 {
+	if got := tend.LoadConfig(); got.RelativeTime || got.MinTurns != 5 {
 		t.Fatalf("没落盘：%+v", got)
 	}
 	m.Update(press("esc"))
@@ -40,7 +40,7 @@ func TestSettingsPanel(t *testing.T) {
 }
 
 func TestOpenInIDE(t *testing.T) {
-	t.Setenv("FAV_HOME", t.TempDir())
+	t.Setenv("TEND_HOME", t.TempDir())
 	m := sized(t, 120, 40)
 	if m.ideName() != capture.DefaultIDE() {
 		t.Fatalf("默认 IDE 应是 %s", capture.DefaultIDE())
@@ -57,7 +57,7 @@ func TestOpenInIDE(t *testing.T) {
 	}
 	m.Update(press("/no/such/ide"))
 	m.Update(press("enter"))
-	if m.ov.editing || m.cfg.IDE != capture.DefaultIDE()+"/no/such/ide" && m.cfg.IDE != "/no/such/ide" || fav.LoadConfig().IDE != m.cfg.IDE {
+	if m.ov.editing || m.cfg.IDE != capture.DefaultIDE()+"/no/such/ide" && m.cfg.IDE != "/no/such/ide" || tend.LoadConfig().IDE != m.cfg.IDE {
 		t.Fatalf("Enter 应保存并落盘：editing=%v ide=%q", m.ov.editing, m.cfg.IDE)
 	}
 	m.cfg.IDE = "/no/such/ide"

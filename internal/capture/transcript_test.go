@@ -20,7 +20,7 @@ func writeFile(t *testing.T, name, body string) string {
 
 func TestPromptsClaude(t *testing.T) {
 	p := writeFile(t, "c.jsonl", `{"type":"mode"}
-{"type":"user","timestamp":"2026-09-12T15:15:02Z","cwd":"/w/x","message":{"content":"<command-name>/fav</command-name>"}}
+{"type":"user","timestamp":"2026-09-12T15:15:02Z","cwd":"/w/x","message":{"content":"<command-name>/tend</command-name>"}}
 {"type":"user","timestamp":"2026-09-12T15:15:38Z","cwd":"/w/x","message":{"content":"把这个 zip 解开"}}
 {"type":"assistant","timestamp":"2026-09-12T15:16:00Z"}
 {"type":"user","timestamp":"2026-09-12T15:17:00Z","message":{"content":[{"type":"tool_result","content":"ok"}]}}
@@ -61,7 +61,7 @@ func TestMessagesSkipLinesLongerThanAChunk(t *testing.T) {
 func TestMessagesSteps(t *testing.T) {
 	p := writeFile(t, "steps.jsonl", `{"type":"user","timestamp":"2026-09-12T15:15:38Z","message":{"content":"跑一下测试"}}
 {"type":"assistant","timestamp":"2026-09-12T15:16:00Z","message":{"content":[{"type":"text","text":"好"},{"type":"tool_use","name":"Bash","input":{"command":"go test ./...","description":"run tests"}}]}}
-{"type":"user","timestamp":"2026-09-12T15:17:00Z","message":{"content":[{"type":"tool_result","content":"ok  fav 0.1s"}]}}
+{"type":"user","timestamp":"2026-09-12T15:17:00Z","message":{"content":[{"type":"tool_result","content":"ok  tend 0.1s"}]}}
 {"type":"assistant","timestamp":"2026-09-12T15:18:00Z","message":{"content":[{"type":"tool_use","name":"Read","input":{"file_path":"/a/b.go"}},{"type":"tool_use","name":"Write","input":{"file_path":"/a/c.py","content":"import os\n\nprint(1)\n"}},{"type":"tool_use","name":"Bash","input":{"command":"cat <<'EOF'\n  indented\nEOF"}}]}}
 {"type":"assistant","timestamp":"2026-09-12T15:19:00Z","message":{"content":[{"type":"text","text":"都过了"}]}}
 `)
@@ -70,7 +70,7 @@ func TestMessagesSteps(t *testing.T) {
 		t.Fatalf("Messages = %+v", got)
 	}
 	st := got[1].Steps
-	if len(st) != 5 || st[0].Tool != "Bash" || st[0].Text != "go test ./..." || !st[1].Result || st[1].Text != "ok  fav 0.1s" || st[2].Tool != "Read" || st[2].Text != "/a/b.go" {
+	if len(st) != 5 || st[0].Tool != "Bash" || st[0].Text != "go test ./..." || !st[1].Result || st[1].Text != "ok  tend 0.1s" || st[2].Tool != "Read" || st[2].Text != "/a/b.go" {
 		t.Fatalf("steps = %+v", st)
 	}
 	if st[3].Text != "/a/c.py\nimport os\n\nprint(1)" || st[4].Text != "cat <<'EOF'\n  indented\nEOF" {

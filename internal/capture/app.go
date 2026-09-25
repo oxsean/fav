@@ -10,9 +10,9 @@ import (
 
 	"uuid"
 
-	"github.com/oxsean/fav/internal/fav"
 	"github.com/oxsean/fav/internal/i18n"
 	"github.com/oxsean/fav/internal/paths"
+	"github.com/oxsean/fav/internal/tend"
 )
 
 // Desktop apps open a session by URL: Claude's resumes a CLI session (claude://resume?session=<uuid>), ChatGPT's Codex
@@ -20,14 +20,14 @@ import (
 // ⚠️ Neither URL is documented: they were found in the apps, so a failure has to fall back to the terminal.
 
 // AppURL opens r in its desktop app; "" when there is none for it.
-func AppURL(r *fav.Rec) string {
+func AppURL(r *tend.Rec) string {
 	if !canonicalUUID(r.SessionID) || appBlock(r) != "" {
 		return ""
 	}
 	switch r.Provider {
-	case fav.ProviderClaude:
+	case tend.ProviderClaude:
 		return "claude://resume?session=" + url.QueryEscape(r.SessionID)
-	case fav.ProviderCodex:
+	case tend.ProviderCodex:
 		return "codex://threads/" + r.SessionID
 	}
 	return ""
@@ -35,7 +35,7 @@ func AppURL(r *fav.Rec) string {
 
 // appBlock is why the desktop app cannot run r (an i18n key), or "". The apps read only the default ~/.claude/projects
 // and ~/.codex/sessions, and start the session in its working directory.
-func appBlock(r *fav.Rec) string {
+func appBlock(r *tend.Rec) string {
 	if fi, err := os.Stat(r.Cwd); r.Cwd == "" || err != nil || !fi.IsDir() {
 		return "resume.app_no_cwd"
 	}
@@ -44,7 +44,7 @@ func appBlock(r *fav.Rec) string {
 		return "resume.app_elsewhere"
 	}
 	root := filepath.Join(home, ".claude", "projects")
-	if r.Provider == fav.ProviderCodex {
+	if r.Provider == tend.ProviderCodex {
 		root = filepath.Join(home, ".codex", "sessions")
 	}
 	if !paths.Under(r.TranscriptPath, root) {
@@ -58,7 +58,7 @@ func appBlock(r *fav.Rec) string {
 
 // AppName is the desktop app that opens this provider's sessions.
 func AppName(provider string) string {
-	if provider == fav.ProviderCodex {
+	if provider == tend.ProviderCodex {
 		return "ChatGPT"
 	}
 	return "Claude"
@@ -66,11 +66,11 @@ func AppName(provider string) string {
 
 // appNames must occur in the scheme handler's name or bundle id: another program may own the scheme.
 var appNames = map[string][]string{
-	fav.ProviderClaude: {"claude"},
-	fav.ProviderCodex:  {"codex", "chatgpt"},
+	tend.ProviderClaude: {"claude"},
+	tend.ProviderCodex:  {"codex", "chatgpt"},
 }
 
-var appSchemes = map[string]string{fav.ProviderClaude: "claude", fav.ProviderCodex: "codex"}
+var appSchemes = map[string]string{tend.ProviderClaude: "claude", tend.ProviderCodex: "codex"}
 
 var appAvail sync.Map // provider → bool
 
@@ -111,7 +111,7 @@ func ForgetAppAvailable(provider string) { appAvail.Delete(provider) }
 func SetAppAvailable(provider string, ok bool) { appAvail.Store(provider, ok) }
 
 // OpenApp hands r to its desktop app.
-func OpenApp(r *fav.Rec) error {
+func OpenApp(r *tend.Rec) error {
 	if k := appBlock(r); k != "" {
 		return i18n.E(k, AppName(r.Provider))
 	}
@@ -187,11 +187,11 @@ func ClaudeDesktopIDs() map[string]bool {
 
 // StartedInApp: r was started in its desktop app — Codex by the session_meta originator (first line of the rollout),
 // Claude by the desktop app's session list.
-func StartedInApp(r *fav.Rec) bool {
+func StartedInApp(r *tend.Rec) bool {
 	switch r.Provider {
-	case fav.ProviderClaude:
+	case tend.ProviderClaude:
 		return ClaudeDesktopIDs()[r.SessionID]
-	case fav.ProviderCodex:
+	case tend.ProviderCodex:
 		m, err := readSessionMeta(r.TranscriptPath)
 		return err == nil && CodexFromApp(m.Originator)
 	}

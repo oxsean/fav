@@ -14,13 +14,13 @@ import (
 	"time"
 
 	"github.com/oxsean/fav/internal/agent"
-	"github.com/oxsean/fav/internal/fav"
 	"github.com/oxsean/fav/internal/fileio"
 	"github.com/oxsean/fav/internal/filelock"
 	"github.com/oxsean/fav/internal/journal"
 	"github.com/oxsean/fav/internal/node"
 	"github.com/oxsean/fav/internal/remote"
 	"github.com/oxsean/fav/internal/task"
+	"github.com/oxsean/fav/internal/tend"
 	"github.com/oxsean/fav/internal/wire"
 )
 
@@ -53,12 +53,12 @@ var ErrLocked = filelock.ErrLocked
 type Options struct {
 	Home    string
 	Version string
-	Config  fav.Config
+	Config  tend.Config
 	// Node is this machine's node; Sessions answers its session reads.
 	Node     *node.Node
 	Sessions remote.Handler
 	// Dial reaches a configured host's node; tests replace it.
-	Dial func(h fav.Host, opt wire.Options) (Conn, error)
+	Dial func(h tend.Host, opt wire.Options) (Conn, error)
 	// Remote: mode 2. The machines are the nodes that dial in (Attach), named by their tokens; there is no local
 	// node and no ssh.
 	Remote bool
@@ -195,15 +195,15 @@ func (c *Coord) commit(cmd *journal.Receipt, events ...journal.Event) error {
 }
 
 // Profiles are the agents one can run.
-func (c *Coord) Profiles() []fav.AgentProfile { return agent.Profiles(c.opt.Config.Agents) }
+func (c *Coord) Profiles() []tend.AgentProfile { return agent.Profiles(c.opt.Config.Agents) }
 
-func (c *Coord) profile(name string) (fav.AgentProfile, bool) {
+func (c *Coord) profile(name string) (tend.AgentProfile, bool) {
 	for _, p := range c.Profiles() {
 		if p.Name == name {
 			return p, true
 		}
 	}
-	return fav.AgentProfile{}, false
+	return tend.AgentProfile{}, false
 }
 
 func newID(prefix string) string {

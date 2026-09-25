@@ -7,9 +7,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/oxsean/fav/internal/fav"
 	"github.com/oxsean/fav/internal/i18n"
 	"github.com/oxsean/fav/internal/paths"
+	"github.com/oxsean/fav/internal/tend"
 )
 
 const (
@@ -25,10 +25,10 @@ const (
 // HandoffPrompt is the new session's first message; the pack itself stays in the file so it never reaches argv or ps.
 func HandoffPrompt(path string) string { return i18n.F("handoff.prompt", path) }
 
-func handoffDir() string { return filepath.Join(fav.Home(), "handoff") }
+func handoffDir() string { return filepath.Join(tend.Home(), "handoff") }
 
-// WriteHandoff writes r's handoff pack under the fav home and returns its path; packs older than handoffKeep are removed.
-func WriteHandoff(r *fav.Rec) (string, error) {
+// WriteHandoff writes r's handoff pack under the tend home and returns its path; packs older than handoffKeep are removed.
+func WriteHandoff(r *tend.Rec) (string, error) {
 	dir := handoffDir()
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", err
@@ -53,14 +53,14 @@ func pruneHandoffs(dir string, now time.Time) {
 
 // handoff is r's handoff pack in Markdown: where it ran, its summary, the latest requests, the last reply, the files it
 // changed and what git has uncommitted. Tool output is left out.
-func handoff(r *fav.Rec) string {
+func handoff(r *tend.Rec) string {
 	var b strings.Builder
 	line := func(s string) { b.WriteString(s + "\n") }
 	section := func(key string) { line(""); line("## " + i18n.T(key)); line("") }
 
 	line("# " + i18n.F("handoff.title", r.Title))
 	line("")
-	src := i18n.F("handoff.source", fav.ProviderLabel(r.Provider), r.SessionID, orDash(r.Cwd))
+	src := i18n.F("handoff.source", tend.ProviderLabel(r.Provider), r.SessionID, orDash(r.Cwd))
 	if r.GitBranch != "" {
 		src += i18n.F("handoff.branch", r.GitBranch)
 	}

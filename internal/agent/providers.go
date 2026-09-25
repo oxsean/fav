@@ -5,8 +5,8 @@ import (
 	"path/filepath"
 	"slices"
 
-	"github.com/oxsean/fav/internal/fav"
 	"github.com/oxsean/fav/internal/i18n"
+	"github.com/oxsean/fav/internal/tend"
 )
 
 func init() {
@@ -24,14 +24,14 @@ const (
 
 type claude struct{}
 
-func (claude) Name() string { return fav.ProviderClaude }
+func (claude) Name() string { return tend.ProviderClaude }
 func (claude) Caps() Caps {
 	return Caps{Resume: true, Fork: true, Headless: true, PresetSession: true, Sessions: true}
 }
 func (claude) Installed() bool { return onPath("claude") }
 
 // Resume keeps the original session id (no --fork-session); --name makes the terminal title and /resume use it.
-func (claude) Resume(r *fav.Rec, name string) (CommandSpec, error) {
+func (claude) Resume(r *tend.Rec, name string) (CommandSpec, error) {
 	args := []string{"--resume", r.SessionID}
 	if name != "" {
 		args = append(args, "--name", name)
@@ -39,7 +39,7 @@ func (claude) Resume(r *fav.Rec, name string) (CommandSpec, error) {
 	return CommandSpec{Exec: "claude", Args: args, Cwd: r.Cwd}, nil
 }
 
-func (claude) Fork(r *fav.Rec) (CommandSpec, error) {
+func (claude) Fork(r *tend.Rec) (CommandSpec, error) {
 	return CommandSpec{Exec: "claude", Args: []string{"--resume", r.SessionID, "--fork-session"}, Cwd: r.Cwd}, nil
 }
 
@@ -75,15 +75,15 @@ func (claude) Launch(s LaunchSpec) (CommandSpec, error) {
 
 type codex struct{}
 
-func (codex) Name() string    { return fav.ProviderCodex }
+func (codex) Name() string    { return tend.ProviderCodex }
 func (codex) Caps() Caps      { return Caps{Resume: true, Fork: true, Headless: true, Sessions: true} }
 func (codex) Installed() bool { return onPath("codex") }
 
-func (codex) Resume(r *fav.Rec, _ string) (CommandSpec, error) {
+func (codex) Resume(r *tend.Rec, _ string) (CommandSpec, error) {
 	return CommandSpec{Exec: "codex", Args: []string{"resume", r.SessionID}, Cwd: r.Cwd}, nil
 }
 
-func (codex) Fork(r *fav.Rec) (CommandSpec, error) {
+func (codex) Fork(r *tend.Rec) (CommandSpec, error) {
 	return CommandSpec{Exec: "codex", Args: []string{"fork", r.SessionID}, Cwd: r.Cwd}, nil
 }
 
@@ -125,10 +125,10 @@ func (fake) Caps() Caps {
 	return Caps{Headless: true, PresetSession: true}
 }
 func (fake) Installed() bool { return true }
-func (fake) Resume(r *fav.Rec, name string) (CommandSpec, error) {
+func (fake) Resume(r *tend.Rec, name string) (CommandSpec, error) {
 	return CommandSpec{}, unknown(ProviderFake)
 }
-func (fake) Fork(*fav.Rec) (CommandSpec, error)        { return CommandSpec{}, unknown(ProviderFake) }
+func (fake) Fork(*tend.Rec) (CommandSpec, error)       { return CommandSpec{}, unknown(ProviderFake) }
 func (fake) Start(string, string) (CommandSpec, error) { return CommandSpec{}, unknown(ProviderFake) }
 func (fake) Launch(s LaunchSpec) (CommandSpec, error) {
 	self, err := os.Executable()
@@ -149,10 +149,10 @@ type command struct{}
 func (command) Name() string    { return ProviderCommand }
 func (command) Caps() Caps      { return Caps{Headless: true} }
 func (command) Installed() bool { return true }
-func (command) Resume(*fav.Rec, string) (CommandSpec, error) {
+func (command) Resume(*tend.Rec, string) (CommandSpec, error) {
 	return CommandSpec{}, unknown(ProviderCommand)
 }
-func (command) Fork(*fav.Rec) (CommandSpec, error) { return CommandSpec{}, unknown(ProviderCommand) }
+func (command) Fork(*tend.Rec) (CommandSpec, error) { return CommandSpec{}, unknown(ProviderCommand) }
 func (command) Start(string, string) (CommandSpec, error) {
 	return CommandSpec{}, unknown(ProviderCommand)
 }

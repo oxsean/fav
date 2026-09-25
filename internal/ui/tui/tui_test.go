@@ -12,15 +12,15 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/oxsean/fav/internal/capture"
-	"github.com/oxsean/fav/internal/fav"
 	"github.com/oxsean/fav/internal/i18n"
 	"github.com/oxsean/fav/internal/index"
+	"github.com/oxsean/fav/internal/tend"
 	"github.com/oxsean/fav/internal/testkit"
 )
 
-func fixture(t *testing.T) *fav.Store {
+func fixture(t *testing.T) *tend.Store {
 	t.Helper()
-	s, err := fav.OpenAt(filepath.Join(t.TempDir(), "records.jsonl"))
+	s, err := tend.OpenAt(filepath.Join(t.TempDir(), "records.jsonl"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -30,16 +30,16 @@ func fixture(t *testing.T) *fav.Store {
 		tags                     []string
 		ago                      time.Duration
 	}{
-		{"notes-api 搜索分页游标漂移排障", "notes-api", fav.ProviderClaude, []string{"notes-api", "pagination", "debug"}, time.Hour},
-		{"SaaS 公共能力盘点补全", "webapp", fav.ProviderCodex, []string{"saas", "design"}, 4 * time.Hour},
-		{"WebSocket launch regression", "notes-api", fav.ProviderClaude, []string{"notes-api", "debug", "websocket"}, 9 * time.Hour},
-		{"RBAC 数据范围设计", "webapp", fav.ProviderCodex, []string{"rbac", "design"}, 30 * time.Hour},
+		{"notes-api 搜索分页游标漂移排障", "notes-api", tend.ProviderClaude, []string{"notes-api", "pagination", "debug"}, time.Hour},
+		{"SaaS 公共能力盘点补全", "webapp", tend.ProviderCodex, []string{"saas", "design"}, 4 * time.Hour},
+		{"WebSocket launch regression", "notes-api", tend.ProviderClaude, []string{"notes-api", "debug", "websocket"}, 9 * time.Hour},
+		{"RBAC 数据范围设计", "webapp", tend.ProviderCodex, []string{"rbac", "design"}, 30 * time.Hour},
 	}
 	for _, x := range seed {
-		r := &fav.Rec{
-			ID: fav.NewID(), Provider: x.provider, SessionID: fav.NewID(),
+		r := &tend.Rec{
+			ID: tend.NewID(), Provider: x.provider, SessionID: tend.NewID(),
 			Title: x.title, Summary: "排查搜索接口游标分页重复返回同一条的问题。确认 region-specific toggle 未创建时后端回退到 embedded YAML default。",
-			Project: x.project, Tags: x.tags, Status: fav.StatusDone,
+			Project: x.project, Tags: x.tags, Status: tend.StatusDone,
 			Cwd: cwd, GitBranch: "feature/cursor-pagination",
 			FavoritedAt: new(base.Add(-x.ago)),
 		}
@@ -61,13 +61,13 @@ func noIndex(t *testing.T) *index.Index {
 
 func sized(t *testing.T, w, h int) *Model { return newModel(t, fixture(t), w, h) }
 
-// newModel is a w×h Model on st with an empty index; FAV_HOME is the test's own unless it set one.
-func newModel(t *testing.T, st *fav.Store, w, h int) *Model {
+// newModel is a w×h Model on st with an empty index; TEND_HOME is the test's own unless it set one.
+func newModel(t *testing.T, st *tend.Store, w, h int) *Model {
 	t.Helper()
-	if testkit.Shared(os.Getenv("FAV_HOME")) {
-		t.Setenv("FAV_HOME", t.TempDir())
+	if testkit.Shared(os.Getenv("TEND_HOME")) {
+		t.Setenv("TEND_HOME", t.TempDir())
 	}
-	m := New(st, noIndex(t), fav.DefaultConfig(), "")
+	m := New(st, noIndex(t), tend.DefaultConfig(), "")
 	m.Update(tea.WindowSizeMsg{Width: w, Height: h})
 	return m
 }
@@ -295,19 +295,19 @@ func TestToggleArchiveRefreshes(t *testing.T) {
 	if r.Archived() {
 		t.Fatal("再按 a 取消归档的应是同一条")
 	}
-	m.toggleStatus(m.current(), fav.StatusDone)
-	if r.Status != fav.StatusDoing {
+	m.toggleStatus(m.current(), tend.StatusDone)
+	if r.Status != tend.StatusDoing {
 		t.Fatalf("默认是已完成，x 应改成进行中：%s", r.Status)
 	}
 	m.toggleArchive(m.current())
-	if !r.Archived() || r.Status != fav.StatusDoing {
+	if !r.Archived() || r.Status != tend.StatusDoing {
 		t.Fatalf("归档不动看板状态：%s archived=%v", r.Status, r.Archived())
 	}
 	m.toggleArchive(m.current())
-	if r.Archived() || r.Status != fav.StatusDoing {
+	if r.Archived() || r.Status != tend.StatusDoing {
 		t.Fatalf("取消归档也不动看板状态：%s", r.Status)
 	}
-	m.toggleStatus(m.current(), fav.StatusDone)
+	m.toggleStatus(m.current(), tend.StatusDone)
 	if !r.Done() {
 		t.Fatalf("x 再按回到已完成：%s", r.Status)
 	}
@@ -631,7 +631,7 @@ func TestBrokenSessionOffersMoveOrDelete(t *testing.T) {
 func TestDrillInAndBack(t *testing.T) {
 	m := sized(t, 140, 40)
 	r := m.current()
-	m.probes = map[*fav.Rec]*probe{r: {done: true, msgs: []capture.Message{{Role: "user", Text: "一句话"}}}}
+	m.probes = map[*tend.Rec]*probe{r: {done: true, msgs: []capture.Message{{Role: "user", Text: "一句话"}}}}
 	key := func(k string) { m.Update(press(k)) }
 	key("right")
 	if m.pane != paneChat {
@@ -713,11 +713,11 @@ func TestNoticeExpires(t *testing.T) {
 // Space never starts anything: it switches to a session already in a Herdr tab, otherwise it only opens the dialog.
 func TestSpaceOnlyOpensTheDialogOrSwitches(t *testing.T) {
 	m := sized(t, 140, 40)
-	capture.SetAppAvailable(fav.ProviderClaude, true)
+	capture.SetAppAvailable(tend.ProviderClaude, true)
 	r := m.current()
-	r.SessionID, r.Provider = "c5126b86-64bb-46a8-9a69-fc421c8f4f9a", fav.ProviderClaude
+	r.SessionID, r.Provider = "c5126b86-64bb-46a8-9a69-fc421c8f4f9a", tend.ProviderClaude
 	appFiles(t, r)
-	m.cfg.ResumeIn = fav.ResumeApp
+	m.cfg.ResumeIn = tend.ResumeApp
 	m.Update(press("space"))
 	if m.quitting || m.ov.kind != ovResume || m.notice != "" {
 		t.Fatalf("Space opens the dialog, like Enter: quitting=%v kind=%d notice=%q", m.quitting, m.ov.kind, m.notice)

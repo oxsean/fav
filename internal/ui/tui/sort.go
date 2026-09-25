@@ -4,8 +4,8 @@ import (
 	"sort"
 	"time"
 
-	"github.com/oxsean/fav/internal/fav"
 	"github.com/oxsean/fav/internal/i18n"
+	"github.com/oxsean/fav/internal/tend"
 )
 
 // sortBy drives list order, date grouping and the time shown per row: one key for all three.
@@ -32,7 +32,7 @@ func (s sortBy) label() string {
 	return i18n.T("sort.active")
 }
 
-func (s sortBy) at(r *fav.Rec) time.Time {
+func (s sortBy) at(r *tend.Rec) time.Time {
 	switch s {
 	case sortStarted:
 		return r.When()
@@ -45,9 +45,9 @@ func (s sortBy) at(r *fav.Rec) time.Time {
 	return r.ActiveAt()
 }
 
-func (s sortBy) sorted(recs []*fav.Rec) ([]*fav.Rec, map[*fav.Rec]time.Time) {
-	at := make(map[*fav.Rec]time.Time, len(recs))
-	out := make([]*fav.Rec, len(recs))
+func (s sortBy) sorted(recs []*tend.Rec) ([]*tend.Rec, map[*tend.Rec]time.Time) {
+	at := make(map[*tend.Rec]time.Time, len(recs))
+	out := make([]*tend.Rec, len(recs))
 	for i, r := range recs {
 		out[i], at[r] = r, s.at(r)
 	}

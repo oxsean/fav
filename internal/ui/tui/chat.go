@@ -10,11 +10,11 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/oxsean/fav/internal/capture"
-	"github.com/oxsean/fav/internal/fav"
 	"github.com/oxsean/fav/internal/fulltext"
 	"github.com/oxsean/fav/internal/i18n"
 	"github.com/oxsean/fav/internal/remote"
 	"github.com/oxsean/fav/internal/render"
+	"github.com/oxsean/fav/internal/tend"
 )
 
 // Recent chat: the last 40 messages first; a page of olderMsgs is fetched from the last offset when nearing the end;
@@ -23,18 +23,18 @@ import (
 const olderMsgs = 20
 
 type pageMsg struct {
-	rec  *fav.Rec
+	rec  *tend.Rec
 	page capture.Page
 }
 
-func transcript(r *fav.Rec) string {
+func transcript(r *tend.Rec) string {
 	if r.PinnedPath != "" {
 		return r.PinnedPath
 	}
 	return r.TranscriptPath
 }
 
-func (m *Model) load(r *fav.Rec, n int) tea.Cmd {
+func (m *Model) load(r *tend.Rec, n int) tea.Cmd {
 	p := m.probes[r]
 	if r == nil || p == nil || !p.done || p.full || p.loading {
 		return nil

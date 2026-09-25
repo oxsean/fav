@@ -15,9 +15,9 @@ import (
 	"time"
 
 	"github.com/oxsean/fav/internal/capture"
-	"github.com/oxsean/fav/internal/fav"
 	"github.com/oxsean/fav/internal/fileio"
 	"github.com/oxsean/fav/internal/i18n"
+	"github.com/oxsean/fav/internal/tend"
 	"github.com/oxsean/fav/internal/wire"
 )
 
@@ -25,21 +25,21 @@ import (
 // Safe for concurrent use; calls to one host run one at a time.
 type Hosts struct {
 	mu      sync.Mutex
-	hosts   []fav.Host
+	hosts   []tend.Host
 	lang    string
 	clients map[string]*Client
 	hellos  map[string]Hello
 	dialing map[string]chan struct{} // one dial per host at a time
-	dial    func(fav.Host) (*Client, error)
+	dial    func(tend.Host) (*Client, error)
 	closed  bool
 	files   map[string]string // host + session key → the transcript's fileio.ID as last read from the end
 }
 
 // NewHosts: lang is sent in hello, so check texts come back in the caller's language.
-func NewHosts(hosts []fav.Host, lang string) *Hosts { return NewHostsDial(hosts, lang, Dial) }
+func NewHosts(hosts []tend.Host, lang string) *Hosts { return NewHostsDial(hosts, lang, Dial) }
 
 // NewHostsDial reaches hosts through dial (tests: Pipe to a Handler).
-func NewHostsDial(hosts []fav.Host, lang string, dial func(fav.Host) (*Client, error)) *Hosts {
+func NewHostsDial(hosts []tend.Host, lang string, dial func(tend.Host) (*Client, error)) *Hosts {
 	return &Hosts{hosts: hosts, lang: lang, clients: map[string]*Client{}, hellos: map[string]Hello{},
 		dialing: map[string]chan struct{}{}, dial: dial, files: map[string]string{}}
 }
@@ -55,7 +55,7 @@ func (h *Hosts) Names() []string {
 	return out
 }
 
-func (h *Hosts) Host(name string) (fav.Host, bool) {
+func (h *Hosts) Host(name string) (tend.Host, bool) {
 	if h != nil {
 		for _, x := range h.hosts {
 			if x.Name == name {
@@ -63,7 +63,7 @@ func (h *Hosts) Host(name string) (fav.Host, bool) {
 			}
 		}
 	}
-	return fav.Host{}, false
+	return tend.Host{}, false
 }
 
 // client dials name if it has no working client, and checks its protocol with hello.
@@ -162,11 +162,11 @@ func (h *Hosts) Hello(ctx context.Context, name string) (Hello, error) {
 type State struct {
 	At      time.Time
 	Err     error
-	Version string // the fav that answered
+	Version string // the tend that answered
 }
 
 // Sessions fetches name's list and caches it; when name cannot answer it returns the cached list with the error.
-func (h *Hosts) Sessions(ctx context.Context, name string) ([]*fav.Rec, State) {
+func (h *Hosts) Sessions(ctx context.Context, name string) ([]*tend.Rec, State) {
 	var l List
 	if err := h.Call(ctx, name, MList, nil, &l); err != nil {
 		recs, st := h.Cached(name)
@@ -188,12 +188,12 @@ func (h *Hosts) Sessions(ctx context.Context, name string) ([]*fav.Rec, State) {
 }
 
 // Cached is name's list from the last fetch, without reaching it.
-func (h *Hosts) Cached(name string) ([]*fav.Rec, State) {
+func (h *Hosts) Cached(name string) ([]*tend.Rec, State) {
 	c := h.load(name)
 	return recs(name, c.Sessions), State{At: c.At, Version: c.Version}
 }
 
-// CacheDir holds what fav keeps about name: its last list and who ran there.
+// CacheDir holds what tend keeps about name: its last list and who ran there.
 func CacheDir(name string) string { return filepath.Dir(cachePath(name)) }
 
 func ForgetCache(name string) error { return os.RemoveAll(CacheDir(name)) }
@@ -251,15 +251,15 @@ type liveCache struct {
 }
 
 // Source reads r where it lives.
-func (h *Hosts) Source(r *fav.Rec) Source {
+func (h *Hosts) Source(r *tend.Rec) Source {
 	if r.Host == "" || h == nil {
 		return Local(r)
 	}
 	return far{h, Ref{r.Provider, r.SessionID}, r.Host}
 }
 
-// ResumeCommand resumes r on its host in this terminal: `ssh -t <host> fav resume --terminal --no-herdr <sid>`.
-func (h *Hosts) ResumeCommand(r *fav.Rec) (*exec.Cmd, bool) {
+// ResumeCommand resumes r on its host in this terminal: `ssh -t <host> tend resume --terminal --no-herdr <sid>`.
+func (h *Hosts) ResumeCommand(r *tend.Rec) (*exec.Cmd, bool) {
 	host, ok := h.Host(r.Host)
 	if !ok || r.SessionID == "" || unsafeName.MatchString(r.SessionID) { // ⚠️ the one value that reaches the remote shell
 		return nil, false
@@ -283,7 +283,7 @@ func (h *Hosts) Close() {
 var reasons = map[string]string{
 	wire.CodeOffline: "remote.err.offline", wire.CodeAuth: "remote.err.auth", wire.CodeHostKey: "remote.err.hostkey",
 	wire.CodeProto: "remote.err.proto", wire.CodeTimeout: "remote.err.timeout", wire.CodeClosed: "remote.err.closed",
-	wire.CodeNotFound: "remote.err.not_found", wire.CodeNoFav: "remote.err.no_fav", wire.CodeStale: "remote.err.stale",
+	wire.CodeNotFound: "remote.err.not_found", wire.CodeNoTend: "remote.err.no_tend", wire.CodeStale: "remote.err.stale",
 	wire.CodeConflict: "remote.err.conflict", wire.CodeUnauthorized: "remote.err.unauthorized",
 	wire.CodeBadRequest: "remote.err.bad_request", wire.CodeBusy: "remote.err.busy", wire.CodeCanceled: "remote.err.canceled",
 	wire.CodeUnknownMethod: "remote.err.unknown_method",
@@ -302,7 +302,7 @@ func Reason(err error) string {
 
 type cache struct {
 	At       time.Time `json:"at"`
-	Target   string    `json:"target"` // the ssh alias and fav command it was fetched through
+	Target   string    `json:"target"` // the ssh alias and tend command it was fetched through
 	Version  string    `json:"version,omitempty"`
 	Sessions []Session `json:"sessions"`
 	Tried    time.Time `json:"tried,omitzero"`   // the last fetch, when it failed
@@ -311,17 +311,17 @@ type cache struct {
 
 var unsafeName = regexp.MustCompile(`[^A-Za-z0-9._-]`)
 
-// cachePath: ~/.agent/fav/hosts/<name>-<hash>/sessions.json, list fields only (Session), mode 0600; the hash keeps
+// cachePath: ~/.agent/tend/hosts/<name>-<hash>/sessions.json, list fields only (Session), mode 0600; the hash keeps
 // names that differ only in other characters apart.
 func cachePath(name string) string {
 	sum := sha256.Sum256([]byte(name))
 	dir := unsafeName.ReplaceAllString(name, "_") + "-" + hex.EncodeToString(sum[:4])
-	return filepath.Join(fav.Home(), "hosts", dir, "sessions.json")
+	return filepath.Join(tend.Home(), "hosts", dir, "sessions.json")
 }
 
 func (h *Hosts) target(name string) string {
 	host, _ := h.Host(name)
-	return strings.Join(append([]string{host.SSH}, host.Fav...), "\x00")
+	return strings.Join(append([]string{host.SSH}, host.Tend...), "\x00")
 }
 
 func (h *Hosts) save(name string, c cache) {
@@ -332,8 +332,8 @@ func (h *Hosts) save(name string, c cache) {
 	}
 }
 
-func recs(host string, ss []Session) []*fav.Rec {
-	out := make([]*fav.Rec, len(ss))
+func recs(host string, ss []Session) []*tend.Rec {
+	out := make([]*tend.Rec, len(ss))
 	for i, s := range ss {
 		out[i] = s.Rec(host)
 	}

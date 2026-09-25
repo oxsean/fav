@@ -7,7 +7,7 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-// ancestors: executable names of fav's parent processes, nearest first.
+// ancestors: executable names of tend's parent processes, nearest first.
 func ancestors() []string {
 	snap, err := windows.CreateToolhelp32Snapshot(windows.TH32CS_SNAPPROCESS, 0)
 	if err != nil {

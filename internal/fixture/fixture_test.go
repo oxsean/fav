@@ -11,22 +11,22 @@ import (
 	"time"
 
 	"github.com/oxsean/fav/internal/capture"
-	"github.com/oxsean/fav/internal/fav"
 	"github.com/oxsean/fav/internal/fulltext"
 	"github.com/oxsean/fav/internal/index"
 	"github.com/oxsean/fav/internal/paths"
+	"github.com/oxsean/fav/internal/tend"
 	"github.com/oxsean/fav/internal/testkit"
 )
 
 func TestMain(m *testing.M) { testkit.Main(m) }
 
-func load(t *testing.T) (*Dataset, *index.Index, *fav.Store) {
+func load(t *testing.T) (*Dataset, *index.Index, *tend.Store) {
 	t.Helper()
 	d, err := Build(filepath.Join(t.TempDir(), "machine"), time.Now())
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("FAV_HOME", d.Home)
+	t.Setenv("TEND_HOME", d.Home)
 	t.Setenv("CLAUDE_CONFIG_DIR", d.Claude)
 	t.Setenv("CODEX_HOME", d.Codex)
 	idx, err := index.OpenAt(filepath.Join(d.Home, "sessions.jsonl"))
@@ -34,7 +34,7 @@ func load(t *testing.T) (*Dataset, *index.Index, *fav.Store) {
 		t.Fatal(err)
 	}
 	idx, _ = idx.Refresh()
-	store, err := fav.OpenAt(filepath.Join(d.Home, "records.jsonl"))
+	store, err := tend.OpenAt(filepath.Join(d.Home, "records.jsonl"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -49,7 +49,7 @@ func byKey(ss []*index.Session) map[string]*index.Session {
 	return m
 }
 
-func key(s Session) string { return fav.SessionKey(s.Provider, s.ID) }
+func key(s Session) string { return tend.SessionKey(s.Provider, s.ID) }
 
 func TestIndexSeesEveryScenario(t *testing.T) {
 	d, idx, _ := load(t)
@@ -119,15 +119,15 @@ func TestRowsListEveryKind(t *testing.T) {
 	d, idx, store := load(t)
 	unfav := idx.Attach(store, nil)
 	var rs index.Rows
-	list := func(expr string, all bool, live map[string]capture.Live) map[string]*fav.Rec {
+	list := func(expr string, all bool, live map[string]capture.Live) map[string]*tend.Rec {
 		t.Helper()
-		q := fav.Parse(expr)
+		q := tend.Parse(expr)
 		q.All = all
 		recs, err := rs.List(store, idx, unfav, live, q)
 		if err != nil {
 			t.Fatal(err)
 		}
-		out := map[string]*fav.Rec{}
+		out := map[string]*tend.Rec{}
 		for _, r := range recs {
 			out[r.Key()] = r
 		}
@@ -144,8 +144,8 @@ func TestRowsListEveryKind(t *testing.T) {
 	}
 
 	oauth := d.Get("oauth")
-	fresh := fav.SessionKey(fav.ProviderClaude, "0d0d0d0d-new")
-	live := map[string]capture.Live{"0d0d0d0d-new": {Agent: fav.ProviderClaude, Cwd: filepath.Join(d.Work, "webapp")}, oauth.ID: {Agent: fav.ProviderClaude}}
+	fresh := tend.SessionKey(tend.ProviderClaude, "0d0d0d0d-new")
+	live := map[string]capture.Live{"0d0d0d0d-new": {Agent: tend.ProviderClaude, Cwd: filepath.Join(d.Work, "webapp")}, oauth.ID: {Agent: tend.ProviderClaude}}
 	running := list("status:live", true, live)
 	if len(running) != 2 || running[key(oauth)] != store.BySession(oauth.Provider, oauth.ID) || running[fresh] == nil || running[fresh].Project != "webapp" {
 		t.Fatalf("running: the favorite's own record plus a row for the session the index has not seen: %v", running)
@@ -153,8 +153,8 @@ func TestRowsListEveryKind(t *testing.T) {
 	if again := list("status:live", true, live); again[fresh] != running[fresh] {
 		t.Error("a made-up row must be the same object on the next call")
 	}
-	if favs := list("status:live", false, live); len(favs) != 1 || favs[key(oauth)] == nil {
-		t.Errorf("favorites only: %v", favs)
+	if favorites := list("status:live", false, live); len(favorites) != 1 || favorites[key(oauth)] == nil {
+		t.Errorf("favorites only: %v", favorites)
 	}
 
 	r := running[key(oauth)]
@@ -182,7 +182,7 @@ func TestRowsListEveryKind(t *testing.T) {
 func TestTrashingAChainTakesEveryFileOfIt(t *testing.T) {
 	d, idx, store := load(t)
 	chain := d.Get("chain-new")
-	var r *fav.Rec
+	var r *tend.Rec
 	for _, x := range idx.Attach(store, nil) {
 		if x.SessionID == chain.ID {
 			r = x
@@ -205,10 +205,10 @@ func TestTrashingAChainTakesEveryFileOfIt(t *testing.T) {
 func TestFavoritesAttach(t *testing.T) {
 	d, idx, store := load(t)
 	recs := idx.Attach(store, nil)
-	favs := 0
+	favorites := 0
 	for _, r := range store.All() {
 		if r.Favorite() {
-			favs++
+			favorites++
 		}
 		if r.Turns == 0 {
 			t.Errorf("%s: favorite got no turns attached", r.Title)
@@ -220,8 +220,8 @@ func TestFavoritesAttach(t *testing.T) {
 			want++
 		}
 	}
-	if favs != want {
-		t.Errorf("favorites: %d, want %d", favs, want)
+	if favorites != want {
+		t.Errorf("favorites: %d, want %d", favorites, want)
 	}
 	for _, r := range recs {
 		if r.SessionID == d.Get("oauth").ID {

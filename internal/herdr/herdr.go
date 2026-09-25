@@ -254,7 +254,7 @@ func KeepLabel(tabID, label string) error {
 
 // label and note both, because the hook resets label to note
 func ReportLabel(paneID, label string) error {
-	return run([]string{"pane", "report-metadata", paneID, "--source", "fav",
+	return run([]string{"pane", "report-metadata", paneID, "--source", "tend",
 		"--token", "note=" + label, "--token", "label=" + label}, nil)
 }
 

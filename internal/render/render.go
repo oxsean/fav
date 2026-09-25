@@ -9,15 +9,15 @@ import (
 	"time"
 
 	"github.com/oxsean/fav/internal/capture"
-	"github.com/oxsean/fav/internal/fav"
 	"github.com/oxsean/fav/internal/i18n"
 	"github.com/oxsean/fav/internal/paths"
+	"github.com/oxsean/fav/internal/tend"
 )
 
 // Sep separates the hidden id from the visible part of an fzf row (--delimiter, --with-nth=2).
 const Sep = "\t"
 
-func RecGlyph(r *fav.Rec) string {
+func RecGlyph(r *tend.Rec) string {
 	if !r.Favorite() {
 		return GlyphSession
 	}
@@ -26,7 +26,7 @@ func RecGlyph(r *fav.Rec) string {
 
 func Glyph(status string) string {
 	switch status {
-	case fav.StatusDone:
+	case tend.StatusDone:
 		return GlyphDone
 	}
 	return GlyphActive
@@ -34,9 +34,9 @@ func Glyph(status string) string {
 
 func StatusLabel(s string) string {
 	switch s {
-	case fav.StatusTodo:
+	case tend.StatusTodo:
 		return i18n.T("status.todo")
-	case fav.StatusDone:
+	case tend.StatusDone:
 		return i18n.T("status.done")
 	case "":
 		return i18n.T("status.unmarked")
@@ -92,7 +92,7 @@ func DayLabel(t, now time.Time) string {
 }
 
 // Line is an fzf row: the key (record id, or session id when unfavorited), a Tab, then the visible part.
-func Line(r *fav.Rec, now time.Time) string {
+func Line(r *tend.Rec, now time.Time) string {
 	turns := ""
 	if r.Turns > 0 {
 		turns = i18n.F("line.turns", r.Turns)
@@ -101,11 +101,11 @@ func Line(r *fav.Rec, now time.Time) string {
 }
 
 // LiveLine is the Agents row: the turns column shows the live status instead.
-func LiveLine(r *fav.Rec, l capture.Live, now time.Time) string {
+func LiveLine(r *tend.Rec, l capture.Live, now time.Time) string {
 	return line(r, now, Pad(LiveText(l, now), 14))
 }
 
-func line(r *fav.Rec, now time.Time, col string) string {
+func line(r *tend.Rec, now time.Time, col string) string {
 	var b strings.Builder
 	b.WriteString(LineKey(r))
 	b.WriteString(Sep)
@@ -128,8 +128,8 @@ func line(r *fav.Rec, now time.Time, col string) string {
 }
 
 // Meta: provider · project, after an @host mark for another machine's session.
-func Meta(r *fav.Rec) string {
-	meta := fav.ProviderName(r.Provider)
+func Meta(r *tend.Rec) string {
+	meta := tend.ProviderName(r.Provider)
 	if r.Project != "" {
 		meta += " · " + r.Project
 	}
@@ -140,7 +140,7 @@ func Meta(r *fav.Rec) string {
 }
 
 // HostMark: @name for another machine's session, "" for this one.
-func HostMark(r *fav.Rec) string {
+func HostMark(r *tend.Rec) string {
 	if r.Host == "" {
 		return ""
 	}
@@ -148,7 +148,7 @@ func HostMark(r *fav.Rec) string {
 }
 
 // LineKey: host:session id for another machine's session (pick() reads it back).
-func LineKey(r *fav.Rec) string {
+func LineKey(r *tend.Rec) string {
 	if r.Host != "" {
 		return r.Host + ":" + r.SessionID
 	}
@@ -189,7 +189,7 @@ func ShortDur(d time.Duration) string {
 	return i18n.F("time.days", int(d.Hours()/24))
 }
 
-func Card(r *fav.Rec, width int, now time.Time) []string {
+func Card(r *tend.Rec, width int, now time.Time) []string {
 	when := When(r.When(), now)
 	head := RecGlyph(r) + " " + r.Title
 	gap := width - Width(when) - 1
@@ -207,8 +207,8 @@ type Source interface {
 	Checks() []capture.Check
 }
 
-// ⚠️ Preview (fzf preview window, `fav show`) never shows env var values.
-func Preview(r *fav.Rec, src Source, width int, now time.Time) string {
+// ⚠️ Preview (fzf preview window, `tend show`) never shows env var values.
+func Preview(r *tend.Rec, src Source, width int, now time.Time) string {
 	if width < 20 {
 		width = 20
 	}
@@ -222,7 +222,7 @@ func Preview(r *fav.Rec, src Source, width int, now time.Time) string {
 	if r.Summary != "" {
 		label := i18n.T("card.summary")
 		switch {
-		case r.ID == "" && r.Recap && r.Provider == fav.ProviderCodex:
+		case r.ID == "" && r.Recap && r.Provider == tend.ProviderCodex:
 			label = i18n.T("detail.recap_codex")
 		case r.ID == "" && r.Recap:
 			label = i18n.T("detail.recap_claude")
@@ -292,7 +292,7 @@ func Preview(r *fav.Rec, src Source, width int, now time.Time) string {
 	return b.String()
 }
 
-func statusLine(r *fav.Rec, now time.Time) string {
+func statusLine(r *tend.Rec, now time.Time) string {
 	state := green.p(RecGlyph(r) + " " + StatusLabel(r.Status))
 	if r.Done() || r.Status == "" {
 		state = dim.p(RecGlyph(r) + " " + StatusLabel(r.Status))
@@ -309,10 +309,10 @@ func statusLine(r *fav.Rec, now time.Time) string {
 	if r.Host != "" {
 		state += cyan.p("  " + HostMark(r))
 	}
-	return state + dim.p("  ·  "+fav.ProviderLabel(r.Provider)+"  ·  "+When(r.When(), now))
+	return state + dim.p("  ·  "+tend.ProviderLabel(r.Provider)+"  ·  "+When(r.When(), now))
 }
 
-func resumeInfo(r *fav.Rec, now time.Time) string {
+func resumeInfo(r *tend.Rec, now time.Time) string {
 	if r.ResumeCount == 0 {
 		return ""
 	}
@@ -323,8 +323,8 @@ func resumeInfo(r *fav.Rec, now time.Time) string {
 	return s
 }
 
-func resumeTarget(r *fav.Rec) string {
-	target := fav.ProviderLabel(r.Provider)
+func resumeTarget(r *tend.Rec) string {
+	target := tend.ProviderLabel(r.Provider)
 	dir := paths.Tilde(r.Cwd)
 	if dir == "" {
 		dir = i18n.T("resume.where.cwd")
@@ -351,7 +351,7 @@ func TagString(tags []string) string {
 }
 
 // FileList: "a.go ×3  ·  b.go" with paths under base written relative to it.
-func FileList(fs []fav.FileCount, base string) string {
+func FileList(fs []tend.FileCount, base string) string {
 	parts := make([]string, len(fs))
 	for i, f := range fs {
 		p := paths.Tilde(f.Path)
@@ -367,7 +367,7 @@ func FileList(fs []fav.FileCount, base string) string {
 }
 
 // FilesField is the detail line for the files r's AI wrote: how many, the most written first.
-func FilesField(r *fav.Rec, n int) string {
+func FilesField(r *tend.Rec, n int) string {
 	if len(r.Files) == 0 {
 		return ""
 	}
@@ -375,7 +375,7 @@ func FilesField(r *fav.Rec, n int) string {
 	if base == "" {
 		base = r.Repo
 	}
-	return i18n.F("card.files_value", len(r.Files), FileList(fav.TopFiles(r.Files, n), base))
+	return i18n.F("card.files_value", len(r.Files), FileList(tend.TopFiles(r.Files, n), base))
 }
 
 func activityLine(src Source) string {
@@ -385,7 +385,7 @@ func activityLine(src Source) string {
 	return ""
 }
 
-// Chat is `fav preview`'s message list: a who · time · length header and at most bodyRows body lines per message.
+// Chat is `tend preview`'s message list: a who · time · length header and at most bodyRows body lines per message.
 func Chat(msgs []capture.Message, width, bodyRows int) []string {
 	var out []string
 	for _, msg := range msgs {

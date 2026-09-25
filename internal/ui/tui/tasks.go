@@ -11,13 +11,13 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/oxsean/fav/internal/coord"
-	"github.com/oxsean/fav/internal/fav"
 	"github.com/oxsean/fav/internal/i18n"
 	"github.com/oxsean/fav/internal/node"
 	"github.com/oxsean/fav/internal/paths"
 	"github.com/oxsean/fav/internal/remote"
 	"github.com/oxsean/fav/internal/render"
 	"github.com/oxsean/fav/internal/task"
+	"github.com/oxsean/fav/internal/tend"
 	"github.com/oxsean/fav/internal/wire"
 )
 
@@ -33,7 +33,7 @@ type tasksState struct {
 	st         *task.State
 	loaded     bool
 	machines   []coord.Machine
-	agents     []fav.AgentProfile
+	agents     []tend.AgentProfile
 	list       []*task.Task // shown, filtered by the search box
 	cursor     int
 	scroll     int
@@ -72,7 +72,7 @@ type tasksConnMsg struct {
 type tasksStateMsg struct {
 	st       *task.State
 	machines []coord.Machine
-	agents   []fav.AgentProfile
+	agents   []tend.AgentProfile
 	err      error
 }
 
@@ -451,7 +451,7 @@ func (m *Model) askStopRun() {
 }
 
 // sessionRec is the record of r's session: the list's own when it has one, else a bare one to resume from.
-func (m *Model) sessionRec(r *task.Run) *fav.Rec {
+func (m *Model) sessionRec(r *task.Run) *tend.Rec {
 	if r == nil || r.Session == "" {
 		return nil
 	}
@@ -466,7 +466,7 @@ func (m *Model) sessionRec(r *task.Run) *fav.Rec {
 			}
 		}
 	}
-	rec := &fav.Rec{Provider: r.Provider, SessionID: r.Session, Title: r.Title, Cwd: r.Dir, Project: projectName(r.Dir)}
+	rec := &tend.Rec{Provider: r.Provider, SessionID: r.Session, Title: r.Title, Cwd: r.Dir, Project: projectName(r.Dir)}
 	if r.Machine != coord.Local {
 		rec.Host = r.Machine
 	}
@@ -855,7 +855,7 @@ func (m *Model) agentNames() []string {
 		out = append(out, a.Name)
 	}
 	if len(out) == 0 {
-		out = []string{fav.ProviderClaude, fav.ProviderCodex}
+		out = []string{tend.ProviderClaude, tend.ProviderCodex}
 	}
 	return out
 }

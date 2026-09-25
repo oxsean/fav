@@ -8,11 +8,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/oxsean/fav/internal/fav"
 	"github.com/oxsean/fav/internal/filelock"
 	"github.com/oxsean/fav/internal/herdr"
 	"github.com/oxsean/fav/internal/paths"
 	"github.com/oxsean/fav/internal/proc"
+	"github.com/oxsean/fav/internal/tend"
 )
 
 type Live struct {
@@ -51,7 +51,7 @@ func herdrLive(agents []herdr.Pane, local, prev map[string]Live, tracked bool, n
 		if a.AgentSession == nil || a.AgentSession.Value == "" {
 			continue
 		}
-		if a.Agent == fav.ProviderClaude && tracked {
+		if a.Agent == tend.ProviderClaude && tracked {
 			if _, ok := local[a.AgentSession.Value]; !ok {
 				continue
 			}
@@ -88,7 +88,7 @@ func ClaudeLive() map[string]Live {
 		if json.Unmarshal(b, &s) != nil || s.SessionID == "" || s.ParkedJobID != "" || !proc.Alive(s.PID) {
 			continue
 		}
-		l := Live{Agent: fav.ProviderClaude, Title: s.Name, Cwd: s.Cwd, Since: time.UnixMilli(s.StatusUpdatedAt)}
+		l := Live{Agent: tend.ProviderClaude, Title: s.Name, Cwd: s.Cwd, Since: time.UnixMilli(s.StatusUpdatedAt)}
 		switch s.Status {
 		case "busy":
 			l.Status = "working"
@@ -146,7 +146,7 @@ func CodexLive() map[string]Live {
 		if strings.HasPrefix(id, ".") || !filelock.Held(f) || codexOneOff(id, f) {
 			continue
 		}
-		out[id] = Live{Agent: fav.ProviderCodex}
+		out[id] = Live{Agent: tend.ProviderCodex}
 	}
 	return out
 }

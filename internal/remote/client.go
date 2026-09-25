@@ -15,10 +15,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/oxsean/fav/internal/fav"
 	"github.com/oxsean/fav/internal/pathmap"
 	"github.com/oxsean/fav/internal/paths"
 	"github.com/oxsean/fav/internal/shell"
+	"github.com/oxsean/fav/internal/tend"
 	"github.com/oxsean/fav/internal/wire"
 )
 
@@ -48,10 +48,10 @@ func (s stdio) Close() error {
 }
 
 // Dial starts `rpc --stdio` on h.
-func Dial(h fav.Host) (*Client, error) { return DialWith(h, wire.Options{}) }
+func Dial(h tend.Host) (*Client, error) { return DialWith(h, wire.Options{}) }
 
 // DialWith is Dial with the connection's options: a coordinator answers the node's pushes.
-func DialWith(h fav.Host, opt wire.Options) (*Client, error) {
+func DialWith(h tend.Host, opt wire.Options) (*Client, error) {
 	cmd := Command(h, false, "rpc", "--stdio")
 	in, err := cmd.StdinPipe()
 	if err != nil {
@@ -149,16 +149,16 @@ func classify(err error, stderr string, ssh bool) *wire.Error {
 		return &wire.Error{Code: wire.CodeOffline, Detail: detail}
 	}
 	if errors.As(err, &exit) && noCommand.MatchString(stderr) {
-		return &wire.Error{Code: wire.CodeNoFav, Detail: detail}
+		return &wire.Error{Code: wire.CodeNoTend, Detail: detail}
 	}
 	return &wire.Error{Code: wire.CodeClosed, Detail: detail}
 }
 
-// Command runs fav on h with args: over ssh (tty for an interactive resume), or as a local process when h.SSH is empty.
-func Command(h fav.Host, tty bool, args ...string) *exec.Cmd {
-	argv := append(slices.Clone(h.Fav), args...)
-	if len(h.Fav) == 0 {
-		argv = append([]string{"fav"}, args...)
+// Command runs tend on h with args: over ssh (tty for an interactive resume), or as a local process when h.SSH is empty.
+func Command(h tend.Host, tty bool, args ...string) *exec.Cmd {
+	argv := append(slices.Clone(h.Tend), args...)
+	if len(h.Tend) == 0 {
+		argv = append([]string{"tend"}, args...)
 	}
 	if tty {
 		argv = withTTY(argv)
@@ -197,14 +197,14 @@ func withTTY(argv []string) []string {
 	return argv
 }
 
-// RemoteShell is how h's login shell reads the command line: h.Shell, else cmd when the fav command looks like
+// RemoteShell is how h's login shell reads the command line: h.Shell, else cmd when the tend command looks like
 // Windows (a drive path, .exe / .cmd, wsl), else POSIX.
-func RemoteShell(h fav.Host) shell.Kind {
+func RemoteShell(h tend.Host) shell.Kind {
 	if k, ok := shell.Named(h.Shell); ok {
 		return k
 	}
-	if len(h.Fav) > 0 {
-		p := strings.ToLower(h.Fav[0])
+	if len(h.Tend) > 0 {
+		p := strings.ToLower(h.Tend[0])
 		if pathmap.Drive(p) || pathmap.Base(p) == "wsl" || slices.Contains([]string{".exe", ".cmd", ".bat"}, path.Ext(p)) {
 			return shell.Cmd
 		}
@@ -212,12 +212,12 @@ func RemoteShell(h fav.Host) shell.Kind {
 	return shell.POSIX
 }
 
-// multiplex shares one ssh connection per host between fav's calls; Windows' OpenSSH has no ControlMaster.
+// multiplex shares one ssh connection per host between tend's calls; Windows' OpenSSH has no ControlMaster.
 func multiplex() []string {
 	if runtime.GOOS == "windows" {
 		return nil
 	}
-	dir := filepath.Join(fav.Home(), "hosts", "ssh")
+	dir := filepath.Join(tend.Home(), "hosts", "ssh")
 	// ssh adds "/" + 40 hex (%C) + a 17-byte temp suffix to the directory.
 	if !paths.SocketRoom(dir, 58) || os.MkdirAll(dir, 0o700) != nil {
 		return nil

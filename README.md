@@ -1,7 +1,7 @@
 # tend
 
-**All your Claude Code / Codex sessions in one place — favorite, search, resume in one keystroke — and tasks that agents run on any of your machines.** The command is `tend` (`fav` is the same program).
-Every AI coding session on the machine goes into one list; the ones worth keeping get a `/fav` while the context is still fresh;
+**All your Claude Code / Codex sessions in one place — favorite, search, resume in one keystroke — and tasks that agents run on any of your machines.**
+Every AI coding session on the machine goes into one list; the ones worth keeping get a `/tend` while the context is still fresh;
 a week later you find them by *what was done* and pick up in the right directory and Herdr workspace.
 Write a task once, send it to an agent on this machine or another one, follow its output and take its session over when it is done.
 
@@ -51,7 +51,7 @@ A dozen Claude Code / Codex sessions a day, and a week later:
 
 | Before | With tend |
 |---|---|
-| Auto titles read "continue", "ok", "take a look"; no idea which is which | `/fav` runs while the AI still has the whole conversation: title, summary and tags written once, recognisable a week later |
+| Auto titles read "continue", "ok", "take a look"; no idea which is which | `/tend` runs while the AI still has the whole conversation: title, summary and tags written once, recognisable a week later |
 | You remember "I had it debug OAuth", not the date, project or tool | Keywords search the prompts and summaries in the index; `#tag` `project:` `last:7d` narrow it down |
 | Claude lives in `~/.claude/projects`, Codex in `~/.codex/sessions`, and each tool's history only shows the current directory | Every session on the machine in one table, by time or by project, tool-agnostic |
 | Found it — now `cd` to the right directory, recall `claude --resume` vs `codex resume`, switch to that Herdr workspace | `Enter`: directory, command and workspace are picked for you; a session that is already running is focused instead |
@@ -63,7 +63,7 @@ plus a resume button that lands in the right place.
 
 ## What it does
 
-- **Favorite**: `/fav` inside a session; the AI writes the title / summary / tags in the conversation's language, `tend` itself collects provider, session id, cwd, git branch and Herdr workspace. `/fav` again updates the same record.
+- **Favorite**: `/tend` inside a session; the AI writes the title / summary / tags in the conversation's language, `tend` itself collects provider, session id, cwd, git branch and Herdr workspace. `/tend` again updates the same record.
 - **Every session**: unfavorited ones are listed too — the whole Claude and Codex history, indexed incrementally by reading heads, tails and new bytes only; a multi-hundred-MB session is never read whole.
 - **Search**: one query syntax across the TUI, fzf and the CLI: keywords, `#tag`, `project:`, `provider:`, `status:`, `last:7d`, `turns:`, `file:` (sessions whose AI wrote a matching path).
 - **Search keys**: `/` searches sessions (title, summary, project, tags), `>` searches the messages of every session, `\` (or `Ctrl+S`) the messages of the selected session — the same wherever the focus is; `/` typed as `、` by a CJK input method still searches sessions.
@@ -84,44 +84,42 @@ plus a resume button that lands in the right place.
 
 ```bash
 # macOS / Linux: latest release into ~/.local/bin
-curl -fsSL https://github.com/oxsean/fav/releases/latest/download/fav_$(uname -s | tr A-Z a-z)_$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/').tar.gz | tar xz -C ~/.local/bin tend && ln -sf tend ~/.local/bin/fav
-# or with Go (the binary is called fav; link tend to it):
-go install github.com/oxsean/fav/cmd/fav@latest
+curl -fsSL https://github.com/oxsean/fav/releases/latest/download/tend_$(uname -s | tr A-Z a-z)_$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/').tar.gz | tar xz -C ~/.local/bin tend
+# or with Go:
+go install github.com/oxsean/fav/cmd/tend@latest
 
-tend migrate-home      # once, when upgrading from fav: backs up ~/.agent/fav and moves it to ~/.agent/tend
-
-tend install-skill      # links the /fav skill into ~/.claude/skills and ~/.codex/skills ($CLAUDE_CONFIG_DIR / $CODEX_HOME when set)
+tend install-skill      # links the /tend skill into ~/.claude/skills and ~/.codex/skills ($CLAUDE_CONFIG_DIR / $CODEX_HOME when set)
 tend install-hook       # optional: Claude Code tells tend when it asks you something, so Agents flags permission questions without Herdr (tend uninstall-hook removes it)
 tend                    # the first start builds the index in the background; the Sessions tab fills up in seconds
 ```
 
-Windows: grab `fav_windows_amd64.zip` from [Releases](https://github.com/oxsean/fav/releases/latest) and unzip it somewhere on PATH.
+Windows: grab `tend_windows_amd64.zip` from [Releases](https://github.com/oxsean/fav/releases/latest) and unzip it somewhere on PATH.
 
 Then:
 
-1. Finish a piece of work in any Claude Code / Codex session and type `/fav`.
+1. Finish a piece of work in any Claude Code / Codex session and type `/tend`.
 2. Next week: `tend`, a few words, `Enter`.
 
 A shell hotkey: add `eval "$(tend shell-init zsh)"` to `.zshrc` (`shell-init bash` for bash) and `Ctrl+G` opens the fzf view from any prompt.
 `--key alt-f` changes the key (or pass the shell's own notation), `--ui tui` opens the TUI instead.
 
 Optional: `fzf` (fzf mode), Herdr (resume into workspaces, see who is running, focus tabs),
-a Nerd Font (switch icons from ASCII in the settings, or `FAV_ICONS=nerd`). `tend uninstall-skill` removes the skill links.
+a Nerd Font (switch icons from ASCII in the settings, or `TEND_ICONS=nerd`). `tend uninstall-skill` removes the skill links.
 
 ## Usage
 
-### Favorite: `/fav`
+### Favorite: `/tend`
 
-Type `/fav` in a session (or say "favorite this session"). The skill reviews the whole conversation and writes a title (12–40 CJK characters
+Type `/tend` in a session (or say "favorite this session"). The skill reviews the whole conversation and writes a title (12–40 CJK characters
 or 6–14 words: the object and what was done to it), a summary (conclusions and next step, not a play-by-play) and 2–5 tags, then hands them to `tend add`.
 Provider, session id, cwd, git and Herdr context are collected by `tend`; the AI never guesses them.
 
-Sessions that were never `/fav`ed are on the Sessions tab too; press `f` to favorite one (the first prompt becomes its title), resume it and `/fav` for a proper summary. Until then the summary is Claude's own recap (goal · done · next) or Codex's last reply when there is one.
+Sessions that were never `/tend`-ed are on the Sessions tab too; press `f` to favorite one (the first prompt becomes its title), resume it and `/tend` for a proper summary. Until then the summary is Claude's own recap (goal · done · next) or Codex's last reply when there is one.
 
 ### Find and resume: `tend` (TUI)
 
 ```
-tend            # TUI by default; FAV_UI=fzf changes the default
+tend            # TUI by default; TEND_UI=fzf changes the default
 tend tui --no-mouse
 ```
 
@@ -129,7 +127,7 @@ Five tabs, `Tab` / `1`–`5`:
 
 | Tab | Shows |
 |---|---|
-| Favorites | `/fav`ed sessions, by last activity (`o` cycles the sort) |
+| Favorites | `/tend`-ed sessions, by last activity (`o` cycles the sort) |
 | Sessions | every session on the machine (fewer than 3 turns hidden by default, `turns:1` shows all) |
 | Projects | grouped by directory (a session in a git worktree goes under its main checkout, its card says `worktree <branch>`; `tend fix` moves the sessions of a removed worktree there): `→` expands, `←` collapses, `→` again shows project info on the right (directory / session count / sources / recent sessions); the group of the directory `tend` was started in opens by itself, scrolled to the top |
 | Agents | who is running now: waiting / working / idle for how long, how long this turn has run, how full the context is, what the AI said last; refreshed every 3 s. Sessions asking you or finished and unseen are flagged (tab `Agents 5 !2`); `.` marks one handled, `H` snoozes it for an hour |
@@ -295,7 +293,7 @@ tend resume <id> --no-herdr              # resume in this terminal
 tend resume <id> --workspace api         # several Herdr workspaces in that directory: pick one
 tend resume <id> --app                   # open it in the desktop app (Claude, or ChatGPT for Codex); --terminal overrides the setting
 
-tend status <id> todo|doing|done  ·  tend done <id>  ·  tend archive|unarchive <id>  ·  tend fav|unfav <id>
+tend status <id> todo|doing|done  ·  tend done <id>  ·  tend archive|unarchive <id>  ·  tend favorite|unfavorite <id>
 tend edit <id>                           # title / tags / summary in $EDITOR
 tend pin <id>                            # hard-link the transcript (Claude deletes transcripts after 30 days)
 ```
@@ -326,10 +324,10 @@ tend doctor [--compact]                  # check data files, dead sessions, tras
 Sessions on other machines show up in the same lists, read over ssh from the tend installed there. Each machine needs an ssh alias in `~/.ssh/config` that logs in with a key (no password prompt), then:
 
 ```bash
-tend hosts add mba mba --fav /Users/me/.local/bin/fav                          # name, ssh alias, tend's absolute path there
-tend hosts add win win-pc --fav 'C:\Users\me\.local\bin\fav.exe'
-tend hosts add wsl win-pc --wsl Debian --fav /home/me/.local/bin/fav            # a WSL distro of that Windows machine
-tend hosts add box nas --docker dev --fav /usr/local/bin/fav                    # a container there (--docker-cmd podman / a full path)
+tend hosts add mba mba --tend /Users/me/.local/bin/tend                          # name, ssh alias, tend's absolute path there
+tend hosts add win win-pc --tend 'C:\Users\me\.local\bin\tend.exe'
+tend hosts add wsl win-pc --wsl Debian --tend /home/me/.local/bin/tend            # a WSL distro of that Windows machine
+tend hosts add box nas --docker dev --tend /usr/local/bin/tend                    # a container there (--docker-cmd podman / a full path)
 tend hosts install mba [--dry-run]       # build tend from this checkout for its system and put it there — in the distro or container too — then check the version
 tend hosts                               # the machines, the tend version each answered with, when each list was last fetched
 tend hosts check [name…]                 # connect, versions, system, claude/codex on PATH, a round trip with Chinese text, list and message timings
@@ -463,7 +461,7 @@ the favorite follows) and does not count the parked process as running.
 | `~/.agent/tend/server/tokens.json` | mode 2: token names, roles and hashes |
 | `~/.agent/tend/hosts/` | the last list fetched from each other machine (list fields: titles, summaries, tags, paths; no messages), ssh connection sockets |
 
-Environment: `TEND_HOME` (or `FAV_HOME`) moves the data directory, `FAV_UI=fzf|tui` sets the default front-end, `FAV_ICONS=nerd|ascii` picks icons, `FAV_TRACE=1` logs a timeline of keys, wheel and background events to `~/.agent/tend/trace.log` (for reporting a slow or stuck UI).
+Environment: `TEND_HOME` (or `TEND_HOME`) moves the data directory, `TEND_UI=fzf|tui` sets the default front-end, `TEND_ICONS=nerd|ascii` picks icons, `TEND_TRACE=1` logs a timeline of keys, wheel and background events to `~/.agent/tend/trace.log` (for reporting a slow or stuck UI).
 The UI language follows the system (`LANG` etc. starting with zh → Chinese, otherwise English) and can be pinned in settings.
 
 Chat text is kept only in the local `text/` copy for search, and nothing is uploaded; session files are only modified when you explicitly move a directory (the cwd field), and the originals go to the trash first. `tend pin` is a local hard link.
@@ -473,6 +471,6 @@ Chat text is kept only in the local `text/` copy for search, and nothing is uplo
 ```bash
 go build ./... && go vet ./... && go test ./...
 HERDR_LIVE=1 go test ./internal/herdr/   # against a real Herdr: create tab → run → clean up
-go run ./tools/fixture -o ~/fav-demo     # a synthetic machine (Claude + Codex sessions, favorites); ~/fav-demo/fav.sh tui runs tend on it
+go run ./tools/fixture -o ~/tend-demo     # a synthetic machine (Claude + Codex sessions, favorites); ~/tend-demo/tend.sh tui runs tend on it
 scripts/test-hosts.sh ssh:host wsl:host:Debian win:host docker:host:ctr   # sync the working tree, build and test natively on each
 ```

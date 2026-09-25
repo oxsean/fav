@@ -9,7 +9,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/oxsean/fav/internal/fav"
+	"github.com/oxsean/fav/internal/tend"
 )
 
 func TestAutoOpenProjectOfStartDir(t *testing.T) {
@@ -21,7 +21,7 @@ func TestAutoOpenProjectOfStartDir(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	m := New(s, noIndex(t), fav.DefaultConfig(), "")
+	m := New(s, noIndex(t), tend.DefaultConfig(), "")
 	m.startDir = filepath.Join(dir, "webapp", "internal", "api")
 	m.Update(tea.WindowSizeMsg{Width: 120, Height: 30})
 	m.setView(viewProjects)
@@ -50,7 +50,7 @@ func TestAutoOpenProjectOfStartDir(t *testing.T) {
 
 func TestFocusOpensHiddenSession(t *testing.T) {
 	m := sized(t, 150, 44)
-	r := &fav.Rec{Provider: fav.ProviderClaude, SessionID: "zz-hidden", Title: "sdk agent", Status: fav.StatusDoing}
+	r := &tend.Rec{Provider: tend.ProviderClaude, SessionID: "zz-hidden", Title: "sdk agent", Status: tend.StatusDoing}
 	m.Focus(r)
 	if m.view != viewSessions || m.pane != paneChat {
 		t.Fatalf("view=%v pane=%v", m.view, m.pane)
@@ -65,7 +65,7 @@ func TestFocusOpensHiddenSession(t *testing.T) {
 }
 
 func TestProjectGroupOrder(t *testing.T) {
-	recs := []*fav.Rec{
+	recs := []*tend.Rec{
 		{Project: "zeta"}, {Project: "alpha"}, {Project: "alpha"}, {Project: "alpha"}, {Project: "mid"}, {Project: "mid"},
 	}
 	names := func(rows []row) []string {

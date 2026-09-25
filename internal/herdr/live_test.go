@@ -13,7 +13,7 @@ func TestLiveCreateTabAndRun(t *testing.T) {
 		t.Skip("需要 HERDR_LIVE=1 且运行在 Herdr 中")
 	}
 	wsID := os.Getenv("HERDR_WORKSPACE_ID")
-	pane, err := CreateTab(wsID, "/tmp", "fav-selftest")
+	pane, err := CreateTab(wsID, "/tmp", "tend-selftest")
 	if err != nil {
 		t.Fatalf("CreateTab: %v", err)
 	}
@@ -24,7 +24,7 @@ func TestLiveCreateTabAndRun(t *testing.T) {
 		}
 	}()
 
-	if err := Run(pane.PaneID, "echo fav-selftest-marker"); err != nil {
+	if err := Run(pane.PaneID, "echo tend-selftest-marker"); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	time.Sleep(1500 * time.Millisecond)
@@ -34,7 +34,7 @@ func TestLiveCreateTabAndRun(t *testing.T) {
 		t.Fatalf("pane read: %v", err)
 	}
 	got := string(raw)
-	if !strings.Contains(got, "fav-selftest-marker") {
+	if !strings.Contains(got, "tend-selftest-marker") {
 		t.Fatalf("没在新 pane 里看到命令输出，实际读到：%q", got)
 	}
 	t.Log("命令确实在新 tab 的 pane 里执行了")

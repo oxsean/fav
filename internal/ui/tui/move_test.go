@@ -10,8 +10,8 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/oxsean/fav/internal/capture"
-	"github.com/oxsean/fav/internal/fav"
 	"github.com/oxsean/fav/internal/index"
+	"github.com/oxsean/fav/internal/tend"
 	"github.com/oxsean/fav/internal/testkit"
 )
 
@@ -19,7 +19,7 @@ func TestMoveProjectFromTUI(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("CLAUDE_CONFIG_DIR", filepath.Join(root, "claude"))
 	t.Setenv("CODEX_HOME", filepath.Join(root, "codex"))
-	t.Setenv("FAV_HOME", filepath.Join(root, "fav"))
+	t.Setenv("TEND_HOME", filepath.Join(root, "tend"))
 	old, dst := filepath.Join(root, "work", "proj"), filepath.Join(root, "dev", "proj")
 	os.MkdirAll(dst, 0o755)
 	pdir := index.ClaudeProjectDir(old)
@@ -31,8 +31,8 @@ func TestMoveProjectFromTUI(t *testing.T) {
 	os.WriteFile(filepath.Join(pdir, "s2.jsonl"), []byte(line(0, old)+line(1, old)+line(2, old)), 0o644)
 	idx, _ := index.OpenAt(filepath.Join(root, "sessions.jsonl"))
 	idx, _ = idx.Refresh()
-	s, _ := fav.OpenAt(filepath.Join(root, "records.jsonl"))
-	m := New(s, idx, fav.DefaultConfig(), "")
+	s, _ := tend.OpenAt(filepath.Join(root, "records.jsonl"))
+	m := New(s, idx, tend.DefaultConfig(), "")
 	m.w, m.h = 140, 40
 	m.setView(viewProjects)
 	m.refresh()

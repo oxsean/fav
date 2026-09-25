@@ -9,15 +9,15 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/oxsean/fav/internal/capture"
-	"github.com/oxsean/fav/internal/fav"
 	"github.com/oxsean/fav/internal/i18n"
 	"github.com/oxsean/fav/internal/paths"
 	"github.com/oxsean/fav/internal/render"
+	"github.com/oxsean/fav/internal/tend"
 )
 
 // newSessionDir: r's directory (the main checkout for a removed worktree), or with r nil on a projects group header
 // the group's most used directory that still exists.
-func (m *Model) newSessionDir(r *fav.Rec) (dir, name string) {
+func (m *Model) newSessionDir(r *tend.Rec) (dir, name string) {
 	if r != nil {
 		for _, d := range []string{r.Cwd, r.Repo} {
 			if paths.IsDir(d) {
@@ -30,7 +30,7 @@ func (m *Model) newSessionDir(r *fav.Rec) (dir, name string) {
 		return "", ""
 	}
 	g := m.groupUnderCursor()
-	for _, d := range topN(m.groups[g], func(r *fav.Rec) string { return r.Cwd }, 8) {
+	for _, d := range topN(m.groups[g], func(r *tend.Rec) string { return r.Cwd }, 8) {
 		if paths.IsDir(d.key) {
 			return d.key, g
 		}
@@ -39,7 +39,7 @@ func (m *Model) newSessionDir(r *fav.Rec) (dir, name string) {
 }
 
 // askStart: a new session in r's directory; the sessions already running there come first.
-func (m *Model) askStart(r *fav.Rec) {
+func (m *Model) askStart(r *tend.Rec) {
 	if m.view == viewLive || m.inTrash() {
 		return
 	}
@@ -51,7 +51,7 @@ func (m *Model) askStart(r *fav.Rec) {
 	if name == "" {
 		name = filepath.Base(dir)
 	}
-	r = &fav.Rec{Title: name, Cwd: dir}
+	r = &tend.Rec{Title: name, Cwd: dir}
 	ov := overlay{kind: ovStart, rec: r, focus: -1, cursor: -1, providers: startProviders(m.projectProviders(dir))}
 	for id, l := range m.live {
 		cur := m.bySession(id)
@@ -59,7 +59,7 @@ func (m *Model) askStart(r *fav.Rec) {
 		if cur != nil {
 			cwd, repo = cur.Cwd, cur.Repo
 		} else {
-			cur = &fav.Rec{Provider: l.Agent, SessionID: id, Title: l.Title, Cwd: l.Cwd}
+			cur = &tend.Rec{Provider: l.Agent, SessionID: id, Title: l.Title, Cwd: l.Cwd}
 		}
 		if paths.Nested(cwd, dir) || repo != "" && paths.Nested(repo, dir) {
 			ov.running = append(ov.running, cur)
@@ -84,14 +84,14 @@ func (m *Model) askStartFromDialog() {
 // projectProviders: providers of the sessions under dir, most used first.
 func (m *Model) projectProviders(dir string) []string {
 	n := map[string]int{}
-	for _, rs := range [][]*fav.Rec{m.store.All(), m.unfav} {
+	for _, rs := range [][]*tend.Rec{m.store.All(), m.unfav} {
 		for _, r := range rs {
 			if paths.Nested(r.Cwd, dir) {
 				n[r.Provider]++
 			}
 		}
 	}
-	out := []string{fav.ProviderClaude, fav.ProviderCodex}
+	out := []string{tend.ProviderClaude, tend.ProviderCodex}
 	sort.SliceStable(out, func(i, j int) bool { return n[out[i]] > n[out[j]] })
 	return out
 }
@@ -109,7 +109,7 @@ func startProviders(order []string) []string {
 func (m *Model) startWith(provider, prompt string) {
 	r := m.ov.rec
 	if !capture.Installed(provider) {
-		m.flash(i18n.F("resume.check.not_installed", fav.ProviderLabel(provider)))
+		m.flash(i18n.F("resume.check.not_installed", tend.ProviderLabel(provider)))
 		return
 	}
 	p := m.ov.plan
@@ -136,7 +136,7 @@ func (m *Model) switchRunning(i int) {
 func (m *Model) startGroups() []btnGroup {
 	var bs []btn
 	for i, p := range m.ov.providers {
-		bs = append(bs, btn{keyed(keyOf(inStart, providerAct(p)), fav.ProviderLabel(p)), i == 0 && m.ov.cursor < 0, func(mm *Model) { mm.startWith(p, "") }})
+		bs = append(bs, btn{keyed(keyOf(inStart, providerAct(p)), tend.ProviderLabel(p)), i == 0 && m.ov.cursor < 0, func(mm *Model) { mm.startWith(p, "") }})
 	}
 	return []btnGroup{{label: i18n.T("start.group"), bs: bs, end: []btn{cancelBtn()}}}
 }
@@ -215,13 +215,13 @@ func (m *Model) startKey(msg tea.KeyPressMsg) tea.Cmd {
 
 func providerOf(a act) string {
 	if a == actCodex {
-		return fav.ProviderCodex
+		return tend.ProviderCodex
 	}
-	return fav.ProviderClaude
+	return tend.ProviderClaude
 }
 
 func providerAct(p string) act {
-	if p == fav.ProviderCodex {
+	if p == tend.ProviderCodex {
 		return actCodex
 	}
 	return actClaude
@@ -234,5 +234,5 @@ func (m *Model) selectProvider(p string) {
 		m.focusOrPress(i)
 		return
 	}
-	m.flash(i18n.F("resume.check.not_installed", fav.ProviderLabel(p)))
+	m.flash(i18n.F("resume.check.not_installed", tend.ProviderLabel(p)))
 }

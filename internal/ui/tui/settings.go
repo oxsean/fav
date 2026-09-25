@@ -8,10 +8,10 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/oxsean/fav/internal/capture"
-	"github.com/oxsean/fav/internal/fav"
 	"github.com/oxsean/fav/internal/i18n"
 	"github.com/oxsean/fav/internal/paths"
 	"github.com/oxsean/fav/internal/render"
+	"github.com/oxsean/fav/internal/tend"
 )
 
 // Settings panel: , opens; ↑↓ picks, ←→/Enter/Space changes a value; applies immediately and writes config.json.
@@ -32,9 +32,9 @@ var turnsOpts = []int{1, 2, 3, 5, 8}
 var wheelOpts = []int{1, 2, 3, 5}
 var trashOpts = []int{7, 30, 90, 0}
 var outputOpts = []int{0, 3, 10, 30}
-var resumeIns = []string{fav.ResumeTerminal, fav.ResumeApp, fav.ResumeOrigin}
+var resumeIns = []string{tend.ResumeTerminal, tend.ResumeApp, tend.ResumeOrigin}
 
-var notifies = []string{fav.NotifyOff, fav.NotifyBell}
+var notifies = []string{tend.NotifyOff, tend.NotifyBell}
 
 func indexOf[T comparable](xs []T, x T) int {
 	for i, v := range xs {
@@ -73,7 +73,7 @@ func settingsTable() []setting {
 			func(m *Model) int { return indexOf(turnsOpts, m.cfg.MinTurns) },
 			func(m *Model, i int) tea.Cmd {
 				m.cfg.MinTurns = turnsOpts[i]
-				fav.DefaultTurns = m.cfg.MinTurns
+				tend.DefaultTurns = m.cfg.MinTurns
 				m.recount()
 				m.refresh()
 				return nil
@@ -223,6 +223,6 @@ func (m *Model) renderSettings() string {
 		})
 		body = append(body, sty.Render(fit(line, inner)))
 	}
-	body = append(body, "", dimmed.Render(render.Truncate(i18n.F("settings.file_hint", paths.Tilde(fav.ConfigPath())), inner)))
+	body = append(body, "", dimmed.Render(render.Truncate(i18n.F("settings.file_hint", paths.Tilde(tend.ConfigPath())), inner)))
 	return ovRender(body, w)
 }

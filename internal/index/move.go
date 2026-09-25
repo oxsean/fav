@@ -16,9 +16,9 @@ import (
 	"time"
 
 	"github.com/oxsean/fav/internal/capture"
-	"github.com/oxsean/fav/internal/fav"
 	"github.com/oxsean/fav/internal/fileio"
 	"github.com/oxsean/fav/internal/paths"
+	"github.com/oxsean/fav/internal/tend"
 )
 
 // MovePlan is everything a move of old (and its subdirectories) to new touches; Plan first, show it, then Apply.
@@ -26,7 +26,7 @@ type MovePlan struct {
 	Old, New string
 	Sessions []MoveSession
 	Live     []MoveSession // any live session blocks the move
-	Records  []*fav.Rec
+	Records  []*tend.Rec
 	Settings bool
 	only     [2]string // set by Only: provider, session id
 }
@@ -68,7 +68,7 @@ func ClaudeProjectDir(cwd string) string {
 func ClaudeProjectName(cwd string) string { return claudeEnc.ReplaceAllString(cwd, "-") }
 
 // PlanMove lists the files to change for each session under old; live is the set of sessions running now.
-func (idx *Index) PlanMove(store *fav.Store, live map[string]capture.Live, old, new string) (*MovePlan, error) {
+func (idx *Index) PlanMove(store *tend.Store, live map[string]capture.Live, old, new string) (*MovePlan, error) {
 	old, new = filepath.Clean(old), filepath.Clean(new)
 	if !filepath.IsAbs(old) || !filepath.IsAbs(new) {
 		return nil, errors.New("paths must be absolute")
@@ -83,7 +83,7 @@ func (idx *Index) PlanMove(store *fav.Store, live map[string]capture.Live, old, 
 		if f.SessionID == "" || !paths.Under(f.Cwd, old) {
 			continue
 		}
-		k := fav.SessionKey(f.Provider, f.SessionID)
+		k := tend.SessionKey(f.Provider, f.SessionID)
 		s := byKey[k]
 		if s == nil {
 			title := f.Title
@@ -95,7 +95,7 @@ func (idx *Index) PlanMove(store *fav.Store, live map[string]capture.Live, old, 
 			order = append(order, k)
 		}
 		s.Files = append(s.Files, f.Path)
-		if f.Provider == fav.ProviderClaude {
+		if f.Provider == tend.ProviderClaude {
 			if d := strings.TrimSuffix(f.Path, ".jsonl"); paths.IsDir(d) {
 				s.Dirs = append(s.Dirs, d)
 			}
@@ -144,7 +144,7 @@ func (p *MovePlan) Only(provider, sessionID string) {
 		return out
 	}
 	p.Sessions, p.Live = keep(p.Sessions), keep(p.Live)
-	var recs []*fav.Rec
+	var recs []*tend.Rec
 	for _, r := range p.Records {
 		if r.Provider == provider && r.SessionID == sessionID {
 			recs = append(recs, r)
@@ -154,7 +154,7 @@ func (p *MovePlan) Only(provider, sessionID string) {
 }
 
 // Replan recomputes with the latest live set; a narrowed plan stays narrowed.
-func (p *MovePlan) Replan(idx *Index, store *fav.Store, live map[string]capture.Live) (*MovePlan, error) {
+func (p *MovePlan) Replan(idx *Index, store *tend.Store, live map[string]capture.Live) (*MovePlan, error) {
 	fresh, err := idx.PlanMove(store, live, p.Old, p.New)
 	if err != nil {
 		return nil, err
@@ -166,7 +166,7 @@ func (p *MovePlan) Replan(idx *Index, store *fav.Store, live map[string]capture.
 }
 
 // ⚠️ rescanAfterRestore: a restored original may match the rewrite's size and mtime, so it is read from scratch.
-func rescanAfterRestore(e fav.TrashEntry) map[string]bool {
+func rescanAfterRestore(e tend.TrashEntry) map[string]bool {
 	force := map[string]bool{}
 	for _, f := range e.Files {
 		if f.Replaced != "" {
@@ -178,7 +178,7 @@ func rescanAfterRestore(e fav.TrashEntry) map[string]bool {
 
 // Apply rewrites cwd in each transcript into its new location (originals go to trash), moves Claude session dirs into the new
 // project dir, sweeps what is left of the old project dir (memory/ …), and rebases store records and ~/.claude.json.
-func (p *MovePlan) Apply(store *fav.Store) (MoveReport, error) {
+func (p *MovePlan) Apply(store *tend.Store) (MoveReport, error) {
 	rep := MoveReport{Touched: map[string]bool{}}
 	if len(p.Live) > 0 {
 		return rep, fmt.Errorf("%d sessions still running", len(p.Live))
@@ -192,7 +192,7 @@ func (p *MovePlan) Apply(store *fav.Store) (MoveReport, error) {
 	}
 	// a file already at the target (restored from trash and moved again) aborts the whole move; never overwritten
 	for _, s := range p.Sessions {
-		if s.Provider != fav.ProviderClaude {
+		if s.Provider != tend.ProviderClaude {
 			continue
 		}
 		for _, f := range append(append([]string{}, s.Files...), s.Dirs...) {
@@ -210,14 +210,14 @@ func (p *MovePlan) Apply(store *fav.Store) (MoveReport, error) {
 		}
 		// Originals go to trash first and the rewrite reads from there: Codex rewrites in place and would clobber the original.
 		// The trash entry records the rewritten files, the moved dirs and the pre-move record so the whole move can be undone.
-		e := fav.TrashEntry{Provider: s.Provider, SessionID: s.SessionID, Title: s.Title + " (moved " + p.Old + " → " + p.New + ")", Cwd: s.Cwd}
+		e := tend.TrashEntry{Provider: s.Provider, SessionID: s.SessionID, Title: s.Title + " (moved " + p.Old + " → " + p.New + ")", Cwd: s.Cwd}
 		for _, r := range p.Records {
 			if r.Provider == s.Provider && r.SessionID == s.SessionID {
 				cp := *r
 				e.Record = &cp
 			}
 		}
-		e, err := fav.MoveToTrash(e, s.Files)
+		e, err := tend.MoveToTrash(e, s.Files)
 		if err != nil {
 			return rep, err
 		}
@@ -225,14 +225,14 @@ func (p *MovePlan) Apply(store *fav.Store) (MoveReport, error) {
 		var moved []string
 		for i, f := range e.Files {
 			dst := f.From
-			if s.Provider == fav.ProviderClaude {
+			if s.Provider == tend.ProviderClaude {
 				dst = filepath.Join(ClaudeProjectDir(s.NewCwd), filepath.Base(f.From))
 				oldDirs[filepath.Dir(f.From)] = true
 			}
 			if err := rewriteCwd(f.To, dst, p.Old, p.New); err != nil {
 				return rep, fmt.Errorf("%s: %w", f.From, err)
 			}
-			e.Files[i].Replaced, e.Files[i].Stamp = dst, fav.FileStamp(dst)
+			e.Files[i].Replaced, e.Files[i].Stamp = dst, tend.FileStamp(dst)
 			moved = append(moved, dst)
 			rep.Touched[dst] = true
 			rep.Files++
@@ -245,10 +245,10 @@ func (p *MovePlan) Apply(store *fav.Store) (MoveReport, error) {
 			if err := os.Rename(d, dst); err != nil {
 				return rep, fmt.Errorf("%s: %w", d, err)
 			}
-			e.Files = append(e.Files, fav.Moved{From: d, To: dst, Relocated: true})
+			e.Files = append(e.Files, tend.Moved{From: d, To: dst, Relocated: true})
 			rep.Files++
 		}
-		if err := fav.SaveTrashEntry(e); err != nil {
+		if err := tend.SaveTrashEntry(e); err != nil {
 			return rep, err
 		}
 		rep.Sessions++
@@ -291,7 +291,7 @@ func (p *MovePlan) Apply(store *fav.Store) (MoveReport, error) {
 // the project dir name is a one-way encoding; the cwd is recovered from the plan
 func decodeHint(dir string, p *MovePlan) string {
 	for _, s := range p.Sessions {
-		if s.Provider == fav.ProviderClaude && len(s.Files) > 0 && filepath.Dir(s.Files[0]) == dir {
+		if s.Provider == tend.ProviderClaude && len(s.Files) > 0 && filepath.Dir(s.Files[0]) == dir {
 			return s.Cwd
 		}
 	}
@@ -458,7 +458,7 @@ type Missing struct {
 // FindMissing lists cwds from sessions / records that no longer exist and looks for the basename under the parents of
 // existing cwds and next to the old dir; a recorded remote must match origin; a removed worktree goes to its main checkout.
 // only limits it to one dir (glob + git exec once).
-func (idx *Index) FindMissing(store *fav.Store, only string) []Missing {
+func (idx *Index) FindMissing(store *tend.Store, only string) []Missing {
 	dead := map[string]*Missing{}
 	parents := map[string]bool{}
 	exists := map[string]bool{} // hundreds of sessions share a cwd: stat once

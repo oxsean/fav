@@ -8,16 +8,16 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/oxsean/fav/internal/capture"
-	"github.com/oxsean/fav/internal/fav"
 	"github.com/oxsean/fav/internal/fulltext"
 	"github.com/oxsean/fav/internal/i18n"
 	"github.com/oxsean/fav/internal/paths"
 	"github.com/oxsean/fav/internal/render"
+	"github.com/oxsean/fav/internal/tend"
 )
 
 // hitList: → on a message-search result lists every hit of that session in the left pane; the right pane follows the selection.
 type hitList struct {
-	rec      *fav.Rec
+	rec      *tend.Rec
 	key      string // rec.Key(): records are rebuilt on a store reload
 	q        string
 	items    []fulltext.Hit
@@ -55,7 +55,7 @@ func (m *Model) openHits(kw string) tea.Cmd {
 		m.jumpHit(0)
 		return nil
 	}
-	paths := fulltext.Cands([]*fav.Rec{r}, m.idx.PathsBySession())[0].Paths
+	paths := fulltext.Cands([]*tend.Rec{r}, m.idx.PathsBySession())[0].Paths
 	var pin fulltext.Hit
 	if x, ok := m.msgHit(r); ok {
 		pin = fulltext.Hit{Path: x.Path, Off: x.Off}

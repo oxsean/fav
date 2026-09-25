@@ -8,14 +8,14 @@ import (
 	"testing"
 
 	"github.com/oxsean/fav/internal/capture"
-	"github.com/oxsean/fav/internal/fav"
+	"github.com/oxsean/fav/internal/tend"
 	"github.com/oxsean/fav/internal/testkit"
 )
 
 func TestMoveProject(t *testing.T) {
 	testkit.PosixOnly(t)
 	claude, codex := setup(t)
-	t.Setenv("FAV_HOME", t.TempDir())
+	t.Setenv("TEND_HOME", t.TempDir())
 	old, new := "/Users/me/work/webapp", "/Users/me/dev/webapp"
 	enc := ClaudeProjectDir
 
@@ -38,8 +38,8 @@ func TestMoveProject(t *testing.T) {
 
 	idx, _ := OpenAt(filepath.Join(t.TempDir(), "sessions.jsonl"))
 	idx, _ = idx.Refresh()
-	store, _ := fav.OpenAt(filepath.Join(t.TempDir(), "records.jsonl"))
-	rec := &fav.Rec{ID: "r1", Provider: fav.ProviderClaude, SessionID: "aaaa", Title: "登录", Cwd: old, GitRoot: old, Project: "webapp", TranscriptPath: a}
+	store, _ := tend.OpenAt(filepath.Join(t.TempDir(), "records.jsonl"))
+	rec := &tend.Rec{ID: "r1", Provider: tend.ProviderClaude, SessionID: "aaaa", Title: "登录", Cwd: old, GitRoot: old, Project: "webapp", TranscriptPath: a}
 	store.Put(rec)
 
 	plan, err := idx.PlanMove(store, map[string]capture.Live{"cccc": {}}, old, new)
@@ -113,7 +113,7 @@ func TestMoveProject(t *testing.T) {
 	if hits, _ := filepath.Glob(filepath.Join(claude, ".claude.json.bak-*")); len(hits) != 1 {
 		t.Fatal("改 .claude.json 前应留备份")
 	}
-	entries, _ := fav.LoadTrash()
+	entries, _ := tend.LoadTrash()
 	if len(entries) != 3 {
 		t.Fatalf("原件应登记进回收站：%d", len(entries))
 	}
@@ -133,7 +133,7 @@ func TestMoveProject(t *testing.T) {
 	}
 
 	// restoring a moved entry = undo: rewritten files deleted, sub-agent dir moved back, record as before
-	e, err := fav.RestoreTrash(fav.ProviderClaude, "aaaa")
+	e, err := tend.RestoreTrash(tend.ProviderClaude, "aaaa")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -149,7 +149,7 @@ func TestMoveProject(t *testing.T) {
 	if e.Record == nil || e.Record.Cwd != old || e.Record.TranscriptPath != a {
 		t.Fatalf("条目里应带搬前的记录快照：%+v", e.Record)
 	}
-	if _, err := fav.RestoreTrash(fav.ProviderCodex, "c1c1"); err != nil {
+	if _, err := tend.RestoreTrash(tend.ProviderCodex, "c1c1"); err != nil {
 		t.Fatal(err)
 	}
 	if b, _ := os.ReadFile(c1); !strings.Contains(string(b), `"cwd":"/Users/me/work/webapp"`) {
@@ -161,13 +161,13 @@ func TestMoveProject(t *testing.T) {
 func TestRescanAfterRestore(t *testing.T) {
 	testkit.PosixOnly(t)
 	_, codex := setup(t)
-	t.Setenv("FAV_HOME", t.TempDir())
+	t.Setenv("TEND_HOME", t.TempDir())
 	old, new := "/Users/me/work/p", "/Users/me/work/q" // same length: size unchanged by the rewrite
 	c1 := rolloutPath(codex, 11, "c1c1")
 	write(t, c1, codexLines("c1c1", old, "codex_cli_rs", "活"))
 	idx, _ := OpenAt(filepath.Join(t.TempDir(), "sessions.jsonl"))
 	idx, _ = idx.Refresh()
-	store, _ := fav.OpenAt(filepath.Join(t.TempDir(), "records.jsonl"))
+	store, _ := tend.OpenAt(filepath.Join(t.TempDir(), "records.jsonl"))
 	plan, _ := idx.PlanMove(store, nil, old, new)
 	rep, err := plan.Apply(store)
 	if err != nil {
@@ -177,7 +177,7 @@ func TestRescanAfterRestore(t *testing.T) {
 	if idx.files[c1].Cwd != new {
 		t.Fatalf("搬后索引应是新目录：%q", idx.files[c1].Cwd)
 	}
-	e, err := fav.RestoreTrash(fav.ProviderCodex, "c1c1")
+	e, err := tend.RestoreTrash(tend.ProviderCodex, "c1c1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -193,10 +193,10 @@ func TestRescanAfterRestore(t *testing.T) {
 func TestPlanMoveSeesWorktreeSettings(t *testing.T) {
 	testkit.PosixOnly(t)
 	claude, _ := setup(t)
-	t.Setenv("FAV_HOME", t.TempDir())
+	t.Setenv("TEND_HOME", t.TempDir())
 	write(t, filepath.Join(claude, ".claude.json"), `{"projects":{"/Users/me/work/p/wt/feat":{}}}`)
 	idx, _ := OpenAt(filepath.Join(t.TempDir(), "sessions.jsonl"))
-	store, _ := fav.OpenAt(filepath.Join(t.TempDir(), "records.jsonl"))
+	store, _ := tend.OpenAt(filepath.Join(t.TempDir(), "records.jsonl"))
 	plan, err := idx.PlanMove(store, nil, "/Users/me/work/p", "/Users/me/dev/p")
 	if err != nil || !plan.Settings {
 		t.Fatalf("只有子目录条目也算：%v %+v", err, plan)
@@ -206,14 +206,14 @@ func TestPlanMoveSeesWorktreeSettings(t *testing.T) {
 func TestMoveSweepsEmptyProjectDir(t *testing.T) {
 	testkit.PosixOnly(t)
 	setup(t)
-	t.Setenv("FAV_HOME", t.TempDir())
+	t.Setenv("TEND_HOME", t.TempDir())
 	old, new := "/Users/me/work/p", "/Users/me/dev/p"
 	dir := ClaudeProjectDir(old)
 	write(t, filepath.Join(dir, "aaaa.jsonl"), strings.ReplaceAll(claudeLines("活", "继续"), "/Users/me/work/webapp", old))
 	write(t, filepath.Join(dir, "memory", "MEMORY.md"), "# m\n")
 	idx, _ := OpenAt(filepath.Join(t.TempDir(), "sessions.jsonl"))
 	idx, _ = idx.Refresh()
-	store, _ := fav.OpenAt(filepath.Join(t.TempDir(), "records.jsonl"))
+	store, _ := tend.OpenAt(filepath.Join(t.TempDir(), "records.jsonl"))
 	plan, err := idx.PlanMove(store, nil, old, new)
 	if err != nil || len(plan.Sessions) != 1 {
 		t.Fatalf("%v %+v", err, plan)
@@ -233,15 +233,15 @@ func TestMoveSweepsEmptyProjectDir(t *testing.T) {
 func TestMoveRefusesDestinationConflictAndGitRootOnlyRecord(t *testing.T) {
 	testkit.PosixOnly(t)
 	setup(t)
-	t.Setenv("FAV_HOME", t.TempDir())
+	t.Setenv("TEND_HOME", t.TempDir())
 	old, new := "/Users/me/work/p", "/Users/me/dev/p"
 	enc := ClaudeProjectDir
 	write(t, filepath.Join(enc(old), "aaaa.jsonl"), strings.ReplaceAll(claudeLines("活", "继续"), "/Users/me/work/webapp", old))
 	write(t, filepath.Join(enc(new), "aaaa.jsonl"), "{}\n") // target already has a file of that name
 	idx, _ := OpenAt(filepath.Join(t.TempDir(), "sessions.jsonl"))
 	idx, _ = idx.Refresh()
-	store, _ := fav.OpenAt(filepath.Join(t.TempDir(), "records.jsonl"))
-	store.Put(&fav.Rec{ID: "r", Provider: fav.ProviderClaude, SessionID: "zzzz", Title: "只有 git_root 在下面", Cwd: "/p", GitRoot: old})
+	store, _ := tend.OpenAt(filepath.Join(t.TempDir(), "records.jsonl"))
+	store.Put(&tend.Rec{ID: "r", Provider: tend.ProviderClaude, SessionID: "zzzz", Title: "只有 git_root 在下面", Cwd: "/p", GitRoot: old})
 	plan, err := idx.PlanMove(store, nil, old, new)
 	if err != nil {
 		t.Fatal(err)
@@ -265,20 +265,20 @@ func TestMoveRefusesDestinationConflictAndGitRootOnlyRecord(t *testing.T) {
 func TestRestoreRefusedAfterUse(t *testing.T) {
 	testkit.PosixOnly(t)
 	setup(t)
-	t.Setenv("FAV_HOME", t.TempDir())
+	t.Setenv("TEND_HOME", t.TempDir())
 	old, new := "/Users/me/work/p", "/Users/me/dev/p"
 	enc := ClaudeProjectDir
 	write(t, filepath.Join(enc(old), "aaaa.jsonl"), strings.ReplaceAll(claudeLines("活", "继续"), "/Users/me/work/webapp", old))
 	idx, _ := OpenAt(filepath.Join(t.TempDir(), "sessions.jsonl"))
 	idx, _ = idx.Refresh()
-	store, _ := fav.OpenAt(filepath.Join(t.TempDir(), "records.jsonl"))
+	store, _ := tend.OpenAt(filepath.Join(t.TempDir(), "records.jsonl"))
 	plan, _ := idx.PlanMove(store, nil, old, new)
 	if _, err := plan.Apply(store); err != nil {
 		t.Fatal(err)
 	}
 	moved := filepath.Join(enc(new), "aaaa.jsonl")
 	appendTo(t, moved, "{}\n") // used again after the move
-	if _, err := fav.RestoreTrash(fav.ProviderClaude, "aaaa"); err == nil {
+	if _, err := tend.RestoreTrash(tend.ProviderClaude, "aaaa"); err == nil {
 		t.Fatal("搬后又用过的会话不能被回收站里的原件盖掉")
 	}
 	if _, err := os.Stat(moved); err != nil {
@@ -289,7 +289,7 @@ func TestRestoreRefusedAfterUse(t *testing.T) {
 func TestRestoreRetryAndPin(t *testing.T) {
 	testkit.PosixOnly(t)
 	_, codex := setup(t)
-	t.Setenv("FAV_HOME", t.TempDir())
+	t.Setenv("TEND_HOME", t.TempDir())
 	old, new := "/Users/me/work/p", "/Users/me/dev/p"
 	enc := ClaudeProjectDir
 	a := filepath.Join(enc(old), "aaaa.jsonl")
@@ -302,8 +302,8 @@ func TestRestoreRetryAndPin(t *testing.T) {
 	os.Link(a, pin)
 	idx, _ := OpenAt(filepath.Join(t.TempDir(), "sessions.jsonl"))
 	idx, _ = idx.Refresh()
-	store, _ := fav.OpenAt(filepath.Join(t.TempDir(), "records.jsonl"))
-	store.Put(&fav.Rec{ID: "r1", Provider: fav.ProviderClaude, SessionID: "aaaa", Title: "钉住的", Cwd: old, TranscriptPath: a, PinnedPath: pin})
+	store, _ := tend.OpenAt(filepath.Join(t.TempDir(), "records.jsonl"))
+	store.Put(&tend.Rec{ID: "r1", Provider: tend.ProviderClaude, SessionID: "aaaa", Title: "钉住的", Cwd: old, TranscriptPath: a, PinnedPath: pin})
 	plan, _ := idx.PlanMove(store, nil, old, new)
 	if _, err := plan.Apply(store); err != nil {
 		t.Fatal(err)
@@ -311,11 +311,11 @@ func TestRestoreRetryAndPin(t *testing.T) {
 
 	// two rollouts of one Codex session, only the second changed after the move: refuse entirely, first original untouched
 	appendTo(t, c2, "{}\n")
-	if _, err := fav.RestoreTrash(fav.ProviderCodex, "c1c1"); err == nil {
+	if _, err := tend.RestoreTrash(tend.ProviderCodex, "c1c1"); err == nil {
 		t.Fatal("有文件搬后用过应拒绝")
 	}
-	entries, _ := fav.LoadTrash()
-	var ce fav.TrashEntry
+	entries, _ := tend.LoadTrash()
+	var ce tend.TrashEntry
 	for _, e := range entries {
 		if e.SessionID == "c1c1" {
 			ce = e
@@ -327,12 +327,12 @@ func TestRestoreRetryAndPin(t *testing.T) {
 		}
 	}
 	// detected even within a second of the move (fingerprint, not time)
-	if _, err := fav.RestoreTrash(fav.ProviderCodex, "c1c1"); err == nil {
+	if _, err := tend.RestoreTrash(tend.ProviderCodex, "c1c1"); err == nil {
 		t.Fatal("再来一次还是拒绝")
 	}
 
 	// undoing the Claude entry relinks the pin to the original
-	e, err := fav.RestoreTrash(fav.ProviderClaude, "aaaa")
+	e, err := tend.RestoreTrash(tend.ProviderClaude, "aaaa")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -349,21 +349,21 @@ func TestRestoreRetryAndPin(t *testing.T) {
 func TestRestoreIdempotentAfterPartialFailure(t *testing.T) {
 	testkit.PosixOnly(t)
 	_, codex := setup(t)
-	t.Setenv("FAV_HOME", t.TempDir())
+	t.Setenv("TEND_HOME", t.TempDir())
 	old, new := "/Users/me/work/p", "/Users/me/dev/p"
 	c1 := rolloutPath(codex, 11, "c1c1")
 	write(t, c1, codexLines("c1c1", old, "codex_cli_rs", "活"))
 	idx, _ := OpenAt(filepath.Join(t.TempDir(), "sessions.jsonl"))
 	idx, _ = idx.Refresh()
-	store, _ := fav.OpenAt(filepath.Join(t.TempDir(), "records.jsonl"))
+	store, _ := tend.OpenAt(filepath.Join(t.TempDir(), "records.jsonl"))
 	plan, _ := idx.PlanMove(store, nil, old, new)
 	if _, err := plan.Apply(store); err != nil {
 		t.Fatal(err)
 	}
 	// simulate a half-finished restore: the original is back but the entry remains
-	entries, _ := fav.LoadTrash()
+	entries, _ := tend.LoadTrash()
 	os.Rename(entries[0].Files[0].To, c1)
-	if _, err := fav.RestoreTrash(fav.ProviderCodex, "c1c1"); err != nil {
+	if _, err := tend.RestoreTrash(tend.ProviderCodex, "c1c1"); err != nil {
 		t.Fatal(err)
 	}
 	if b, _ := os.ReadFile(c1); !strings.Contains(string(b), old) {

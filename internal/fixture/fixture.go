@@ -1,5 +1,5 @@
 // Package fixture writes a small synthetic machine — Claude and Codex transcripts, a favorites store, project
-// directories — covering the session shapes fav handles, with paths native to the OS it runs on.
+// directories — covering the session shapes tend handles, with paths native to the OS it runs on.
 package fixture
 
 import (
@@ -12,12 +12,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/oxsean/fav/internal/fav"
 	"github.com/oxsean/fav/internal/index"
 	"github.com/oxsean/fav/internal/paths"
+	"github.com/oxsean/fav/internal/tend"
 )
 
-// Session is one scenario; Listed: shown by `fav sessions status:all`; Agent: a one-shot or scratch run.
+// Session is one scenario; Listed: shown by `tend sessions status:all`; Agent: a one-shot or scratch run.
 type Session struct {
 	Name, Provider, ID, Cwd, Path, Title string
 	Listed, Agent, Favorite              bool
@@ -29,7 +29,7 @@ type Dataset struct {
 }
 
 func (d *Dataset) Env() []string {
-	return append([]string{"TEND_HOME=" + d.Home, "FAV_HOME=" + d.Home, "CLAUDE_CONFIG_DIR=" + d.Claude, "CODEX_HOME=" + d.Codex}, paths.TempEnv(d.Tmp)...)
+	return append([]string{"TEND_HOME=" + d.Home, "CLAUDE_CONFIG_DIR=" + d.Claude, "CODEX_HOME=" + d.Codex}, paths.TempEnv(d.Tmp)...)
 }
 
 func (d *Dataset) Get(name string) Session {
@@ -48,7 +48,7 @@ type builder struct {
 	now   time.Time
 	files []*transcript
 	ends  map[string]*transcript
-	recs  []*fav.Rec
+	recs  []*tend.Rec
 	n     int
 }
 
@@ -148,7 +148,7 @@ func (b *builder) claude(name, cwd, branch string, ago time.Duration) *claudeSes
 	s.t = b.now.Add(-ago)
 	s.path = filepath.Join(b.Claude, "projects", index.ClaudeProjectName(cwd), s.id+".jsonl")
 	b.files, b.ends[name] = append(b.files, &s.transcript), &s.transcript
-	b.Sessions = append(b.Sessions, Session{Name: name, Provider: fav.ProviderClaude, ID: s.id, Cwd: cwd, Path: s.path, Listed: true})
+	b.Sessions = append(b.Sessions, Session{Name: name, Provider: tend.ProviderClaude, ID: s.id, Cwd: cwd, Path: s.path, Listed: true})
 	return s
 }
 
@@ -157,7 +157,7 @@ func (b *builder) codex(name, cwd string, ago time.Duration, archived bool) *cod
 	s.t = b.now.Add(-ago)
 	b.files, b.ends[name] = append(b.files, &s.transcript), &s.transcript
 	s.path = b.rollout(s.id, s.t, archived)
-	b.Sessions = append(b.Sessions, Session{Name: name, Provider: fav.ProviderCodex, ID: s.id, Cwd: cwd, Path: s.path, Listed: true})
+	b.Sessions = append(b.Sessions, Session{Name: name, Provider: tend.ProviderCodex, ID: s.id, Cwd: cwd, Path: s.path, Listed: true})
 	return s
 }
 
@@ -178,12 +178,12 @@ func (b *builder) set(name string, f func(*Session)) {
 	}
 }
 
-// favorite records the session as /fav would at the end of its last turn.
+// favorite records the session as /tend would at the end of its last turn.
 func (b *builder) favorite(name, title, summary, status string, tags []string, archived bool) {
 	b.set(name, func(s *Session) { s.Favorite, s.Title = true, title })
 	s := b.Get(name)
 	at := b.ends[name].t.Add(time.Minute)
-	r := &fav.Rec{ID: fmt.Sprintf("fx%06d", len(b.recs)+1), Schema: fav.Schema, Provider: s.Provider, SessionID: s.ID, Title: title,
+	r := &tend.Rec{ID: fmt.Sprintf("fx%06d", len(b.recs)+1), Schema: tend.Schema, Provider: s.Provider, SessionID: s.ID, Title: title,
 		Summary: summary, Project: filepath.Base(s.Cwd), Tags: tags, Status: status, Cwd: s.Cwd, TranscriptPath: s.Path,
 		FavoritedAt: &at, UpdatedAt: at}
 	if archived {
@@ -220,7 +220,7 @@ func (b *builder) claudeSessions() {
 	s.reply("测试全部通过，文档已补到 docs/oauth.md。")
 	s.system("away_summary", "修好了 OAuth 回调 state 双重解码导致的 400，补了文档，测试通过。")
 	s.mark("custom-title", "customTitle", "登录页 OAuth 回调排障")
-	b.favorite("oauth", "登录页 OAuth 回调排障", "state 双重解码导致 400，已修复并补文档", fav.StatusDoing, []string{"oauth", "login"}, false)
+	b.favorite("oauth", "登录页 OAuth 回调排障", "state 双重解码导致 400，已修复并补文档", tend.StatusDoing, []string{"oauth", "login"}, false)
 
 	big := b.claude("pagination", b.dir("notes-api"), "fix/cursor-drift", d)
 	big.user("Cursor pagination returns duplicate rows on page 3, find out why")
@@ -235,7 +235,7 @@ func (b *builder) claudeSessions() {
 		"The file has been updated.")
 	big.reply("The cursor only encoded the id; rows sharing a timestamp drifted. It now encodes (ts, id).")
 	big.mark("ai-title", "aiTitle", "Cursor pagination drift")
-	b.favorite("pagination", "Cursor pagination drift", "Cursor encoded only the id; fixed to (ts, id)", fav.StatusTodo, []string{"pagination", "go"}, false)
+	b.favorite("pagination", "Cursor pagination drift", "Cursor encoded only the id; fixed to (ts, id)", tend.StatusTodo, []string{"pagination", "go"}, false)
 
 	cjk := b.claude("cjk-dir", b.dir("中文项目"), "main", 3*d)
 	cjk.user("把 README 里的安装步骤翻译成中文，保留命令原样")
@@ -282,7 +282,7 @@ func (b *builder) claudeSessions() {
 	quote.user(`title with "quotes" and it's an apostrophe; also $HOME and %PATH%`)
 	quote.reply("Noted.")
 	quote.mark("custom-title", "customTitle", `it's "quoted" & 50%`)
-	b.favorite("quoted", `it's "quoted" & 50%`, "resume command quoting", fav.StatusTodo, []string{"quoting"}, false)
+	b.favorite("quoted", `it's "quoted" & 50%`, "resume command quoting", tend.StatusTodo, []string{"quoting"}, false)
 
 	gone := b.claude("missing-dir", b.dir("legacy-app"), "main", 4*d)
 	gone.user("升级 legacy-app 的依赖")
@@ -300,7 +300,7 @@ func (b *builder) claudeSessions() {
 	arch := b.claude("archived", b.dir("webapp"), "main", 40*d)
 	arch.user("初始化 webapp 的 CI 流水线")
 	arch.reply("CI 已配置：lint、test、build 三个阶段。")
-	b.favorite("archived", "初始化 webapp CI", "三个阶段的 CI", fav.StatusDone, []string{"ci"}, true)
+	b.favorite("archived", "初始化 webapp CI", "三个阶段的 CI", tend.StatusDone, []string{"ci"}, true)
 }
 
 func (b *builder) codexSessions() {
@@ -318,7 +318,7 @@ func (b *builder) codexSessions() {
 	cli.exec("npm run build", "built in 2.1s")
 	cli.reply("build 正常。")
 	cli.done("lint 报错已修复，build 通过。")
-	b.favorite("codex-cli", "修 webapp CI", "lint 未使用变量", fav.StatusTodo, []string{"ci", "lint"}, false)
+	b.favorite("codex-cli", "修 webapp CI", "lint 未使用变量", tend.StatusTodo, []string{"ci", "lint"}, false)
 
 	app := b.codex("codex-desktop", b.dir("notes-api"), d+3*h, false)
 	app.desktop = true
@@ -374,7 +374,7 @@ func (b *builder) codexSessions() {
 	lost.meta("codex_cli_rs", "", fmt.Sprintf(remote, "legacy-app"))
 	lost.say("legacy-app 的 Dockerfile 换成多阶段构建")
 	lost.reply("已改为多阶段构建，镜像小了 60%。")
-	b.favorite("codex-missing-dir", "legacy-app 多阶段构建", "项目目录已被移走", fav.StatusDone, []string{"docker"}, false)
+	b.favorite("codex-missing-dir", "legacy-app 多阶段构建", "项目目录已被移走", tend.StatusDone, []string{"docker"}, false)
 	b.recs[len(b.recs)-1].GitRemote = strings.TrimSuffix(fmt.Sprintf(remote, "legacy-app"), ".git")
 }
 

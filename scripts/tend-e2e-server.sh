@@ -1,5 +1,5 @@
 #!/bin/sh
-# End to end in mode 2: `fav server` in the fav-linux container on mba (a forwarder on mba carries mba's tailnet
+# End to end in mode 2: `tend server` in the tend-linux container on mba (a forwarder on mba carries mba's tailnet
 # address to it), nodes on mba, the container itself and win dialing in with tokens, and this Mac as a client.
 # ⚠️ The tailnet ACL lets lg-win open no connection to mba: win dials through `ssh -R` from here to its loopback. WSL
 # (NAT) cannot reach that loopback, so it is left out unless named (`wsl` needs lg-win to reach mba:$port directly).
@@ -9,8 +9,8 @@
 set -u
 cd "$(git rev-parse --show-toplevel)" || exit 1
 id=tend-e2e-srv-$(date +%Y%m%d-%H%M%S)
-root=$HOME/.cache/fav-test/e2e/$id
-fav=${FAV_BIN:-$HOME/.local/bin/fav}
+root=$HOME/.cache/tend-test/e2e/$id
+tend=${TEND_BIN:-$HOME/.local/bin/tend}
 tailnet=100.101.8.10
 port=7788
 url=ws://$tailnet:$port
@@ -20,17 +20,17 @@ r=/tmp/$id
 mkdir -p "$root/home" "$root/claude" "$root/codex" "$root/bin"
 printf '#!/bin/sh\nexit 1\n' >"$root/bin/herdr" && chmod +x "$root/bin/herdr"
 export TEND_HOME=$root/home CLAUDE_CONFIG_DIR=$root/claude CODEX_HOME=$root/codex PATH=$root/bin:$PATH
-unset HERDR_SOCKET HERDR_PANE_ID HERDR_WORKSPACE_ID FAV_HOME
+unset HERDR_SOCKET HERDR_PANE_ID HERDR_WORKSPACE_ID
 pids=""
 bg() { "$@" </dev/null >>"$root/bg.log" 2>&1 & pids="$pids $!"; }
 fail=0
 check() { if [ "$2" = "$3" ]; then echo "ok   $1"; else echo "FAIL $1: got '$2', want '$3'"; fail=$((fail + 1)); fi; }
 envs() { printf 'TEND_HOME=%s/%s/home CLAUDE_CONFIG_DIR=%s/%s/claude CODEX_HOME=%s/%s/codex' "$r" "$1" "$r" "$1" "$r" "$1"; }
-cexec() { ssh mba "$docker exec -i fav-linux $*"; }
+cexec() { ssh mba "$docker exec -i tend-linux $*"; }
 
 server_home=$r/server
 cexec mkdir -p "$server_home"
-token() { cexec env TEND_HOME=$server_home /root/.local/bin/fav server token add "$@" 2>/dev/null; }
+token() { cexec env TEND_HOME=$server_home /root/.local/bin/tend server token add "$@" 2>/dev/null; }
 [ $# -gt 0 ] || set -- mba linux win
 nodes=$#
 for h in "$@"; do eval "tok_$h=\$(token --node $h)"; done
@@ -40,13 +40,13 @@ tok_me=$(token --client mac)
 # ckill PATTERN: the container has no pkill / kill binary; the shell's kill and /proc do
 ckill() { # the first character in brackets keeps the pattern from matching this shell's own command line
 	pat="[$(printf %s "$1" | cut -c1)]$(printf %s "$1" | cut -c2-)"
-	ssh mba "$docker exec fav-linux sh -c 'for p in /proc/[0-9]*; do tr \"\\000\" \" \" <\$p/cmdline 2>/dev/null | grep -q -- \"$pat\" && kill \${p#/proc/}; done; true'"
+	ssh mba "$docker exec tend-linux sh -c 'for p in /proc/[0-9]*; do tr \"\\000\" \" \" <\$p/cmdline 2>/dev/null | grep -q -- \"$pat\" && kill \${p#/proc/}; done; true'"
 }
 # the server records its pid in its throwaway home: only this test's server is ever stopped
-start_server() { bg ssh mba "$docker exec -i fav-linux sh -c 'echo \$\$ >$server_home/pid; exec env TEND_HOME=$server_home /root/.local/bin/fav server --listen 0.0.0.0:$port --plain'"; }
-stop_server() { ssh mba "$docker exec fav-linux sh -c 'kill \$(cat $server_home/pid)'"; }
+start_server() { bg ssh mba "$docker exec -i tend-linux sh -c 'echo \$\$ >$server_home/pid; exec env TEND_HOME=$server_home /root/.local/bin/tend server --listen 0.0.0.0:$port --plain'"; }
+stop_server() { ssh mba "$docker exec tend-linux sh -c 'kill \$(cat $server_home/pid)'"; }
 start_server
-ctr_ip=$(ssh mba "$docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' fav-linux")
+ctr_ip=$(ssh mba "$docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' tend-linux")
 cat >"$root/fwd.py" <<'EOF'
 import socket, sys, threading
 lh, lp, th, tp = sys.argv[1], int(sys.argv[2]), sys.argv[3], int(sys.argv[4])
@@ -86,7 +86,7 @@ check "healthz through the tailnet" "$(curl -s -m 5 http://$tailnet:$port/health
 check "a wrong token gets 401" "$(curl -s -m 5 -o /dev/null -w '%{http_code}' -H 'Authorization: Bearer tend_nope' http://$tailnet:$port/client)" 401
 
 # nodes: a throwaway home with node.allow_dirs, the token in a file
-posix_node() { # name, how to run a command there, fav path there, server url seen from there, token
+posix_node() { # name, how to run a command there, tend path there, server url seen from there, token
 	name=$1 pre=$2 bin=$3 u=$4 tok=$5
 	printf '%s' "$tok" >"$root/token.$name"
 	printf '{"node":{"allow_dirs":["%s/%s"]}}' "$r" "$name" >"$root/config.$name.json"
@@ -97,33 +97,33 @@ posix_node() { # name, how to run a command there, fav path there, server url se
 }
 has() { for x in $hosts; do [ "$x" = "$1" ] && return 0; done; return 1; }
 hosts="$*"
-has mba && posix_node mba "ssh mba" /Users/ozn/.local/bin/fav "$url" "$tok_mba"
-has linux && posix_node linux "ssh mba $docker exec -i fav-linux" /root/.local/bin/fav "ws://127.0.0.1:$port" "$tok_linux"
-has wsl && posix_node wsl "ssh lg-win wsl -d Debian -e" /home/admin/.local/bin/fav "$url" "$tok_wsl"
+has mba && posix_node mba "ssh mba" /Users/ozn/.local/bin/tend "$url" "$tok_mba"
+has linux && posix_node linux "ssh mba $docker exec -i tend-linux" /root/.local/bin/tend "ws://127.0.0.1:$port" "$tok_linux"
+has wsl && posix_node wsl "ssh lg-win wsl -d Debian -e" /home/admin/.local/bin/tend "$url" "$tok_wsl"
 w="$winhome\\$id\\win"
 if has win; then
-printf '@echo off\r\nset "TEND_HOME=%s\\home"\r\nset "CLAUDE_CONFIG_DIR=%s\\claude"\r\nset "CODEX_HOME=%s\\codex"\r\n"%s\\.local\\bin\\fav.exe" %%*\r\n' "$w" "$w" "$w" "$winhome" >"$root/fav.cmd"
+printf '@echo off\r\nset "TEND_HOME=%s\\home"\r\nset "CLAUDE_CONFIG_DIR=%s\\claude"\r\nset "CODEX_HOME=%s\\codex"\r\n"%s\\.local\\bin\\tend.exe" %%*\r\n' "$w" "$w" "$w" "$winhome" >"$root/tend.cmd"
 printf '%s' "$tok_win" >"$root/token.win"
 wj=$(printf '%s' "$w" | sed 's/\\/\\\\/g')
 printf '{"node":{"allow_dirs":["%s"]}}' "$wj" >"$root/config.win.json"
 ssh lg-win "mkdir $w\\home & mkdir $w\\proj" >/dev/null 2>&1
-scp -q "$root/fav.cmd" "lg-win:$id/win/fav.cmd" && scp -q "$root/token.win" "lg-win:$id/win/token" && scp -q "$root/config.win.json" "lg-win:$id/win/home/config.json"
+scp -q "$root/tend.cmd" "lg-win:$id/win/tend.cmd" && scp -q "$root/token.win" "lg-win:$id/win/token" && scp -q "$root/config.win.json" "lg-win:$id/win/home/config.json"
 bg ssh -N -R "7789:$tailnet:$port" lg-win
-bg ssh lg-win "$w\\fav.cmd node --connect ws://127.0.0.1:7789 --token-file $w\\token"
+bg ssh lg-win "$w\\tend.cmd node --connect ws://127.0.0.1:7789 --token-file $w\\token"
 fi
 
 printf '{"coordinator": {"url": "%s", "token_file": "%s/client-token"}}\n' "$url" "$root" >"$TEND_HOME/config.json"
 printf '%s\n' "$tok_me" >"$root/client-token"
 
 all_connected() {
-	"$fav" machine list --json 2>/dev/null | python3 -c "import json,sys
+	"$tend" machine list --json 2>/dev/null | python3 -c "import json,sys
 try: print(sum(1 for m in json.load(sys.stdin) if m['state']=='connected'))
 except ValueError: print(0)"
 }
 wait_connected() {
 	deadline=$(($(date +%s) + $1))
 	until [ "$(all_connected)" = "$nodes" ] || [ "$(date +%s)" -gt "$deadline" ]; do sleep 2; done
-	"$fav" machine list
+	"$tend" machine list
 }
 wait_connected 60
 check "$nodes nodes connected" "$(all_connected)" "$nodes"
@@ -138,11 +138,11 @@ check "the session names the client" "$(curl -s -m 5 -b "$jar" $web/session | py
 check "signing out ends the session" "$(curl -s -m 5 -b "$jar" -c "$jar" -o /dev/null -X POST $web/logout; curl -s -m 5 -b "$jar" -o /dev/null -w '%{http_code}' $web/session)" 401
 
 dir_of() { if [ "$1" = win ]; then printf '%s\\proj' "$w"; else printf '%s/%s/proj' "$r" "$1"; fi; }
-jq_runs() { "$fav" run list --all --json | python3 -c "import json,sys; rs=json.load(sys.stdin); $1"; }
+jq_runs() { "$tend" run list --all --json | python3 -c "import json,sys; rs=json.load(sys.stdin); $1"; }
 run_on() { # host, title
-	"$fav" task add "$2" --machine "$1" --agent fake --dir "$(dir_of "$1")" >/dev/null
-	t=$("$fav" task list --json | python3 -c "import json,sys; print([t['id'] for t in json.load(sys.stdin) if t['title']=='$2'][0])")
-	"$fav" run start "$t" --runner background
+	"$tend" task add "$2" --machine "$1" --agent fake --dir "$(dir_of "$1")" >/dev/null
+	t=$("$tend" task list --json | python3 -c "import json,sys; print([t['id'] for t in json.load(sys.stdin) if t['title']=='$2'][0])")
+	"$tend" run start "$t" --runner background
 }
 wait_runs() {
 	deadline=$(($(date +%s) + 120))
@@ -153,11 +153,11 @@ wait_runs() {
 }
 for h in $hosts; do run_on "$h" "srv e2e on $h"; done
 wait_runs
-"$fav" run list --all
+"$tend" run list --all
 for h in $hosts; do
 	check "$h exited 0" "$(jq_runs "print(' '.join(r['state']+str(r.get('exit_code')) for r in rs if r['machine']=='$h'))")" exited0
 	run=$(jq_runs "print([r['id'] for r in rs if r['machine']=='$h'][0])")
-	check "$h output" "$("$fav" run logs "$run" | grep -c 'fake step')" 2
+	check "$h output" "$("$tend" run logs "$run" | grep -c 'fake step')" 2
 done
 
 stop_server
@@ -181,7 +181,7 @@ if has wsl; then
 	ssh lg-win wsl -d Debian -e rm -rf "$r"
 fi
 if has win; then
-	ssh lg-win "powershell -NoProfile -Command \"Get-CimInstance Win32_Process -Filter \\\"Name='fav.exe'\\\" | Where-Object { \$_.CommandLine -like '*$id*' } | ForEach-Object { Stop-Process -Id \$_.ProcessId -Force }\"" || true
+	ssh lg-win "powershell -NoProfile -Command \"Get-CimInstance Win32_Process -Filter \\\"Name='tend.exe'\\\" | Where-Object { \$_.CommandLine -like '*$id*' } | ForEach-Object { Stop-Process -Id \$_.ProcessId -Force }\"" || true
 	sleep 1
 	ssh lg-win "rmdir /s /q $winhome\\$id" || true
 fi

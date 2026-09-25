@@ -13,10 +13,10 @@ import (
 	"time"
 
 	"github.com/oxsean/fav/internal/capture"
-	"github.com/oxsean/fav/internal/fav"
 	"github.com/oxsean/fav/internal/fileio"
 	"github.com/oxsean/fav/internal/fixture"
 	"github.com/oxsean/fav/internal/i18n"
+	"github.com/oxsean/fav/internal/tend"
 	"github.com/oxsean/fav/internal/wire"
 )
 
@@ -26,7 +26,7 @@ func localMachine(t *testing.T) (*fixture.Dataset, *Client) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("FAV_HOME", d.Home)
+	t.Setenv("TEND_HOME", d.Home)
 	t.Setenv("CLAUDE_CONFIG_DIR", d.Claude)
 	t.Setenv("CODEX_HOME", d.Codex)
 	return d, pipeClient(t, NewLocal("test"))
@@ -53,7 +53,7 @@ func TestLocalHello(t *testing.T) {
 	if h.Proto != wire.Proto || h.Version != "test" || h.OS == "" || h.Arch == "" || len(h.Endpoint) != 12 || h.Home == "" || h.Sep == "" {
 		t.Fatalf("%+v", h)
 	}
-	if _, ok := h.CLIs[fav.ProviderCodex]; !ok || len(h.CLIs) != 2 {
+	if _, ok := h.CLIs[tend.ProviderCodex]; !ok || len(h.CLIs) != 2 {
 		t.Errorf("clis: %v", h.CLIs)
 	}
 	for _, m := range []string{MHello, MList, MMessages, MText, MSteps, MPulse, MChecks, MLive, MEcho} {
@@ -84,34 +84,34 @@ func TestLocalListsEverySessionAndFollowsTheStore(t *testing.T) {
 		}
 		out := map[string]Session{}
 		for _, s := range l.Sessions {
-			out[fav.SessionKey(s.Provider, s.SessionID)] = s
+			out[tend.SessionKey(s.Provider, s.SessionID)] = s
 		}
 		return out
 	}
 	got := list()
 	for _, s := range d.Sessions {
-		_, ok := got[fav.SessionKey(s.Provider, s.ID)]
+		_, ok := got[tend.SessionKey(s.Provider, s.ID)]
 		if want := !s.Agent && s.Name != "chain-old"; ok != want {
 			t.Errorf("%s: listed %v, want %v (short sessions included, agent runs not)", s.Name, ok, want)
 		}
 	}
 	oauth := d.Get("oauth")
-	if s := got[fav.SessionKey(oauth.Provider, oauth.ID)]; s.Turns != 4 || s.Transcript == "" || s.LastAt.IsZero() {
+	if s := got[tend.SessionKey(oauth.Provider, oauth.ID)]; s.Turns != 4 || s.Transcript == "" || s.LastAt.IsZero() {
 		t.Errorf("index fields travel with the list: %+v", s)
 	}
 	arch := d.Get("archived")
-	if s := got[fav.SessionKey(arch.Provider, arch.ID)]; s.ID == "" || s.ArchivedAt == nil || s.FavoritedAt == nil {
+	if s := got[tend.SessionKey(arch.Provider, arch.ID)]; s.ID == "" || s.ArchivedAt == nil || s.FavoritedAt == nil {
 		t.Errorf("archived favorites are listed with their record: %+v", s)
 	}
 
-	store, err := fav.Open()
+	store, err := tend.Open()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.Update(store.BySession(arch.Provider, arch.ID), func(r *fav.Rec) { r.Title = "改过的标题" }); err != nil {
+	if _, err := store.Update(store.BySession(arch.Provider, arch.ID), func(r *tend.Rec) { r.Title = "改过的标题" }); err != nil {
 		t.Fatal(err)
 	}
-	if s := list()[fav.SessionKey(arch.Provider, arch.ID)]; s.Title != "改过的标题" {
+	if s := list()[tend.SessionKey(arch.Provider, arch.ID)]; s.Title != "改过的标题" {
 		t.Errorf("the next list reloads the store: %q", s.Title)
 	}
 }
@@ -155,7 +155,7 @@ func TestLocalReadsByRef(t *testing.T) {
 		params any
 		want   string
 	}{
-		{"unknown session", MMessages, MessagesParams{Ref: Ref{fav.ProviderClaude, "nope"}, Before: -1, N: 5}, wire.CodeNotFound},
+		{"unknown session", MMessages, MessagesParams{Ref: Ref{tend.ProviderClaude, "nope"}, Before: -1, N: 5}, wire.CodeNotFound},
 		{"no ref", MPulse, Ref{}, wire.CodeBadRequest},
 		{"no page size", MMessages, MessagesParams{Ref: ref("oauth"), Before: -1, N: 0}, wire.CodeBadRequest},
 		{"params of the wrong shape", MChecks, json.RawMessage(`[1]`), wire.CodeBadRequest},
@@ -195,9 +195,9 @@ func TestARewrittenTranscriptIsStale(t *testing.T) {
 		t.Fatalf("a full text of the old file: %v", err)
 	}
 
-	h := NewHostsDial([]fav.Host{{Name: "m"}}, "", func(fav.Host) (*Client, error) { return Pipe(NewLocal("t")), nil })
+	h := NewHostsDial([]tend.Host{{Name: "m"}}, "", func(tend.Host) (*Client, error) { return Pipe(NewLocal("t")), nil })
 	defer h.Close()
-	src := h.Source(&fav.Rec{Host: "m", Provider: s.Provider, SessionID: s.ID})
+	src := h.Source(&tend.Rec{Host: "m", Provider: s.Provider, SessionID: s.ID})
 	if pg := src.Messages(-1, 2); pg.Err != nil {
 		t.Fatal(pg.Err)
 	}

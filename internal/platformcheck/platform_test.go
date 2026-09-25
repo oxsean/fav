@@ -21,7 +21,7 @@ var rules = []struct {
 	{regexp.MustCompile(`HasPrefix\(rel, *"\.\."`), "internal/paths", "paths.Inside"},
 	{regexp.MustCompile(`"~/"|"~" *\+`), "internal/paths", "paths.Tilde / paths.Expand"},
 	{regexp.MustCompile(`'\\''|func shellQuote`), "internal/shell", "shell.Kind.Quote / Join / Line"},
-	{regexp.MustCompile(`/dev/null`), "internal/shell", "a fav subcommand or exec without a shell"},
+	{regexp.MustCompile(`/dev/null`), "internal/shell", "a tend subcommand or exec without a shell"},
 	{regexp.MustCompile(`syscall\.Flock|LockFileEx`), "internal/filelock", "filelock.Lock / TryLock / Held"},
 	{regexp.MustCompile(`syscall\.Stat_t|GetFileInformationByHandle`), "internal/fileio", "fileio.ID"},
 	{regexp.MustCompile(`\[A-Za-z\]:`), "internal/pathmap", "pathmap.Drive / Abs / Base"},

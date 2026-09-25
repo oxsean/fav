@@ -9,10 +9,10 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/oxsean/fav/internal/capture"
-	"github.com/oxsean/fav/internal/fav"
 	"github.com/oxsean/fav/internal/i18n"
 	"github.com/oxsean/fav/internal/paths"
 	"github.com/oxsean/fav/internal/render"
+	"github.com/oxsean/fav/internal/tend"
 )
 
 func (m *Model) View() tea.View {
@@ -89,7 +89,7 @@ func (m *Model) baseLines() []string {
 }
 
 func (m *Model) header() string {
-	names := []string{i18n.T("view.favorites") + " " + strconv.Itoa(m.nFav), i18n.T("view.sessions") + " " + strconv.Itoa(m.nAll), i18n.T("label.projects") + " " + strconv.Itoa(m.nProj), agentsTab(len(m.live), m.needCount()), i18n.T("view.tasks") + " " + strconv.Itoa(m.openTaskCount())}
+	names := []string{i18n.T("view.favorites") + " " + strconv.Itoa(m.nFavorites), i18n.T("view.sessions") + " " + strconv.Itoa(m.nAll), i18n.T("label.projects") + " " + strconv.Itoa(m.nProj), agentsTab(len(m.live), m.needCount()), i18n.T("view.tasks") + " " + strconv.Itoa(m.openTaskCount())}
 	var tabs strings.Builder
 	var widths []int
 	for i, n := range names {
@@ -222,7 +222,7 @@ type chip struct {
 }
 
 func (m *Model) chipData() []chip {
-	q := fav.Parse(m.search.Value())
+	q := tend.Parse(m.search.Value())
 	tagVal := i18n.T("label.all")
 	if len(q.Tags) > 0 {
 		tagVal = strings.Join(q.Tags, "+")
@@ -231,7 +231,7 @@ func (m *Model) chipData() []chip {
 		{render.GlyphProject, i18n.T("label.projects"), orAll(q.Project), q.Project != "", (*Model).pickProjects},
 		{render.GlyphTag, i18n.T("label.tags"), tagVal, len(q.Tags) > 0, (*Model).pickTags},
 		{render.GlyphTerm, i18n.T("label.source"), orAll(q.Provider), q.Provider != "", (*Model).cycleProvider},
-		{render.GlyphOK, i18n.T("label.status"), statusLabel(q.Status), q.Status != fav.StatusOpen, (*Model).pickStatus},
+		{render.GlyphOK, i18n.T("label.status"), statusLabel(q.Status), q.Status != tend.StatusOpen, (*Model).pickStatus},
 		{render.GlyphClock, i18n.T("label.time"), timeLabel(q), !q.After.IsZero() || !q.Before.IsZero() || !q.Active.IsZero(), (*Model).pickDate},
 	}
 	if m.view == viewLive {
@@ -245,7 +245,7 @@ func (m *Model) chipData() []chip {
 				break
 			}
 		}
-		chips = append(chips, chip{render.GlyphHerdr, i18n.T("label.host"), value, q.Host != "" && q.Host != fav.HostLocal, (*Model).pickHost})
+		chips = append(chips, chip{render.GlyphHerdr, i18n.T("label.host"), value, q.Host != "" && q.Host != tend.HostLocal, (*Model).pickHost})
 	}
 	return chips
 }
@@ -259,26 +259,26 @@ func orAll(s string) string {
 
 func statusLabel(s string) string {
 	switch s {
-	case fav.StatusLive:
+	case tend.StatusLive:
 		return "Agents"
 	case "all":
 		return i18n.T("label.all")
-	case fav.StatusOpen:
+	case tend.StatusOpen:
 		return i18n.T("status.open")
-	case fav.StatusActive:
+	case tend.StatusActive:
 		return i18n.T("status.active")
 	case "archived":
 		return i18n.T("status.archived")
-	case fav.StatusTrash:
+	case tend.StatusTrash:
 		return i18n.T("status.trash")
-	case fav.StatusAgent:
+	case tend.StatusAgent:
 		return i18n.T("status.agent")
 	}
 	return render.StatusLabel(s)
 }
 
 // timeLabel: last: reads "active since", after: / before: the days the session started in.
-func timeLabel(q fav.Query) string {
+func timeLabel(q tend.Query) string {
 	if !q.Active.IsZero() {
 		return i18n.F("date.active_from", q.Active.Format("01-02"))
 	}
@@ -522,7 +522,7 @@ func (m *Model) groupLine(r row, w int, sel bool) string {
 	return text + " " + frame.Render(strings.Repeat(hRule, gap-1))
 }
 
-func (m *Model) recLine(r *fav.Rec, sel bool, w int) string {
+func (m *Model) recLine(r *tend.Rec, sel bool, w int) string {
 	when := render.When(m.when(r), m.now)
 	turns := ""
 	if r.Turns > 0 {
@@ -544,10 +544,10 @@ func (m *Model) recLine(r *fav.Rec, sel bool, w int) string {
 	return fit(tSty.Render("  "+glyphFor(r)+" "+title)+brokenSty.Inherit(tSty).Render(mark)+nSty.Render(turns)+tSty.Render(pad+" "+when), w)
 }
 
-func (m *Model) cardBox(r *fav.Rec, sel bool, w int) []string {
+func (m *Model) cardBox(r *tend.Rec, sel bool, w int) []string {
 	inner := w - 4
 	when := render.When(m.when(r), m.now)
-	meta := fav.ProviderName(r.Provider)
+	meta := tend.ProviderName(r.Provider)
 	if r.App {
 		meta += " App"
 	}
@@ -578,7 +578,7 @@ func (m *Model) cardBox(r *fav.Rec, sel bool, w int) []string {
 		}
 		meta += "  ·  " + liveText
 	}
-	if r.ID != "" && r.Status != fav.StatusDefault {
+	if r.ID != "" && r.Status != tend.StatusDefault {
 		meta += "  ·  " + render.Glyph(r.Status) + " " + render.StatusLabel(r.Status)
 	}
 	if r.Archived() {
@@ -619,7 +619,7 @@ func (m *Model) cardBox(r *fav.Rec, sel bool, w int) []string {
 	return strings.Split(sty.Width(w).Render(content), "\n")
 }
 
-func glyphFor(r *fav.Rec) string {
+func glyphFor(r *tend.Rec) string {
 	if r.Favorite() {
 		return render.GlyphActive
 	}
@@ -648,7 +648,7 @@ func (m *Model) detailBlock(y0, x0, w, h int) []string {
 	if r.Summary != "" && !searching {
 		label := i18n.T("card.summary")
 		switch {
-		case r.ID == "" && r.Recap && r.Provider == fav.ProviderCodex:
+		case r.ID == "" && r.Recap && r.Provider == tend.ProviderCodex:
 			label = i18n.T("detail.recap_codex")
 		case r.ID == "" && r.Recap:
 			label = i18n.T("detail.recap_claude")
@@ -689,14 +689,14 @@ func (m *Model) detailBlock(y0, x0, w, h int) []string {
 	return panel("", body, w, h)
 }
 
-func (m *Model) statusLine(r *fav.Rec, w int) string {
-	notFav, done := "detail.not_favorited", "detail.done"
+func (m *Model) statusLine(r *tend.Rec, w int) string {
+	notFavorited, done := "detail.not_favorited", "detail.done"
 	if r.Host != "" { // read-only here: no key hints
-		notFav, done = "remote.not_favorited", "remote.done"
+		notFavorited, done = "remote.not_favorited", "remote.done"
 	}
 	state := accent.Render(render.GlyphActive + i18n.T("detail.favorited"))
 	if !r.Favorite() {
-		state = dimmed.Render(render.GlyphSession + i18n.T(notFav))
+		state = dimmed.Render(render.GlyphSession + i18n.T(notFavorited))
 	}
 	switch {
 	case r.Done():
@@ -722,14 +722,14 @@ func (m *Model) statusLine(r *fav.Rec, w int) string {
 			state += dimmed.Render(i18n.T("detail.live_elsewhere"))
 		}
 	}
-	tail := "  ·  " + fav.ProviderLabel(r.Provider) + "  ·  " + render.WhenFull(r.When())
+	tail := "  ·  " + tend.ProviderLabel(r.Provider) + "  ·  " + render.WhenFull(r.When())
 	if r.Host != "" {
 		tail = "  ·  " + hostMark(r) + tail
 	}
 	return fit(state+dimmed.Render(tail), w)
 }
 
-func (m *Model) fieldLines(r *fav.Rec, w int) []string {
+func (m *Model) fieldLines(r *tend.Rec, w int) []string {
 	const labelW = 12
 	var out []string
 	add := func(k, v string) {
@@ -767,7 +767,7 @@ func (m *Model) fieldLines(r *fav.Rec, w int) []string {
 	return out
 }
 
-func (m *Model) chatLines(r *fav.Rec, w, room int) (lines []string, owners []int) {
+func (m *Model) chatLines(r *tend.Rec, w, room int) (lines []string, owners []int) {
 	p := m.probes[r]
 	if p == nil || !p.done || len(p.msgs) == 0 || room < 5 {
 		return nil, nil
@@ -905,7 +905,7 @@ func plainText(s string) string {
 	return strings.NewReplacer("**", "", "`", "").Replace(s)
 }
 
-func (m *Model) checkLines(r *fav.Rec, w int) []string {
+func (m *Model) checkLines(r *tend.Rec, w int) []string {
 	p := m.probes[r]
 	if p == nil || !p.done {
 		return []string{dimmed.Render(render.GlyphClock + i18n.T("detail.checking"))}
@@ -1008,7 +1008,7 @@ func (m *Model) footer() string {
 		if m.inTrash() {
 			left = []footGroup{{fk(keyOf(inList, actDelete), "footer.restore", 0)}}
 		} else {
-			left = []footGroup{m.mainKeys(m.current()), m.favKeys(m.current())}
+			left = []footGroup{m.mainKeys(m.current()), m.favoriteKeys(m.current())}
 		}
 		right = footGroup{fk(escKey, "footer.esc_back", 0), fk(keyOf(inList, actHelp), "footer.help", 0)}
 	case m.inTrash() && m.current() != nil:
@@ -1027,9 +1027,9 @@ func (m *Model) footer() string {
 	case m.w < compactCols:
 		left, right = []footGroup{{fk(enterKey, "footer.enter_details", 0)}, {fk(keyOf(inList, actSearch), "footer.search", 0)}}, help
 	case !m.twoColumn():
-		left = []footGroup{{fk(enterKey, "footer.enter_details", 0)}, m.searchKeys(), m.favKeys(m.current())}
+		left = []footGroup{{fk(enterKey, "footer.enter_details", 0)}, m.searchKeys(), m.favoriteKeys(m.current())}
 	default:
-		left = []footGroup{m.mainKeys(m.current()), m.searchKeys(), m.favKeys(m.current())}
+		left = []footGroup{m.mainKeys(m.current()), m.searchKeys(), m.favoriteKeys(m.current())}
 	}
 	count := "" // compact mode has no list title: the count goes to the footer
 	if m.w < compactCols && !m.typing {
@@ -1039,7 +1039,7 @@ func (m *Model) footer() string {
 }
 
 // mainKeys: Enter opens the action dialog; Space presses its primary button (resume, switch, or the hits of a message search).
-func (m *Model) mainKeys(r *fav.Rec) footGroup {
+func (m *Model) mainKeys(r *tend.Rec) footGroup {
 	g := footGroup{fk(enterKey, "footer.enter_actions", 0)}
 	switch {
 	case r == nil:
@@ -1064,8 +1064,8 @@ func (m *Model) searchKeys() footGroup {
 	return footGroup{fk(keyOf(inList, actSearch), "footer.search", 0), fk(keyOf(inList, actMsgSearch), "footer.msg_search", 5)}
 }
 
-// favKeys: none on another machine's session, which is read-only here.
-func (m *Model) favKeys(r *fav.Rec) footGroup {
+// favoriteKeys: none on another machine's session, which is read-only here.
+func (m *Model) favoriteKeys(r *tend.Rec) footGroup {
 	switch {
 	case r != nil && r.Host != "":
 		return nil

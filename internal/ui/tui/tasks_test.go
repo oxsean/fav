@@ -11,10 +11,10 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/oxsean/fav/internal/coord"
-	"github.com/oxsean/fav/internal/fav"
 	"github.com/oxsean/fav/internal/node"
 	"github.com/oxsean/fav/internal/remote"
 	"github.com/oxsean/fav/internal/task"
+	"github.com/oxsean/fav/internal/tend"
 	"github.com/oxsean/fav/internal/wire"
 )
 
@@ -33,7 +33,7 @@ func tasksModel(t *testing.T) (*Model, string) {
 	m := sized(t, 140, 40)
 	var clients []*coord.Client
 	m.SetCoordinator(func(w wire.Options) (*coord.Client, error) {
-		cl, err := coord.Connect(coord.Options{Home: home, Config: fav.Config{Agents: []fav.AgentProfile{{Name: "fake", Provider: "fake"}}},
+		cl, err := coord.Connect(coord.Options{Home: home, Config: tend.Config{Agents: []tend.AgentProfile{{Name: "fake", Provider: "fake"}}},
 			Node: n, Sessions: remote.NewLocal("test")}, w)
 		if err == nil {
 			clients = append(clients, cl)

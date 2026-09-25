@@ -1,5 +1,5 @@
 // Package index scans Claude ~/.claude/projects/*/*.jsonl and Codex sessions/YYYY/MM/DD/rollout-*.jsonl incrementally
-// by recorded offset; cached in ~/.agent/fav/sessions.jsonl, one line per file, last line wins.
+// by recorded offset; cached in ~/.agent/tend/sessions.jsonl, one line per file, last line wins.
 package index
 
 import (
@@ -16,9 +16,9 @@ import (
 	"unicode/utf8"
 
 	"github.com/oxsean/fav/internal/capture"
-	"github.com/oxsean/fav/internal/fav"
 	"github.com/oxsean/fav/internal/fileio"
 	"github.com/oxsean/fav/internal/paths"
+	"github.com/oxsean/fav/internal/tend"
 )
 
 // File is one transcript as scanned so far (a Codex session may span several rollouts, merged in Sessions); counters are cumulative.
@@ -80,10 +80,10 @@ type Session struct {
 
 // CodexArchived: the rollout sits in ~/.codex/archived_sessions (archived in Codex or the desktop app).
 func (s *Session) CodexArchived() bool {
-	return s.Provider == fav.ProviderCodex && paths.Under(s.Path, capture.CodexArchivedDir())
+	return s.Provider == tend.ProviderCodex && paths.Under(s.Path, capture.CodexArchivedDir())
 }
 
-func (s *Session) Key() string { return fav.SessionKey(s.Provider, s.SessionID) }
+func (s *Session) Key() string { return tend.SessionKey(s.Provider, s.SessionID) }
 
 func (s *Session) DisplayTitle() string {
 	if s.Title != "" {
@@ -96,9 +96,9 @@ func (s *Session) DisplayTitle() string {
 	return first
 }
 
-func (s *Session) Rec() *fav.Rec {
+func (s *Session) Rec() *tend.Rec {
 	started := s.StartedAt
-	r := &fav.Rec{
+	r := &tend.Rec{
 		Provider: s.Provider, SessionID: s.SessionID, Cwd: s.Cwd, GitBranch: s.Branch,
 		Title: s.DisplayTitle(), Summary: strings.Join(strings.Fields(s.First), " "), Project: projectOf(s.Cwd),
 		Recap: s.Recap != "", Repo: s.Repo, Files: s.Files,
@@ -294,7 +294,7 @@ type Index struct {
 	wt    worktrees
 }
 
-func Path() string { return filepath.Join(fav.Home(), "sessions.jsonl") }
+func Path() string { return filepath.Join(tend.Home(), "sessions.jsonl") }
 
 func Open() (*Index, error) { return OpenAt(Path()) }
 
@@ -343,7 +343,7 @@ func (idx *Index) FileByPrefix(ref string) (*File, int) {
 	ids := map[string]bool{}
 	for _, f := range idx.files {
 		if strings.HasPrefix(f.SessionID, ref) {
-			ids[fav.SessionKey(f.Provider, f.SessionID)] = true
+			ids[tend.SessionKey(f.Provider, f.SessionID)] = true
 			if hit == nil || f.ModTime.After(hit.ModTime) {
 				hit = f
 			}
@@ -367,7 +367,7 @@ func (idx *Index) PathsBySession() map[string][]string {
 	canon := map[string]string{}
 	for _, s := range idx.Sessions() {
 		for _, a := range s.Aliases {
-			canon[fav.SessionKey(s.Provider, a)] = s.Key()
+			canon[tend.SessionKey(s.Provider, a)] = s.Key()
 		}
 	}
 	out := map[string][]string{}
@@ -375,7 +375,7 @@ func (idx *Index) PathsBySession() map[string][]string {
 		if f.SessionID == "" {
 			continue
 		}
-		k := fav.SessionKey(f.Provider, f.SessionID)
+		k := tend.SessionKey(f.Provider, f.SessionID)
 		if c, ok := canon[k]; ok {
 			k = c
 		}
@@ -394,7 +394,7 @@ func (idx *Index) AgentSessions() []*Session {
 		if !f.Skip && !AgentScratch(f.Cwd) || isRun(runs, f) || f.SessionID == "" {
 			continue
 		}
-		s := byKey[fav.SessionKey(f.Provider, f.SessionID)]
+		s := byKey[tend.SessionKey(f.Provider, f.SessionID)]
 		if s == nil {
 			s = &Session{Provider: f.Provider, SessionID: f.SessionID, Path: f.Path, Cwd: f.Cwd, Branch: f.Branch,
 				StartedAt: f.StartedAt, First: f.First}
@@ -418,8 +418,8 @@ func (idx *Index) AgentSessions() []*Session {
 }
 
 // Rec is a bare record for a file outside Sessions() (Skip): enough to preview and resume it.
-func (f *File) Rec() *fav.Rec {
-	r := &fav.Rec{Provider: f.Provider, SessionID: f.SessionID, Cwd: f.Cwd, GitBranch: f.Branch, Title: f.Title,
+func (f *File) Rec() *tend.Rec {
+	r := &tend.Rec{Provider: f.Provider, SessionID: f.SessionID, Cwd: f.Cwd, GitBranch: f.Branch, Title: f.Title,
 		Summary: strings.Join(strings.Fields(f.First), " "), Project: projectOf(f.Cwd), TranscriptPath: f.Path,
 		SessionStartedAt: &f.StartedAt, UpdatedAt: f.ModTime}
 	if r.Title == "" {
@@ -456,7 +456,7 @@ func (idx *Index) Rescan(force map[string]bool) (*Index, bool) {
 		}
 		f.ModTime = st.ModTime()
 		f.scan()
-		if f.Provider == fav.ProviderCodex {
+		if f.Provider == tend.ProviderCodex {
 			if t := threads[f.SessionID]; t != "" {
 				f.Title = t
 			}
@@ -554,7 +554,7 @@ func (idx *Index) Sessions() []*Session {
 	// a Claude continuation chain folds into its newest id: turns add up, the newest file is the transcript
 	next := map[string]string{}
 	for _, f := range idx.files {
-		if f.ContinuedIn != "" && f.Provider == fav.ProviderClaude {
+		if f.ContinuedIn != "" && f.Provider == tend.ProviderClaude {
 			next[f.SessionID] = f.ContinuedIn
 		}
 	}
@@ -570,10 +570,10 @@ func (idx *Index) Sessions() []*Session {
 	}
 	for _, f := range order {
 		id := f.SessionID
-		if f.Provider == fav.ProviderClaude {
+		if f.Provider == tend.ProviderClaude {
 			id = newest(id)
 		}
-		k := fav.SessionKey(f.Provider, id)
+		k := tend.SessionKey(f.Provider, id)
 		s := byKey[k]
 		if s == nil {
 			s = &Session{Provider: f.Provider, SessionID: id, Path: f.Path, Cwd: f.Cwd,
@@ -582,7 +582,7 @@ func (idx *Index) Sessions() []*Session {
 		}
 		if f.SessionID != id {
 			s.Aliases = append(s.Aliases, f.SessionID)
-		} else if f.Provider == fav.ProviderClaude {
+		} else if f.Provider == tend.ProviderClaude {
 			s.Path = f.Path
 		}
 		s.App = s.App || f.App
@@ -631,10 +631,10 @@ type candidate struct{ path, provider, sessionID string }
 func candidates() []candidate {
 	var out []candidate
 	for _, p := range capture.ClaudeTranscripts("") {
-		out = append(out, candidate{p, fav.ProviderClaude, strings.TrimSuffix(filepath.Base(p), ".jsonl")})
+		out = append(out, candidate{p, tend.ProviderClaude, strings.TrimSuffix(filepath.Base(p), ".jsonl")})
 	}
 	for _, p := range capture.CodexRollouts("") {
-		out = append(out, candidate{p, fav.ProviderCodex, ""})
+		out = append(out, candidate{p, tend.ProviderCodex, ""})
 	}
 	return out
 }
@@ -661,15 +661,15 @@ func codexThreadNames() map[string]string {
 }
 
 // Attach: store records get index data attached, unknown sessions become records with an empty ID; the same object is reused from prev.
-func (idx *Index) Attach(store *fav.Store, prev []*fav.Rec) []*fav.Rec {
-	keep := make(map[string]*fav.Rec, len(prev))
+func (idx *Index) Attach(store *tend.Store, prev []*tend.Rec) []*tend.Rec {
+	keep := make(map[string]*tend.Rec, len(prev))
 	for _, r := range prev {
 		keep[r.Key()] = r
 	}
-	var out []*fav.Rec
+	var out []*tend.Rec
 	desktop := capture.ClaudeDesktopIDs()
 	for _, s := range idx.Sessions() {
-		if s.Provider == fav.ProviderClaude && !s.App {
+		if s.Provider == tend.ProviderClaude && !s.App {
 			s.App = desktop[s.SessionID]
 			for _, a := range s.Aliases {
 				s.App = s.App || desktop[a]
@@ -717,7 +717,7 @@ func SessionFiles(provider, sessionID string) []string {
 		return nil
 	}
 	switch provider {
-	case fav.ProviderClaude:
+	case tend.ProviderClaude:
 		out, h := capture.ClaudeTranscripts(sessionID), capture.ClaudeHome()
 		for _, pattern := range []string{filepath.Join(h, "projects", "*", sessionID), filepath.Join(h, "todos", sessionID+"*"),
 			filepath.Join(h, "file-history", sessionID)} {
@@ -725,7 +725,7 @@ func SessionFiles(provider, sessionID string) []string {
 			out = append(out, hits...)
 		}
 		return out
-	case fav.ProviderCodex:
+	case tend.ProviderCodex:
 		return capture.CodexRollouts(sessionID)
 	}
 	return nil

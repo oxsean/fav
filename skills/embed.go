@@ -1,7 +1,7 @@
-// Package skills embeds the /fav skill so a release binary can install it.
+// Package skills embeds the /tend skill so a release binary can install it.
 package skills
 
 import _ "embed"
 
-//go:embed fav/SKILL.md
-var Fav []byte
+//go:embed tend/SKILL.md
+var Tend []byte

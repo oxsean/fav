@@ -13,9 +13,9 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/oxsean/fav/internal/capture"
-	"github.com/oxsean/fav/internal/fav"
 	"github.com/oxsean/fav/internal/i18n"
 	"github.com/oxsean/fav/internal/render"
+	"github.com/oxsean/fav/internal/tend"
 )
 
 // transcriptOf writes a Claude transcript of n user messages ("第0句" oldest).
@@ -33,9 +33,9 @@ func transcriptOf(t *testing.T, n int) string {
 }
 
 func TestScrollingProbesOnlyWhereTheCursorRests(t *testing.T) {
-	s, _ := fav.OpenAt(filepath.Join(t.TempDir(), "records.jsonl"))
+	s, _ := tend.OpenAt(filepath.Join(t.TempDir(), "records.jsonl"))
 	for i := range 60 {
-		s.Put(&fav.Rec{ID: fav.NewID(), Provider: fav.ProviderClaude, SessionID: strconv.Itoa(i), Title: "t", Status: fav.StatusDone,
+		s.Put(&tend.Rec{ID: tend.NewID(), Provider: tend.ProviderClaude, SessionID: strconv.Itoa(i), Title: "t", Status: tend.StatusDone,
 			Cwd: t.TempDir(), TranscriptPath: transcriptOf(t, 3), FavoritedAt: new(time.Now().Add(-time.Duration(i) * time.Hour))})
 	}
 	m := newModel(t, s, 160, 45)
@@ -78,9 +78,9 @@ func settle(m *Model) {
 }
 
 func TestChatScrollKeys(t *testing.T) {
-	s, _ := fav.OpenAt(filepath.Join(t.TempDir(), "records.jsonl"))
-	s.Put(&fav.Rec{ID: fav.NewID(), Provider: fav.ProviderClaude, SessionID: "x", Title: "t", Summary: "s", Project: "p",
-		Status: fav.StatusDone, Cwd: t.TempDir(), TranscriptPath: transcriptOf(t, 100), FavoritedAt: new(time.Now())})
+	s, _ := tend.OpenAt(filepath.Join(t.TempDir(), "records.jsonl"))
+	s.Put(&tend.Rec{ID: tend.NewID(), Provider: tend.ProviderClaude, SessionID: "x", Title: "t", Summary: "s", Project: "p",
+		Status: tend.StatusDone, Cwd: t.TempDir(), TranscriptPath: transcriptOf(t, 100), FavoritedAt: new(time.Now())})
 	m := newModel(t, s, 150, 44)
 	settle(m)
 	m.screen()
@@ -128,7 +128,7 @@ func TestProbeWaitsForCursorToRest(t *testing.T) {
 func TestChatSearch(t *testing.T) {
 	m := sized(t, 140, 40)
 	a, b := m.rows[1].rec, m.rows[2].rec
-	m.probes = map[*fav.Rec]*probe{a: {done: true}, b: {done: true}}
+	m.probes = map[*tend.Rec]*probe{a: {done: true}, b: {done: true}}
 	for i := range recentMsgs {
 		m.probes[a].msgs = append(m.probes[a].msgs, capture.Message{Role: "assistant", Text: "第" + strconv.Itoa(i) + "句", Off: int64(1000 - i)})
 	}
@@ -216,7 +216,7 @@ func TestMessageOverlay(t *testing.T) {
 	m := sized(t, 140, 40)
 	r := m.current()
 	long := strings.Repeat("这是一段很长的回复，长到一个小框放不下。", 300)
-	m.probes = map[*fav.Rec]*probe{r: {done: true, msgs: []capture.Message{{Role: "user", Text: "好的"}, {Role: "assistant", Text: long}}}}
+	m.probes = map[*tend.Rec]*probe{r: {done: true, msgs: []capture.Message{{Role: "user", Text: "好的"}, {Role: "assistant", Text: long}}}}
 	m.screen()
 	m.Update(press("right"))
 	if m.pane != paneChat {
@@ -269,7 +269,7 @@ func TestMessageOverlayMultilineStep(t *testing.T) {
 	msg := capture.Message{Role: "assistant", Text: "写个脚本", Steps: []capture.Step{
 		{Tool: "Bash", Text: "cat <<'EOF'\n    indented line\nEOF"},
 		{Result: true, Text: strings.Repeat("x", 80)}}}
-	m.probes = map[*fav.Rec]*probe{r: {done: true, full: true, msgs: []capture.Message{msg}}}
+	m.probes = map[*tend.Rec]*probe{r: {done: true, full: true, msgs: []capture.Message{msg}}}
 	m.screen()
 	m.pane = paneChat
 	m.Update(press("enter"))
@@ -307,7 +307,7 @@ func TestMessageOverlayFullSteps(t *testing.T) {
 	if !strings.Contains(msgs[0].Steps[2].Text, "还有") {
 		t.Fatalf("内存里的步骤应是截过的：%q", msgs[0].Steps[2].Text)
 	}
-	m.probes = map[*fav.Rec]*probe{r: {done: true, full: true, msgs: msgs}}
+	m.probes = map[*tend.Rec]*probe{r: {done: true, full: true, msgs: msgs}}
 	m.screen()
 	m.pane = paneChat
 	m.chatCur = 0

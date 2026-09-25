@@ -7,11 +7,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/oxsean/fav/internal/fav"
 	"github.com/oxsean/fav/internal/journal"
 	"github.com/oxsean/fav/internal/node"
 	"github.com/oxsean/fav/internal/remote"
 	"github.com/oxsean/fav/internal/task"
+	"github.com/oxsean/fav/internal/tend"
 	"github.com/oxsean/fav/internal/wire"
 )
 
@@ -70,7 +70,7 @@ type Machines struct {
 }
 
 type Agents struct {
-	Agents []fav.AgentProfile `json:"agents"`
+	Agents []tend.AgentProfile `json:"agents"`
 }
 
 // maxBrief bounds a brief: the journal holds it on one line, and the state it is in goes in one frame.
@@ -352,7 +352,7 @@ func (c *Coord) runDispatch(r *wire.Request) (string, []journal.Event, error) {
 	if !slices.Contains([]string{"", node.RunnerBackground, node.RunnerHerdr}, p.Runner) {
 		return "", nil, bad("runner " + p.Runner)
 	}
-	name := firstOf(p.Agent, t.Agent, fav.ProviderClaude)
+	name := firstOf(p.Agent, t.Agent, tend.ProviderClaude)
 	prof, ok := c.profile(name)
 	if !ok {
 		return "", nil, notFound("agent " + name)
@@ -362,7 +362,7 @@ func (c *Coord) runDispatch(r *wire.Request) (string, []journal.Event, error) {
 		return "", nil, bad("machine")
 	}
 	machine = firstOf(machine, Local)
-	if p.Runner == node.RunnerHerdr && prof.Provider != fav.ProviderClaude {
+	if p.Runner == node.RunnerHerdr && prof.Provider != tend.ProviderClaude {
 		return "", nil, bad("runner herdr runs claude only")
 	}
 	if prof.Machine != "" && machine != prof.Machine {

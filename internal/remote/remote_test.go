@@ -14,8 +14,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/oxsean/fav/internal/fav"
 	"github.com/oxsean/fav/internal/shell"
+	"github.com/oxsean/fav/internal/tend"
 	"github.com/oxsean/fav/internal/testkit"
 	"github.com/oxsean/fav/internal/wire"
 )
@@ -94,12 +94,12 @@ func TestCloseDoesNotWaitForACallInFlight(t *testing.T) {
 }
 
 func TestADeadProcessClosesWithItsReason(t *testing.T) {
-	testkit.PosixOnly(t) // a shell script stands in for fav
+	testkit.PosixOnly(t) // a shell script stands in for tend
 	for _, c := range []struct{ script, code string }{
 		{"echo 'Welcome!'; read x; exit 3", wire.CodeClosed},
-		{"echo 'sh: 1: fav: not found' >&2; exit 127", wire.CodeNoFav},
+		{"echo 'sh: 1: tend: not found' >&2; exit 127", wire.CodeNoTend},
 	} {
-		cl, err := Dial(fav.Host{Name: "t", Fav: []string{"sh", "-c", c.script, "fav"}})
+		cl, err := Dial(tend.Host{Name: "t", Tend: []string{"sh", "-c", c.script, "tend"}})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -114,7 +114,7 @@ func TestADeadProcessClosesWithItsReason(t *testing.T) {
 func TestHostsRedialAfterAFailure(t *testing.T) {
 	var dials atomic.Int32
 	var last *Client
-	h := NewHostsDial([]fav.Host{{Name: "a"}}, "", func(fav.Host) (*Client, error) {
+	h := NewHostsDial([]tend.Host{{Name: "a"}}, "", func(tend.Host) (*Client, error) {
 		dials.Add(1)
 		last = Pipe(helloHandler{})
 		return last, nil
@@ -146,18 +146,18 @@ func TestCommandLines(t *testing.T) {
 	testkit.PosixOnly(t) // multiplexing is on only off Windows
 	sid := "fa000009-0c1a-4de0-8000-000000000009"
 	for _, c := range []struct {
-		host fav.Host
+		host tend.Host
 		want string // the command line the remote shell reads
 	}{
-		{fav.Host{Name: "m", SSH: "m"}, "fav resume --terminal --no-herdr " + sid},
-		{fav.Host{Name: "m", SSH: "m", Fav: []string{"/Users/a b/fav"}}, "'/Users/a b/fav' resume --terminal --no-herdr " + sid},
-		{fav.Host{Name: "w", SSH: "w", Fav: []string{`C:\Users\a b\fav.exe`}}, `"C:\Users\a b\fav.exe" resume --terminal --no-herdr ` + sid},
-		{fav.Host{Name: "l", SSH: "w", Fav: []string{"wsl", "-d", "Debian", "-e", "/home/a/fav"}}, "wsl -d Debian -e /home/a/fav resume --terminal --no-herdr " + sid},
-		{fav.Host{Name: "d", SSH: "n", Fav: []string{"docker", "exec", "-i", "dev", "/usr/local/bin/fav"}}, "docker exec -t -i dev /usr/local/bin/fav resume --terminal --no-herdr " + sid},
-		{fav.Host{Name: "e", SSH: "n", Fav: []string{"docker", "exec", "-it", "dev", "fav"}}, "docker exec -it dev fav resume --terminal --no-herdr " + sid},
+		{tend.Host{Name: "m", SSH: "m"}, "tend resume --terminal --no-herdr " + sid},
+		{tend.Host{Name: "m", SSH: "m", Tend: []string{"/Users/a b/tend"}}, "'/Users/a b/tend' resume --terminal --no-herdr " + sid},
+		{tend.Host{Name: "w", SSH: "w", Tend: []string{`C:\Users\a b\tend.exe`}}, `"C:\Users\a b\tend.exe" resume --terminal --no-herdr ` + sid},
+		{tend.Host{Name: "l", SSH: "w", Tend: []string{"wsl", "-d", "Debian", "-e", "/home/a/tend"}}, "wsl -d Debian -e /home/a/tend resume --terminal --no-herdr " + sid},
+		{tend.Host{Name: "d", SSH: "n", Tend: []string{"docker", "exec", "-i", "dev", "/usr/local/bin/tend"}}, "docker exec -t -i dev /usr/local/bin/tend resume --terminal --no-herdr " + sid},
+		{tend.Host{Name: "e", SSH: "n", Tend: []string{"docker", "exec", "-it", "dev", "tend"}}, "docker exec -it dev tend resume --terminal --no-herdr " + sid},
 	} {
-		h := NewHosts([]fav.Host{c.host}, "")
-		cmd, ok := h.ResumeCommand(&fav.Rec{Host: c.host.Name, SessionID: sid})
+		h := NewHosts([]tend.Host{c.host}, "")
+		cmd, ok := h.ResumeCommand(&tend.Rec{Host: c.host.Name, SessionID: sid})
 		if !ok {
 			t.Fatalf("%s: no command", c.host.Name)
 		}
@@ -166,12 +166,12 @@ func TestCommandLines(t *testing.T) {
 			t.Errorf("%s: %q", c.host.Name, args)
 		}
 	}
-	h := NewHosts([]fav.Host{{Name: "m", SSH: "m"}}, "")
-	if _, ok := h.ResumeCommand(&fav.Rec{Host: "m", SessionID: "x; rm -rf ~"}); ok {
+	h := NewHosts([]tend.Host{{Name: "m", SSH: "m"}}, "")
+	if _, ok := h.ResumeCommand(&tend.Rec{Host: "m", SessionID: "x; rm -rf ~"}); ok {
 		t.Error("a session id with shell syntax never reaches the remote shell")
 	}
-	if cmd := Command(fav.Host{Name: "p", Fav: []string{"/bin/fav"}}, false, "rpc"); cmd.Args[0] != "/bin/fav" || len(cmd.Args) != 2 {
-		t.Errorf("no ssh alias runs fav here: %q", cmd.Args)
+	if cmd := Command(tend.Host{Name: "p", Tend: []string{"/bin/tend"}}, false, "rpc"); cmd.Args[0] != "/bin/tend" || len(cmd.Args) != 2 {
+		t.Errorf("no ssh alias runs tend here: %q", cmd.Args)
 	}
 }
 
@@ -189,14 +189,14 @@ func TestClassifySSHFailures(t *testing.T) {
 	}
 	exit1 := exec.Command("sh", "-c", "exit 1").Run()
 	for _, c := range []struct{ stderr, code string }{
-		{"'fav' is not recognized as an internal or external command,", wire.CodeNoFav},
-		{"fav: The term 'fav' is not recognized as a name of a cmdlet, function, script file, or executable program.", wire.CodeNoFav},
-		{"fish: Unknown command: fav", wire.CodeNoFav},
-		{"bash: /x/fav: No such file or directory", wire.CodeNoFav},
-		{"zsh:1: no such file or directory: /x/fav", wire.CodeNoFav},
-		{"<3>WSL (12) ERROR: CreateProcessCommon:640: execvpe(/home/a/fav) failed: No such file or directory", wire.CodeNoFav},
-		{"fav: index not written: open /x/sessions.jsonl: no such file or directory\npanic: boom", wire.CodeClosed},
-		{"fav: open /home/u/.agent/fav/x: No such file or directory", wire.CodeClosed},
+		{"'tend' is not recognized as an internal or external command,", wire.CodeNoTend},
+		{"tend: The term 'tend' is not recognized as a name of a cmdlet, function, script file, or executable program.", wire.CodeNoTend},
+		{"fish: Unknown command: tend", wire.CodeNoTend},
+		{"bash: /x/tend: No such file or directory", wire.CodeNoTend},
+		{"zsh:1: no such file or directory: /x/tend", wire.CodeNoTend},
+		{"<3>WSL (12) ERROR: CreateProcessCommon:640: execvpe(/home/a/tend) failed: No such file or directory", wire.CodeNoTend},
+		{"tend: index not written: open /x/sessions.jsonl: no such file or directory\npanic: boom", wire.CodeClosed},
+		{"tend: open /home/u/.agent/tend/x: No such file or directory", wire.CodeClosed},
 	} {
 		if got := classify(exit1, c.stderr, true); got.Code != c.code {
 			t.Errorf("%q: %s, want %s", c.stderr, got.Code, c.code)
@@ -209,21 +209,21 @@ func TestClassifySSHFailures(t *testing.T) {
 
 func TestRemoteShellGuess(t *testing.T) {
 	for _, c := range []struct {
-		fav  []string
+		tend []string
 		want shell.Kind
 	}{
 		{nil, shell.POSIX},
-		{[]string{"/home/me/.local/bin/fav"}, shell.POSIX},
-		{[]string{`C:\Users\Administrator\fav.exe`}, shell.Cmd},
-		{[]string{"C:/Users/a/fav-test/data/fav.cmd"}, shell.Cmd},
-		{[]string{"wsl", "-d", "Debian", "--", "fav"}, shell.Cmd},
+		{[]string{"/home/me/.local/bin/tend"}, shell.POSIX},
+		{[]string{`C:\Users\Administrator\tend.exe`}, shell.Cmd},
+		{[]string{"C:/Users/a/tend-test/data/tend.cmd"}, shell.Cmd},
+		{[]string{"wsl", "-d", "Debian", "--", "tend"}, shell.Cmd},
 		{[]string{"wsl.exe", "-d", "Debian"}, shell.Cmd},
 	} {
-		if got := RemoteShell(fav.Host{Fav: c.fav}); got != c.want {
-			t.Errorf("%v: %s", c.fav, got.Name())
+		if got := RemoteShell(tend.Host{Tend: c.tend}); got != c.want {
+			t.Errorf("%v: %s", c.tend, got.Name())
 		}
 	}
-	if RemoteShell(fav.Host{Fav: []string{"fav"}, Shell: "powershell"}) != shell.PowerShell {
+	if RemoteShell(tend.Host{Tend: []string{"tend"}, Shell: "powershell"}) != shell.PowerShell {
 		t.Error("an explicit shell wins")
 	}
 }
@@ -242,7 +242,7 @@ func TestSessionTimesReadInThisZone(t *testing.T) {
 
 func TestAProcessThatStopsTalkingButRunsIsReaped(t *testing.T) {
 	testkit.PosixOnly(t)
-	cl, err := Dial(fav.Host{Name: "t", Fav: []string{"sh", "-c", "exec >&-; sleep 60", "fav"}})
+	cl, err := Dial(tend.Host{Name: "t", Tend: []string{"sh", "-c", "exec >&-; sleep 60", "tend"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -256,7 +256,7 @@ func TestHostsClosedWhileDialingKeepNothing(t *testing.T) {
 	dialing, release := make(chan struct{}), make(chan struct{})
 	var c *Client
 	var dials atomic.Int32
-	h := NewHostsDial([]fav.Host{{Name: "a"}}, "", func(fav.Host) (*Client, error) {
+	h := NewHostsDial([]tend.Host{{Name: "a"}}, "", func(tend.Host) (*Client, error) {
 		if dials.Add(1) == 1 {
 			close(dialing)
 		}
@@ -285,12 +285,12 @@ func TestHostsClosedWhileDialingKeepNothing(t *testing.T) {
 }
 
 func TestCachesAreKeptApartAndFollowTheirTarget(t *testing.T) {
-	t.Setenv("FAV_HOME", t.TempDir())
-	if cachePath("机器一") == cachePath("机器二") || cachePath("ssh") == filepath.Join(fav.Home(), "hosts", "ssh", "sessions.json") {
+	t.Setenv("TEND_HOME", t.TempDir())
+	if cachePath("机器一") == cachePath("机器二") || cachePath("ssh") == filepath.Join(tend.Home(), "hosts", "ssh", "sessions.json") {
 		t.Fatal("cache dirs collide")
 	}
-	f := func(fav.Host) (*Client, error) { return Pipe(listHandler{}), nil }
-	h := NewHostsDial([]fav.Host{{Name: "机器一", SSH: "a"}}, "", f)
+	f := func(tend.Host) (*Client, error) { return Pipe(listHandler{}), nil }
+	h := NewHostsDial([]tend.Host{{Name: "机器一", SSH: "a"}}, "", f)
 	defer h.Close()
 	if recs, st := h.Sessions(context.Background(), "机器一"); st.Err != nil || len(recs) != 1 {
 		t.Fatalf("%v %d", st.Err, len(recs))
@@ -302,7 +302,7 @@ func TestCachesAreKeptApartAndFollowTheirTarget(t *testing.T) {
 	if recs, _ := h.Cached("机器一"); len(recs) != 1 || recs[0].Host != "机器一" {
 		t.Fatalf("cached: %v", recs)
 	}
-	moved := NewHostsDial([]fav.Host{{Name: "机器一", SSH: "b"}}, "", f)
+	moved := NewHostsDial([]tend.Host{{Name: "机器一", SSH: "b"}}, "", f)
 	if recs, st := moved.Cached("机器一"); len(recs) != 0 || !st.At.IsZero() {
 		t.Fatal("a host pointed at another machine does not show the old machine's cache")
 	}
@@ -312,14 +312,14 @@ type listHandler struct{}
 
 func (listHandler) Handle(ctx context.Context, method string, params json.RawMessage) (any, error) {
 	if method == MList {
-		return List{Sessions: []Session{{Provider: fav.ProviderClaude, SessionID: "s1", Title: "t"}}}, nil
+		return List{Sessions: []Session{{Provider: tend.ProviderClaude, SessionID: "s1", Title: "t"}}}, nil
 	}
 	return helloHandler{}.Handle(ctx, method, params)
 }
 
 func TestCloseDoesNotWaitForAReap(t *testing.T) {
 	testkit.PosixOnly(t)
-	cl, err := Dial(fav.Host{Name: "t", Fav: []string{"sh", "-c", "exec >&-; sleep 60", "fav"}})
+	cl, err := Dial(tend.Host{Name: "t", Tend: []string{"sh", "-c", "exec >&-; sleep 60", "tend"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -335,7 +335,7 @@ func TestCloseDoesNotWaitForAReap(t *testing.T) {
 func TestACallWaitingForAnotherDialKeepsItsDeadline(t *testing.T) {
 	release := make(chan struct{})
 	defer close(release)
-	h := NewHostsDial([]fav.Host{{Name: "a"}}, "", func(fav.Host) (*Client, error) {
+	h := NewHostsDial([]tend.Host{{Name: "a"}}, "", func(tend.Host) (*Client, error) {
 		<-release
 		return Pipe(helloHandler{}), nil
 	})

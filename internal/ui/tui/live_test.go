@@ -8,8 +8,8 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/oxsean/fav/internal/capture"
-	"github.com/oxsean/fav/internal/fav"
 	"github.com/oxsean/fav/internal/i18n"
+	"github.com/oxsean/fav/internal/tend"
 )
 
 func TestLiveChatRefreshHoldsWhileReading(t *testing.T) {
@@ -17,7 +17,7 @@ func TestLiveChatRefreshHoldsWhileReading(t *testing.T) {
 	r := m.current()
 	at := time.Date(2026, 9, 20, 10, 0, 0, 0, time.Local)
 	old := []capture.Message{{Role: "user", Text: "第三句", At: at.Add(2 * time.Minute)}, {Role: "assistant", Text: "第二句", At: at.Add(time.Minute)}, {Role: "user", Text: "第一句", At: at}}
-	m.probes = map[*fav.Rec]*probe{r: {done: true, msgs: old}}
+	m.probes = map[*tend.Rec]*probe{r: {done: true, msgs: old}}
 	m.live = map[string]capture.Live{r.SessionID: {TabID: "t1", Status: "working"}}
 	m.Update(press("l"))
 	m.Update(press("j"))
@@ -45,7 +45,7 @@ func TestLiveChatRefreshHoldsWhileReading(t *testing.T) {
 }
 
 func TestLiveView(t *testing.T) {
-	t.Setenv("FAV_HOME", t.TempDir())
+	t.Setenv("TEND_HOME", t.TempDir())
 	m := sized(t, 140, 40)
 	r := m.current()
 	now := time.Now()
@@ -107,7 +107,7 @@ func TestLiveView(t *testing.T) {
 func TestStashEmptyPages(t *testing.T) {
 	m := sized(t, 140, 40)
 	r := m.current()
-	m.probes = map[*fav.Rec]*probe{r: {done: true}}
+	m.probes = map[*tend.Rec]*probe{r: {done: true}}
 	m.stash(refreshMsg{rec: r})
 	m.applyFresh()
 	if p := m.probes[r]; len(p.msgs) != 0 || p.fresh != nil {

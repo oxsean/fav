@@ -1,4 +1,4 @@
-// Command fixture writes the synthetic test dataset (internal/fixture) and launchers that run fav against it.
+// Command fixture writes the synthetic test dataset (internal/fixture) and launchers that run tend against it.
 package main
 
 import (
@@ -12,10 +12,10 @@ import (
 
 func main() {
 	out := flag.String("o", "", "directory to create (must not hold a dataset yet)")
-	bin := flag.String("fav", "", "fav binary the launchers run (default: fav next to the launcher, else PATH)")
+	bin := flag.String("tend", "", "tend binary the launchers run (default: tend next to the launcher, else PATH)")
 	flag.Parse()
 	if *out == "" {
-		fmt.Fprintln(os.Stderr, "usage: fixture -o DIR [-fav PATH]")
+		fmt.Fprintln(os.Stderr, "usage: fixture -o DIR [-tend PATH]")
 		os.Exit(2)
 	}
 	d, err := fixture.Build(*out, time.Now())
@@ -27,6 +27,6 @@ func main() {
 		os.Exit(1)
 	}
 	for _, s := range d.Sessions {
-		fmt.Printf("%-18s %-6s %s listed=%t agent=%t fav=%t\n", s.Name, s.Provider, s.ID, s.Listed, s.Agent, s.Favorite)
+		fmt.Printf("%-18s %-6s %s listed=%t agent=%t favorite=%t\n", s.Name, s.Provider, s.ID, s.Listed, s.Agent, s.Favorite)
 	}
 }

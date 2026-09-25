@@ -8,9 +8,6 @@ import (
 	"syscall"
 )
 
-// SurvivesRename: a lock stays held when the directory of its file is renamed.
-const SurvivesRename = true
-
 const probeMode = os.O_RDONLY
 
 func lockFile(f *os.File, try bool) (func(), error) {

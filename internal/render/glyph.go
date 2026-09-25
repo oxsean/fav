@@ -2,7 +2,7 @@ package render
 
 import "os"
 
-// ASCII by default; icons=nerd / FAV_ICONS=nerd switches to Nerd Font PUA (Font Awesome U+F000–F2E0, Powerline U+E0A0),
+// ASCII by default; icons=nerd / TEND_ICONS=nerd switches to Nerd Font PUA (Font Awesome U+F000–F2E0, Powerline U+E0A0),
 // which renders 2 cells wide without the font. ⚠️ Code points, not literals: editors and transports drop PUA characters silently.
 var (
 	GlyphActive  = string(rune(0xf006)) // star_o              active
@@ -31,10 +31,10 @@ var (
 )
 
 func init() {
-	SetIcons(os.Getenv("FAV_ICONS"))
+	SetIcons(os.Getenv("TEND_ICONS"))
 }
 
-func IconsFromEnv() bool { return os.Getenv("FAV_ICONS") != "" }
+func IconsFromEnv() bool { return os.Getenv("TEND_ICONS") != "" }
 
 var nerd = [...]string{GlyphActive, GlyphDone, GlyphPinned, GlyphArchive, GlyphArrow, GlyphOpen, GlyphClosed,
 	GlyphOK, GlyphWarn, GlyphErr, GlyphSearch, GlyphProject, GlyphBranch, GlyphDir, GlyphTag, GlyphClock, GlyphTerm,

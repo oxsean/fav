@@ -13,8 +13,8 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/oxsean/fav/internal/capture"
-	"github.com/oxsean/fav/internal/fav"
 	"github.com/oxsean/fav/internal/index"
+	"github.com/oxsean/fav/internal/tend"
 )
 
 // every frame is exactly the terminal's size: each line w wide (overlays are composited by column), h lines
@@ -98,7 +98,7 @@ func openOverlay(m *Model, kind string) {
 	case "message":
 		long := capture.Message{Role: "assistant", Text: strings.Repeat("一段很长的回复，放不下一屏。", 200),
 			Steps: []capture.Step{{Tool: "Bash", Text: "go test ./..."}, {Result: true, Text: "ok"}}}
-		m.probes = map[*fav.Rec]*probe{m.current(): {done: true, msgs: []capture.Message{long}}}
+		m.probes = map[*tend.Rec]*probe{m.current(): {done: true, msgs: []capture.Message{long}}}
 		m.pane = paneChat
 		m.openMessage()
 	case "handoff":
@@ -157,29 +157,29 @@ func findText(s, want string) (int, int) {
 	return -1, -1
 }
 
-// FAV_DUMP=120x34 go test ./internal/ui/tui -run TestDumpFrame -v prints a real frame.
+// TEND_DUMP=120x34 go test ./internal/ui/tui -run TestDumpFrame -v prints a real frame.
 func TestDumpFrame(t *testing.T) {
-	spec := os.Getenv("FAV_DUMP")
+	spec := os.Getenv("TEND_DUMP")
 	if spec == "" {
-		t.Skip("设置 FAV_DUMP=WxH 查看画面")
+		t.Skip("设置 TEND_DUMP=WxH 查看画面")
 	}
 	var w, h int
 	if _, err := fmt.Sscanf(spec, "%dx%d", &w, &h); err != nil {
-		t.Fatalf("FAV_DUMP 应形如 120x34：%v", err)
+		t.Fatalf("TEND_DUMP 应形如 120x34：%v", err)
 	}
 	m := newModel(t, demoStore(t), w, h)
-	if os.Getenv("FAV_DUMP_VIEW") == "real" {
+	if os.Getenv("TEND_DUMP_VIEW") == "real" {
 		idx, _ := index.Open()
 		m.Update(m.pollLive()())
 		m.applyIndex(idx)
 	}
-	openOverlay(m, os.Getenv("FAV_DUMP_OV"))
+	openOverlay(m, os.Getenv("TEND_DUMP_OV"))
 	fmt.Println(m.screen())
 }
 
-func demoStore(t *testing.T) *fav.Store {
+func demoStore(t *testing.T) *tend.Store {
 	t.Helper()
-	st, err := fav.OpenAt(filepath.Join(t.TempDir(), "records.jsonl"))
+	st, err := tend.OpenAt(filepath.Join(t.TempDir(), "records.jsonl"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -188,19 +188,19 @@ func demoStore(t *testing.T) *fav.Store {
 		tags                          []string
 		provider, branch, ws          string
 	}{
-		{"notes-api WebSocket 断线重连排障", "弱网下心跳超时后不重连，定位到 backoff 计时器被 close 事件重置。", "notes-api", "排障", []string{"notes-api", "debug", "websocket"}, fav.ProviderClaude, "fix/ws-reconnect", "notes-api"},
-		{"WebApp 分支栈 rebase 自动化", "把手工 rebase 流程收敛成 make 目标，处理 worktree 隔离与冲突恢复。", "webapp", "重构", []string{"webapp", "git", "tooling"}, fav.ProviderCodex, "feat/stack-rebase", "webapp"},
-		{"Fav Session Manager 实现", "去掉 SQLite 改 JSONL，FZF 与原生 TUI 双前端。", "fav", "实现", []string{"fav", "golang", "tui"}, fav.ProviderClaude, "main", "dev"},
-		{"标签合并规则重写", "合并优先级与生效时间窗的边界条件梳理，补了 14 条表驱动测试。", "notes-api", "实现", []string{"notes-api", "tags"}, fav.ProviderClaude, "feat/geo-override", ""},
-		{"Codex rollout 文件反查会话 id", "没有环境变量可用，只能按 mtime + cwd 从首行反查，多命中时报错不猜。", "fav", "调研", []string{"fav", "codex"}, fav.ProviderCodex, "main", ""},
+		{"notes-api WebSocket 断线重连排障", "弱网下心跳超时后不重连，定位到 backoff 计时器被 close 事件重置。", "notes-api", "排障", []string{"notes-api", "debug", "websocket"}, tend.ProviderClaude, "fix/ws-reconnect", "notes-api"},
+		{"WebApp 分支栈 rebase 自动化", "把手工 rebase 流程收敛成 make 目标，处理 worktree 隔离与冲突恢复。", "webapp", "重构", []string{"webapp", "git", "tooling"}, tend.ProviderCodex, "feat/stack-rebase", "webapp"},
+		{"Tend Session Manager 实现", "去掉 SQLite 改 JSONL，FZF 与原生 TUI 双前端。", "tend", "实现", []string{"tend", "golang", "tui"}, tend.ProviderClaude, "main", "dev"},
+		{"标签合并规则重写", "合并优先级与生效时间窗的边界条件梳理，补了 14 条表驱动测试。", "notes-api", "实现", []string{"notes-api", "tags"}, tend.ProviderClaude, "feat/geo-override", ""},
+		{"Codex rollout 文件反查会话 id", "没有环境变量可用，只能按 mtime + cwd 从首行反查，多命中时报错不猜。", "tend", "调研", []string{"tend", "codex"}, tend.ProviderCodex, "main", ""},
 	} {
-		r := &fav.Rec{
-			ID: fav.NewID(), Provider: d.provider, SessionID: d.title,
+		r := &tend.Rec{
+			ID: tend.NewID(), Provider: d.provider, SessionID: d.title,
 			Title: d.title, Summary: d.summary, Project: d.project, WorkType: d.work,
 			Tags: d.tags, GitBranch: d.branch, HerdrWorkspace: d.ws,
-			Cwd: "/Users/me/work/" + d.project, Status: fav.StatusDone,
+			Cwd: "/Users/me/work/" + d.project, Status: tend.StatusDone,
 		}
-		r.Tags = fav.Normalize(r.Tags)
+		r.Tags = tend.Normalize(r.Tags)
 		r.FavoritedAt = new(time.Now().Add(-time.Duration(len(d.title)) * time.Hour))
 		if err := st.Put(r); err != nil {
 			t.Fatal(err)
@@ -261,7 +261,7 @@ func TestResumeDialogEditsTitle(t *testing.T) {
 	if rec.Title != "改过的标题" {
 		t.Errorf("记录标题还是 %q", rec.Title)
 	}
-	reloaded, err := fav.OpenAt(st.Path)
+	reloaded, err := tend.OpenAt(st.Path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -275,18 +275,18 @@ func TestResumeDialogEditsTitle(t *testing.T) {
 func TestSessionsViewFavorites(t *testing.T) {
 	st := demoStore(t)
 	m := newModel(t, st, 120, 36)
-	rec := &fav.Rec{Provider: fav.ProviderClaude, SessionID: "sess-x", Title: "第一句话",
-		Cwd: t.TempDir(), FavoritedAt: new(time.Now()), Status: fav.StatusDone}
+	rec := &tend.Rec{Provider: tend.ProviderClaude, SessionID: "sess-x", Title: "第一句话",
+		Cwd: t.TempDir(), FavoritedAt: new(time.Now()), Status: tend.StatusDone}
 	rec.Attach(5, 10, time.Now(), "第一句话\n再来一句\n")
-	short := &fav.Rec{Provider: fav.ProviderClaude, SessionID: "sess-short", Title: "hi",
-		Cwd: t.TempDir(), FavoritedAt: new(time.Now()), Status: fav.StatusDone}
+	short := &tend.Rec{Provider: tend.ProviderClaude, SessionID: "sess-short", Title: "hi",
+		Cwd: t.TempDir(), FavoritedAt: new(time.Now()), Status: tend.StatusDone}
 	short.Attach(1, 2, time.Now(), "hi\n")
-	m.unfav = []*fav.Rec{rec, short}
+	m.unfav = []*tend.Rec{rec, short}
 	m.setView(viewSessions)
 	if m.current() != rec {
 		t.Fatalf("最新的未收藏会话应排在最前：%+v", m.current())
 	}
-	base := len(st.Query(fav.Parse("")))
+	base := len(st.Query(tend.Parse("")))
 	if n := m.countRecs(); n != base+1 {
 		t.Fatalf("1 轮的会话默认应藏起来：列了 %d 条", n)
 	}
@@ -301,7 +301,7 @@ func TestSessionsViewFavorites(t *testing.T) {
 		t.Fatal("应能按索引里的提示语搜到未收藏会话")
 	}
 	m.search.SetValue("")
-	codex := &fav.Rec{Provider: fav.ProviderCodex, SessionID: "sess-cx", Title: "codex 的会话", Cwd: t.TempDir(), FavoritedAt: new(time.Now().Add(-time.Hour)), Status: fav.StatusDone}
+	codex := &tend.Rec{Provider: tend.ProviderCodex, SessionID: "sess-cx", Title: "codex 的会话", Cwd: t.TempDir(), FavoritedAt: new(time.Now().Add(-time.Hour)), Status: tend.StatusDone}
 	codex.Attach(5, 10, time.Now().Add(-time.Hour), "")
 	m.unfav = append(m.unfav, codex)
 	m.setView(viewSessions)
@@ -310,7 +310,7 @@ func TestSessionsViewFavorites(t *testing.T) {
 		m.cycleProvider()
 		seen = append(seen, m.search.Value())
 	}
-	if !strings.Contains(strings.Join(seen, ","), "provider:"+fav.ProviderCodex) || seen[2] != "" {
+	if !strings.Contains(strings.Join(seen, ","), "provider:"+tend.ProviderCodex) || seen[2] != "" {
 		t.Fatalf("来源轮换应经过没收藏的 Codex 会话再回到全部：%v", seen)
 	}
 	m.setView(viewFavorites)
@@ -321,7 +321,7 @@ func TestSessionsViewFavorites(t *testing.T) {
 	}
 	m.setView(viewSessions)
 	m.Update(press("f"))
-	if rec.ID == "" || st.BySession(fav.ProviderClaude, "sess-x") == nil {
+	if rec.ID == "" || st.BySession(tend.ProviderClaude, "sess-x") == nil {
 		t.Fatal("按 f 后没有落库")
 	}
 	for _, r := range m.unfav {
@@ -373,10 +373,10 @@ func TestFavoriteToggle(t *testing.T) {
 	if first == nil || !first.Favorite() {
 		t.Fatal("demo 库的第一条应是收藏")
 	}
-	title, nFav := first.Title, m.nFav
+	title, nFavorites := first.Title, m.nFavorites
 	m.Update(press("f"))
-	if first.Favorite() || m.current() != first || m.nFav != nFav-1 {
-		t.Fatalf("f 应取消收藏、记录留在原地、收藏总数减一：fav=%v cur==first=%v nFav=%d", first.Favorite(), m.current() == first, m.nFav)
+	if first.Favorite() || m.current() != first || m.nFavorites != nFavorites-1 {
+		t.Fatalf("f 应取消收藏、记录留在原地、收藏总数减一：favorite=%v cur==first=%v nFavorites=%d", first.Favorite(), m.current() == first, m.nFavorites)
 	}
 	if !strings.Contains(ansi.Strip(m.screen()), "未收藏 · f 收藏") {
 		t.Fatal("取消后详情应提示可再收藏")
@@ -390,7 +390,7 @@ func TestFavoriteToggle(t *testing.T) {
 	m.setView(viewSessions)
 	m.Update(press("f"))
 	got := st.BySession(first.Provider, first.SessionID)
-	if got == nil || !got.Favorite() || got.Title != title || got.ID != first.ID || m.nFav != nFav {
+	if got == nil || !got.Favorite() || got.Title != title || got.ID != first.ID || m.nFavorites != nFavorites {
 		t.Fatalf("再按 f 应原样恢复原记录：%+v", got)
 	}
 }
@@ -399,7 +399,7 @@ func TestStateOnPlainSession(t *testing.T) {
 	st := demoStore(t)
 	m := newModel(t, st, 120, 40)
 	m.setView(viewSessions)
-	sess := &fav.Rec{Provider: "claude", SessionID: "plain-1", Title: "没收藏的会话", Cwd: "/tmp", Status: fav.StatusDone}
+	sess := &tend.Rec{Provider: "claude", SessionID: "plain-1", Title: "没收藏的会话", Cwd: "/tmp", Status: tend.StatusDone}
 	sess.Attach(9, 20, time.Now(), "")
 	m.unfav = append(m.unfav, sess)
 	m.recount()

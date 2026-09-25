@@ -6,10 +6,10 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/oxsean/fav/internal/fav"
 	"github.com/oxsean/fav/internal/fileio"
 	"github.com/oxsean/fav/internal/filelock"
 	"github.com/oxsean/fav/internal/proc"
+	"github.com/oxsean/fav/internal/tend"
 )
 
 // RunSession is a session a tend run started on this machine.
@@ -48,7 +48,7 @@ func KeepRunSession(nodeDir, sid string, r RunSession) error {
 // after their directories went), by session id. Their CLIs mark them one-shot, but tend started them for a task:
 // they are listed and guarded like any session.
 func RunSessions() map[string]RunSession {
-	nodeDir := filepath.Join(fav.Home(), "node")
+	nodeDir := filepath.Join(tend.Home(), "node")
 	out := map[string]RunSession{}
 	fileio.Lines(context.Background(), filepath.Join(nodeDir, keptSessions), 0, 64<<10, func(_ int64, line []byte) bool {
 		var k struct {

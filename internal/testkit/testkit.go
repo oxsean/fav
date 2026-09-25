@@ -27,11 +27,11 @@ var root string
 // Shared: p is under the package-wide root of Main, not a test's own directory.
 func Shared(p string) bool { return root != "" && paths.Under(p, root) }
 
-// Main runs a package's tests with every per-user location (fav, Claude, Codex, home, OS config dirs) under a
+// Main runs a package's tests with every per-user location (tend, Claude, Codex, home, OS config dirs) under a
 // temporary root and always-failing herdr, claude and codex first on PATH; call it from TestMain.
 func Main(m *testing.M) {
 	var err error
-	root, err = os.MkdirTemp("", "fav-test")
+	root, err = os.MkdirTemp("", "tend-test")
 	if err != nil {
 		panic(err)
 	}
@@ -44,12 +44,11 @@ func Main(m *testing.M) {
 	os.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	for k, sub := range map[string]string{
 		"HOME": "home", "USERPROFILE": "home", "XDG_CONFIG_HOME": "config", "APPDATA": "config", "LOCALAPPDATA": "local",
-		"FAV_HOME": "fav", "CLAUDE_CONFIG_DIR": "claude", "CODEX_HOME": "codex",
+		"TEND_HOME": "tend", "CLAUDE_CONFIG_DIR": "claude", "CODEX_HOME": "codex",
 	} {
 		os.Setenv(k, filepath.Join(root, sub))
 	}
 	os.Setenv("HERDR_ENV", "")
-	os.Unsetenv("TEND_HOME") // it would outrank every test's own FAV_HOME
 	code := m.Run()
 	os.RemoveAll(root)
 	os.Exit(code)

@@ -15,12 +15,12 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/oxsean/fav/internal/fav"
 	"github.com/oxsean/fav/internal/fileio"
+	"github.com/oxsean/fav/internal/tend"
 )
 
 // Cands turns records into candidates: every transcript of the session, else the record's own file.
-func Cands(recs []*fav.Rec, bySession map[string][]string) []Cand {
+func Cands(recs []*tend.Rec, bySession map[string][]string) []Cand {
 	out := make([]Cand, len(recs))
 	for i, r := range recs {
 		ps := bySession[r.Key()]
@@ -59,7 +59,7 @@ func Split(q string) (keywords, scope string) {
 			kw = append(kw, `"`+f+`"`)
 			continue
 		}
-		if len(fav.Parse(f).Words) > 0 { // whatever the list query would treat as a keyword
+		if len(tend.Parse(f).Words) > 0 { // whatever the list query would treat as a keyword
 			kw = append(kw, f)
 			continue
 		}
@@ -651,7 +651,7 @@ func snippet(kws []Keyword, text string) string {
 	return s
 }
 
-func sources(indexed []string, recs []*fav.Rec) []string {
+func sources(indexed []string, recs []*tend.Rec) []string {
 	out := indexed
 	for _, r := range recs {
 		if p := pinnedOnly(r); p != "" {
@@ -661,7 +661,7 @@ func sources(indexed []string, recs []*fav.Rec) []string {
 	return out
 }
 
-func pinnedOnly(r *fav.Rec) string {
+func pinnedOnly(r *tend.Rec) string {
 	if r.PinnedPath == "" {
 		return ""
 	}

@@ -1,4 +1,4 @@
-// Package fzf drives one fzf session from fav subcommands; it never touches data files.
+// Package fzf drives one fzf session from tend subcommands; it never touches data files.
 package fzf
 
 import (
@@ -19,10 +19,10 @@ import (
 
 // PickFileEnv: sub-picker results go to this file (execute's stdout is the terminal) and `fzf-pick read` hands them to
 // transform-query.
-const PickFileEnv = "FAV_PICK_FILE"
+const PickFileEnv = "TEND_PICK_FILE"
 
-// bindShellEnv tells `fav fzf-tab` which shell runs the bindings it prints.
-const bindShellEnv = "FAV_FZF_SHELL"
+// bindShellEnv tells `tend fzf-tab` which shell runs the bindings it prints.
+const bindShellEnv = "TEND_FZF_SHELL"
 
 // bindShell is the shell fzf runs bindings with, and quotes its placeholders for. POSIX: sh -c, named from 0.51
 // (--with-shell). Windows: fzf's own choice, $SHELL else cmd — naming one there switches fzf to POSIX placeholder quoting.
@@ -124,7 +124,7 @@ func Run(initialQuery string, start Tab) (string, error) {
 	withShell, sh := bindShell(major, minor)
 	q := selfIn(sh)
 
-	pickFile := filepath.Join(os.TempDir(), "fav-pick-"+strconv.Itoa(os.Getpid()))
+	pickFile := filepath.Join(os.TempDir(), "tend-pick-"+strconv.Itoa(os.Getpid()))
 	defer os.Remove(pickFile)
 
 	// fzf escapes {q} and {1} for the shell it runs
@@ -150,7 +150,7 @@ func Run(initialQuery string, start Tab) (string, error) {
 		"--prompt", start.prompt(),
 		"--header", head,
 		"--info", "inline-right",
-		"--disabled", // filtering is all done by fav
+		"--disabled", // filtering is all done by tend
 		"--query", initialQuery,
 		"--bind", "start:"+reload,
 		"--bind", "change:"+reload,
@@ -200,7 +200,7 @@ func Run(initialQuery string, start Tab) (string, error) {
 
 func reloadAction(q string) string { return "reload(" + q + " fzf-list {q})" }
 
-// Switch is the action string `fav fzf-tab` prints for fzf transform: prompt, header, footer, reload.
+// Switch is the action string `tend fzf-tab` prints for fzf transform: prompt, header, footer, reload.
 // Arguments are wrapped in ^ because the texts contain ( ) [ ] and newlines.
 func Switch(t Tab) string {
 	head, foot := hints(t)

@@ -8,9 +8,9 @@ import (
 	uv "github.com/charmbracelet/ultraviolet"
 
 	"github.com/oxsean/fav/internal/capture"
-	"github.com/oxsean/fav/internal/fav"
 	"github.com/oxsean/fav/internal/i18n"
 	"github.com/oxsean/fav/internal/remote"
+	"github.com/oxsean/fav/internal/tend"
 )
 
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -289,7 +289,7 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 // herdrDoneMsg is the receipt of a Herdr resume; the TUI stays open.
 type herdrDoneMsg struct {
-	rec     *fav.Rec
+	rec     *tend.Rec
 	msg     string
 	resumed bool // a new tab resumed the session (not a focus, fork or new session): counted
 	warn    error
@@ -584,7 +584,7 @@ func (m *Model) navKey(msg tea.KeyPressMsg) tea.Cmd {
 	case actArchive:
 		m.toggleArchive(m.current())
 	case actDone:
-		m.toggleStatus(m.current(), fav.StatusDone)
+		m.toggleStatus(m.current(), tend.StatusDone)
 	case actEdit:
 		return m.openEdit(m.current())
 	case actHelp:
@@ -950,7 +950,7 @@ func (m *Model) resumeEnter() {
 	}
 }
 
-func (m *Model) openResume(r *fav.Rec) {
+func (m *Model) openResume(r *tend.Rec) {
 	if r == nil {
 		return
 	}
@@ -972,22 +972,22 @@ func (m *Model) openResume(r *fav.Rec) {
 	}
 }
 
-func (m *Model) visibleRecs() []*fav.Rec { return m.list(m.query().Scope()) }
+func (m *Model) visibleRecs() []*tend.Rec { return m.list(m.query().Scope()) }
 
 func (m *Model) pickTags() {
-	q := fav.Parse(m.search.Value())
+	q := tend.Parse(m.search.Value())
 	m.openPicker(i18n.T("picker.tags_title"), i18n.T("picker.tags_hint"), tagsOf(m.visibleRecs()), true, q.Tags,
 		func(m *Model, chosen []string) {
 			toks := make([]string, len(chosen))
 			for i, c := range chosen {
 				toks[i] = "#" + c
 			}
-			m.setQuery(toks, fav.HasPrefix("#"))
+			m.setQuery(toks, tend.HasPrefix("#"))
 		})
 }
 
 func (m *Model) pickProjects() {
-	q := fav.Parse(m.search.Value())
+	q := tend.Parse(m.search.Value())
 	items := append([]item{{name: "", label: i18n.T("picker.all")}}, projectsOf(m.visibleRecs())...)
 	m.openPicker(i18n.T("picker.projects_title"), "", items, false, []string{q.Project},
 		func(m *Model, chosen []string) {
@@ -995,7 +995,7 @@ func (m *Model) pickProjects() {
 			if len(chosen) > 0 && chosen[0] != "" {
 				toks = []string{"project:" + chosen[0]}
 			}
-			m.setQuery(toks, fav.HasPrefix("project:"))
+			m.setQuery(toks, tend.HasPrefix("project:"))
 		})
 }
 
@@ -1006,7 +1006,7 @@ func (m *Model) saveConfig() {
 }
 
 func (m *Model) cycleProvider() {
-	q := fav.Parse(m.search.Value())
+	q := tend.Parse(m.search.Value())
 	cycle := []string{""}
 	for _, it := range providersOf(m.visibleRecs()) {
 		cycle = append(cycle, it.name)
@@ -1016,15 +1016,15 @@ func (m *Model) cycleProvider() {
 	if next != "" {
 		toks = []string{"provider:" + next}
 	}
-	m.setQuery(toks, fav.HasPrefix("provider:"))
+	m.setQuery(toks, tend.HasPrefix("provider:"))
 	m.refresh()
 }
 
 func (m *Model) pickDate() {
-	q := fav.Parse(m.search.Value())
+	q := tend.Parse(m.search.Value())
 	var cur []string
 	for t := range strings.FieldsSeq(m.search.Value()) {
-		if fav.HasPrefix("last:", "after:", "before:")(t) {
+		if tend.HasPrefix("last:", "after:", "before:")(t) {
 			cur = append(cur, t)
 		}
 	}
@@ -1043,7 +1043,7 @@ func (m *Model) pickDate() {
 			if len(chosen) > 0 {
 				toks = strings.Fields(chosen[0])
 			}
-			m.setQuery(toks, fav.HasPrefix("last:", "after:", "before:"))
+			m.setQuery(toks, tend.HasPrefix("last:", "after:", "before:"))
 		})
 	m.ov.parse = func(s string) (item, bool) { return dateItem(s, time.Now()) }
 	m.ov.filter.Placeholder = i18n.T("picker.time_placeholder")
@@ -1088,7 +1088,7 @@ func dateItem(s string, now time.Time) (item, bool) {
 		var toks []string
 		label := ""
 		if a != "" {
-			t, ok := fav.ParseDay(a, now)
+			t, ok := tend.ParseDay(a, now)
 			if !ok {
 				return item{}, false
 			}
@@ -1096,7 +1096,7 @@ func dateItem(s string, now time.Time) (item, bool) {
 			label = t.Format("01-02")
 		}
 		if b != "" {
-			t, ok := fav.ParseDay(b, now)
+			t, ok := tend.ParseDay(b, now)
 			if !ok {
 				return item{}, false
 			}
@@ -1110,15 +1110,15 @@ func dateItem(s string, now time.Time) (item, bool) {
 		}
 		return item{name: strings.Join(toks, " "), label: label}, true
 	}
-	if t, ok := fav.ParseDay(s, now); ok {
+	if t, ok := tend.ParseDay(s, now); ok {
 		return item{name: "last:" + t.Format("2006-01-02"), label: i18n.F("date.active_from", t.Format("01-02"))}, true
 	}
-	if _, ok := fav.ParseWhen(s, now); ok && !strings.Contains(s, "-") {
+	if _, ok := tend.ParseWhen(s, now); ok && !strings.Contains(s, "-") {
 		return item{name: "last:" + s, label: i18n.F("date.last", s)}, true
 	}
 	return item{}, false
 }
 
 func (m *Model) setQuery(add []string, sameKind func(string) bool) {
-	m.search.SetValue(fav.ReplaceTokens(m.search.Value(), add, sameKind))
+	m.search.SetValue(tend.ReplaceTokens(m.search.Value(), add, sameKind))
 }

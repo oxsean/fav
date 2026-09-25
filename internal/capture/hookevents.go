@@ -6,11 +6,11 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/oxsean/fav/internal/fav"
 	"github.com/oxsean/fav/internal/fileio"
+	"github.com/oxsean/fav/internal/tend"
 )
 
-// hookEvent: a session's latest Claude Code hook event (fav install-hook) and the transcript size at that moment.
+// hookEvent: a session's latest Claude Code hook event (tend install-hook) and the transcript size at that moment.
 type hookEvent struct {
 	Event string    `json:"event"`
 	At    time.Time `json:"at"`
@@ -18,7 +18,7 @@ type hookEvent struct {
 }
 
 func hookEventPath(sessionID string) string {
-	return filepath.Join(fav.Home(), "events", filepath.Base(sessionID)+".json")
+	return filepath.Join(tend.Home(), "events", filepath.Base(sessionID)+".json")
 }
 
 // RecordHookEvent overwrites the session's event file; errors are dropped, a hook must never get in Claude's way.

@@ -13,12 +13,12 @@ import (
 	"time"
 
 	"github.com/oxsean/fav/internal/agent"
-	"github.com/oxsean/fav/internal/fav"
 	"github.com/oxsean/fav/internal/journal"
 	"github.com/oxsean/fav/internal/node"
 	"github.com/oxsean/fav/internal/proc"
 	"github.com/oxsean/fav/internal/remote"
 	"github.com/oxsean/fav/internal/task"
+	"github.com/oxsean/fav/internal/tend"
 	"github.com/oxsean/fav/internal/testkit"
 	"github.com/oxsean/fav/internal/wire"
 )
@@ -43,19 +43,19 @@ func TestMain(m *testing.M) {
 type env struct {
 	t      *testing.T
 	home   string
-	cfg    fav.Config
-	dial   func(h fav.Host, opt wire.Options) (Conn, error)
+	cfg    tend.Config
+	dial   func(h tend.Host, opt wire.Options) (Conn, error)
 	c      *Coord
 	cancel context.CancelFunc
 	cli    *wire.Conn
 	cmd    atomic.Int64
 }
 
-func newEnv(t *testing.T, cfg fav.Config) *env {
+func newEnv(t *testing.T, cfg tend.Config) *env {
 	e := &env{t: t, home: t.TempDir(), cfg: cfg}
 	cfg.Agents = append(cfg.Agents,
-		fav.AgentProfile{Name: "quick", Provider: agent.ProviderFake, Args: []string{"--steps", "1", "--every", "50ms"}},
-		fav.AgentProfile{Name: "slow", Provider: agent.ProviderFake, Args: []string{"--steps", "1", "--every", "50ms", "--ask"}})
+		tend.AgentProfile{Name: "quick", Provider: agent.ProviderFake, Args: []string{"--steps", "1", "--every", "50ms"}},
+		tend.AgentProfile{Name: "slow", Provider: agent.ProviderFake, Args: []string{"--steps", "1", "--every", "50ms", "--ask"}})
 	e.cfg = cfg
 	t.Cleanup(e.stop)
 	t.Cleanup(func() { killRuns(e.home) })
@@ -156,7 +156,7 @@ func ended(r *task.Run) bool { return !task.Open(r.State) }
 func state(s string) func(*task.Run) bool { return func(r *task.Run) bool { return r.State == s } }
 
 func TestATaskRunsOnThisMachineToItsEnd(t *testing.T) {
-	e := newEnv(t, fav.Config{})
+	e := newEnv(t, tend.Config{})
 	e.start()
 	tk := e.task("fix the build", "quick")
 	r := e.dispatch(Dispatch{Task: tk.ID})
@@ -174,7 +174,7 @@ func TestATaskRunsOnThisMachineToItsEnd(t *testing.T) {
 }
 
 func TestACommandIDAnswersItsFirstResult(t *testing.T) {
-	e := newEnv(t, fav.Config{})
+	e := newEnv(t, tend.Config{})
 	e.start()
 	ctx := context.Background()
 	var a, b task.Task
@@ -197,7 +197,7 @@ func TestACommandIDAnswersItsFirstResult(t *testing.T) {
 }
 
 func TestAnOpenRunHoldsItsTask(t *testing.T) {
-	e := newEnv(t, fav.Config{})
+	e := newEnv(t, tend.Config{})
 	e.start()
 	tk := e.task("x", "slow")
 	r := e.dispatch(Dispatch{Task: tk.ID})
@@ -213,7 +213,7 @@ func TestAnOpenRunHoldsItsTask(t *testing.T) {
 }
 
 func TestSlotsAndDirectoriesQueueRuns(t *testing.T) {
-	e := newEnv(t, fav.Config{Machines: map[string]fav.MachineConfig{Local: {Slots: 2}}})
+	e := newEnv(t, tend.Config{Machines: map[string]tend.MachineConfig{Local: {Slots: 2}}})
 	e.start()
 	shared := t.TempDir()
 	a := e.dispatch(Dispatch{Task: e.taskIn("a", "slow", shared).ID})
@@ -240,7 +240,7 @@ func TestSlotsAndDirectoriesQueueRuns(t *testing.T) {
 }
 
 func TestRunsGoOnWithoutTheCoordinator(t *testing.T) {
-	e := newEnv(t, fav.Config{})
+	e := newEnv(t, tend.Config{})
 	e.start()
 	r := e.dispatch(Dispatch{Task: e.task("x", "slow").ID})
 	e.wait(r.ID, state(task.Running))
@@ -281,7 +281,7 @@ func newFar(t *testing.T) *far {
 	return f
 }
 
-func (f *far) dial(h fav.Host, opt wire.Options) (Conn, error) {
+func (f *far) dial(h tend.Host, opt wire.Options) (Conn, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.dials++
@@ -312,7 +312,7 @@ func (f *far) cut() {
 func TestAMachineThatCannotBeReachedKeepsItsRunsQueued(t *testing.T) {
 	f := newFar(t)
 	f.set(&wire.Error{Code: wire.CodeOffline, Detail: "no route"})
-	e := newEnv(t, fav.Config{Hosts: []fav.Host{{Name: "far", SSH: "far"}}})
+	e := newEnv(t, tend.Config{Hosts: []tend.Host{{Name: "far", SSH: "far"}}})
 	e.dial = f.dial
 	e.start()
 	r := e.dispatch(Dispatch{Task: e.task("x", "quick").ID, Machine: "far"})
@@ -344,7 +344,7 @@ func TestAMachineThatCannotBeReachedKeepsItsRunsQueued(t *testing.T) {
 
 func TestALostConnectionIsReconciledOnReconnect(t *testing.T) {
 	f := newFar(t)
-	e := newEnv(t, fav.Config{Hosts: []fav.Host{{Name: "far", SSH: "far"}}})
+	e := newEnv(t, tend.Config{Hosts: []tend.Host{{Name: "far", SSH: "far"}}})
 	e.dial = f.dial
 	e.start()
 	r := e.dispatch(Dispatch{Task: e.task("x", "slow").ID, Machine: "far"})
@@ -372,7 +372,7 @@ func TestALostConnectionIsReconciledOnReconnect(t *testing.T) {
 
 func TestAStopAskedWhileOfflineIsDeliveredLater(t *testing.T) {
 	f := newFar(t)
-	e := newEnv(t, fav.Config{Hosts: []fav.Host{{Name: "far", SSH: "far"}}})
+	e := newEnv(t, tend.Config{Hosts: []tend.Host{{Name: "far", SSH: "far"}}})
 	e.dial = f.dial
 	e.start()
 	r := e.dispatch(Dispatch{Task: e.task("x", "slow").ID, Machine: "far"})
@@ -397,9 +397,9 @@ func TestAStopAskedWhileOfflineIsDeliveredLater(t *testing.T) {
 }
 
 func TestANodeThatRefusesARunFailsIt(t *testing.T) {
-	e := newEnv(t, fav.Config{})
+	e := newEnv(t, tend.Config{})
 	e.start()
-	e.c.opt.Node.Limits = fav.NodeConfig{AllowProfiles: []string{"slow"}}
+	e.c.opt.Node.Limits = tend.NodeConfig{AllowProfiles: []string{"slow"}}
 	r := e.dispatch(Dispatch{Task: e.task("x", "quick").ID})
 	end := e.wait(r.ID, ended)
 	if end.State != task.Failed || end.Reason == "" {
@@ -408,7 +408,7 @@ func TestANodeThatRefusesARunFailsIt(t *testing.T) {
 }
 
 func TestSubscribersGetEveryEnvelopeInOrder(t *testing.T) {
-	e := newEnv(t, fav.Config{})
+	e := newEnv(t, tend.Config{})
 	e.start()
 	e.task("before", "quick")
 	var mu sync.Mutex
@@ -449,7 +449,7 @@ func TestSubscribersGetEveryEnvelopeInOrder(t *testing.T) {
 }
 
 func TestOneCoordinatorAtATime(t *testing.T) {
-	e := newEnv(t, fav.Config{})
+	e := newEnv(t, tend.Config{})
 	e.start()
 	if _, err := Open(Options{Home: e.home, Node: node.New(e.home)}); !errors.Is(err, ErrLocked) {
 		t.Fatalf("%v", err)
@@ -476,7 +476,7 @@ func TestOneCoordinatorAtATime(t *testing.T) {
 }
 
 func TestAStartThatNeverReachedTheNodeIsSentAgain(t *testing.T) {
-	e := newEnv(t, fav.Config{})
+	e := newEnv(t, tend.Config{})
 	e.start()
 	tk := e.task("x", "quick")
 	e.stop()
@@ -501,7 +501,7 @@ func TestAStartThatNeverReachedTheNodeIsSentAgain(t *testing.T) {
 }
 
 func TestAnAbandonedRunIsAskedToStop(t *testing.T) {
-	e := newEnv(t, fav.Config{})
+	e := newEnv(t, tend.Config{})
 	e.start()
 	tk := e.task("x", "slow")
 	r := e.dispatch(Dispatch{Task: tk.ID})
@@ -518,7 +518,7 @@ func TestAnAbandonedRunIsAskedToStop(t *testing.T) {
 }
 
 func TestARunGoneFromItsNodeCanBeGivenUp(t *testing.T) {
-	e := newEnv(t, fav.Config{})
+	e := newEnv(t, tend.Config{})
 	e.start()
 	r := e.dispatch(Dispatch{Task: e.task("x", "slow").ID})
 	e.wait(r.ID, state(task.Running))
@@ -542,7 +542,7 @@ func TestARunGoneFromItsNodeCanBeGivenUp(t *testing.T) {
 }
 
 func TestAStopOfAStartThatNeverArrivedEndsTheRun(t *testing.T) {
-	e := newEnv(t, fav.Config{})
+	e := newEnv(t, tend.Config{})
 	e.start()
 	tk := e.task("x", "quick")
 	e.stop()
@@ -568,7 +568,7 @@ func TestAStopOfAStartThatNeverArrivedEndsTheRun(t *testing.T) {
 }
 
 func TestADirectoryIsMappedFromTheMachineItWasWrittenFor(t *testing.T) {
-	e := newEnv(t, fav.Config{Hosts: []fav.Host{{Name: "far", SSH: "far"}}})
+	e := newEnv(t, tend.Config{Hosts: []tend.Host{{Name: "far", SSH: "far"}}})
 	c, err := Open(Options{Home: e.home, Config: e.cfg, Node: node.New(e.home), Sessions: remote.NewLocal("test")})
 	if err != nil {
 		t.Fatal(err)
@@ -576,8 +576,8 @@ func TestADirectoryIsMappedFromTheMachineItWasWrittenFor(t *testing.T) {
 	defer c.Close()
 	home, _ := os.UserHomeDir()
 	c.ms["far"].hello = remote.Hello{OS: "linux", Home: "/root"}
-	r := &task.Run{Task: "t_1", Dir: filepath.Join(home, "dev", "fav"), From: Local}
-	if got, ok := c.mapDir(r, c.ms["far"]); !ok || got != "/root/dev/fav" {
+	r := &task.Run{Task: "t_1", Dir: filepath.Join(home, "dev", "tend"), From: Local}
+	if got, ok := c.mapDir(r, c.ms["far"]); !ok || got != "/root/dev/tend" {
 		t.Fatalf("this machine never connected: %s", got)
 	}
 }
@@ -589,7 +589,7 @@ func TestADirectoryIsBusyWhateverItsCase(t *testing.T) {
 }
 
 func TestAReplayedCommandAnswersWhatItAnsweredFirst(t *testing.T) {
-	e := newEnv(t, fav.Config{})
+	e := newEnv(t, tend.Config{})
 	e.start()
 	ctx := context.Background()
 	var a, b task.Task
@@ -604,7 +604,7 @@ func TestAReplayedCommandAnswersWhatItAnsweredFirst(t *testing.T) {
 }
 
 func TestStateWithoutBriefsAndOneTask(t *testing.T) {
-	e := newEnv(t, fav.Config{})
+	e := newEnv(t, tend.Config{})
 	e.start()
 	var tk task.Task
 	e.must(MTaskCreate, TaskCreate{Title: "x", Brief: "the brief", Dir: t.TempDir()}, &tk)
@@ -627,7 +627,7 @@ func TestStateWithoutBriefsAndOneTask(t *testing.T) {
 func TestACallWaitsOutTheBackoff(t *testing.T) {
 	f := newFar(t)
 	f.set(&wire.Error{Code: wire.CodeOffline})
-	e := newEnv(t, fav.Config{Hosts: []fav.Host{{Name: "far", SSH: "far"}}})
+	e := newEnv(t, tend.Config{Hosts: []tend.Host{{Name: "far", SSH: "far"}}})
 	e.dial = f.dial
 	e.start()
 	var ms Machines
@@ -649,7 +649,7 @@ func TestACallWaitsOutTheBackoff(t *testing.T) {
 }
 
 func TestAnAbandonedStartThatLandsLateIsStopped(t *testing.T) {
-	e := newEnv(t, fav.Config{})
+	e := newEnv(t, tend.Config{})
 	e.start()
 	tk := e.task("x", "slow")
 	e.stop()
@@ -683,7 +683,7 @@ func TestAnAbandonedStartThatLandsLateIsStopped(t *testing.T) {
 }
 
 func TestAnAbandonedRunKeepsItsDirectoryUntilItStops(t *testing.T) {
-	e := newEnv(t, fav.Config{})
+	e := newEnv(t, tend.Config{})
 	e.start()
 	dir := t.TempDir()
 	a := e.dispatch(Dispatch{Task: e.taskIn("a", "slow", dir).ID})
@@ -710,7 +710,7 @@ func TestAnAbandonedRunKeepsItsDirectoryUntilItStops(t *testing.T) {
 
 func TestARunGoneFromAFarNodeIsNoticedWhileOthersRun(t *testing.T) {
 	f := newFar(t)
-	e := newEnv(t, fav.Config{Hosts: []fav.Host{{Name: "far", SSH: "far"}}})
+	e := newEnv(t, tend.Config{Hosts: []tend.Host{{Name: "far", SSH: "far"}}})
 	e.dial = f.dial
 	e.start()
 	here := e.dispatch(Dispatch{Task: e.task("here", "slow").ID})
@@ -734,8 +734,8 @@ func TestARunGoneFromAFarNodeIsNoticedWhileOthersRun(t *testing.T) {
 func TestAReadOnlyCommandLeavesAtOnce(t *testing.T) {
 	f := newFar(t)
 	f.set(&wire.Error{Code: wire.CodeOffline})
-	e := newEnv(t, fav.Config{Hosts: []fav.Host{{Name: "far", SSH: "far"}}})
-	e.dial = func(h fav.Host, opt wire.Options) (Conn, error) {
+	e := newEnv(t, tend.Config{Hosts: []tend.Host{{Name: "far", SSH: "far"}}})
+	e.dial = func(h tend.Host, opt wire.Options) (Conn, error) {
 		time.Sleep(3 * time.Second) // an ssh that never answers
 		return f.dial(h, opt)
 	}
@@ -765,7 +765,7 @@ func TestADirectoryKeyFollowsTheTargetsRules(t *testing.T) {
 }
 
 func TestTitlesAreCappedAndHerdrRunsClaudeOnly(t *testing.T) {
-	e := newEnv(t, fav.Config{})
+	e := newEnv(t, tend.Config{})
 	e.start()
 	if err := e.call(MTaskCreate, TaskCreate{Title: strings.Repeat("x", maxTitle+1)}, nil); wire.Code(err) != wire.CodeBadRequest {
 		t.Fatal(err)

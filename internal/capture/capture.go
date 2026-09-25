@@ -10,9 +10,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/oxsean/fav/internal/fav"
 	"github.com/oxsean/fav/internal/herdr"
 	"github.com/oxsean/fav/internal/i18n"
+	"github.com/oxsean/fav/internal/tend"
 )
 
 type Context struct {
@@ -50,7 +50,7 @@ func Detect() (*Context, error) {
 
 	if c.Provider == "" {
 		if id := os.Getenv("CLAUDE_CODE_SESSION_ID"); id != "" {
-			c.Provider, c.SessionID = fav.ProviderClaude, id
+			c.Provider, c.SessionID = tend.ProviderClaude, id
 		}
 	}
 	if c.Provider == "" {
@@ -59,7 +59,7 @@ func Detect() (*Context, error) {
 			return c, err
 		}
 		if sess != nil {
-			c.Provider, c.SessionID = fav.ProviderCodex, sess.SessionID
+			c.Provider, c.SessionID = tend.ProviderCodex, sess.SessionID
 			c.TranscriptPath = sess.Path
 		}
 	}
@@ -106,9 +106,9 @@ func (c *Context) fillHerdr() {
 func normalizeAgent(a string) string {
 	switch strings.ToLower(a) {
 	case "claude", "claude-code":
-		return fav.ProviderClaude
+		return tend.ProviderClaude
 	case "codex", "codex-cli":
-		return fav.ProviderCodex
+		return tend.ProviderCodex
 	}
 	return ""
 }
@@ -182,9 +182,9 @@ func TranscriptPath(provider, sessionID string) string {
 	}
 	var hits []string
 	switch provider {
-	case fav.ProviderClaude:
+	case tend.ProviderClaude:
 		hits = ClaudeTranscripts(sessionID)
-	case fav.ProviderCodex:
+	case tend.ProviderCodex:
 		hits = CodexRollouts(sessionID)
 	}
 	if len(hits) == 0 {

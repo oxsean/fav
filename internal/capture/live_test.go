@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/oxsean/fav/internal/fav"
 	"github.com/oxsean/fav/internal/filelock"
 	"github.com/oxsean/fav/internal/herdr"
+	"github.com/oxsean/fav/internal/tend"
 	"github.com/oxsean/fav/internal/testkit"
 )
 
@@ -77,12 +77,12 @@ func TestHerdrLive(t *testing.T) {
 		return herdr.Pane{PaneID: id, TabID: "t" + id, Agent: agent, AgentSession: &herdr.Agent{Value: sid}, AgentStatus: status, StateSeq: seq, Title: "title " + id}
 	}
 	agents := []herdr.Pane{
-		pane("1", fav.ProviderClaude, "c-live", "working", 3),
-		pane("2", fav.ProviderClaude, "c-stale", "idle", 1),
-		pane("3", fav.ProviderCodex, "x-1", "idle", 7),
-		{PaneID: "4", Agent: fav.ProviderCodex},
+		pane("1", tend.ProviderClaude, "c-live", "working", 3),
+		pane("2", tend.ProviderClaude, "c-stale", "idle", 1),
+		pane("3", tend.ProviderCodex, "x-1", "idle", 7),
+		{PaneID: "4", Agent: tend.ProviderCodex},
 	}
-	local := map[string]Live{"c-live": {Agent: fav.ProviderClaude}}
+	local := map[string]Live{"c-live": {Agent: tend.ProviderClaude}}
 	then, now := time.Unix(100, 0), time.Unix(200, 0)
 	prev := map[string]Live{"c-live": {Status: "working", Seq: 3, Since: then}, "x-1": {Status: "idle", Seq: 6, Since: then}}
 
@@ -90,7 +90,7 @@ func TestHerdrLive(t *testing.T) {
 	if _, ok := got["c-stale"]; ok || len(got) != 2 {
 		t.Fatalf("a Claude id without a sessions file is stale; a pane without a session is skipped: %v", got)
 	}
-	if l := got["c-live"]; !l.Since.Equal(then) || l.PaneID != "1" || l.TabID != "t1" || l.Title != "title 1" || l.Agent != fav.ProviderClaude {
+	if l := got["c-live"]; !l.Since.Equal(then) || l.PaneID != "1" || l.TabID != "t1" || l.Title != "title 1" || l.Agent != tend.ProviderClaude {
 		t.Errorf("unchanged status and seq keep Since; pane, tab, agent and title filled: %+v", l)
 	}
 	if l := got["x-1"]; !l.Since.Equal(now) {
@@ -104,11 +104,11 @@ func TestHerdrLive(t *testing.T) {
 func TestMergeLive(t *testing.T) {
 	since := time.Unix(100, 0)
 	got := MergeLive(
-		map[string]Live{"a": {Agent: fav.ProviderClaude, Title: "local", Cwd: "/w", BackgroundID: "bg", Status: "idle", Since: time.Unix(1, 0)}},
-		map[string]Live{"a": {PaneID: "p", TabID: "t", Title: "herdr", Status: "working", Seq: 4, Since: since}, "b": {Agent: fav.ProviderCodex}},
+		map[string]Live{"a": {Agent: tend.ProviderClaude, Title: "local", Cwd: "/w", BackgroundID: "bg", Status: "idle", Since: time.Unix(1, 0)}},
+		map[string]Live{"a": {PaneID: "p", TabID: "t", Title: "herdr", Status: "working", Seq: 4, Since: since}, "b": {Agent: tend.ProviderCodex}},
 	)
-	want := Live{PaneID: "p", TabID: "t", Status: "working", Seq: 4, Since: since, Agent: fav.ProviderClaude, Title: "herdr", Cwd: "/w", BackgroundID: "bg"}
-	if got["a"] != want || got["b"].Agent != fav.ProviderCodex || len(got) != 2 {
+	want := Live{PaneID: "p", TabID: "t", Status: "working", Seq: 4, Since: since, Agent: tend.ProviderClaude, Title: "herdr", Cwd: "/w", BackgroundID: "bg"}
+	if got["a"] != want || got["b"].Agent != tend.ProviderCodex || len(got) != 2 {
 		t.Fatalf("later non-empty fields win, Status carries Seq and Since:\n got %+v\nwant %+v", got["a"], want)
 	}
 }

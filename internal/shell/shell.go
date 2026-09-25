@@ -18,13 +18,13 @@ const (
 
 // Env names the user's shell for child processes (fzf's children run under fzf's shell, not the user's); set it to
 // posix, powershell or cmd to override the detection.
-const Env = "FAV_SHELL"
+const Env = "TEND_SHELL"
 
 var names = [...]string{"posix", "powershell", "cmd"}
 
 func (k Kind) Name() string { return names[k] }
 
-// User is the shell fav was started from: $FAV_SHELL, else the nearest known shell among fav's parent processes
+// User is the shell tend was started from: $TEND_SHELL, else the nearest known shell among tend's parent processes
 // (PowerShell when none is found; POSIX systems report sh).
 var User = sync.OnceValue(func() Kind {
 	if k, ok := Named(os.Getenv(Env)); ok {

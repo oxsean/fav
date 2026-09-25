@@ -9,20 +9,20 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/oxsean/fav/internal/fav"
+	"github.com/oxsean/fav/internal/tend"
 )
 
-// Event log, off by default: FAV_TRACE=1 writes ~/.agent/fav/trace.log (truncated at start), FAV_TRACE=path writes elsewhere.
+// Event log, off by default: TEND_TRACE=1 writes ~/.agent/tend/trace.log (truncated at start), TEND_TRACE=path writes elsewhere.
 // Wheel, keys, right-pane state and background events, one line each with ms. A separate goroutine writes; a full channel drops, the UI never waits on disk.
 var traceQ chan string
 
 func openTrace() {
-	p := os.Getenv("FAV_TRACE")
+	p := os.Getenv("TEND_TRACE")
 	switch p {
 	case "", "0", "off", "no":
 		return
 	case "1", "on", "yes":
-		p = filepath.Join(fav.Home(), "trace.log")
+		p = filepath.Join(tend.Home(), "trace.log")
 	}
 	os.MkdirAll(filepath.Dir(p), 0o755)
 	f, err := os.OpenFile(p, os.O_TRUNC|os.O_CREATE|os.O_WRONLY, 0o644)

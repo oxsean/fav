@@ -10,7 +10,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/oxsean/fav/internal/fav"
+	"github.com/oxsean/fav/internal/tend"
 )
 
 // fakeCLIs puts stub claude / codex executables first on PATH so the checks pass wherever the tests run.
@@ -43,7 +43,7 @@ func TestForkFromResumeDialog(t *testing.T) {
 		t.Fatalf("fork quits with a start command, not a resume: %+v", m.result)
 	}
 	var want []string
-	if r.Provider == fav.ProviderClaude {
+	if r.Provider == tend.ProviderClaude {
 		want = []string{"claude", "--resume", r.SessionID, "--fork-session"}
 	} else {
 		want = []string{"codex", "fork", r.SessionID}

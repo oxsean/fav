@@ -8,9 +8,9 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/oxsean/fav/internal/fav"
 	"github.com/oxsean/fav/internal/i18n"
 	"github.com/oxsean/fav/internal/shell"
+	"github.com/oxsean/fav/internal/tend"
 )
 
 // CommandSpec is a structured command. ⚠️ Never hand an unescaped string to a shell.
@@ -41,7 +41,7 @@ type Caps struct {
 }
 
 // Profile is one way to run an agent (config `agents`).
-type Profile = fav.AgentProfile
+type Profile = tend.AgentProfile
 
 // LaunchSpec is one run's start.
 type LaunchSpec struct {
@@ -60,8 +60,8 @@ type Provider interface {
 	Caps() Caps
 	Installed() bool
 	Launch(s LaunchSpec) (CommandSpec, error)
-	Resume(r *fav.Rec, name string) (CommandSpec, error)
-	Fork(r *fav.Rec) (CommandSpec, error)
+	Resume(r *tend.Rec, name string) (CommandSpec, error)
+	Fork(r *tend.Rec) (CommandSpec, error)
 	Start(cwd, prompt string) (CommandSpec, error)
 }
 
@@ -76,7 +76,7 @@ func Get(name string) (Provider, bool) {
 }
 
 // Sessions are the providers whose sessions tend indexes, in display order.
-func Sessions() []string { return []string{fav.ProviderClaude, fav.ProviderCodex} }
+func Sessions() []string { return []string{tend.ProviderClaude, tend.ProviderCodex} }
 
 // Installed: name is a known provider whose CLI is on PATH.
 func Installed(name string) bool {
@@ -94,7 +94,7 @@ func noSession() error { return errors.New(i18n.T("resume.check.no_session")) }
 func unknown(provider string) error { return i18n.E("resume.unknown_provider", provider) }
 
 // ResumeOf builds r's resume command.
-func ResumeOf(r *fav.Rec, name string) (CommandSpec, error) {
+func ResumeOf(r *tend.Rec, name string) (CommandSpec, error) {
 	p, ok := Get(r.Provider)
 	if !ok || !p.Caps().Resume {
 		return CommandSpec{}, unknown(r.Provider)
@@ -106,7 +106,7 @@ func ResumeOf(r *fav.Rec, name string) (CommandSpec, error) {
 }
 
 // ForkOf builds the command for a new session carrying r's history.
-func ForkOf(r *fav.Rec) (CommandSpec, error) {
+func ForkOf(r *tend.Rec) (CommandSpec, error) {
 	p, ok := Get(r.Provider)
 	if !ok || !p.Caps().Fork {
 		return CommandSpec{}, unknown(r.Provider)
@@ -163,7 +163,7 @@ func withModel(args []string, flag, model string) []string {
 func SessionProvider(name string) string {
 	switch name {
 	case ProviderFake:
-		return fav.ProviderClaude
+		return tend.ProviderClaude
 	case ProviderCommand:
 		return ""
 	}
@@ -171,7 +171,7 @@ func SessionProvider(name string) string {
 }
 
 // AttachOf builds the command that attaches to a Claude background session (they cannot be resumed).
-func AttachOf(r *fav.Rec, backgroundID string) CommandSpec {
+func AttachOf(r *tend.Rec, backgroundID string) CommandSpec {
 	return CommandSpec{Exec: "claude", Args: []string{"attach", backgroundID}, Cwd: r.Cwd}
 }
 
@@ -214,8 +214,8 @@ func BypassArgv(argv []string) bool {
 // the same name).
 func Profiles(config []Profile) []Profile {
 	out := []Profile{
-		{Name: fav.ProviderClaude, Provider: fav.ProviderClaude},
-		{Name: fav.ProviderCodex, Provider: fav.ProviderCodex},
+		{Name: tend.ProviderClaude, Provider: tend.ProviderClaude},
+		{Name: tend.ProviderCodex, Provider: tend.ProviderCodex},
 		{Name: ProviderFake, Provider: ProviderFake},
 	}
 	for _, p := range config {

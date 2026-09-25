@@ -15,9 +15,9 @@ import (
 	"time"
 
 	"github.com/oxsean/fav/internal/capture"
-	"github.com/oxsean/fav/internal/fav"
 	"github.com/oxsean/fav/internal/fileio"
 	"github.com/oxsean/fav/internal/filelock"
+	"github.com/oxsean/fav/internal/tend"
 )
 
 // Store layout: <dir>/<sha1(transcript path)[:16]>.tsv holds one line per entry, "off\trole\tunix\ttext" (text has no tab or
@@ -25,7 +25,7 @@ import (
 // ⚠️ A text file longer than its recorded size was written by a run that died before saving state: it is cut back first.
 const storeVer = 6
 
-// bytes hashed at the start and before the read offset to notice a transcript rewritten in place (fav mv changes cwd in every line)
+// bytes hashed at the start and before the read offset to notice a transcript rewritten in place (tend mv changes cwd in every line)
 const headLen, tailLen = 4096, 256
 
 var ErrBusy = errors.New("full-text store is being updated by another process")
@@ -46,7 +46,7 @@ type state struct {
 	Files    map[string]*entry `json:"files"`
 }
 
-func Dir() string { return filepath.Join(fav.Home(), "text") }
+func Dir() string { return filepath.Join(tend.Home(), "text") }
 
 func textName(path string) string {
 	h := sha1.Sum([]byte(path))
@@ -82,7 +82,7 @@ type Options struct{ OutLines int }
 
 // Sync updates the store for indexed plus the pinned copies of recs whose original is gone.
 // ⚠️ An empty indexed means the index is not built yet: Sync does nothing, or Update would drop every text file.
-func Sync(ctx context.Context, indexed []string, recs []*fav.Rec, outLines int, progress func(Progress)) (Progress, error) {
+func Sync(ctx context.Context, indexed []string, recs []*tend.Rec, outLines int, progress func(Progress)) (Progress, error) {
 	if len(indexed) == 0 {
 		return Progress{}, nil
 	}

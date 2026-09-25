@@ -10,9 +10,9 @@ import (
 
 	"github.com/oxsean/fav/internal/agent"
 	"github.com/oxsean/fav/internal/capture"
-	"github.com/oxsean/fav/internal/fav"
 	"github.com/oxsean/fav/internal/herdr"
 	"github.com/oxsean/fav/internal/i18n"
+	"github.com/oxsean/fav/internal/tend"
 )
 
 func TestResumeCommand(t *testing.T) {
@@ -27,12 +27,12 @@ func TestResumeCommand(t *testing.T) {
 
 func TestResumeDialogOffersTheDesktopApp(t *testing.T) {
 	m := sized(t, 140, 40)
-	capture.SetAppAvailable(fav.ProviderClaude, true)
-	capture.SetAppAvailable(fav.ProviderCodex, true)
+	capture.SetAppAvailable(tend.ProviderClaude, true)
+	capture.SetAppAvailable(tend.ProviderCodex, true)
 	r := m.current()
-	r.SessionID, r.Provider = "c5126b86-64bb-46a8-9a69-fc421c8f4f9a", fav.ProviderClaude
+	r.SessionID, r.Provider = "c5126b86-64bb-46a8-9a69-fc421c8f4f9a", tend.ProviderClaude
 	appFiles(t, r)
-	m.cfg.ResumeIn = fav.ResumeOrigin
+	m.cfg.ResumeIn = tend.ResumeOrigin
 
 	r.App = false
 	m.askResume()
@@ -59,10 +59,10 @@ func TestResumeDialogOffersTheDesktopApp(t *testing.T) {
 
 func TestAppButtonAppearsWhenTheLookupAnswers(t *testing.T) {
 	m := sized(t, 140, 40)
-	capture.ForgetAppAvailable(fav.ProviderClaude)
-	t.Cleanup(func() { capture.ForgetAppAvailable(fav.ProviderClaude) })
+	capture.ForgetAppAvailable(tend.ProviderClaude)
+	t.Cleanup(func() { capture.ForgetAppAvailable(tend.ProviderClaude) })
 	r := m.current()
-	r.SessionID, r.Provider = "c5126b86-64bb-46a8-9a69-fc421c8f4f9a", fav.ProviderClaude
+	r.SessionID, r.Provider = "c5126b86-64bb-46a8-9a69-fc421c8f4f9a", tend.ProviderClaude
 	appFiles(t, r)
 
 	m.askResume()
@@ -74,7 +74,7 @@ func TestAppButtonAppearsWhenTheLookupAnswers(t *testing.T) {
 		t.Fatal("no button yet")
 	}
 	m.pending = nil
-	capture.SetAppAvailable(fav.ProviderClaude, true)
+	capture.SetAppAvailable(tend.ProviderClaude, true)
 	m.Update(appProbedMsg{})
 	if !strings.Contains(ansi.Strip(m.screen()), btn) {
 		t.Fatal("the button appears once the app is found")
@@ -87,12 +87,12 @@ func TestAppButtonAppearsWhenTheLookupAnswers(t *testing.T) {
 }
 
 // appFiles puts r's transcript where the desktop apps read it, under a temporary HOME, with an existing cwd.
-func appFiles(t *testing.T, r *fav.Rec) {
+func appFiles(t *testing.T, r *tend.Rec) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
 	dir := filepath.Join(home, ".claude", "projects", "-p")
-	if r.Provider == fav.ProviderCodex {
+	if r.Provider == tend.ProviderCodex {
 		dir = filepath.Join(home, ".codex", "sessions")
 	}
 	os.MkdirAll(dir, 0o755)
@@ -110,9 +110,9 @@ func TestResumeDialogOpensTheFileManager(t *testing.T) {
 
 func TestAppKeyIsP(t *testing.T) {
 	m := sized(t, 140, 40)
-	capture.SetAppAvailable(fav.ProviderClaude, true)
+	capture.SetAppAvailable(tend.ProviderClaude, true)
 	r := m.current()
-	r.SessionID, r.Provider = "c5126b86-64bb-46a8-9a69-fc421c8f4f9a", fav.ProviderClaude
+	r.SessionID, r.Provider = "c5126b86-64bb-46a8-9a69-fc421c8f4f9a", tend.ProviderClaude
 	appFiles(t, r)
 	m.askResume()
 	if !strings.Contains(ansi.Strip(m.screen()), "p Claude App") {

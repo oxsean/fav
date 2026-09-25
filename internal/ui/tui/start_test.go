@@ -8,8 +8,8 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/oxsean/fav/internal/capture"
-	"github.com/oxsean/fav/internal/fav"
 	"github.com/oxsean/fav/internal/i18n"
+	"github.com/oxsean/fav/internal/tend"
 )
 
 func TestStartFromProjectShowsWhatRuns(t *testing.T) {
@@ -64,7 +64,7 @@ func TestRunningSessionDialogActsOnItsOwnRecord(t *testing.T) {
 	fakeCLIs(t)
 	m := sized(t, 140, 44)
 	cur := m.current()
-	var other *fav.Rec
+	var other *tend.Rec
 	for _, r := range m.store.All() {
 		if r != cur {
 			other = r

@@ -9,16 +9,16 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/oxsean/fav/internal/fav"
 	"github.com/oxsean/fav/internal/index"
+	"github.com/oxsean/fav/internal/tend"
 	"github.com/oxsean/fav/internal/testkit"
 )
 
 func TestStatusPickerAndTrash(t *testing.T) {
-	t.Setenv("FAV_HOME", t.TempDir())
+	t.Setenv("TEND_HOME", t.TempDir())
 	m := sized(t, 140, 40)
 	m.pickStatus()
-	if !m.ov.active() || m.ov.visible()[m.ov.cursor].name != fav.StatusOpen {
+	if !m.ov.active() || m.ov.visible()[m.ov.cursor].name != tend.StatusOpen {
 		t.Fatalf("选择器应打开并停在当前值：%+v", m.ov.cursor)
 	}
 	m.ov.filter.SetValue("回收")
@@ -139,7 +139,7 @@ func TestDeletedSessionLeavesEveryCountUntilRestored(t *testing.T) {
 }
 
 func TestTrashBlocksEveryAlias(t *testing.T) {
-	t.Setenv("FAV_HOME", t.TempDir())
+	t.Setenv("TEND_HOME", t.TempDir())
 	m := sized(t, 140, 40)
 	r := m.current()
 	transcript := filepath.Join(t.TempDir(), r.SessionID+".jsonl")

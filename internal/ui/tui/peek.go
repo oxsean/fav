@@ -8,10 +8,10 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/oxsean/fav/internal/capture"
-	"github.com/oxsean/fav/internal/fav"
 	"github.com/oxsean/fav/internal/herdr"
 	"github.com/oxsean/fav/internal/i18n"
 	"github.com/oxsean/fav/internal/render"
+	"github.com/oxsean/fav/internal/tend"
 )
 
 const (
@@ -40,7 +40,7 @@ func peekRead(pane string) tea.Cmd {
 }
 
 // askPeek (v): the terminal of a session running in a Herdr pane, refreshed every second, with a line to answer it.
-func (m *Model) askPeek(r *fav.Rec) {
+func (m *Model) askPeek(r *tend.Rec) {
 	l, ok := m.liveOf(r)
 	if !ok || l.PaneID == "" {
 		m.flash(i18n.T("live.not_in_herdr"))

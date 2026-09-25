@@ -4,9 +4,9 @@ import (
 	"slices"
 
 	"github.com/oxsean/fav/internal/agent"
-	"github.com/oxsean/fav/internal/fav"
 	"github.com/oxsean/fav/internal/i18n"
 	"github.com/oxsean/fav/internal/paths"
+	"github.com/oxsean/fav/internal/tend"
 )
 
 // Installed: provider is a known agent whose CLI is on PATH.
@@ -21,13 +21,13 @@ type Check struct {
 // contextNearlyFull: percent of the context window above which a resume starts by compacting.
 const contextNearlyFull = 80
 
-func Checks(r *fav.Rec) []Check {
+func Checks(r *tend.Rec) []Check {
 	var out []Check
 
 	if Installed(r.Provider) {
 		out = append(out, Check{OK: true, Text: i18n.F("resume.check.source", sourceLabel(r))})
 	} else {
-		out = append(out, Check{Text: i18n.F("resume.check.not_installed", fav.ProviderLabel(r.Provider))})
+		out = append(out, Check{Text: i18n.F("resume.check.not_installed", tend.ProviderLabel(r.Provider))})
 	}
 	if c := dirCheck(r.Cwd, r.GitRemote); !c.OK && !c.Warn && r.Repo != "" && !paths.Same(r.Repo, r.Cwd) {
 		out = append(out, Check{Text: i18n.F("resume.check.worktree_gone", r.Cwd, r.Repo)})
@@ -59,9 +59,9 @@ func Checks(r *fav.Rec) []Check {
 
 // startChecks: a new session only needs its CLI and the directory.
 func startChecks(provider, cwd string) []Check {
-	c := Check{OK: true, Text: i18n.F("resume.check.cli_ok", fav.ProviderLabel(provider))}
+	c := Check{OK: true, Text: i18n.F("resume.check.cli_ok", tend.ProviderLabel(provider))}
 	if !Installed(provider) {
-		c = Check{Text: i18n.F("resume.check.not_installed", fav.ProviderLabel(provider))}
+		c = Check{Text: i18n.F("resume.check.not_installed", tend.ProviderLabel(provider))}
 	}
 	return []Check{c, dirCheck(cwd, "")}
 }
@@ -80,11 +80,11 @@ func dirCheck(cwd, remote string) Check {
 }
 
 // sourceLabel names where r was started: the desktop app or the CLI.
-func sourceLabel(r *fav.Rec) string {
+func sourceLabel(r *tend.Rec) string {
 	if !r.App {
-		return fav.ProviderLabel(r.Provider)
+		return tend.ProviderLabel(r.Provider)
 	}
-	if r.Provider == fav.ProviderCodex {
+	if r.Provider == tend.ProviderCodex {
 		return "Codex App"
 	}
 	return "Claude App"

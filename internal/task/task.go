@@ -9,8 +9,8 @@ import (
 	"sort"
 	"time"
 
-	"github.com/oxsean/fav/internal/fav"
 	"github.com/oxsean/fav/internal/journal"
+	"github.com/oxsean/fav/internal/tend"
 )
 
 // Task statuses.
@@ -52,27 +52,27 @@ type Task struct {
 }
 
 type Run struct {
-	ID        string           `json:"id"`
-	Task      string           `json:"task"`
-	Machine   string           `json:"machine"`
-	Agent     string           `json:"agent"`
-	Profile   fav.AgentProfile `json:"profile"`
-	Dir       string           `json:"dir"`
-	From      string           `json:"from,omitempty"`  // the machine Dir was written for; "": the run's own
-	Brief     string           `json:"brief,omitempty"` // frozen at dispatch
-	Title     string           `json:"title,omitempty"`
-	Runner    string           `json:"runner,omitempty"` // "": the node picks
-	Want      string           `json:"want"`             // run | stop
-	State     string           `json:"state"`
-	ExitCode  *int             `json:"exit_code,omitempty"`
-	Reason    string           `json:"reason,omitempty"`
-	Provider  string           `json:"provider,omitempty"`
-	Session   string           `json:"session,omitempty"`
-	Pane      string           `json:"pane,omitempty"`
-	NodeRev   int              `json:"node_rev,omitempty"`
-	QueuedAt  time.Time        `json:"queued_at"`
-	StartedAt *time.Time       `json:"started_at,omitempty"`
-	EndedAt   *time.Time       `json:"ended_at,omitempty"`
+	ID        string            `json:"id"`
+	Task      string            `json:"task"`
+	Machine   string            `json:"machine"`
+	Agent     string            `json:"agent"`
+	Profile   tend.AgentProfile `json:"profile"`
+	Dir       string            `json:"dir"`
+	From      string            `json:"from,omitempty"`  // the machine Dir was written for; "": the run's own
+	Brief     string            `json:"brief,omitempty"` // frozen at dispatch
+	Title     string            `json:"title,omitempty"`
+	Runner    string            `json:"runner,omitempty"` // "": the node picks
+	Want      string            `json:"want"`             // run | stop
+	State     string            `json:"state"`
+	ExitCode  *int              `json:"exit_code,omitempty"`
+	Reason    string            `json:"reason,omitempty"`
+	Provider  string            `json:"provider,omitempty"`
+	Session   string            `json:"session,omitempty"`
+	Pane      string            `json:"pane,omitempty"`
+	NodeRev   int               `json:"node_rev,omitempty"`
+	QueuedAt  time.Time         `json:"queued_at"`
+	StartedAt *time.Time        `json:"started_at,omitempty"`
+	EndedAt   *time.Time        `json:"ended_at,omitempty"`
 }
 
 // Event types and their payloads.

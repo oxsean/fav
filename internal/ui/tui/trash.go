@@ -5,40 +5,40 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/oxsean/fav/internal/fav"
 	"github.com/oxsean/fav/internal/i18n"
 	"github.com/oxsean/fav/internal/index"
 	"github.com/oxsean/fav/internal/paths"
 	"github.com/oxsean/fav/internal/render"
+	"github.com/oxsean/fav/internal/tend"
 )
 
-func (m *Model) inTrash() bool { return fav.Parse(m.search.Value()).Status == fav.StatusTrash }
+func (m *Model) inTrash() bool { return tend.Parse(m.search.Value()).Status == tend.StatusTrash }
 
 func (m *Model) pickStatus() {
 	if m.view == viewLive {
 		return
 	}
-	q := fav.Parse(m.search.Value())
+	q := tend.Parse(m.search.Value())
 	items := []item{
-		{name: fav.StatusOpen, label: i18n.T("status.open")},
-		{name: fav.StatusActive, label: i18n.T("status.active")},
-		{name: fav.StatusDone, label: render.StatusLabel(fav.StatusDone)},
+		{name: tend.StatusOpen, label: i18n.T("status.open")},
+		{name: tend.StatusActive, label: i18n.T("status.active")},
+		{name: tend.StatusDone, label: render.StatusLabel(tend.StatusDone)},
 		{name: "archived", label: i18n.T("status.archived")},
 		{name: "all", label: i18n.T("label.all")},
-		{name: fav.StatusTrash, label: i18n.T("status.trash")},
-		{name: fav.StatusAgent, label: i18n.T("status.agent")},
+		{name: tend.StatusTrash, label: i18n.T("status.trash")},
+		{name: tend.StatusAgent, label: i18n.T("status.agent")},
 	}
 	m.openPicker(i18n.T("picker.status_title"), "", items, false, []string{q.Status},
 		func(m *Model, chosen []string) {
 			var toks []string
-			if len(chosen) > 0 && chosen[0] != fav.StatusOpen {
+			if len(chosen) > 0 && chosen[0] != tend.StatusOpen {
 				toks = []string{"status:" + chosen[0]}
 			}
-			m.setQuery(toks, fav.HasPrefix("status:"))
+			m.setQuery(toks, tend.HasPrefix("status:"))
 		})
 }
 
-func (m *Model) askDelete(r *fav.Rec) {
+func (m *Model) askDelete(r *tend.Rec) {
 	if r == nil {
 		return
 	}
@@ -71,7 +71,7 @@ func (m *Model) askDelete(r *fav.Rec) {
 	m.openConfirm(i18n.T("trash.title"), i18n.T("trash.btn_delete"), body, func(m *Model) { m.deleteSession(r, files) }, nil)
 }
 
-func (m *Model) deleteSession(r *fav.Rec, files []string) {
+func (m *Model) deleteSession(r *tend.Rec, files []string) {
 	_, err := index.Trash(m.store, r, files)
 	m.adopt(m.idx.Forget(slices.DeleteFunc(files, paths.Exists)))
 	if err != nil {
@@ -81,7 +81,7 @@ func (m *Model) deleteSession(r *fav.Rec, files []string) {
 	m.flash(i18n.F("trash.moved", render.Truncate(r.Title, 40)))
 }
 
-func (m *Model) restoreTrash(r *fav.Rec) {
+func (m *Model) restoreTrash(r *tend.Rec) {
 	e, force, err := index.Restore(m.store, r.Provider, r.SessionID)
 	m.pending = tea.Batch(m.pending, m.reindex(force))
 	m.recount()

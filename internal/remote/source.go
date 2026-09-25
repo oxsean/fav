@@ -5,8 +5,8 @@ import (
 	"time"
 
 	"github.com/oxsean/fav/internal/capture"
-	"github.com/oxsean/fav/internal/fav"
 	"github.com/oxsean/fav/internal/i18n"
+	"github.com/oxsean/fav/internal/tend"
 	"github.com/oxsean/fav/internal/wire"
 )
 
@@ -21,12 +21,12 @@ type Source interface {
 }
 
 // Local reads r's own files; it keeps a copy of r, so it can run off the UI goroutine.
-func Local(r *fav.Rec) Source {
+func Local(r *tend.Rec) Source {
 	cp := *r
 	return local{&cp}
 }
 
-type local struct{ r *fav.Rec }
+type local struct{ r *tend.Rec }
 
 func (l local) path() string {
 	if ts := l.r.Transcripts(); len(ts) > 0 {
@@ -75,7 +75,7 @@ func (f far) call(method string, params, out any) error {
 // Messages from the end learns which file the transcript is; the offsets of later pages, full texts and steps are
 // asked about that file only. A rewritten transcript answers wire.CodeStale once: read it again from the end.
 func (f far) Messages(before int64, n int) capture.Page {
-	key := f.on + "\x00" + fav.SessionKey(f.ref.Provider, f.ref.SessionID)
+	key := f.on + "\x00" + tend.SessionKey(f.ref.Provider, f.ref.SessionID)
 	known := f.h.file(key, "")
 	params := MessagesParams{Ref: f.ref, Before: before, N: n}
 	if before >= 0 {
@@ -101,7 +101,7 @@ func (f far) Messages(before int64, n int) capture.Page {
 }
 
 func (f far) known() string {
-	if k := f.h.file(f.on+"\x00"+fav.SessionKey(f.ref.Provider, f.ref.SessionID), ""); k != "-" {
+	if k := f.h.file(f.on+"\x00"+tend.SessionKey(f.ref.Provider, f.ref.SessionID), ""); k != "-" {
 		return k
 	}
 	return ""

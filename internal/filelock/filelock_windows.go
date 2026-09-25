@@ -9,9 +9,6 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-// SurvivesRename: false, Windows refuses to rename a directory holding a file that is open.
-const SurvivesRename = false
-
 const probeMode = os.O_RDWR
 
 func lockFile(f *os.File, try bool) (func(), error) {

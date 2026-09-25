@@ -3,7 +3,7 @@
 # with `mise run test-host` (mise.toml pins go, claude and codex); a target needs only mise (the docker one: scripts/linux.Dockerfile).
 # Targets: local | ssh:HOST | docker:HOST:CONTAINER | win:HOST | wsl:HOST:DISTRO; default: the lines of .test-hosts.
 cd "$(git rev-parse --show-toplevel)" || exit 1
-logs=${FAV_TEST_ROOT:-$HOME/.cache/fav-test}/logs
+logs=${TEND_TEST_ROOT:-$HOME/.cache/tend-test}/logs
 mkdir -p "$logs"
 [ $# -gt 0 ] || set -- $(grep -v '^#' .test-hosts 2>/dev/null)
 [ $# -gt 0 ] || set -- local
@@ -13,9 +13,9 @@ pack() {
 		COPYFILE_DISABLE=1 tar -czf - --no-xattrs -T -
 }
 
-unpack='d=$HOME/.cache/fav-test/src; rm -rf $d && mkdir -p $d && tar -xzf - -C $d 2>/dev/null && cd $d && PATH=$HOME/.local/bin:$PATH && mise trust -q && exec mise run test-host'
+unpack='d=$HOME/.cache/tend-test/src; rm -rf $d && mkdir -p $d && tar -xzf - -C $d 2>/dev/null && cd $d && PATH=$HOME/.local/bin:$PATH && mise trust -q && exec mise run test-host'
 docker_path='PATH=$PATH:/usr/local/bin:/opt/homebrew/bin:/Applications/OrbStack.app/Contents/MacOS/xbin'
-winsrc='"%LOCALAPPDATA%\fav-test\src"'
+winsrc='"%LOCALAPPDATA%\tend-test\src"'
 
 run() {
 	case $1 in

@@ -10,7 +10,7 @@ import (
 	"github.com/oxsean/fav/internal/shell"
 )
 
-// WriteLaunchers: fav.cmd / fav.sh set the dataset's environment and pass their arguments to fav, so nothing needs quoting over ssh.
+// WriteLaunchers: tend.cmd / tend.sh set the dataset's environment and pass their arguments to tend, so nothing needs quoting over ssh.
 func (d *Dataset) WriteLaunchers(bin string) error {
 	if runtime.GOOS == "windows" {
 		var b strings.Builder
@@ -19,10 +19,10 @@ func (d *Dataset) WriteLaunchers(bin string) error {
 			fmt.Fprintf(&b, "set \"%s\"\r\n", e)
 		}
 		if bin == "" {
-			bin = `%~dp0bin\fav.exe`
+			bin = `%~dp0bin\tend.exe`
 		}
-		fmt.Fprintf(&b, "if exist \"%s\" (\"%s\" %%*) else (fav %%*)\r\n", bin, bin)
-		return os.WriteFile(filepath.Join(d.Root, "fav.cmd"), []byte(b.String()), 0o755)
+		fmt.Fprintf(&b, "if exist \"%s\" (\"%s\" %%*) else (tend %%*)\r\n", bin, bin)
+		return os.WriteFile(filepath.Join(d.Root, "tend.cmd"), []byte(b.String()), 0o755)
 	}
 	var b strings.Builder
 	b.WriteString("#!/bin/sh\n")
@@ -31,10 +31,10 @@ func (d *Dataset) WriteLaunchers(bin string) error {
 		fmt.Fprintf(&b, "export %s=%s\n", k, shell.POSIX.Quote(v))
 	}
 	if bin == "" {
-		bin = `$(dirname "$0")/bin/fav`
+		bin = `$(dirname "$0")/bin/tend`
 	} else {
 		bin = shell.POSIX.Quote(bin)
 	}
-	fmt.Fprintf(&b, "if [ -x %s ]; then exec %s \"$@\"; else exec fav \"$@\"; fi\n", bin, bin)
-	return os.WriteFile(filepath.Join(d.Root, "fav.sh"), []byte(b.String()), 0o755)
+	fmt.Fprintf(&b, "if [ -x %s ]; then exec %s \"$@\"; else exec tend \"$@\"; fi\n", bin, bin)
+	return os.WriteFile(filepath.Join(d.Root, "tend.sh"), []byte(b.String()), 0o755)
 }

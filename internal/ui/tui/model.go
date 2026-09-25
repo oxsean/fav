@@ -1,4 +1,4 @@
-// Package tui is the bubbletea front-end: layout, navigation, overlays; query parsing and previews come from internal/fav and internal/render.
+// Package tui is the bubbletea front-end: layout, navigation, overlays; query parsing and previews come from internal/tend and internal/render.
 package tui
 
 import (
@@ -14,13 +14,13 @@ import (
 
 	"github.com/oxsean/fav/internal/agent"
 	"github.com/oxsean/fav/internal/capture"
-	"github.com/oxsean/fav/internal/fav"
 	"github.com/oxsean/fav/internal/fulltext"
 	"github.com/oxsean/fav/internal/i18n"
 	"github.com/oxsean/fav/internal/index"
 	"github.com/oxsean/fav/internal/paths"
 	"github.com/oxsean/fav/internal/remote"
 	"github.com/oxsean/fav/internal/render"
+	"github.com/oxsean/fav/internal/tend"
 )
 
 const (
@@ -45,7 +45,7 @@ const viewCount = 5
 
 // Result is what the TUI hands back on exit; resuming happens outside.
 type Result struct {
-	Resume  *fav.Rec
+	Resume  *tend.Rec
 	NoHerdr bool
 	Start   *agent.CommandSpec // a new session (fork, handoff) to run in this terminal
 }
@@ -53,7 +53,7 @@ type Result struct {
 type row struct {
 	group  string // non-empty = group header row, not selectable
 	count  int
-	rec    *fav.Rec
+	rec    *tend.Rec
 	folded bool
 }
 
@@ -63,8 +63,8 @@ const (
 )
 
 type Model struct {
-	store  *fav.Store
-	cfg    fav.Config
+	store  *tend.Store
+	cfg    tend.Config
 	search textinput.Model
 	typing bool
 
@@ -104,10 +104,10 @@ type Model struct {
 
 	chipFocus int // focused chip; -1 = list
 	sortBy    sortBy
-	at        map[*fav.Rec]time.Time
-	probes    map[*fav.Rec]*probe
+	at        map[*tend.Rec]time.Time
+	probes    map[*tend.Rec]*probe
 
-	chatRec    *fav.Rec // which record the chat scroll belongs to; reset on change
+	chatRec    *tend.Rec // which record the chat scroll belongs to; reset on change
 	chatScroll int
 	chatSkip   int // lines skipped inside the first message: the wheel scrolls by line, J/K by message
 	chatCur    int
@@ -118,37 +118,37 @@ type Model struct {
 	chatRoom   int
 	chatShown  int // messages shown last frame, to detect nearing the end
 	chat       chatSearch
-	hitsFor    *fav.Rec // hits() cache key: record, query, message count
+	hitsFor    *tend.Rec // hits() cache key: record, query, message count
 	hitsQ      string
 	hitsN      int
 	hitList    []int
-	probeWant  *fav.Rec // where the cursor last rested; probing waits probeDelay and is void if it moved
+	probeWant  *tend.Rec // where the cursor last rested; probing waits probeDelay and is void if it moved
 	probeSeq   int
 
-	live      map[string]capture.Live
-	liveHerdr map[string]capture.Live  // previous Herdr result, needed for "since when"
-	pulse     map[string]capture.Pulse // running sessions' last reply / turn start / context, read after each live poll
-	attn      map[string]attnEntry     // what the user has taken in of each running session (attention.json)
-	lastNeed  map[string]int           // need() at the last check: a change to "needs you" is announced once
-	lastWheel time.Time                // last wheel event; no index swap while scrolling
-	mouse     bool                     // mouse reporting on; View asks the terminal for it
-	themed    bool                     // the terminal's background is known (or will not be): View draws only from then on
-	heldIdx   *index.Index             // index that arrived mid-scroll, applied once scrolling stops
-	forced    map[string]bool          // files every background rescan reads from scratch until one is applied
-	idxGen    int                      // +1 after a project move: refreshes started before it return stale snapshots
-	idx       *index.Index             // index snapshot, replaced whole by the background refresh
-	nFav      int                      // tab totals, query-independent, recomputed when the index or the store changes
-	nAll      int
-	nProj     int
-	unfav     []*fav.Rec // unfavorited sessions from the index (empty ID); objects survive refreshes
-	extra     *fav.Rec   // a session opened by id that the lists would not show (fav open)
-	lists     index.Rows // the rows it makes up (trash, agent runs, unindexed live sessions) survive refreshes
-	msg       msgState   // > message search and the full-text store updates
+	live       map[string]capture.Live
+	liveHerdr  map[string]capture.Live  // previous Herdr result, needed for "since when"
+	pulse      map[string]capture.Pulse // running sessions' last reply / turn start / context, read after each live poll
+	attn       map[string]attnEntry     // what the user has taken in of each running session (attention.json)
+	lastNeed   map[string]int           // need() at the last check: a change to "needs you" is announced once
+	lastWheel  time.Time                // last wheel event; no index swap while scrolling
+	mouse      bool                     // mouse reporting on; View asks the terminal for it
+	themed     bool                     // the terminal's background is known (or will not be): View draws only from then on
+	heldIdx    *index.Index             // index that arrived mid-scroll, applied once scrolling stops
+	forced     map[string]bool          // files every background rescan reads from scratch until one is applied
+	idxGen     int                      // +1 after a project move: refreshes started before it return stale snapshots
+	idx        *index.Index             // index snapshot, replaced whole by the background refresh
+	nFavorites int                      // tab totals, query-independent, recomputed when the index or the store changes
+	nAll       int
+	nProj      int
+	unfav      []*tend.Rec // unfavorited sessions from the index (empty ID); objects survive refreshes
+	extra      *tend.Rec   // a session opened by id that the lists would not show (tend open)
+	lists      index.Rows  // the rows it makes up (trash, agent runs, unindexed live sessions) survive refreshes
+	msg        msgState    // > message search and the full-text store updates
 	// a just-edited record stays in place until the cursor leaves, the filter or the tab changes
-	pin     *fav.Rec
+	pin     *tend.Rec
 	pinKey  string
-	groups  map[string][]*fav.Rec // records per project group incl. collapsed ones, for the right-pane project info
-	projCur int                   // highlighted session in the project info; active when the right pane has focus on a group header
+	groups  map[string][]*tend.Rec // records per project group incl. collapsed ones, for the right-pane project info
+	projCur int                    // highlighted session in the project info; active when the right pane has focus on a group header
 
 	hosts  *remote.Hosts        // other machines; nil = none configured, nothing is contacted
 	remote map[string]*hostRows // by host name
@@ -156,7 +156,7 @@ type Model struct {
 	tasks tasksState
 }
 
-func New(s *fav.Store, idx *index.Index, cfg fav.Config, initialQuery string) *Model {
+func New(s *tend.Store, idx *index.Index, cfg tend.Config, initialQuery string) *Model {
 	ti := newInput()
 	ti.Placeholder = i18n.T("search.placeholder")
 	ti.Prompt = render.GlyphSearch + "  "
@@ -177,7 +177,7 @@ func New(s *fav.Store, idx *index.Index, cfg fav.Config, initialQuery string) *M
 }
 
 // Focus opens the sessions view on r (or the list's own object for that session) with the right pane active.
-func (m *Model) Focus(r *fav.Rec) {
+func (m *Model) Focus(r *tend.Rec) {
 	if r == nil {
 		return
 	}
@@ -204,10 +204,10 @@ func (m *Model) Init() tea.Cmd {
 	if m.idx.Len() == 0 {
 		m.flash(i18n.T("flash.building_index"))
 	}
-	if m.cfg.ResumeIn == fav.ResumeApp || m.cfg.ResumeIn == fav.ResumeOrigin {
+	if m.cfg.ResumeIn == tend.ResumeApp || m.cfg.ResumeIn == tend.ResumeOrigin {
 		go func() { // the resume dialog's Enter depends on it; everyone else looks up on the first dialog
-			capture.AppAvailable(fav.ProviderClaude)
-			capture.AppAvailable(fav.ProviderCodex)
+			capture.AppAvailable(tend.ProviderClaude)
+			capture.AppAvailable(tend.ProviderCodex)
 		}()
 	}
 	return tea.Batch(textinput.Blink, askTheme(), m.pollLive(), watchStore(), m.refreshIndex(), m.syncText(m.idx), m.fetchHosts())
@@ -290,7 +290,7 @@ type probe struct {
 }
 
 type probeMsg struct {
-	rec    *fav.Rec
+	rec    *tend.Rec
 	checks []capture.Check
 	page   capture.Page
 }
@@ -309,7 +309,7 @@ func (m *Model) probeCurrent() tea.Cmd {
 		return nil
 	}
 	if m.probes == nil {
-		m.probes = map[*fav.Rec]*probe{}
+		m.probes = map[*tend.Rec]*probe{}
 	}
 	m.probes[r] = &probe{}
 	src := m.hosts.Source(r) // ⚠️ rows are reused and refreshed in place: the source reads a copy
@@ -320,7 +320,7 @@ func (m *Model) probeCurrent() tea.Cmd {
 }
 
 // reprobe reads r again from the end: its transcript was rewritten, the offsets held no longer line up.
-func (m *Model) reprobe(r *fav.Rec) tea.Cmd {
+func (m *Model) reprobe(r *tend.Rec) tea.Cmd {
 	delete(m.probes, r)
 	m.chatScroll, m.chatSkip = 0, 0
 	return m.probeCurrent()
@@ -331,8 +331,8 @@ func (m *Model) isLive(sessionID string) bool { _, ok := m.live[sessionID]; retu
 func (m *Model) Result() Result { return m.result }
 
 func (m *Model) recount() {
-	q := fav.Parse("status:all")
-	m.nFav = len(m.store.Query(q))
+	q := tend.Parse("status:all")
+	m.nFavorites = len(m.store.Query(q))
 	q.All = true
 	all := m.list(q)
 	projects := map[string]bool{}
@@ -344,20 +344,20 @@ func (m *Model) recount() {
 
 func (m *Model) pinContext() string { return strconv.Itoa(int(m.view)) + "\x00" + m.search.Value() }
 
-func (m *Model) query() fav.Query {
+func (m *Model) query() tend.Query {
 	s := m.search.Value()
 	if rest, ok := m.msgQuery(); ok { // message search: the keywords are searched in the text, the rest picks the sessions
 		_, s = fulltext.Split(rest)
 	}
-	q := fav.Parse(s)
+	q := tend.Parse(s)
 	q.All, q.Live = m.view != viewFavorites, m.isLive
 	if m.view == viewLive {
-		q.Status, q.Turns = fav.StatusLive, 0
+		q.Status, q.Turns = tend.StatusLive, 0
 	}
 	return q
 }
 
-func (m *Model) list(q fav.Query) []*fav.Rec {
+func (m *Model) list(q tend.Query) []*tend.Rec {
 	recs, err := m.lists.List(m.store, m.idx, m.unfav, m.live, q)
 	if err != nil {
 		m.flash(i18n.F("flash.trash_read_failed", err))
@@ -373,7 +373,7 @@ func (m *Model) refresh() {
 	}
 	q := m.query()
 	recs := m.list(q)
-	if m.extra != nil && q.All && q.Status != fav.StatusTrash && q.Status != fav.StatusAgent && !slices.Contains(recs, m.extra) {
+	if m.extra != nil && q.All && q.Status != tend.StatusTrash && q.Status != tend.StatusAgent && !slices.Contains(recs, m.extra) {
 		recs = append(recs, m.extra)
 	}
 	cur := m.current()
@@ -460,14 +460,14 @@ func (m *Model) autoOpenProject() {
 	}
 }
 
-func (m *Model) when(r *fav.Rec) time.Time {
+func (m *Model) when(r *tend.Rec) time.Time {
 	if t, ok := m.at[r]; ok {
 		return t
 	}
 	return m.sortBy.at(r)
 }
 
-func timelineRows(recs []*fav.Rec, at map[*fav.Rec]time.Time, now time.Time) []row {
+func timelineRows(recs []*tend.Rec, at map[*tend.Rec]time.Time, now time.Time) []row {
 	var out []row
 	last, head := "", -1
 	for _, r := range recs {
@@ -483,8 +483,8 @@ func timelineRows(recs []*fav.Rec, at map[*fav.Rec]time.Time, now time.Time) []r
 }
 
 // projectRows groups by project, groups ordered by their newest record; groups not in open are collapsed.
-func projectRows(recs []*fav.Rec, open map[string]bool, order string) ([]row, map[string][]*fav.Rec) {
-	byProject := map[string][]*fav.Rec{}
+func projectRows(recs []*tend.Rec, open map[string]bool, order string) ([]row, map[string][]*tend.Rec) {
+	byProject := map[string][]*tend.Rec{}
 	var names []string
 	for _, r := range recs {
 		p := r.Project
@@ -510,7 +510,7 @@ func projectRows(recs []*fav.Rec, open map[string]bool, order string) ([]row, ma
 	return out, byProject
 }
 
-func (m *Model) current() *fav.Rec {
+func (m *Model) current() *tend.Rec {
 	if m.cursor >= 0 && m.cursor < len(m.rows) {
 		return m.rows[m.cursor].rec
 	}
@@ -730,12 +730,12 @@ func (m *Model) setView(v view) {
 
 func (m *Model) nextView() view { return (m.view + 1) % viewCount }
 
-func (m *Model) toggleFavorite(r *fav.Rec) {
+func (m *Model) toggleFavorite(r *tend.Rec) {
 	if r == nil {
 		return
 	}
 	title, fresh, now := render.Truncate(r.Title, 30), r.ID == "", time.Now()
-	switch r = m.editRec(r, func(r *fav.Rec) { r.ToggleFavorite(now) }); {
+	switch r = m.editRec(r, func(r *tend.Rec) { r.ToggleFavorite(now) }); {
 	case r == nil:
 	case !r.Favorite():
 		m.flash(i18n.F("flash.unfavorited", title))
@@ -746,12 +746,12 @@ func (m *Model) toggleFavorite(r *fav.Rec) {
 	}
 }
 
-func (m *Model) toggleArchive(r *fav.Rec) {
+func (m *Model) toggleArchive(r *tend.Rec) {
 	if r == nil {
 		return
 	}
 	now := time.Now()
-	switch r = m.editRec(r, func(r *fav.Rec) { r.ToggleArchived(now) }); {
+	switch r = m.editRec(r, func(r *tend.Rec) { r.ToggleArchived(now) }); {
 	case r == nil:
 	case r.Archived():
 		m.flash(i18n.F("flash.archived", r.Title))
@@ -760,11 +760,11 @@ func (m *Model) toggleArchive(r *fav.Rec) {
 	}
 }
 
-func (m *Model) toggleStatus(r *fav.Rec, target string) {
+func (m *Model) toggleStatus(r *tend.Rec, target string) {
 	if r == nil {
 		return
 	}
-	switch r = m.editRec(r, func(r *fav.Rec) { r.ToggleStatus(target) }); {
+	switch r = m.editRec(r, func(r *tend.Rec) { r.ToggleStatus(target) }); {
 	case r == nil:
 	case r.Status == target:
 		m.flash(i18n.F("flash.status_set", render.StatusLabel(target), r.Title))
@@ -775,7 +775,7 @@ func (m *Model) toggleStatus(r *fav.Rec, target string) {
 
 // editRec saves change through Store.Update and returns the record written (nil on failure).
 // An unsaved session gets a record, not a favorite.
-func (m *Model) editRec(r *fav.Rec, change func(*fav.Rec)) *fav.Rec {
+func (m *Model) editRec(r *tend.Rec, change func(*tend.Rec)) *tend.Rec {
 	if r == nil {
 		return nil
 	}
@@ -799,7 +799,7 @@ func (m *Model) editRec(r *fav.Rec, change func(*fav.Rec)) *fav.Rec {
 	return saved
 }
 
-func (m *Model) dropUnfav(r *fav.Rec) {
+func (m *Model) dropUnfav(r *tend.Rec) {
 	for i, x := range m.unfav {
 		if x == r {
 			m.unfav = append(m.unfav[:i], m.unfav[i+1:]...)
@@ -855,18 +855,18 @@ type item struct {
 	count int // 0 hides the count
 }
 
-func tagsOf(recs []*fav.Rec) []item {
-	return countBy(recs, func(r *fav.Rec) []string { return r.Tags })
+func tagsOf(recs []*tend.Rec) []item {
+	return countBy(recs, func(r *tend.Rec) []string { return r.Tags })
 }
-func projectsOf(recs []*fav.Rec) []item {
-	return countBy(recs, func(r *fav.Rec) []string { return []string{r.Project} })
+func projectsOf(recs []*tend.Rec) []item {
+	return countBy(recs, func(r *tend.Rec) []string { return []string{r.Project} })
 }
-func providersOf(recs []*fav.Rec) []item {
-	return countBy(recs, func(r *fav.Rec) []string { return []string{r.Provider} })
+func providersOf(recs []*tend.Rec) []item {
+	return countBy(recs, func(r *tend.Rec) []string { return []string{r.Provider} })
 }
 
-func countBy(recs []*fav.Rec, keys func(*fav.Rec) []string) []item {
-	counts := fav.CountBy(recs, keys)
+func countBy(recs []*tend.Rec, keys func(*tend.Rec) []string) []item {
+	counts := tend.CountBy(recs, keys)
 	out := make([]item, len(counts))
 	for i, c := range counts {
 		out[i] = item{name: c.Name, count: c.N}

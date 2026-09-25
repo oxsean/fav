@@ -9,12 +9,12 @@ import (
 
 	"github.com/oxsean/fav/internal/agent"
 	"github.com/oxsean/fav/internal/capture"
-	"github.com/oxsean/fav/internal/fav"
 	"github.com/oxsean/fav/internal/herdr"
 	"github.com/oxsean/fav/internal/i18n"
 	"github.com/oxsean/fav/internal/remote"
 	"github.com/oxsean/fav/internal/render"
 	"github.com/oxsean/fav/internal/shell"
+	"github.com/oxsean/fav/internal/tend"
 	"github.com/oxsean/fav/internal/wire"
 )
 
@@ -30,8 +30,8 @@ const (
 
 // hostRows is one host's list; rows are reused per session key across fetches (cursor, pin and probes key by pointer).
 type hostRows struct {
-	recs    []*fav.Rec
-	byKey   map[string]*fav.Rec
+	recs    []*tend.Rec
+	byKey   map[string]*tend.Rec
 	live    map[string]capture.Live
 	at      time.Time // when the list shown was fetched
 	err     error     // the last fetch failed: the list is the cached one
@@ -41,9 +41,9 @@ type hostRows struct {
 	idle    bool // not polled: the filter does not show the host
 }
 
-func (hr *hostRows) merge(fresh []*fav.Rec) {
-	next := make(map[string]*fav.Rec, len(fresh))
-	out := make([]*fav.Rec, 0, len(fresh))
+func (hr *hostRows) merge(fresh []*tend.Rec) {
+	next := make(map[string]*tend.Rec, len(fresh))
+	out := make([]*tend.Rec, 0, len(fresh))
 	for _, f := range fresh {
 		k := f.Key()
 		if r := hr.byKey[k]; r != nil {
@@ -74,7 +74,7 @@ func (m *Model) useHosts(h *remote.Hosts) {
 
 type hostMsg struct {
 	name    string
-	recs    []*fav.Rec
+	recs    []*tend.Rec
 	st      remote.State
 	live    map[string]capture.Live
 	liveErr error
@@ -170,11 +170,11 @@ func (m *Model) wakeHosts() tea.Cmd {
 
 // remoteList: the rows of the hosts q.Host selects; status:live asks each host's own live map. Trash, one-shot agent
 // runs and message search are this machine's only.
-func (m *Model) remoteList(q fav.Query) []*fav.Rec {
-	if len(m.remote) == 0 || q.Host == "" || q.Host == fav.HostLocal || q.Status == fav.StatusTrash || q.Status == fav.StatusAgent || m.msgMode() {
+func (m *Model) remoteList(q tend.Query) []*tend.Rec {
+	if len(m.remote) == 0 || q.Host == "" || q.Host == tend.HostLocal || q.Status == tend.StatusTrash || q.Status == tend.StatusAgent || m.msgMode() {
 		return nil
 	}
-	var out []*fav.Rec
+	var out []*tend.Rec
 	for _, name := range m.hosts.Names() {
 		hr := m.remote[name]
 		hq := q
@@ -189,8 +189,8 @@ func (m *Model) remoteList(q fav.Query) []*fav.Rec {
 }
 
 // hostSelected: the host: filter shows name's rows.
-func hostSelected(q fav.Query, name string) bool {
-	return q.Host == fav.HostAll || strings.EqualFold(q.Host, name)
+func hostSelected(q tend.Query, name string) bool {
+	return q.Host == tend.HostAll || strings.EqualFold(q.Host, name)
 }
 
 // hostName is the configured spelling of the host: value v (the query is lowercased).
@@ -203,11 +203,11 @@ func (m *Model) hostName(v string) string {
 	return v
 }
 
-func (m *Model) hostChipValue(q fav.Query) string {
+func (m *Model) hostChipValue(q tend.Query) string {
 	switch q.Host {
-	case "", fav.HostLocal:
+	case "", tend.HostLocal:
 		return i18n.T("remote.local")
-	case fav.HostAll:
+	case tend.HostAll:
 		return i18n.T("remote.all")
 	}
 	return m.hostName(q.Host)
@@ -233,7 +233,7 @@ func (m *Model) offlineNote() string {
 	if m.hosts == nil {
 		return ""
 	}
-	q := fav.Parse(m.search.Value())
+	q := tend.Parse(m.search.Value())
 	var parts []string
 	for _, name := range m.hosts.Names() {
 		if s := m.hostDown(name); s != "" && hostSelected(q, name) {
@@ -250,8 +250,8 @@ func (m *Model) pickHost() {
 	if m.hosts == nil {
 		return
 	}
-	q := fav.Parse(m.search.Value())
-	items := []item{{name: "", label: i18n.T("remote.local")}, {name: fav.HostAll, label: i18n.T("remote.all")}}
+	q := tend.Parse(m.search.Value())
+	items := []item{{name: "", label: i18n.T("remote.local")}, {name: tend.HostAll, label: i18n.T("remote.all")}}
 	for _, name := range m.hosts.Names() {
 		label := name
 		if s := m.hostDown(name); s != "" {
@@ -260,7 +260,7 @@ func (m *Model) pickHost() {
 		items = append(items, item{name: name, label: label, count: len(m.remote[name].recs)})
 	}
 	cur := ""
-	if q.Host != fav.HostLocal {
+	if q.Host != tend.HostLocal {
 		cur = m.hostName(q.Host)
 	}
 	m.openPicker(i18n.T("remote.picker_title"), "", items, false, []string{cur},
@@ -269,11 +269,11 @@ func (m *Model) pickHost() {
 			if len(chosen) > 0 && chosen[0] != "" {
 				toks = []string{"host:" + chosen[0]}
 			}
-			m.setQuery(toks, fav.HasPrefix("host:", "machine:"))
+			m.setQuery(toks, tend.HasPrefix("host:", "machine:"))
 		})
 }
 
-func hostMark(r *fav.Rec) string { return "@" + r.Host }
+func hostMark(r *tend.Rec) string { return "@" + r.Host }
 
 // remoteRow: the action would act on another machine's session (or a project group holding one).
 func (m *Model) remoteRow() bool {
@@ -290,7 +290,7 @@ func (m *Model) remoteRow() bool {
 	return false
 }
 
-// remoteBlocked: what writes fav's records or opens local things; not offered on another machine's session.
+// remoteBlocked: what writes tend's records or opens local things; not offered on another machine's session.
 func remoteBlocked(a act) bool {
 	switch a {
 	case actFavorite, actDone, actArchive, actEdit, actMove, actDelete, actNew, actPeek, actHandled, actSnooze, actCloseTab, actTitle:
@@ -299,8 +299,8 @@ func remoteBlocked(a act) bool {
 	return false
 }
 
-// openRemoteResume: resume over ssh (a new Herdr tab when fav runs inside Herdr, else this terminal) or copy the command.
-func (m *Model) openRemoteResume(r *fav.Rec) {
+// openRemoteResume: resume over ssh (a new Herdr tab when tend runs inside Herdr, else this terminal) or copy the command.
+func (m *Model) openRemoteResume(r *tend.Rec) {
 	cmd, ok := m.hosts.ResumeCommand(r)
 	if !ok { // a node with no ssh host here (mode 2): the command to run on that machine
 		spec, err := agent.ResumeOf(r, "")
@@ -331,7 +331,7 @@ func (m *Model) openRemoteResume(r *fav.Rec) {
 	m.ov = overlay{kind: ovResume, rec: r, plan: plan, edit: ti, focus: -1}
 }
 
-// herdrHere is the Herdr workspace fav runs in, nil outside Herdr.
+// herdrHere is the Herdr workspace tend runs in, nil outside Herdr.
 func herdrHere() *herdr.Workspace {
 	if !herdr.Active() || !herdr.Reachable() {
 		return nil
@@ -377,7 +377,7 @@ func (m *Model) remoteResume(here bool) {
 }
 
 // remoteTarget: "mba  →  ~/dev/x  →  ssh".
-func (m *Model) remoteTarget(r *fav.Rec, arrow string) string {
+func (m *Model) remoteTarget(r *tend.Rec, arrow string) string {
 	dir := r.Cwd
 	if dir == "" {
 		dir = i18n.T("resume.where.cwd")

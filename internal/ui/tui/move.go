@@ -7,15 +7,15 @@ import (
 	"strings"
 
 	"github.com/oxsean/fav/internal/capture"
-	"github.com/oxsean/fav/internal/fav"
 	"github.com/oxsean/fav/internal/i18n"
 	"github.com/oxsean/fav/internal/index"
 	"github.com/oxsean/fav/internal/paths"
 	"github.com/oxsean/fav/internal/render"
+	"github.com/oxsean/fav/internal/tend"
 )
 
 // askMove: r's session, or with r nil on a group header the whole project (subdirs included); live sessions block it.
-func (m *Model) askMove(r *fav.Rec) {
+func (m *Model) askMove(r *tend.Rec) {
 	if m.view == viewLive || m.inTrash() {
 		return
 	}
@@ -24,13 +24,13 @@ func (m *Model) askMove(r *fav.Rec) {
 		return
 	}
 	old := ""
-	var only *fav.Rec
+	var only *tend.Rec
 	switch {
 	case r != nil:
 		old, only = r.Cwd, r
 	case m.view == viewProjects:
 		if recs := m.groups[m.groupUnderCursor()]; len(recs) > 0 {
-			if d := topN(recs, func(r *fav.Rec) string { return r.Cwd }, 1); len(d) > 0 {
+			if d := topN(recs, func(r *tend.Rec) string { return r.Cwd }, 1); len(d) > 0 {
 				old = d[0].key
 			}
 		}
@@ -55,14 +55,14 @@ func (m *Model) askMove(r *fav.Rec) {
 	m.pickMoveTarget(old, start, only)
 }
 
-func (m *Model) pickMoveTarget(old, start string, only *fav.Rec) {
+func (m *Model) pickMoveTarget(old, start string, only *tend.Rec) {
 	m.openDirPicker(i18n.F("move.title", paths.Tilde(old)), start, func(m *Model, dst string) { m.confirmMove(old, dst, only) })
 }
 
-func (m *Model) runningUnder(dir string, only *fav.Rec) []string {
+func (m *Model) runningUnder(dir string, only *tend.Rec) []string {
 	var out []string
 	seen := map[string]bool{}
-	check := func(r *fav.Rec) {
+	check := func(r *tend.Rec) {
 		if r.SessionID == "" || seen[r.SessionID] || !m.isLive(r.SessionID) {
 			return
 		}
@@ -83,7 +83,7 @@ func (m *Model) runningUnder(dir string, only *fav.Rec) []string {
 	return out
 }
 
-func (m *Model) confirmMove(old, dst string, only *fav.Rec) {
+func (m *Model) confirmMove(old, dst string, only *tend.Rec) {
 	dst = filepath.Clean(dst)
 	plan, err := m.idx.PlanMove(m.store, m.live, old, dst)
 	if err != nil {
@@ -103,7 +103,7 @@ func (m *Model) confirmMove(old, dst string, only *fav.Rec) {
 	}
 	claude, codex := 0, 0
 	for _, s := range plan.Sessions {
-		if s.Provider == fav.ProviderClaude {
+		if s.Provider == tend.ProviderClaude {
 			claude++
 		} else {
 			codex++

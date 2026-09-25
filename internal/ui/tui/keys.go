@@ -34,9 +34,9 @@ type tier uint8
 
 const (
 	tierNav    tier = iota // moves, filters, opens a view or a dialog
-	tierRecord             // reversible change to fav's own records
+	tierRecord             // reversible change to tend's own records
 	tierStart              // starts a process, opens a tab or an app, sends to an agent
-	tierHeavy              // cannot be undone from fav
+	tierHeavy              // cannot be undone from tend
 )
 
 type act uint8

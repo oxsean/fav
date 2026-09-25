@@ -10,10 +10,10 @@ import (
 	"time"
 
 	"github.com/oxsean/fav/internal/coord"
-	"github.com/oxsean/fav/internal/fav"
 	"github.com/oxsean/fav/internal/node"
 	"github.com/oxsean/fav/internal/remote"
 	"github.com/oxsean/fav/internal/task"
+	"github.com/oxsean/fav/internal/tend"
 	"github.com/oxsean/fav/internal/testkit"
 	"github.com/oxsean/fav/internal/wire"
 )
@@ -81,7 +81,7 @@ func newRig(t *testing.T) *rig {
 		t.Fatal(err)
 	}
 	r.c, err = coord.Open(coord.Options{Home: r.home, Version: "test", Remote: true, Nodes: NodeNames(r.home),
-		Config: fav.Config{Agents: []fav.AgentProfile{{Name: "fake", Provider: "fake"}}}})
+		Config: tend.Config{Agents: []tend.AgentProfile{{Name: "fake", Provider: "fake"}}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -111,7 +111,7 @@ func newRig(t *testing.T) *rig {
 func (r *rig) node(token string) *wire.Conn {
 	r.t.Helper()
 	n := node.New(r.t.TempDir())
-	n.Limits = fav.NodeConfig{AllowDirs: []string{os.TempDir(), r.t.TempDir()}}
+	n.Limits = tend.NodeConfig{AllowDirs: []string{os.TempDir(), r.t.TempDir()}}
 	n.Launch = func(dir string, spec node.Spec) (string, error) {
 		os.WriteFile(filepath.Join(dir, "output.log"), []byte("done here\n"), 0o600)
 		return "", os.WriteFile(filepath.Join(dir, "state.json"), []byte(`{"rev":1,"state":"exited","exit_code":0,"session":"`+spec.Session+`"}`), 0o600)

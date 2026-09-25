@@ -12,8 +12,8 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/oxsean/fav/internal/capture"
-	"github.com/oxsean/fav/internal/fav"
 	"github.com/oxsean/fav/internal/fulltext"
+	"github.com/oxsean/fav/internal/tend"
 )
 
 func line(role, text string) string {
@@ -21,22 +21,22 @@ func line(role, text string) string {
 }
 
 // msgModel: three favorited sessions with transcripts, the text store built, message search typed in.
-func msgModel(t *testing.T, query string) (*Model, []*fav.Rec) {
+func msgModel(t *testing.T, query string) (*Model, []*tend.Rec) {
 	t.Helper()
-	t.Setenv("FAV_HOME", t.TempDir())
+	t.Setenv("TEND_HOME", t.TempDir())
 	src := t.TempDir()
-	s, _ := fav.OpenAt(filepath.Join(t.TempDir(), "records.jsonl"))
+	s, _ := tend.OpenAt(filepath.Join(t.TempDir(), "records.jsonl"))
 	bodies := map[string][]string{
 		"wheel":  {line("user", "滚轮太慢了"), line("assistant", "加上滚动加速，一帧最多滚十几步")},
 		"cursor": {line("user", "分页游标漂移怎么查"), line("assistant", "先看排序键")},
 		"both":   {line("user", "滚轮加速和分页都要改")},
 	}
-	var recs []*fav.Rec
+	var recs []*tend.Rec
 	var paths []string
 	for _, name := range []string{"wheel", "cursor", "both"} {
 		p := filepath.Join(src, name+".jsonl")
 		os.WriteFile(p, []byte(strings.Join(bodies[name], "")), 0o644)
-		r := &fav.Rec{ID: fav.NewID(), Provider: fav.ProviderClaude, SessionID: name, Title: name + " session", Status: fav.StatusDone,
+		r := &tend.Rec{ID: tend.NewID(), Provider: tend.ProviderClaude, SessionID: name, Title: name + " session", Status: tend.StatusDone,
 			Cwd: src, TranscriptPath: p, FavoritedAt: new(time.Now())}
 		s.Put(r)
 		recs = append(recs, r)
@@ -45,7 +45,7 @@ func msgModel(t *testing.T, query string) (*Model, []*fav.Rec) {
 	if _, err := fulltext.Update(context.Background(), fulltext.Dir(), paths, fulltext.Options{}, nil); err != nil {
 		t.Fatal(err)
 	}
-	m := New(s, noIndex(t), fav.DefaultConfig(), query)
+	m := New(s, noIndex(t), tend.DefaultConfig(), query)
 	m.Update(tea.WindowSizeMsg{Width: 140, Height: 40})
 	return m, recs
 }
@@ -110,7 +110,7 @@ func TestFindQueryDrivesHitsInTheRightPane(t *testing.T) {
 	if m.current() != recs[0] {
 		t.Fatalf("cursor on %v", m.current())
 	}
-	m.probes = map[*fav.Rec]*probe{recs[0]: {done: true, full: true, msgs: []capture.Message{
+	m.probes = map[*tend.Rec]*probe{recs[0]: {done: true, full: true, msgs: []capture.Message{
 		{Role: "assistant", Text: "加上滚动加速，一帧最多滚十几步"},
 		{Role: "user", Text: "滚轮太慢了"},
 		{Role: "user", Text: "无关的一句"},
@@ -123,7 +123,7 @@ func TestFindQueryDrivesHitsInTheRightPane(t *testing.T) {
 func TestMessageSearchSurvivesAStoreReload(t *testing.T) {
 	m, recs := msgModel(t, "> 滚轮 加速")
 	search(t, m)
-	other, _ := fav.OpenAt(m.store.Path)
+	other, _ := tend.OpenAt(m.store.Path)
 	r := *recs[1]
 	r.Title = "edited elsewhere"
 	other.Put(&r)
@@ -155,7 +155,7 @@ func TestMessageSearchPagesBackOnlyToTheFirstHit(t *testing.T) {
 	}
 	page := capture.Messages(r.TranscriptPath, -1, recentMsgs)
 	p := &probe{done: true, msgs: page.Msgs, from: page.From, full: page.Done}
-	m.probes = map[*fav.Rec]*probe{r: p}
+	m.probes = map[*tend.Rec]*probe{r: p}
 	cmd := m.findHit(0)
 	for cmd != nil {
 		m.applyPage(cmd().(pageMsg))
@@ -176,7 +176,7 @@ func TestChangingKeywordsReseeksTheSameRecord(t *testing.T) {
 	if m.current() != r {
 		t.Fatalf("cursor on %v", m.current())
 	}
-	m.probes = map[*fav.Rec]*probe{r: {done: true, full: true, msgs: []capture.Message{
+	m.probes = map[*tend.Rec]*probe{r: {done: true, full: true, msgs: []capture.Message{
 		{Role: "assistant", Text: "先看排序键"},
 		{Role: "user", Text: "分页游标漂移怎么查"},
 	}}}
@@ -201,7 +201,7 @@ func TestALatePageDoesNotTrimTheCurrentRecord(t *testing.T) {
 	for i := range long {
 		long[i] = capture.Message{Role: "user", Text: "x", Off: int64(1000 - i)}
 	}
-	m.probes = map[*fav.Rec]*probe{cur: {done: true, msgs: long, from: 1}, other: {done: true, loading: true}}
+	m.probes = map[*tend.Rec]*probe{cur: {done: true, msgs: long, from: 1}, other: {done: true, loading: true}}
 	m.applyPage(pageMsg{other, capture.Page{Msgs: []capture.Message{{Role: "user", Text: "late"}}}})
 	if len(m.probes[cur].msgs) != 100 {
 		t.Fatalf("the record on screen keeps its loaded pages: %d", len(m.probes[cur].msgs))
@@ -214,7 +214,7 @@ func TestHitListWalksEveryHitAndTheRightPaneFollows(t *testing.T) {
 	m.cursor = 1
 	r := recs[0] // "wheel": 滚轮 in the question, 加速 in the answer
 	page := capture.Messages(r.TranscriptPath, -1, recentMsgs)
-	m.probes = map[*fav.Rec]*probe{r: {done: true, msgs: page.Msgs, from: page.From, full: page.Done}}
+	m.probes = map[*tend.Rec]*probe{r: {done: true, msgs: page.Msgs, from: page.From, full: page.Done}}
 	m.typing = false
 	m.search.Blur()
 	m.Update(press("right"))
@@ -274,7 +274,7 @@ func TestHitListSurvivesAStoreReload(t *testing.T) {
 	if !m.hitsOpen() {
 		t.Fatal("→ opens the hit list")
 	}
-	other, _ := fav.OpenAt(m.store.Path)
+	other, _ := tend.OpenAt(m.store.Path)
 	r := *recs[2]
 	r.Title = "edited elsewhere"
 	other.Put(&r)
@@ -298,7 +298,7 @@ func TestABusyStoreIsRetriedAndRerunsTheSearch(t *testing.T) {
 	m, _ := msgModel(t, "> 滚轮")
 	gen := m.msg.textGen
 	if cmd := m.applyTextDone(textDoneMsg{err: fulltext.ErrBusy}); cmd == nil {
-		t.Fatal("another fav building the store: check back later")
+		t.Fatal("another tend building the store: check back later")
 	}
 	m.applyTextDone(textDoneMsg{})
 	if m.msg.textGen == gen {
@@ -430,7 +430,7 @@ func TestTheHitListFollowsTheRightPane(t *testing.T) {
 	m.cursor = 1
 	r := recs[0]
 	page := capture.Messages(r.TranscriptPath, -1, recentMsgs)
-	m.probes = map[*fav.Rec]*probe{r: {done: true, msgs: page.Msgs, from: page.From, full: page.Done}}
+	m.probes = map[*tend.Rec]*probe{r: {done: true, msgs: page.Msgs, from: page.From, full: page.Done}}
 	m.typing = false
 	m.search.Blur()
 	m.Update(press("right"))

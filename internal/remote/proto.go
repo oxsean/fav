@@ -1,4 +1,4 @@
-// Package remote lets fav on one machine read the sessions of another: `fav rpc` answers line-delimited JSON on
+// Package remote lets tend on one machine read the sessions of another: `tend rpc` answers line-delimited JSON on
 // stdin/stdout, a Client reaches it over ssh (or as a local process), Hosts keeps the configured machines' lists and
 // Source reads one record's transcript wherever it lives.
 package remote
@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/oxsean/fav/internal/capture"
-	"github.com/oxsean/fav/internal/fav"
+	"github.com/oxsean/fav/internal/tend"
 )
 
 const (
@@ -89,7 +89,7 @@ type Session struct {
 	Files         map[string]int `json:"files,omitempty"`
 }
 
-func SessionOf(r *fav.Rec) Session {
+func SessionOf(r *tend.Rec) Session {
 	return Session{ID: r.ID, Provider: r.Provider, SessionID: r.SessionID, Title: r.Title, Label: r.Label,
 		Summary: r.Summary, Project: r.Project, WorkType: r.WorkType, Tags: r.Tags, Status: r.Status, Cwd: r.Cwd,
 		GitBranch: r.GitBranch, GitRemote: r.GitRemote, Repo: r.Repo, Transcript: r.TranscriptPath, Pinned: r.PinnedPath,
@@ -99,8 +99,8 @@ func SessionOf(r *fav.Rec) Session {
 }
 
 // Rec is s as a record of host.
-func (s Session) Rec(host string) *fav.Rec {
-	r := &fav.Rec{ID: s.ID, Provider: s.Provider, SessionID: s.SessionID, Title: s.Title, Label: s.Label,
+func (s Session) Rec(host string) *tend.Rec {
+	r := &tend.Rec{ID: s.ID, Provider: s.Provider, SessionID: s.SessionID, Title: s.Title, Label: s.Label,
 		Summary: s.Summary, Project: s.Project, WorkType: s.WorkType, Tags: s.Tags, Status: s.Status, Cwd: s.Cwd,
 		GitBranch: s.GitBranch, GitRemote: s.GitRemote, Repo: s.Repo, TranscriptPath: s.Transcript, PinnedPath: s.Pinned,
 		SessionStartedAt: s.StartedAt, FavoritedAt: s.FavoritedAt, ArchivedAt: s.ArchivedAt, UpdatedAt: s.UpdatedAt,

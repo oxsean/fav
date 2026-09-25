@@ -10,11 +10,11 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/oxsean/fav/internal/capture"
-	"github.com/oxsean/fav/internal/fav"
 	"github.com/oxsean/fav/internal/herdr"
 	"github.com/oxsean/fav/internal/i18n"
 	"github.com/oxsean/fav/internal/remote"
 	"github.com/oxsean/fav/internal/render"
+	"github.com/oxsean/fav/internal/tend"
 )
 
 // Who is running: polled every 3 s (Herdr, Claude sessions/*.json, Codex locks); with the cursor on a live session the right pane re-reads its tail.
@@ -117,7 +117,7 @@ func (m *Model) applyLive(msg liveMsg) {
 	}
 }
 
-func (m *Model) liveOf(r *fav.Rec) (capture.Live, bool) {
+func (m *Model) liveOf(r *tend.Rec) (capture.Live, bool) {
 	if r == nil {
 		return capture.Live{}, false
 	}
@@ -133,8 +133,8 @@ func (m *Model) liveOf(r *fav.Rec) (capture.Live, bool) {
 	return l, ok
 }
 
-func (m *Model) bySession(id string) *fav.Rec {
-	for _, rs := range [][]*fav.Rec{m.store.All(), m.unfav} {
+func (m *Model) bySession(id string) *tend.Rec {
+	for _, rs := range [][]*tend.Rec{m.store.All(), m.unfav} {
 		for _, r := range rs {
 			if r.SessionID == id {
 				return r
@@ -174,11 +174,11 @@ const (
 var liveSorts = []string{liveSortStarted, liveSortGroup, liveSortActive}
 
 // liveRows: default is by start time (missing = newest) so rows do not jump; group is waiting / working / idle / finished; active is by last activity.
-func (m *Model) liveRows(recs []*fav.Rec) []row {
+func (m *Model) liveRows(recs []*tend.Rec) []row {
 	if m.cfg.LiveSort == liveSortActive {
 		recs, _ = sortActive.sorted(recs)
 	} else {
-		fav.SortByStart(recs)
+		tend.SortByStart(recs)
 	}
 	if m.cfg.LiveSort != liveSortGroup {
 		out := make([]row, len(recs))
@@ -187,7 +187,7 @@ func (m *Model) liveRows(recs []*fav.Rec) []row {
 		}
 		return out
 	}
-	by := map[int][]*fav.Rec{}
+	by := map[int][]*tend.Rec{}
 	for _, r := range recs {
 		g := m.liveGroup(r)
 		by[g] = append(by[g], r)
@@ -218,7 +218,7 @@ func liveGroupNames() []string {
 	return []string{i18n.T("live.waiting"), i18n.T("attn.unseen_group"), i18n.T("live.working"), i18n.T("live.idle"), i18n.T("live.finished")}
 }
 
-func (m *Model) liveGroup(r *fav.Rec) int {
+func (m *Model) liveGroup(r *tend.Rec) int {
 	need := needNone
 	if r.Host == "" { // attention is this machine's, by session id
 		need = m.need(r.SessionID)
@@ -275,7 +275,7 @@ func (m *Model) liveSummary() string {
 }
 
 type refreshMsg struct {
-	rec  *fav.Rec
+	rec  *tend.Rec
 	page capture.Page
 }
 
@@ -354,7 +354,7 @@ func (m *Model) applyFresh() {
 	m.hitsFor = nil
 }
 
-func (m *Model) closeLive(r *fav.Rec) {
+func (m *Model) closeLive(r *tend.Rec) {
 	l, ok := m.liveOf(r)
 	if !ok || l.TabID == "" {
 		m.flash(i18n.T("live.not_in_herdr"))

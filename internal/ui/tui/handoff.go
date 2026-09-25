@@ -9,15 +9,15 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/oxsean/fav/internal/capture"
-	"github.com/oxsean/fav/internal/fav"
 	"github.com/oxsean/fav/internal/i18n"
 	"github.com/oxsean/fav/internal/paths"
 	"github.com/oxsean/fav/internal/render"
 	"github.com/oxsean/fav/internal/shell"
+	"github.com/oxsean/fav/internal/tend"
 )
 
 // ovRec is the dialog's record, re-read from the store (ov.rec is stale after a store reload).
-func (m *Model) ovRec() *fav.Rec {
+func (m *Model) ovRec() *tend.Rec {
 	r := m.ov.rec
 	if r != nil && r.ID != "" && r.Host == "" {
 		if cur := m.store.Get(r.ID); cur != nil {
@@ -38,7 +38,7 @@ func (m *Model) doFork() {
 }
 
 // startPlan opens a new session (fork, handoff): a new Herdr tab, or this terminal once the TUI quits.
-func (m *Model) startPlan(r *fav.Rec, p capture.Plan, _ bool) {
+func (m *Model) startPlan(r *tend.Rec, p capture.Plan, _ bool) {
 	if c := p.Blocking(); c != nil {
 		m.flash(i18n.F("start.failed", c.Text))
 		return
@@ -60,7 +60,7 @@ func (m *Model) startPlan(r *fav.Rec, p capture.Plan, _ bool) {
 }
 
 type handoffMsg struct {
-	rec  *fav.Rec
+	rec  *tend.Rec
 	path string
 	err  error
 }
@@ -101,9 +101,9 @@ func (m *Model) loadHandoff() {
 }
 
 // handoffProviders: the installed CLIs, the session's own first.
-func handoffProviders(r *fav.Rec) []string {
+func handoffProviders(r *tend.Rec) []string {
 	var out []string
-	for _, p := range []string{r.Provider, fav.ProviderClaude, fav.ProviderCodex} {
+	for _, p := range []string{r.Provider, tend.ProviderClaude, tend.ProviderCodex} {
 		if capture.Installed(p) && !slices.Contains(out, p) {
 			out = append(out, p)
 		}
@@ -145,7 +145,7 @@ func (m *Model) editHandoff() tea.Cmd {
 func (m *Model) handoffGroups() []btnGroup {
 	var start []btn
 	for i, p := range m.ov.providers {
-		start = append(start, btn{keyed(keyOf(inHandoff, providerAct(p)), fav.ProviderLabel(p)), i == 0, func(mm *Model) { mm.startHandoff(p) }})
+		start = append(start, btn{keyed(keyOf(inHandoff, providerAct(p)), tend.ProviderLabel(p)), i == 0, func(mm *Model) { mm.startHandoff(p) }})
 	}
 	return []btnGroup{
 		{label: i18n.T("handoff.group.start"), bs: start},

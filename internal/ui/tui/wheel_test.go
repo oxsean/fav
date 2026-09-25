@@ -6,7 +6,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/oxsean/fav/internal/capture"
-	"github.com/oxsean/fav/internal/fav"
+	"github.com/oxsean/fav/internal/tend"
 )
 
 func TestWheel(t *testing.T) {
@@ -38,7 +38,7 @@ func TestWheel(t *testing.T) {
 	for range 30 {
 		msgs = append(msgs, capture.Message{Role: "user", Text: "一行"})
 	}
-	m.probes = map[*fav.Rec]*probe{r: {done: true, msgs: msgs}}
+	m.probes = map[*tend.Rec]*probe{r: {done: true, msgs: msgs}}
 	m.screen()
 	right := tea.MouseWheelMsg{Button: tea.MouseWheelDown, X: m.listWidth() + 5, Y: 20}
 	m.wheelAcc = 0

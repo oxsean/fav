@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/oxsean/fav/internal/agent"
-	"github.com/oxsean/fav/internal/fav"
+	"github.com/oxsean/fav/internal/tend"
 	"github.com/oxsean/fav/internal/testkit"
 )
 
@@ -28,7 +28,7 @@ func TestHandoffPack(t *testing.T) {
 		`{"type":"assistant","timestamp":"2026-09-22T10:08:00Z","message":{"role":"assistant","content":[{"type":"text","text":"改完了\n| a | b |\n下一步跑测试"},{"type":"tool_use","name":"Write","input":{"file_path":"/elsewhere/b.md","content":"z"}},{"type":"tool_use","name":"NotebookEdit","input":{"notebook_path":"/elsewhere/n.ipynb","new_source":"x"}}]}}`,
 	)
 	os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o644)
-	r := &fav.Rec{Provider: fav.ProviderClaude, SessionID: "abc", Title: "修分页", Summary: "分页游标漂移", Cwd: cwd, TranscriptPath: path}
+	r := &tend.Rec{Provider: tend.ProviderClaude, SessionID: "abc", Title: "修分页", Summary: "分页游标漂移", Cwd: cwd, TranscriptPath: path}
 
 	msgs := recentMessages(path, handoffScan)
 	if got := lastRequests(path, msgs, 5); !slices.Equal(got, []string{"要求二", "要求三", "要求四", "要求五", "要求六"}) {
@@ -52,13 +52,13 @@ func TestHandoffPack(t *testing.T) {
 }
 
 func TestWriteHandoffPrunesOld(t *testing.T) {
-	t.Setenv("FAV_HOME", t.TempDir())
+	t.Setenv("TEND_HOME", t.TempDir())
 	os.MkdirAll(handoffDir(), 0o700)
 	old := filepath.Join(handoffDir(), "old.md")
 	os.WriteFile(old, []byte("x"), 0o600)
 	past := time.Now().Add(-handoffKeep - time.Hour)
 	os.Chtimes(old, past, past)
-	p, err := WriteHandoff(&fav.Rec{Provider: fav.ProviderCodex, SessionID: "0199aaaa-bbbb", Title: "t"})
+	p, err := WriteHandoff(&tend.Rec{Provider: tend.ProviderCodex, SessionID: "0199aaaa-bbbb", Title: "t"})
 	if err != nil || !strings.HasPrefix(filepath.Base(p), "0199aaaa-") {
 		t.Fatalf("written %s: %v", p, err)
 	}
@@ -68,15 +68,15 @@ func TestWriteHandoffPrunesOld(t *testing.T) {
 }
 
 func TestForkAndStartCommands(t *testing.T) {
-	c, _ := agent.ForkOf(&fav.Rec{Provider: fav.ProviderClaude, SessionID: "s1", Cwd: "/p"})
+	c, _ := agent.ForkOf(&tend.Rec{Provider: tend.ProviderClaude, SessionID: "s1", Cwd: "/p"})
 	if got := c.ShellLine(); got != "cd /p && claude --resume s1 --fork-session" {
 		t.Errorf("claude fork: %s", got)
 	}
-	c, _ = agent.ForkOf(&fav.Rec{Provider: fav.ProviderCodex, SessionID: "s2"})
+	c, _ = agent.ForkOf(&tend.Rec{Provider: tend.ProviderCodex, SessionID: "s2"})
 	if got := c.ShellLine(); got != "codex fork s2" {
 		t.Errorf("codex fork: %s", got)
 	}
-	c, _ = agent.StartOf(fav.ProviderCodex, "/p", "read /x.md")
+	c, _ = agent.StartOf(tend.ProviderCodex, "/p", "read /x.md")
 	if !slices.Equal(c.Argv(), []string{"codex", "read /x.md"}) || c.Cwd != "/p" {
 		t.Errorf("codex start: %q", c.Argv())
 	}

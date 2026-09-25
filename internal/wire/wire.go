@@ -64,8 +64,8 @@ const (
 	CodeAuth    = "auth"    // ssh refused the key
 	CodeHostKey = "hostkey" // the host key changed or is unknown
 	CodeTimeout = "timeout"
-	CodeClosed  = "closed" // the connection or the process behind it ended
-	CodeNoFav   = "no_fav" // the remote shell could not find the tend command
+	CodeClosed  = "closed"  // the connection or the process behind it ended
+	CodeNoTend  = "no_tend" // the remote shell could not find the tend command
 )
 
 // Code is err's code, "" when err is not an *Error.

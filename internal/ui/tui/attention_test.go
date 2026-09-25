@@ -5,12 +5,12 @@ import (
 	"testing"
 
 	"github.com/oxsean/fav/internal/capture"
-	"github.com/oxsean/fav/internal/fav"
 	"github.com/oxsean/fav/internal/i18n"
+	"github.com/oxsean/fav/internal/tend"
 )
 
 func TestAttentionQueue(t *testing.T) {
-	t.Setenv("FAV_HOME", t.TempDir())
+	t.Setenv("TEND_HOME", t.TempDir())
 	m := sized(t, 140, 40)
 	r := m.current()
 	id := r.SessionID
@@ -52,7 +52,7 @@ func TestAttentionQueue(t *testing.T) {
 }
 
 func TestAttentionAskingAndGroups(t *testing.T) {
-	t.Setenv("FAV_HOME", t.TempDir())
+	t.Setenv("TEND_HOME", t.TempDir())
 	m := sized(t, 140, 40)
 	recs := m.store.All()
 	a, b, c := recs[0].SessionID, recs[1].SessionID, recs[2].SessionID
@@ -65,7 +65,7 @@ func TestAttentionAskingAndGroups(t *testing.T) {
 		t.Fatalf("the card says it is asking: %q", text)
 	}
 	m.cfg.LiveSort = liveSortGroup
-	rows := m.liveRows([]*fav.Rec{recs[0], recs[1], recs[2]})
+	rows := m.liveRows([]*tend.Rec{recs[0], recs[1], recs[2]})
 	if rows[0].group != i18n.T("live.waiting") || rows[1].rec.SessionID != c {
 		t.Fatalf("the waiting group comes first: %+v", rows)
 	}

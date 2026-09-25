@@ -1,6 +1,6 @@
 // Package pathmap carries a path from one machine's file system to another's: a path under one home maps under the
 // other's, and Windows and a WSL distro on the same machine share drives (C:\x is /mnt/c/x). Pure strings: both ends'
-// rules apply whatever OS fav runs on.
+// rules apply whatever OS tend runs on.
 package pathmap
 
 import "strings"

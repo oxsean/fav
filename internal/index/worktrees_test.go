@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/oxsean/fav/internal/fav"
+	"github.com/oxsean/fav/internal/tend"
 )
 
 func git(t *testing.T, dir string, args ...string) {
@@ -39,9 +39,9 @@ func TestWorktreeSessionsBelongToTheirRepo(t *testing.T) {
 	idxPath := filepath.Join(t.TempDir(), "sessions.jsonl")
 	idx, _ := OpenAt(idxPath)
 	idx, _ = idx.Refresh()
-	store, _ := fav.OpenAt(filepath.Join(t.TempDir(), "records.jsonl"))
-	byID := func(idx *Index) map[string]*fav.Rec {
-		out := map[string]*fav.Rec{}
+	store, _ := tend.OpenAt(filepath.Join(t.TempDir(), "records.jsonl"))
+	byID := func(idx *Index) map[string]*tend.Rec {
+		out := map[string]*tend.Rec{}
 		for _, r := range idx.Attach(store, nil) {
 			out[r.SessionID] = r
 		}

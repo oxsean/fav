@@ -6,10 +6,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/oxsean/fav/internal/fav"
 	"github.com/oxsean/fav/internal/i18n"
 	"github.com/oxsean/fav/internal/paths"
 	"github.com/oxsean/fav/internal/render"
+	"github.com/oxsean/fav/internal/tend"
 )
 
 // projectFocus: cursor on a group header with the right pane focused; ↑↓ picks a session, Enter jumps to it.
@@ -41,15 +41,15 @@ func (m *Model) projectBlock(name string, y0, x0, w, h int) []string {
 	}
 	body = append(body, boldSty.Foreground(cText).Render(render.Truncate(name, inner)), "")
 
-	dirs := topN(recs, func(r *fav.Rec) string { return r.Cwd }, 1)
+	dirs := topN(recs, func(r *tend.Rec) string { return r.Cwd }, 1)
 	if len(dirs) > 0 {
 		dir := paths.Tilde(dirs[0].key)
-		if i := slices.IndexFunc(recs, func(r *fav.Rec) bool { return r.Cwd == dirs[0].key }); recs[i].Host != "" {
+		if i := slices.IndexFunc(recs, func(r *tend.Rec) bool { return r.Cwd == dirs[0].key }); recs[i].Host != "" {
 			dir = recs[i].Host + ":" + dirs[0].key // another machine's directory: not checked here
 		} else if !paths.IsDir(dirs[0].key) {
 			dir += errSty.Render(i18n.T("project.missing"))
 		}
-		if extra := distinct(recs, func(r *fav.Rec) string { return r.Cwd }) - 1; extra > 0 {
+		if extra := distinct(recs, func(r *tend.Rec) string { return r.Cwd }) - 1; extra > 0 {
 			dir = i18n.F("project.dirs_more", dir, extra)
 		}
 		add(render.GlyphDir+i18n.T("card.directory"), dir)
@@ -60,7 +60,7 @@ func (m *Model) projectBlock(name string, y0, x0, w, h int) []string {
 			break
 		}
 	}
-	if bs := topN(recs, func(r *fav.Rec) string { return r.GitBranch }, 4); len(bs) > 0 {
+	if bs := topN(recs, func(r *tend.Rec) string { return r.GitBranch }, 4); len(bs) > 0 {
 		names := make([]string, len(bs))
 		for i, b := range bs {
 			names[i] = b.key
@@ -68,16 +68,16 @@ func (m *Model) projectBlock(name string, y0, x0, w, h int) []string {
 		add(render.GlyphBranch+i18n.T("card.branch"), strings.Join(names, " · "))
 	}
 
-	favs, claude, codex, turns, active, done, archived, live := 0, 0, 0, 0, 0, 0, 0, 0
+	favorites, claude, codex, turns, active, done, archived, live := 0, 0, 0, 0, 0, 0, 0, 0
 	var first, last time.Time
 	for _, r := range recs {
 		if r.Favorite() {
-			favs++
+			favorites++
 		}
 		switch r.Provider {
-		case fav.ProviderClaude:
+		case tend.ProviderClaude:
 			claude++
-		case fav.ProviderCodex:
+		case tend.ProviderCodex:
 			codex++
 		}
 		turns += r.Turns
@@ -99,7 +99,7 @@ func (m *Model) projectBlock(name string, y0, x0, w, h int) []string {
 			last = t
 		}
 	}
-	add(render.GlyphSession+i18n.T("project.sessions_label"), i18n.F("project.sessions", len(recs), favs))
+	add(render.GlyphSession+i18n.T("project.sessions_label"), i18n.F("project.sessions", len(recs), favorites))
 	add(render.GlyphTerm+" "+i18n.T("label.source"), i18n.F("project.providers", claude, codex))
 	add(render.GlyphClock+i18n.T("card.turns_label"), i18n.F("card.turns", turns))
 	add(render.GlyphOK+" "+i18n.T("label.status"), i18n.F("project.status", active, done, archived))
@@ -160,7 +160,7 @@ func (m *Model) projectBlock(name string, y0, x0, w, h int) []string {
 	return panel(i18n.T("detail.project"), body, w, h)
 }
 
-func (m *Model) jumpTo(group string, r *fav.Rec) {
+func (m *Model) jumpTo(group string, r *tend.Rec) {
 	m.open[group] = true
 	m.refresh()
 	for i, row := range m.rows {
@@ -177,7 +177,7 @@ type keyCount struct {
 }
 
 // topN: the n most frequent; key nil counts tags.
-func topN(recs []*fav.Rec, key func(*fav.Rec) string, n int) []keyCount {
+func topN(recs []*tend.Rec, key func(*tend.Rec) string, n int) []keyCount {
 	counts := map[string]int{}
 	var order []string
 	bump := func(k string) {
@@ -209,7 +209,7 @@ func topN(recs []*fav.Rec, key func(*fav.Rec) string, n int) []keyCount {
 	return out
 }
 
-func distinct(recs []*fav.Rec, key func(*fav.Rec) string) int {
+func distinct(recs []*tend.Rec, key func(*tend.Rec) string) int {
 	seen := map[string]bool{}
 	for _, r := range recs {
 		if k := key(r); k != "" {
@@ -238,7 +238,7 @@ func projSortLabel(name string) string {
 }
 
 // orderGroups: the projects view orders groups by their newest record (the record order), by how many sessions they hold, or by name.
-func orderGroups(names []string, by map[string][]*fav.Rec, mode string) []string {
+func orderGroups(names []string, by map[string][]*tend.Rec, mode string) []string {
 	switch mode {
 	case projSortCount:
 		sort.SliceStable(names, func(i, j int) bool { return len(by[names[i]]) > len(by[names[j]]) })
@@ -253,7 +253,7 @@ func orderGroups(names []string, by map[string][]*fav.Rec, mode string) []string
 const hotWindow = 7 * 24 * time.Hour
 
 // hotFiles: the files written most in the project's sessions active this week.
-func (m *Model) hotFiles(recs []*fav.Rec) []fav.FileCount {
+func (m *Model) hotFiles(recs []*tend.Rec) []tend.FileCount {
 	sum := map[string]int{}
 	for _, r := range recs {
 		if m.now.Sub(r.ActiveAt()) > hotWindow {
@@ -263,5 +263,5 @@ func (m *Model) hotFiles(recs []*fav.Rec) []fav.FileCount {
 			sum[p] += n
 		}
 	}
-	return fav.TopFiles(sum, 5)
+	return tend.TopFiles(sum, 5)
 }

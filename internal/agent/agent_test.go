@@ -5,7 +5,7 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/oxsean/fav/internal/fav"
+	"github.com/oxsean/fav/internal/tend"
 )
 
 func TestLaunchLines(t *testing.T) {
@@ -47,23 +47,23 @@ func TestCommandTemplates(t *testing.T) {
 }
 
 func TestResumeForkStart(t *testing.T) {
-	r := &fav.Rec{Provider: fav.ProviderCodex, SessionID: "s1", Cwd: "/w"}
+	r := &tend.Rec{Provider: tend.ProviderCodex, SessionID: "s1", Cwd: "/w"}
 	if c, err := ResumeOf(r, "n"); err != nil || !slices.Equal(c.Argv(), []string{"codex", "resume", "s1"}) || c.Cwd != "/w" {
 		t.Fatalf("%q %v", c.Argv(), err)
 	}
-	if c, err := ForkOf(&fav.Rec{Provider: fav.ProviderClaude, SessionID: "s1"}); err != nil || !slices.Equal(c.Argv(), []string{"claude", "--resume", "s1", "--fork-session"}) {
+	if c, err := ForkOf(&tend.Rec{Provider: tend.ProviderClaude, SessionID: "s1"}); err != nil || !slices.Equal(c.Argv(), []string{"claude", "--resume", "s1", "--fork-session"}) {
 		t.Fatalf("%q %v", c.Argv(), err)
 	}
-	if _, err := ResumeOf(&fav.Rec{Provider: fav.ProviderClaude}, ""); err == nil {
+	if _, err := ResumeOf(&tend.Rec{Provider: tend.ProviderClaude}, ""); err == nil {
 		t.Fatal("no session id")
 	}
-	if _, err := ResumeOf(&fav.Rec{Provider: ProviderCommand, SessionID: "x"}, ""); err == nil {
+	if _, err := ResumeOf(&tend.Rec{Provider: ProviderCommand, SessionID: "x"}, ""); err == nil {
 		t.Fatal("command runs cannot be resumed")
 	}
-	if c, _ := StartOf(fav.ProviderClaude, "/w", ""); !slices.Equal(c.Argv(), []string{"claude"}) {
+	if c, _ := StartOf(tend.ProviderClaude, "/w", ""); !slices.Equal(c.Argv(), []string{"claude"}) {
 		t.Fatalf("%q", c.Argv())
 	}
-	if SessionProvider(ProviderFake) != fav.ProviderClaude || SessionProvider(ProviderCommand) != "" || SessionProvider("codex") != "codex" {
+	if SessionProvider(ProviderFake) != tend.ProviderClaude || SessionProvider(ProviderCommand) != "" || SessionProvider("codex") != "codex" {
 		t.Fatal("session providers")
 	}
 }

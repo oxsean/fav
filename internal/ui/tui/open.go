@@ -4,10 +4,10 @@ import (
 	"github.com/atotto/clipboard"
 
 	"github.com/oxsean/fav/internal/capture"
-	"github.com/oxsean/fav/internal/fav"
 	"github.com/oxsean/fav/internal/i18n"
 	"github.com/oxsean/fav/internal/paths"
 	"github.com/oxsean/fav/internal/render"
+	"github.com/oxsean/fav/internal/tend"
 )
 
 func (m *Model) ideName() string {
@@ -17,7 +17,7 @@ func (m *Model) ideName() string {
 	return capture.DefaultIDE()
 }
 
-func recDir(r *fav.Rec) string {
+func recDir(r *tend.Rec) string {
 	if r.Cwd != "" {
 		return r.Cwd
 	}

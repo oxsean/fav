@@ -14,10 +14,10 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/oxsean/fav/internal/capture"
-	"github.com/oxsean/fav/internal/fav"
 	"github.com/oxsean/fav/internal/i18n"
 	"github.com/oxsean/fav/internal/render"
 	"github.com/oxsean/fav/internal/task"
+	"github.com/oxsean/fav/internal/tend"
 )
 
 type ovKind int
@@ -59,7 +59,7 @@ type overlay struct {
 	browse    func(string) []item       // dir picker: the list follows the typed path, items unused
 	btns      []btn                     // buttons drawn this frame; arrow keys move focus among them
 	focus     int                       // focused button; -1 = none, Enter runs the default
-	rec       *fav.Rec
+	rec       *tend.Rec
 	plan      capture.Plan
 	edit      textinput.Model
 	edit2     textinput.Model
@@ -69,10 +69,10 @@ type overlay struct {
 	confirm   func(*Model)
 	back      func(*Model) // ovConfirm cancel goes back here (nil = close)
 	okLabel   string
-	app       bool       // resume dialog: opening in the desktop app is the primary action
-	providers []string   // handoff / new session: the CLIs a new session can start in, the default first
-	running   []*fav.Rec // new session: sessions already running in that directory
-	armed     string     // peek: the digit pressed once, sent on the second press
+	app       bool        // resume dialog: opening in the desktop app is the primary action
+	providers []string    // handoff / new session: the CLIs a new session can start in, the default first
+	running   []*tend.Rec // new session: sessions already running in that directory
+	armed     string      // peek: the digit pressed once, sent on the second press
 	armedAt   time.Time
 	taskID    string     // task form: the task edited ("" = a new one); run dialog: the task to run
 	taskWas   *task.Task // task form: the task as task.get read it; only fields changed from it are saved
@@ -1105,7 +1105,7 @@ func (m *Model) recordAction(a act) {
 	case actFavorite:
 		m.toggleFavorite(r)
 	case actDone:
-		m.toggleStatus(r, fav.StatusDone)
+		m.toggleStatus(r, tend.StatusDone)
 	case actArchive:
 		m.toggleArchive(r)
 	case actEdit:
@@ -1127,7 +1127,7 @@ func (m *Model) focusKey(a act) {
 
 // appReady: r's desktop app was found. The lookup runs in the background when the resume dialog first opens; the
 // button appears once it answers.
-func appReady(r *fav.Rec) bool {
+func appReady(r *tend.Rec) bool {
 	ok, _ := capture.AppKnown(r.Provider)
 	return ok && capture.AppURL(r) != ""
 }
@@ -1135,7 +1135,7 @@ func appReady(r *fav.Rec) bool {
 type appProbedMsg struct{}
 
 // probeApp looks up r's desktop app unless that is already known.
-func probeApp(r *fav.Rec) tea.Cmd {
+func probeApp(r *tend.Rec) tea.Cmd {
 	if _, known := capture.AppKnown(r.Provider); known || capture.AppURL(r) == "" {
 		return nil
 	}
@@ -1148,11 +1148,11 @@ func probeApp(r *fav.Rec) tea.Cmd {
 
 // appFirst: the resume dialog leads with the desktop app — the setting says so (always, or for sessions started there)
 // and the session is not running in a Herdr tab.
-func (m *Model) appFirst(r *fav.Rec, p capture.Plan) bool {
+func (m *Model) appFirst(r *tend.Rec, p capture.Plan) bool {
 	if r.Host != "" || !appReady(r) || p.Live.TabID != "" {
 		return false
 	}
-	return m.cfg.ResumeIn == fav.ResumeApp || m.cfg.ResumeIn == fav.ResumeOrigin && r.App
+	return m.cfg.ResumeIn == tend.ResumeApp || m.cfg.ResumeIn == tend.ResumeOrigin && r.App
 }
 
 // doApp hands the session to its desktop app. A session running in a terminal is not opened a second time there.
@@ -1171,7 +1171,7 @@ func (m *Model) doApp() {
 }
 
 type appDoneMsg struct {
-	rec *fav.Rec
+	rec *tend.Rec
 	err error
 }
 
@@ -1271,7 +1271,7 @@ func (m *Model) doResume(noHerdr bool) {
 }
 
 // pickWorkspace asks which of several Herdr workspaces in the session's directory to resume in; the last item is this terminal.
-func (m *Model) pickWorkspace(r *fav.Rec, p capture.Plan, run func(*Model, *fav.Rec, capture.Plan, bool)) {
+func (m *Model) pickWorkspace(r *tend.Rec, p capture.Plan, run func(*Model, *tend.Rec, capture.Plan, bool)) {
 	items := make([]item, 0, len(p.WsChoices)+1)
 	for _, w := range p.WsChoices {
 		items = append(items, item{name: w.WorkspaceID, label: w.Label})
@@ -1294,7 +1294,7 @@ func (m *Model) pickWorkspace(r *fav.Rec, p capture.Plan, run func(*Model, *fav.
 
 // runPlan carries out a resume plan: focus the running tab, a new Herdr tab, or this terminal (the TUI quits and the caller
 // execs).
-func (m *Model) runPlan(r *fav.Rec, p capture.Plan, noHerdr bool) {
+func (m *Model) runPlan(r *tend.Rec, p capture.Plan, noHerdr bool) {
 	if _, ok := m.live[r.SessionID]; ok {
 		m.markSeen(r.SessionID, true) // switching to it is taking it in
 	}
@@ -1319,7 +1319,7 @@ func (m *Model) runPlan(r *fav.Rec, p capture.Plan, noHerdr bool) {
 	}
 }
 
-func (m *Model) resumeTargetLine(r *fav.Rec) string {
+func (m *Model) resumeTargetLine(r *tend.Rec) string {
 	if r.Host != "" {
 		return m.remoteTarget(r, "  "+render.GlyphArrow+"  ")
 	}

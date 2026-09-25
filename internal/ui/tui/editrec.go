@@ -6,15 +6,15 @@ import (
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/oxsean/fav/internal/fav"
 	"github.com/oxsean/fav/internal/i18n"
 	"github.com/oxsean/fav/internal/render"
+	"github.com/oxsean/fav/internal/tend"
 )
 
 // e edits title, tags and summary in place: Tab moves between fields; Enter saves in title / tags, inserts a newline in summary
 // (Ctrl+S saves); Esc discards. An unsaved session gets a record (not a favorite).
 
-func (m *Model) openEdit(r *fav.Rec) tea.Cmd {
+func (m *Model) openEdit(r *tend.Rec) tea.Cmd {
 	if r == nil {
 		return nil
 	}
@@ -73,7 +73,7 @@ func (m *Model) editStop() int {
 
 func (m *Model) editDirty() bool {
 	r := m.ov.rec
-	tags := fav.Normalize(strings.FieldsFunc(m.ov.edit2.Value(), func(r rune) bool { return r == ' ' || r == ',' || r == '，' }))
+	tags := tend.Normalize(strings.FieldsFunc(m.ov.edit2.Value(), func(r rune) bool { return r == ' ' || r == ',' || r == '，' }))
 	return strings.TrimSpace(m.ov.edit.Value()) != r.Title || strings.Join(tags, " ") != strings.Join(r.Tags, " ") || strings.TrimSpace(m.ov.area.Value()) != r.Summary
 }
 
@@ -131,7 +131,7 @@ func (m *Model) editKey(msg tea.KeyPressMsg) tea.Cmd {
 
 func (m *Model) saveEdit() {
 	title := strings.TrimSpace(m.ov.edit.Value())
-	tags := fav.Normalize(strings.FieldsFunc(m.ov.edit2.Value(), func(r rune) bool { return r == ' ' || r == ',' || r == '，' }))
+	tags := tend.Normalize(strings.FieldsFunc(m.ov.edit2.Value(), func(r rune) bool { return r == ' ' || r == ',' || r == '，' }))
 	summary := strings.TrimSpace(m.ov.area.Value())
 	r := m.ov.rec
 	if title == "" {
@@ -143,7 +143,7 @@ func (m *Model) saveEdit() {
 		return
 	}
 	m.closeOverlay()
-	if m.editRec(r, func(r *fav.Rec) { r.Title, r.Tags, r.Summary = title, tags, summary }) != nil {
+	if m.editRec(r, func(r *tend.Rec) { r.Title, r.Tags, r.Summary = title, tags, summary }) != nil {
 		m.flash(i18n.F("edit.saved", render.Truncate(title, 40)))
 	}
 }

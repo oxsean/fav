@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/oxsean/fav/internal/fav"
+	"github.com/oxsean/fav/internal/tend"
 	"github.com/oxsean/fav/internal/testkit"
 )
 
@@ -192,7 +192,7 @@ func TestAttachKeepsIdentity(t *testing.T) {
 	p := filepath.Join(claude, "projects", "x", "kkkk.jsonl")
 	write(t, p, claudeLines("第一句完整的提示语在这里", "第二句", "第三句"))
 	idx, _ := (&Index{files: map[string]*File{}}).Refresh()
-	store, err := fav.OpenAt(filepath.Join(t.TempDir(), "records.jsonl"))
+	store, err := tend.OpenAt(filepath.Join(t.TempDir(), "records.jsonl"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -207,11 +207,11 @@ func TestAttachKeepsIdentity(t *testing.T) {
 		t.Fatal("同一会话应沿用同一个对象并更新轮数")
 	}
 	now := time.Now()
-	rec := &fav.Rec{ID: fav.NewID(), Provider: "claude", SessionID: "kkkk", Title: "收藏了", FavoritedAt: &now}
+	rec := &tend.Rec{ID: tend.NewID(), Provider: "claude", SessionID: "kkkk", Title: "收藏了", FavoritedAt: &now}
 	if err := store.Put(rec); err != nil {
 		t.Fatal(err)
 	}
-	if got := idx.Attach(store, second); len(got) != 0 || rec.Turns != 4 || !fav.Parse("第四句").Match(rec) {
+	if got := idx.Attach(store, second); len(got) != 0 || rec.Turns != 4 || !tend.Parse("第四句").Match(rec) {
 		t.Fatalf("收藏后应挂上索引信息且能按提示语搜到：%d %+v", len(got), rec)
 	}
 }
@@ -238,11 +238,11 @@ func TestClaudeContinuationChainIsOneSession(t *testing.T) {
 		t.Fatalf("got id=%s aliases=%v turns=%d path=%s", s.SessionID, s.Aliases, s.Turns, s.Path)
 	}
 
-	st, err := fav.OpenAt(filepath.Join(t.TempDir(), "records.jsonl"))
+	st, err := tend.OpenAt(filepath.Join(t.TempDir(), "records.jsonl"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	r := &fav.Rec{ID: fav.NewID(), Provider: fav.ProviderClaude, SessionID: "old1", Title: "收藏在老 id 上", TranscriptPath: filepath.Join(dir, "old1.jsonl")}
+	r := &tend.Rec{ID: tend.NewID(), Provider: tend.ProviderClaude, SessionID: "old1", Title: "收藏在老 id 上", TranscriptPath: filepath.Join(dir, "old1.jsonl")}
 	if err := st.Put(r); err != nil {
 		t.Fatal(err)
 	}
@@ -264,12 +264,12 @@ func TestCodexArchivedSessionsStayFound(t *testing.T) {
 		t.Fatal(err)
 	}
 	idx, _ = idx.Refresh()
-	store, err := fav.OpenAt(filepath.Join(t.TempDir(), "records.jsonl"))
+	store, err := tend.OpenAt(filepath.Join(t.TempDir(), "records.jsonl"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	now := time.Now()
-	rec := &fav.Rec{ID: "r1", Provider: fav.ProviderCodex, SessionID: "ffff", Title: "修 CI", TranscriptPath: live, FavoritedAt: &now}
+	rec := &tend.Rec{ID: "r1", Provider: tend.ProviderCodex, SessionID: "ffff", Title: "修 CI", TranscriptPath: live, FavoritedAt: &now}
 	if err := store.Put(rec); err != nil {
 		t.Fatal(err)
 	}
@@ -285,7 +285,7 @@ func TestCodexArchivedSessionsStayFound(t *testing.T) {
 	if got.TranscriptPath != archived || !got.CodexArchived {
 		t.Fatalf("archiving in Codex moves the file: the record follows it and says so: %+v", got)
 	}
-	if files := SessionFiles(fav.ProviderCodex, "ffff"); len(files) != 1 || files[0] != archived {
+	if files := SessionFiles(tend.ProviderCodex, "ffff"); len(files) != 1 || files[0] != archived {
 		t.Fatalf("trash and move see the archived rollout: %v", files)
 	}
 }
@@ -325,7 +325,7 @@ func TestRecapBecomesTheSummary(t *testing.T) {
 	done := `{"timestamp":"2026-09-11T02:00:09Z","type":"event_msg","payload":{"type":"task_complete","last_agent_message":"CI 修好了：缓存键写错。\n\n细节：……"}}` + "\n"
 	write(t, rolloutPath(codex, 11, "xxxx"), codexLines("xxxx", "/Users/me/work/env", "codex-tui", fix, fix, fix)+done)
 	idx, _ := (&Index{files: map[string]*File{}}).Refresh()
-	got := map[string]*fav.Rec{}
+	got := map[string]*tend.Rec{}
 	for _, s := range idx.Sessions() {
 		got[s.SessionID] = s.Rec()
 	}
@@ -349,11 +349,11 @@ func TestCacheStaysSmallWhenOneBigFileKeepsChanging(t *testing.T) {
 		for j := range 3 {
 			q := fmt.Sprintf("%s-%d.jsonl", p, j)
 			if idx.files[q] == nil {
-				f := &File{Path: q, Provider: fav.ProviderClaude, SessionID: fmt.Sprint(j), Turns: 1}
+				f := &File{Path: q, Provider: tend.ProviderClaude, SessionID: fmt.Sprint(j), Turns: 1}
 				idx.files[q], idx.dirty = f, append(idx.dirty, f)
 			}
 		}
-		f := &File{Path: p, Provider: fav.ProviderClaude, SessionID: "live", Turns: i + 1, Prompts: prompts}
+		f := &File{Path: p, Provider: tend.ProviderClaude, SessionID: "live", Turns: i + 1, Prompts: prompts}
 		idx.files[p], idx.dirty = f, append(idx.dirty, f)
 		if err := idx.Save(); err != nil {
 			t.Fatal(err)
@@ -406,7 +406,7 @@ func TestAnUnreadableCacheLineIsRewrittenAway(t *testing.T) {
 func TestARunSessionIsListedThoughItsCLIMarksItOneShot(t *testing.T) {
 	claude, _ := setup(t)
 	home := t.TempDir()
-	t.Setenv("FAV_HOME", home)
+	t.Setenv("TEND_HOME", home)
 	write(t, filepath.Join(claude, "projects", "-Users-me", "rrrr.jsonl"),
 		`{"type":"user","entrypoint":"sdk-cli","sessionId":"rrrr","timestamp":"2026-09-10T01:00:00Z","cwd":"/Users/me","message":{"content":"修构建"}}`+"\n")
 	idx, err := OpenAt(filepath.Join(t.TempDir(), "sessions.jsonl"))

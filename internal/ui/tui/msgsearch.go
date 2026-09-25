@@ -12,11 +12,11 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/oxsean/fav/internal/fav"
 	"github.com/oxsean/fav/internal/fulltext"
 	"github.com/oxsean/fav/internal/i18n"
 	"github.com/oxsean/fav/internal/index"
 	"github.com/oxsean/fav/internal/paths"
+	"github.com/oxsean/fav/internal/tend"
 )
 
 // Message search: a search box value starting with > (or 》) searches the prose of the sessions the rest of the query picks.
@@ -33,14 +33,14 @@ type msgState struct {
 	seq     int
 	busy    bool
 	cancel  context.CancelFunc
-	cands   []*fav.Rec // sessions the scope picks, set by refresh
-	byTime  bool       // o: newest hit first instead of relevance
-	shownQ  string     // query of the results on screen
-	toTop   bool       // the next refresh puts the cursor on the first result
-	candKey string     // identity of cands: a change reruns the search
-	landQ   string     // keywords the right pane last landed for
+	cands   []*tend.Rec // sessions the scope picks, set by refresh
+	byTime  bool        // o: newest hit first instead of relevance
+	shownQ  string      // query of the results on screen
+	toTop   bool        // the next refresh puts the cursor on the first result
+	candKey string      // identity of cands: a change reruns the search
+	landQ   string      // keywords the right pane last landed for
 
-	seek    *fav.Rec // paging back through this record until hit number seekHit is loaded
+	seek    *tend.Rec // paging back through this record until hit number seekHit is loaded
 	seekHit int
 	seekOff int64 // ≥0: paging back until the message at this offset is loaded, instead of seekHit
 	hl      hitList
@@ -50,14 +50,14 @@ type msgState struct {
 	textAgain bool         // an index change arrived during the update: run once more
 	textProg  atomic.Int64 // done<<32 | total of the running update
 	textGen   int          // bumped when an update read something: the search reruns
-	textBusy  bool         // the last update found another fav building the store
+	textBusy  bool         // the last update found another tend building the store
 }
 
 type msgTickMsg int
 type msgResultMsg struct {
 	seq  int
 	key  string
-	recs []*fav.Rec
+	recs []*tend.Rec
 	res  []fulltext.Result
 }
 type textDoneMsg struct {
@@ -96,8 +96,8 @@ func (m *Model) findQuery() string {
 }
 
 // msgRows are the candidates that hold every keyword, in rank order.
-func (m *Model) msgRows(recs []*fav.Rec) []row {
-	in := make(map[string]*fav.Rec, len(recs))
+func (m *Model) msgRows(recs []*tend.Rec) []row {
+	in := make(map[string]*tend.Rec, len(recs))
 	for _, r := range recs {
 		in[r.Key()] = r
 	}
@@ -117,7 +117,7 @@ func (m *Model) msgRows(recs []*fav.Rec) []row {
 	return out
 }
 
-func (m *Model) msgHit(r *fav.Rec) (fulltext.Result, bool) {
+func (m *Model) msgHit(r *tend.Rec) (fulltext.Result, bool) {
 	x, ok := m.msg.res[r.Key()]
 	return x, ok
 }
@@ -154,7 +154,7 @@ func (m *Model) runMsgSearch(seq int) tea.Cmd {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	m.msg.cancel = cancel
-	recs := append([]*fav.Rec(nil), m.msg.cands...)
+	recs := append([]*tend.Rec(nil), m.msg.cands...)
 	cands := fulltext.Cands(recs, m.idx.PathsBySession())
 	kw, key, dir := m.msgKeywords(), m.msg.want, fulltext.Dir()
 	return func() tea.Msg {
@@ -188,7 +188,7 @@ func (m *Model) applyMsgResult(msg msgResultMsg) tea.Cmd {
 	return nil
 }
 
-func candKey(recs []*fav.Rec) string {
+func candKey(recs []*tend.Rec) string {
 	h := fnv.New64a()
 	for _, r := range recs {
 		h.Write([]byte(r.Key()))
@@ -205,7 +205,7 @@ func (m *Model) syncText(idx *index.Index) tea.Cmd {
 	}
 	m.msg.textRun, m.msg.textAgain = true, false
 	indexed, prog, outLines := idx.Paths(), &m.msg.textProg, m.cfg.ToolOutput
-	var pinned []*fav.Rec // ⚠️ copies: the update runs off the main loop, which keeps editing the records
+	var pinned []*tend.Rec // ⚠️ copies: the update runs off the main loop, which keeps editing the records
 	for _, r := range m.store.All() {
 		if r.PinnedPath != "" {
 			cp := *r
@@ -228,7 +228,7 @@ func textTick() tea.Cmd {
 func (m *Model) applyTextDone(msg textDoneMsg) tea.Cmd {
 	m.msg.textRun = false
 	m.msg.textProg.Store(0)
-	if errors.Is(msg.err, fulltext.ErrBusy) { // another fav is building the store: check back, rerun the search once it is done
+	if errors.Is(msg.err, fulltext.ErrBusy) { // another tend is building the store: check back, rerun the search once it is done
 		m.msg.textBusy = true
 		return tea.Tick(2*time.Second, func(time.Time) tea.Msg { return textRetryMsg{} })
 	}
@@ -376,7 +376,7 @@ func (m *Model) jumpMsg(i int) {
 }
 
 // resumeSeek continues a seek once a page of r arrives.
-func (m *Model) resumeSeek(r *fav.Rec) tea.Cmd {
+func (m *Model) resumeSeek(r *tend.Rec) tea.Cmd {
 	if m.msg.seek != r {
 		return nil
 	}

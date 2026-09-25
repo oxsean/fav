@@ -3,7 +3,7 @@ package tui
 import (
 	"os"
 
-	"github.com/oxsean/fav/internal/fav"
+	"github.com/oxsean/fav/internal/tend"
 )
 
 func (m *Model) exists(p string) bool {
@@ -19,7 +19,7 @@ func (m *Model) exists(p string) bool {
 }
 
 // broken: cwd gone (move it) or transcript gone (delete it); live sessions never count.
-func (m *Model) broken(r *fav.Rec) (dirGone, transcriptGone bool) {
+func (m *Model) broken(r *tend.Rec) (dirGone, transcriptGone bool) {
 	if r == nil || r.Host != "" || m.isLive(r.SessionID) {
 		return false, false
 	}

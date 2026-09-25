@@ -1,4 +1,4 @@
-// Command test-host runs on a test target from the synced tree (`mise run test-host`): vet, test, then the fav binary
+// Command test-host runs on a test target from the synced tree (`mise run test-host`): vet, test, then the tend binary
 // against a fresh fixture dataset. The last line is `RESULT vet=… test=… smoke=…`, which scripts/test-hosts.sh collects.
 package main
 
@@ -15,14 +15,14 @@ import (
 )
 
 func main() {
-	root := os.Getenv("FAV_TEST_ROOT")
+	root := os.Getenv("TEND_TEST_ROOT")
 	if root == "" {
 		cache, err := os.UserCacheDir()
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
-		root = filepath.Join(cache, "fav-test")
+		root = filepath.Join(cache, "tend-test")
 	}
 	fmt.Printf("== %s/%s\n", runtime.GOOS, runtime.GOARCH)
 	run(nil, "go", "version")
@@ -58,11 +58,11 @@ func smoke(dir string) error {
 	if err != nil {
 		return err
 	}
-	bin := filepath.Join(dir, "bin", "fav")
+	bin := filepath.Join(dir, "bin", "tend")
 	if runtime.GOOS == "windows" {
 		bin += ".exe"
 	}
-	if err := run(nil, "go", "build", "-o", bin, "./cmd/fav"); err != nil {
+	if err := run(nil, "go", "build", "-o", bin, "./cmd/tend"); err != nil {
 		return err
 	}
 	if err := d.WriteLaunchers(bin); err != nil {
@@ -105,13 +105,13 @@ func taskSmoke(d *fixture.Dataset, env []string, bin string) error {
 	return run(env, bin, "run", "start", "--runner", "background", "--wait", tasks[0].ID)
 }
 
-// hostsSmoke: this machine as both ends of the multi-host path, fav reaching its own launcher as a process.
+// hostsSmoke: this machine as both ends of the multi-host path, tend reaching its own launcher as a process.
 func hostsSmoke(d *fixture.Dataset, env []string, bin string) error {
-	launcher := filepath.Join(d.Root, "fav.sh")
+	launcher := filepath.Join(d.Root, "tend.sh")
 	if runtime.GOOS == "windows" {
-		launcher = filepath.Join(d.Root, "fav.cmd")
+		launcher = filepath.Join(d.Root, "tend.cmd")
 	}
-	cfg, _ := json.Marshal(map[string]any{"lang": "zh", "hosts": []map[string]any{{"name": "self", "fav": []string{launcher}}}})
+	cfg, _ := json.Marshal(map[string]any{"lang": "zh", "hosts": []map[string]any{{"name": "self", "tend": []string{launcher}}}})
 	if err := os.WriteFile(filepath.Join(d.Home, "config.json"), cfg, 0o644); err != nil {
 		return err
 	}

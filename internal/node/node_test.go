@@ -89,7 +89,7 @@ func TestARunGoesToItsEndAndLeavesItsSession(t *testing.T) {
 	if err != nil || !strings.Contains(tail.Text, "fake step 1 of 2") || !tail.Done || tail.File == "" {
 		t.Fatalf("output: %+v %v", tail, err)
 	}
-	t.Setenv("FAV_HOME", filepath.Dir(n.Dir))
+	t.Setenv("TEND_HOME", filepath.Dir(n.Dir))
 	if got := capture.RunSessions()[end.Session]; got.Run != s.Run || got.Open || got.Provider != "claude" {
 		t.Fatalf("run sessions: %+v", got)
 	}
@@ -359,7 +359,7 @@ func TestTailPagesBackwardFromALineStart(t *testing.T) {
 
 func TestASessionOutlivesItsRunDirectory(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("FAV_HOME", home)
+	t.Setenv("TEND_HOME", home)
 	n := New(home)
 	n.Launch = noLaunch
 	s := start(t, n, StartParams{Task: "t_1", Profile: fake(), Title: "fix it"})

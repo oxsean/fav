@@ -1,5 +1,5 @@
 version: 2
-project_name: fav
+project_name: tend
 
 before:
   hooks:
@@ -7,7 +7,7 @@ before:
 
 builds:
   - id: tend
-    main: ./cmd/fav
+    main: ./cmd/tend
     binary: tend
     env: [CGO_ENABLED=0]
     goos: [darwin, linux, windows]
@@ -17,17 +17,9 @@ builds:
         goarch: arm64
     flags: [-trimpath]
     ldflags: ["-s -w -X main.version={{.Version}}"]
-  - id: fav-windows  # Windows has no symlink to install: fav.exe is the same program under its old name
-    main: ./cmd/fav
-    binary: fav
-    env: [CGO_ENABLED=0]
-    goos: [windows]
-    goarch: [amd64]
-    flags: [-trimpath]
-    ldflags: ["-s -w -X main.version={{.Version}}"]
 
 archives:
-  - ids: [tend, fav-windows]
+  - ids: [tend]
     formats: [tar.gz]
     name_template: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}"  # no version in the name so releases/latest/download/<name> works
     format_overrides:

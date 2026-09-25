@@ -8,10 +8,10 @@ import (
 	"unicode/utf8"
 
 	"github.com/oxsean/fav/internal/capture"
-	"github.com/oxsean/fav/internal/fav"
+	"github.com/oxsean/fav/internal/tend"
 )
 
-type ownFiles struct{ r *fav.Rec }
+type ownFiles struct{ r *tend.Rec }
 
 func (o ownFiles) Pulse() (capture.Pulse, bool) { return capture.ReadPulse(o.r.TranscriptPath) }
 func (o ownFiles) Checks() []capture.Check      { return capture.Checks(o.r) }
@@ -34,9 +34,9 @@ func TestCardRightColumnAlignsAcrossScripts(t *testing.T) {
 		"这是一个非常非常非常非常非常非常长的中文标题需要被截断",
 	}
 	for _, title := range titles {
-		r := &fav.Rec{
-			Title: title, Provider: fav.ProviderClaude, Project: "notes-api",
-			Status: fav.StatusDone, FavoritedAt: new(now.Add(-90 * time.Minute)),
+		r := &tend.Rec{
+			Title: title, Provider: tend.ProviderClaude, Project: "notes-api",
+			Status: tend.StatusDone, FavoritedAt: new(now.Add(-90 * time.Minute)),
 		}
 		got := Card(r, width, now)[0]
 		if w := Width(got); w != width {
@@ -89,10 +89,10 @@ func TestTruncateAndPad(t *testing.T) {
 }
 
 func TestLineIsSingleLineWithHiddenID(t *testing.T) {
-	r := &fav.Rec{
-		ID: "abc123", Title: "notes-api 排障", Provider: fav.ProviderClaude,
+	r := &tend.Rec{
+		ID: "abc123", Title: "notes-api 排障", Provider: tend.ProviderClaude,
 		Project: "notes-api", Tags: []string{"notes-api", "debug"},
-		Status: fav.StatusDone, FavoritedAt: new(time.Now()),
+		Status: tend.StatusDone, FavoritedAt: new(time.Now()),
 	}
 	got := Line(r, time.Now())
 	if strings.Contains(got, "\n") {
@@ -138,9 +138,9 @@ func TestWhen(t *testing.T) {
 }
 
 func TestPreviewReportsDeadTranscript(t *testing.T) {
-	r := &fav.Rec{
-		Title: "排障", Provider: fav.ProviderClaude, SessionID: "x",
-		Status: fav.StatusDone, FavoritedAt: new(time.Now()),
+	r := &tend.Rec{
+		Title: "排障", Provider: tend.ProviderClaude, SessionID: "x",
+		Status: tend.StatusDone, FavoritedAt: new(time.Now()),
 		TranscriptPath: "/nope/definitely-missing.jsonl",
 	}
 	if !strings.Contains(Preview(r, ownFiles{r}, 60, time.Now()), "会话记录文件已失效") {
@@ -150,12 +150,12 @@ func TestPreviewReportsDeadTranscript(t *testing.T) {
 
 func TestRemoteRowCarriesItsHost(t *testing.T) {
 	now := time.Now()
-	r := &fav.Rec{ID: "abc", Provider: fav.ProviderClaude, SessionID: "0123-sid", Title: "远端", Project: "notes-api",
+	r := &tend.Rec{ID: "abc", Provider: tend.ProviderClaude, SessionID: "0123-sid", Title: "远端", Project: "notes-api",
 		Host: "mba", TranscriptPath: "/nope/definitely-missing.jsonl"}
 	if k := LineKey(r); k != "mba:0123-sid" {
 		t.Errorf("a remote row's key is host:sid, even when favorited there: %q", k)
 	}
-	if k := LineKey(&fav.Rec{ID: "abc", SessionID: "0123-sid"}); k != "abc" {
+	if k := LineKey(&tend.Rec{ID: "abc", SessionID: "0123-sid"}); k != "abc" {
 		t.Errorf("a local favorite keeps its record id: %q", k)
 	}
 	line := Line(r, now)
@@ -194,7 +194,7 @@ func TestWrapFillsLineWithMixedText(t *testing.T) {
 }
 
 func TestWrapKeepsPunctuationOffLineStarts(t *testing.T) {
-	text := "搜所有会话的消息：按 >（》也行）打开搜索框并在前面填好 >；关键词在所有消息和命令里找，其余的筛选词（project: #标签 last: status:）限定会话范围；命令行：fav mv <旧> <新>，fav fix 会找已不存在的目录去了哪"
+	text := "搜所有会话的消息：按 >（》也行）打开搜索框并在前面填好 >；关键词在所有消息和命令里找，其余的筛选词（project: #标签 last: status:）限定会话范围；命令行：tend mv <旧> <新>，tend fix 会找已不存在的目录去了哪"
 	for w := 12; w <= 60; w++ { // narrower, a mark plus its word may not fit: the width wins
 		for _, l := range Wrap(text, w) {
 			if Width(l) > w {
@@ -216,7 +216,7 @@ func TestWrapKeepsPunctuationOffLineStarts(t *testing.T) {
 }
 
 func TestFileList(t *testing.T) {
-	fs := []fav.FileCount{{Path: "/w/app/internal/a.go", N: 3}, {Path: "/other/b.md", N: 1}}
+	fs := []tend.FileCount{{Path: "/w/app/internal/a.go", N: 3}, {Path: "/other/b.md", N: 1}}
 	if got := FileList(fs, "/w/app"); got != filepath.FromSlash("internal/a.go")+" ×3  ·  /other/b.md" {
 		t.Errorf("relative under base, count after: %q", got)
 	}

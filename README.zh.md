@@ -2,7 +2,7 @@
 
 [English](README.md)
 
-**管好你所有的 Claude Code / Codex 会话：收藏、检索、一键恢复；再把任务派给任意一台机器上的 agent 去跑。** 命令行叫 `tend`（`fav` 是同一个程序）。 本机所有 AI 编码会话一个列表，值得留的一句 `/fav` 收进来，
+**管好你所有的 Claude Code / Codex 会话：收藏、检索、一键恢复；再把任务派给任意一台机器上的 agent 去跑。** 本机所有 AI 编码会话一个列表，值得留的一句 `/tend` 收进来，
 一周后凭「做过什么」两秒找回，在正确的目录和 Herdr workspace 里接着聊。
 任务写一次，派给本机或另一台机器上的 agent，看它的输出，跑完后接手它的会话。
 
@@ -49,7 +49,7 @@
 
 | 之前 | 用 tend 之后 |
 |---|---|
-| 自动标题是「继续」「ok」「帮我看下」，不知道哪条是哪条 | `/fav` 时 AI 还记得整段对话，标题、摘要、标签一次写好，一周后仍认得出 |
+| 自动标题是「继续」「ok」「帮我看下」，不知道哪条是哪条 | `/tend` 时 AI 还记得整段对话，标题、摘要、标签一次写好，一周后仍认得出 |
 | 只记得「让它排查过 OAuth」，不记得日期、项目、用的哪个工具 | 关键词直接搜索引里的提示语和摘要，`#标签` `project:` `last:7d` 层层收窄 |
 | Claude 在 `~/.claude/projects`、Codex 在 `~/.codex/sessions`，两边各自的历史列表都只看得到本目录 | 全机所有会话一张表，按时间或按项目看，不分工具 |
 | 找到了还要 `cd` 到对的目录、想起是 `claude --resume` 还是 `codex resume`、再切到 Herdr 那个 workspace | `Enter`：目录、命令、workspace 全替你选好；已经在跑的直接切过去 |
@@ -61,7 +61,7 @@ tend 不是新的聊天客户端，不替代 Claude / Codex，也不上传任何
 
 ## 能做什么
 
-- **收藏**：会话里 `/fav`，AI 按对话语言写标题 / 摘要 / 标签，`tend` 自己采集 provider、session id、目录、git 分支、Herdr workspace。同一会话再 `/fav` 是更新。
+- **收藏**：会话里 `/tend`，AI 按对话语言写标题 / 摘要 / 标签，`tend` 自己采集 provider、session id、目录、git 分支、Herdr workspace。同一会话再 `/tend` 是更新。
 - **全部会话**：不用收藏也都在列表里——Claude 和 Codex 的全部历史增量索引，只读文件头尾和新增部分，几百 MB 的会话也不整读。
 - **搜**：同一套查询语法贯穿 TUI、fzf、命令行：关键词、`#标签`、`project:`、`provider:`、`status:`、`last:7d`、`turns:`、`file:`（AI 改过路径里含这段的文件的会话）。
 - **三个搜索键**：`/` 搜会话（标题、摘要、项目、标签），`>` 搜所有会话的消息，`\`（或 `Ctrl+S`）搜当前会话的消息；焦点在哪含义都一样，中文输入法把 `/` 打成 `、` 也照样是搜会话。
@@ -82,44 +82,42 @@ tend 不是新的聊天客户端，不替代 Claude / Codex，也不上传任何
 
 ```bash
 # macOS / Linux：从 Releases 下载最新版到 ~/.local/bin
-curl -fsSL https://github.com/oxsean/fav/releases/latest/download/fav_$(uname -s | tr A-Z a-z)_$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/').tar.gz | tar xz -C ~/.local/bin tend && ln -sf tend ~/.local/bin/fav
-# 或者有 Go（装出来的二进制叫 fav，再把 tend 链接过去）：
-go install github.com/oxsean/fav/cmd/fav@latest
+curl -fsSL https://github.com/oxsean/fav/releases/latest/download/tend_$(uname -s | tr A-Z a-z)_$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/').tar.gz | tar xz -C ~/.local/bin tend
+# 或者有 Go：
+go install github.com/oxsean/fav/cmd/tend@latest
 
-tend migrate-home                            # 从 fav 升级时跑一次：备份 ~/.agent/fav 并迁到 ~/.agent/tend
-
-tend install-skill                            # /fav Skill 装进 ~/.claude/skills 和 ~/.codex/skills（设了 $CLAUDE_CONFIG_DIR / $CODEX_HOME 就装到那里）
+tend install-skill                            # /tend Skill 装进 ~/.claude/skills 和 ~/.codex/skills（设了 $CLAUDE_CONFIG_DIR / $CODEX_HOME 就装到那里）
 tend install-hook                             # 可选：Claude Code 问你问题时告诉 tend，没有 Herdr 也能在 Agents 页标出权限确认（tend uninstall-hook 删掉）
 tend                                          # 第一次启动后台建索引，几秒后「会话」页就有你所有历史
 ```
 
-Windows：到 [Releases](https://github.com/oxsean/fav/releases/latest) 下 `fav_windows_amd64.zip`，解压到 PATH 里的目录。
+Windows：到 [Releases](https://github.com/oxsean/fav/releases/latest) 下 `tend_windows_amd64.zip`，解压到 PATH 里的目录。
 
 然后：
 
-1. 在任何 Claude Code / Codex 会话里做完一件事，输入 `/fav`。
+1. 在任何 Claude Code / Codex 会话里做完一件事，输入 `/tend`。
 2. 下周想接着做：`tend`，打几个词，`Enter`。
 
 想在 shell 里一键弹出：`.zshrc` 加一行 `eval "$(tend shell-init zsh)"`（bash 用 `shell-init bash`），之后按 `Ctrl+G` 弹出 fzf 版，退出回到提示符。
 换键 `--key alt-f`（或直接给 shell 自己的记法），`--ui tui` 改弹 TUI。
 
 可选依赖：`fzf`（fzf 模式）、Herdr（恢复到 workspace、看谁在跑、切 tab）、
-Nerd Font（设置里把图标从 ASCII 切成 Nerd Font，或 `FAV_ICONS=nerd`）。卸载 Skill：`tend uninstall-skill`。
+Nerd Font（设置里把图标从 ASCII 切成 Nerd Font，或 `TEND_ICONS=nerd`）。卸载 Skill：`tend uninstall-skill`。
 
 ## 用法
 
-### 收藏：`/fav`
+### 收藏：`/tend`
 
-在会话里输入 `/fav`（或说「收藏这个会话」）。Skill 回顾整段对话，写标题（12–40 字，说清对象和做了什么）、
+在会话里输入 `/tend`（或说「收藏这个会话」）。Skill 回顾整段对话，写标题（12–40 字，说清对象和做了什么）、
 一段摘要（结论和下一步，不是流水账）、2–5 个标签，交给 `tend add` 入库。
 provider、session id、目录、git、Herdr 上下文由 `tend` 自己采集，AI 不猜。
 
-没 `/fav` 过的会话也在「会话」页，随时按 `f` 收进来，标题用第一句提示语；恢复进去再 `/fav` 补摘要。在那之前，有 Claude 自动回顾（目标 · 已做 · 下一步）或 Codex 最后一轮总结的，摘要就先用它。
+没 `/tend` 过的会话也在「会话」页，随时按 `f` 收进来，标题用第一句提示语；恢复进去再 `/tend` 补摘要。在那之前，有 Claude 自动回顾（目标 · 已做 · 下一步）或 Codex 最后一轮总结的，摘要就先用它。
 
 ### 找回来、恢复：`tend`（TUI）
 
 ```
-tend            # 默认 TUI；FAV_UI=fzf 改默认
+tend            # 默认 TUI；TEND_UI=fzf 改默认
 tend tui --no-mouse
 ```
 
@@ -127,7 +125,7 @@ tend tui --no-mouse
 
 | 页 | 看什么 |
 |---|---|
-| 收藏 | `/fav` 过的，按最后活跃排（`o` 切排序） |
+| 收藏 | `/tend` 过的，按最后活跃排（`o` 切排序） |
 | 会话 | 本机全部会话（短于 3 轮的默认不列，`turns:1` 全列） |
 | 项目 | 按目录分组（git worktree 里的会话归到主仓库，卡片标 `worktree <分支>`；worktree 删了，`tend fix` 把会话移回主仓库）：`→` 展开、`←` 折叠、再 `→` 到右栏看项目信息（目录 / 会话数 / 来源 / 最近会话）；在哪个目录里启动 `tend`，那个项目的分组自动展开并滚到顶上 |
 | Agents | 现在谁在跑：等你 / 工作中 / 空闲多久，本轮跑了多久、上下文用了多少、AI 最后说了什么，每 3 秒刷；等你回答、跑完了还没看的会提醒（标签页 `Agents 5 !2`），`.` 标已处理、`H` 暂缓 1 小时 |
@@ -292,7 +290,7 @@ tend resume <id> --no-herdr              # 当前终端恢复
 tend resume <id> --workspace api         # 目录下有多个 Herdr workspace 时指定一个
 tend resume <id> --app                   # 在桌面 App 里打开（Claude，Codex 用 ChatGPT）；--terminal 不管设置走终端
 
-tend status <id> todo|doing|done  ·  tend done <id>  ·  tend archive|unarchive <id>  ·  tend fav|unfav <id>
+tend status <id> todo|doing|done  ·  tend done <id>  ·  tend archive|unarchive <id>  ·  tend favorite|unfavorite <id>
 tend edit <id>                           # $EDITOR 里改标题 / 标签 / 摘要
 tend pin <id>                            # 硬链保住会话记录文件（Claude 默认 30 天清 transcript）
 ```
@@ -323,17 +321,17 @@ tend doctor [--compact]                  # 体检：数据文件、失效会话�
 别的机器上的会话出现在同一个列表里，经 ssh 从那台机器上装的 tend 读取。每台机器要先在 `~/.ssh/config` 里有一个用密钥登录（不弹密码）的别名，然后：
 
 ```bash
-tend hosts add mba mba --fav /Users/me/.local/bin/fav                          # 名字、ssh 别名、那边 tend 的绝对路径
-tend hosts add win win-pc --fav 'C:\Users\me\.local\bin\fav.exe'
-tend hosts add wsl win-pc --wsl Debian --fav /home/me/.local/bin/fav            # 那台 Windows 里的一个 WSL 发行版
-tend hosts add box nas --docker dev --fav /usr/local/bin/fav                    # 那边的一个容器（--docker-cmd podman 或完整路径）
+tend hosts add mba mba --tend /Users/me/.local/bin/tend                          # 名字、ssh 别名、那边 tend 的绝对路径
+tend hosts add win win-pc --tend 'C:\Users\me\.local\bin\tend.exe'
+tend hosts add wsl win-pc --wsl Debian --tend /home/me/.local/bin/tend            # 那台 Windows 里的一个 WSL 发行版
+tend hosts add box nas --docker dev --tend /usr/local/bin/tend                    # 那边的一个容器（--docker-cmd podman 或完整路径）
 tend hosts install mba [--dry-run]       # 用当前源码按那边的系统编译 tend 并装过去（WSL、容器里也行），最后核对版本
 tend hosts                               # 机器列表、各自应答的 tend 版本、列表上次什么时候取的
 tend hosts check [名字…]                 # 连接、版本、系统、claude/codex 是否在 PATH、中文往返、列表和读消息耗时
 tend hosts rm <名字…> · tend hosts clear [名字…]   # 删掉机器 / 清掉缓存的列表
 ```
 
-`add` 会把机器写进 `~/.agent/tend/config.json` 的 `hosts` 并检查一遍（`--no-check` 跳过）；机器上还没有 tend 时，第一次 `install` 要带 `--os` 和 `--arch`。`--fav` 要写绝对路径：ssh 在那边起的 shell 常常不把 `~/.local/bin` 放进 PATH。远端 shell 按 `--fav` 猜（Windows 路径或 `wsl` 用 cmd），也可用 `--shell posix|cmd|powershell` 指定。
+`add` 会把机器写进 `~/.agent/tend/config.json` 的 `hosts` 并检查一遍（`--no-check` 跳过）；机器上还没有 tend 时，第一次 `install` 要带 `--os` 和 `--arch`。`--tend` 要写绝对路径：ssh 在那边起的 shell 常常不把 `~/.local/bin` 放进 PATH。远端 shell 按 `--tend` 猜（Windows 路径或 `wsl` 用 cmd），也可用 `--shell posix|cmd|powershell` 指定。
 
 ```bash
 tend sessions host:all                   # 所有机器；host:mba 只看它；不写 host: 只看本机
@@ -449,7 +447,7 @@ tend 把这条链合成一个会话（轮数相加、用最新的 id 恢复、�
 | `~/.agent/tend/server/tokens.json` | 模式二：token 的名字、角色和哈希 |
 | `~/.agent/tend/hosts/` | 从每台其它机器最近取到的列表（只有列表字段：标题、摘要、标签、路径；没有消息）、ssh 连接复用的 socket |
 
-环境变量：`TEND_HOME`（或 `FAV_HOME`）改数据目录，`FAV_UI=fzf|tui` 改默认前端，`FAV_ICONS=nerd|ascii` 选图标，`FAV_TRACE=1` 把按键、滚轮和后台事件的时间线记到 `~/.agent/tend/trace.log`（报告界面卡顿时用）。
+环境变量：`TEND_HOME`（或 `TEND_HOME`）改数据目录，`TEND_UI=fzf|tui` 改默认前端，`TEND_ICONS=nerd|ascii` 选图标，`TEND_TRACE=1` 把按键、滚轮和后台事件的时间线记到 `~/.agent/tend/trace.log`（报告界面卡顿时用）。
 界面语言默认跟系统（`LANG` 等以 zh 开头是中文，否则英文），设置里可固定。
 
 聊天正文只在本机 `text/` 里存一份供搜索，不上传任何东西；只在你点名移动目录时改会话文件里的 cwd，改之前原件先进回收站。`tend pin` 只在本机做硬链。
@@ -459,6 +457,6 @@ tend 把这条链合成一个会话（轮数相加、用最新的 id 恢复、�
 ```bash
 go build ./... && go vet ./... && go test ./...
 HERDR_LIVE=1 go test ./internal/herdr/   # 实跑 Herdr 建 tab → 执行 → 清理
-go run ./tools/fixture -o ~/fav-demo     # 造一台合成机器（Claude + Codex 会话、收藏）；~/fav-demo/fav.sh tui 在它上面跑 tend
+go run ./tools/fixture -o ~/tend-demo     # 造一台合成机器（Claude + Codex 会话、收藏）；~/tend-demo/tend.sh tui 在它上面跑 tend
 scripts/test-hosts.sh ssh:host wsl:host:Debian win:host docker:host:ctr   # 同步工作区，在各目标机本地编译并测试
 ```

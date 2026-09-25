@@ -1,4 +1,4 @@
-// Package docscheck fails when the agent instructions, the READMEs or the /fav skill name a file, symbol, environment
+// Package docscheck fails when the agent instructions, the READMEs or the /tend skill name a file, symbol, environment
 // variable, test or subcommand the code no longer has.
 package docscheck
 
@@ -15,10 +15,10 @@ import (
 	"testing"
 )
 
-var docs = []string{"AGENTS.md", "README.md", "README.zh.md", "skills/fav/SKILL.md"}
+var docs = []string{"AGENTS.md", "README.md", "README.zh.md", "skills/tend/SKILL.md"}
 
 // notCode: capitalised words and tokens in backticks that are not Go names.
-var notCode = []string{"Width", "Height", "TestName", "RESULT", "fav.sh", "fav.cmd", "Enter", "Esc", "Tab", "Space", "Backspace", "Shift", "Ctrl", "Alt", "PATH", "HOME", "LANG",
+var notCode = []string{"Width", "Height", "TestName", "RESULT", "tend.sh", "tend.cmd", "Enter", "Esc", "Tab", "Space", "Backspace", "Shift", "Ctrl", "Alt", "PATH", "HOME", "LANG",
 	"LC_ALL", "LC_MESSAGES", "NO_COLOR", "HERDR_ENV", "FZF_PROMPT", "FZF_PREVIEW_COLUMNS", "CLAUDE_CODE_SESSION_ID",
 	"WSL_DISTRO_NAME", "LOCALAPPDATA", "USERPROFILE", "TMPDIR", "GOOS", "GOARCH", "EDITOR", "Nerd", "Rebased", "Herdr",
 	"Claude", "Codex", "ChatGPT", "BM25", "JSON", "JSONL", "UUID", "TODO", "CJK", "IME", "ASCII", "OSC", "ControlMaster",
@@ -34,7 +34,7 @@ var (
 	ident    = regexp.MustCompile(`^(?:[a-z][a-z0-9]*\.)?([A-Za-z_][A-Za-z0-9_]*)(?:\.([A-Za-z_][A-Za-z0-9_]*))?(?:\(\))?$`)
 	envVar   = regexp.MustCompile(`^[A-Z][A-Z0-9]*_[A-Z0-9_]+$`)
 	testRun  = regexp.MustCompile(`-run '?\^?(Test\w+)`)
-	favCmd   = regexp.MustCompile(`^(?:fav|tend) ([a-z][a-z-]+)(?: \[?([a-z][a-z-]+))?`)
+	tendCmd  = regexp.MustCompile(`^tend ([a-z][a-z-]+)(?: \[?([a-z][a-z-]+))?`)
 	caseLine = regexp.MustCompile(`case ((?:"[^"]*"(?:, )?)+):`)
 	quoted   = regexp.MustCompile(`"([^"]*)"`)
 )
@@ -114,7 +114,7 @@ func files(t *testing.T, root string) map[string]bool {
 	return out
 }
 
-// subcommands are the case labels of the fav dispatchers.
+// subcommands are the case labels of the tend dispatchers.
 func subcommands(t *testing.T, root string, file string) map[string]bool {
 	b, err := os.ReadFile(filepath.Join(root, file))
 	if err != nil {
@@ -133,8 +133,8 @@ func TestDocsNameWhatExists(t *testing.T) {
 	root := root(t)
 	decl, src := names(t, root)
 	paths := files(t, root)
-	top := subcommands(t, root, "cmd/fav/main.go")
-	hosts := subcommands(t, root, "cmd/fav/hosts.go")
+	top := subcommands(t, root, "cmd/tend/main.go")
+	hosts := subcommands(t, root, "cmd/tend/hosts.go")
 	for _, doc := range docs {
 		b, err := os.ReadFile(filepath.Join(root, doc))
 		if err != nil {
@@ -146,7 +146,7 @@ func TestDocsNameWhatExists(t *testing.T) {
 			if slices.Contains(notCode, tok) || external.MatchString(tok) || keyName.MatchString(tok) {
 				continue
 			}
-			checkFav(t, doc, tok, top, hosts)
+			checkTend(t, doc, tok, top, hosts)
 			switch {
 			case pathLike.MatchString(tok):
 				if !paths[tok] {
@@ -179,7 +179,7 @@ func TestDocsNameWhatExists(t *testing.T) {
 				continue
 			}
 			if fenced {
-				checkFav(t, doc, strings.TrimSpace(line), top, hosts)
+				checkTend(t, doc, strings.TrimSpace(line), top, hosts)
 				for _, f := range goFile.FindAllString(line, -1) {
 					if !paths[f] {
 						t.Errorf("%s names %q: no such file", doc, f)
@@ -190,8 +190,8 @@ func TestDocsNameWhatExists(t *testing.T) {
 	}
 }
 
-func checkFav(t *testing.T, doc, snippet string, top, hosts map[string]bool) {
-	m := favCmd.FindStringSubmatch(snippet)
+func checkTend(t *testing.T, doc, snippet string, top, hosts map[string]bool) {
+	m := tendCmd.FindStringSubmatch(snippet)
 	if m == nil {
 		return
 	}

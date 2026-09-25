@@ -6,9 +6,9 @@ import (
 	"github.com/mattn/go-runewidth"
 
 	"github.com/oxsean/fav/internal/agent"
-	"github.com/oxsean/fav/internal/fav"
 	"github.com/oxsean/fav/internal/herdr"
 	"github.com/oxsean/fav/internal/i18n"
+	"github.com/oxsean/fav/internal/tend"
 )
 
 type Plan struct {
@@ -22,7 +22,7 @@ type Plan struct {
 
 // PlanResume: running in a Herdr tab → focus it; Claude background session → attach;
 // otherwise --resume, inside Herdr when it is up and a workspace is found, else in this terminal.
-func PlanResume(r *fav.Rec, live map[string]Live, noHerdr bool) (Plan, error) {
+func PlanResume(r *tend.Rec, live map[string]Live, noHerdr bool) (Plan, error) {
 	l, running := live[r.SessionID]
 	p := Plan{Live: l, Checks: Checks(r)}
 	if p.Live.TabID != "" && !noHerdr {
@@ -45,7 +45,7 @@ func PlanResume(r *fav.Rec, live map[string]Live, noHerdr bool) (Plan, error) {
 }
 
 // PlanFork: a new session carrying r's history, placed where a resume would go.
-func PlanFork(r *fav.Rec, noHerdr bool) (Plan, error) {
+func PlanFork(r *tend.Rec, noHerdr bool) (Plan, error) {
 	p := Plan{Checks: Checks(r)}
 	var err error
 	if p.Spec, err = agent.ForkOf(r); err != nil {
@@ -56,7 +56,7 @@ func PlanFork(r *fav.Rec, noHerdr bool) (Plan, error) {
 }
 
 // PlanStart: a new provider session in r's directory whose first message is prompt.
-func PlanStart(r *fav.Rec, provider, prompt string, noHerdr bool) (Plan, error) {
+func PlanStart(r *tend.Rec, provider, prompt string, noHerdr bool) (Plan, error) {
 	p := Plan{Checks: startChecks(provider, r.Cwd)}
 	var err error
 	if p.Spec, err = agent.StartOf(provider, r.Cwd, prompt); err != nil {
@@ -66,7 +66,7 @@ func PlanStart(r *fav.Rec, provider, prompt string, noHerdr bool) (Plan, error) 
 	return p, nil
 }
 
-func (p *Plan) findWorkspace(r *fav.Rec, noHerdr bool) {
+func (p *Plan) findWorkspace(r *tend.Rec, noHerdr bool) {
 	if noHerdr || !herdr.Reachable() {
 		return
 	}
@@ -78,7 +78,7 @@ func (p *Plan) findWorkspace(r *fav.Rec, noHerdr bool) {
 	}
 }
 
-func (p Plan) Target(r *fav.Rec, arrow string) string {
+func (p Plan) Target(r *tend.Rec, arrow string) string {
 	dir := r.Cwd
 	if dir == "" {
 		dir = i18n.T("resume.where.cwd")
@@ -105,14 +105,14 @@ func (p Plan) Blocking() *Check {
 	return nil
 }
 
-func TabLabel(r *fav.Rec) string {
+func TabLabel(r *tend.Rec) string {
 	if r.Label != "" {
 		return runewidth.Truncate(r.Label, 24, "…")
 	}
 	return runewidth.Truncate(r.Title, 24, "…")
 }
 
-func (p Plan) RunInHerdr(r *fav.Rec) (msg string, warn error, err error) {
+func (p Plan) RunInHerdr(r *tend.Rec) (msg string, warn error, err error) {
 	if p.Live.TabID != "" {
 		if err := herdr.FocusTab(p.Live.TabID); err != nil {
 			return "", nil, err
@@ -136,7 +136,7 @@ func (p Plan) RunInHerdr(r *fav.Rec) (msg string, warn error, err error) {
 	return i18n.F("resume.already_in_herdr", p.Ws.Label, label), warn, nil
 }
 
-func MarkResumed(s *fav.Store, r *fav.Rec) error {
+func MarkResumed(s *tend.Store, r *tend.Rec) error {
 	if r.ID == "" {
 		return nil
 	}

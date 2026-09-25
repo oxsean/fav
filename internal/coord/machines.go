@@ -11,13 +11,13 @@ import (
 	"sync"
 	"time"
 
-	"github.com/oxsean/fav/internal/fav"
 	"github.com/oxsean/fav/internal/journal"
 	"github.com/oxsean/fav/internal/node"
 	"github.com/oxsean/fav/internal/pathmap"
 	"github.com/oxsean/fav/internal/paths"
 	"github.com/oxsean/fav/internal/remote"
 	"github.com/oxsean/fav/internal/task"
+	"github.com/oxsean/fav/internal/tend"
 	"github.com/oxsean/fav/internal/wire"
 )
 
@@ -41,7 +41,7 @@ const (
 
 type machine struct {
 	name     string
-	host     *fav.Host // nil: this machine, or a node that dialed in
+	host     *tend.Host // nil: this machine, or a node that dialed in
 	conn     Conn
 	hello    remote.Hello
 	err      error
@@ -192,7 +192,7 @@ func (c *Coord) lost(m *machine, conn Conn, err error) {
 func transport(err error) bool {
 	switch wire.Code(err) {
 	case "", wire.CodeClosed, wire.CodeTimeout, wire.CodeCanceled, wire.CodeBusy, wire.CodeOffline, wire.CodeAuth,
-		wire.CodeHostKey, wire.CodeNoFav, wire.CodeProto:
+		wire.CodeHostKey, wire.CodeNoTend, wire.CodeProto:
 		return true
 	}
 	return errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled)

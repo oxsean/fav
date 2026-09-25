@@ -19,11 +19,11 @@ import (
 
 	"github.com/oxsean/fav/internal/agent"
 	"github.com/oxsean/fav/internal/capture"
-	"github.com/oxsean/fav/internal/fav"
 	"github.com/oxsean/fav/internal/fileio"
 	"github.com/oxsean/fav/internal/filelock"
 	"github.com/oxsean/fav/internal/paths"
 	"github.com/oxsean/fav/internal/proc"
+	"github.com/oxsean/fav/internal/tend"
 	"github.com/oxsean/fav/internal/wire"
 )
 
@@ -118,7 +118,7 @@ type Node struct {
 }
 
 // Limits is what this machine lets a coordinator do (mode 2 sets them).
-type Limits = fav.NodeConfig
+type Limits = tend.NodeConfig
 
 // New is the node living in home.
 func New(home string) *Node {
@@ -190,7 +190,7 @@ func (n *Node) admit(p *StartParams) error {
 		switch p.Profile.Provider {
 		case agent.ProviderCommand:
 			return &wire.Error{Code: wire.CodeUnauthorized, Detail: "profile " + p.Profile.Name}
-		case fav.ProviderClaude, fav.ProviderCodex: // only the node's own profiles carry args; permissions from a short list
+		case tend.ProviderClaude, tend.ProviderCodex: // only the node's own profiles carry args; permissions from a short list
 			if len(p.Profile.Args) > 0 || !contains(safePermissions[p.Profile.Provider], p.Profile.Permission) {
 				return &wire.Error{Code: wire.CodeUnauthorized, Detail: "profile " + p.Profile.Name}
 			}
@@ -204,8 +204,8 @@ func (n *Node) admit(p *StartParams) error {
 
 // safePermissions are the permission modes a coordinator may ask for on a node that allows no bypass.
 var safePermissions = map[string][]string{
-	fav.ProviderClaude: {"", "default", "acceptEdits", "plan"},
-	fav.ProviderCodex:  {"", "read-only", "workspace-write"},
+	tend.ProviderClaude: {"", "default", "acceptEdits", "plan"},
+	tend.ProviderCodex:  {"", "read-only", "workspace-write"},
 }
 
 // sameRun: a and b start the same command line (their names and the machine they are pinned to aside).
@@ -234,12 +234,12 @@ func (n *Node) spec(p StartParams, dir string) (Spec, error) {
 		return Spec{}, &wire.Error{Code: wire.CodeBadRequest, Detail: "provider " + p.Profile.Provider}
 	}
 	runner := p.Runner
-	if runner == RunnerHerdr && p.Profile.Provider != fav.ProviderClaude {
+	if runner == RunnerHerdr && p.Profile.Provider != tend.ProviderClaude {
 		return Spec{}, &wire.Error{Code: wire.CodeBadRequest, Detail: "runner herdr runs claude only"}
 	}
 	if runner == "" {
 		runner = RunnerBackground
-		if p.Profile.Provider == fav.ProviderClaude && herdrFits(p.Dir) {
+		if p.Profile.Provider == tend.ProviderClaude && herdrFits(p.Dir) {
 			runner = RunnerHerdr
 		}
 	}
@@ -269,7 +269,7 @@ func (n *Node) spec(p StartParams, dir string) (Spec, error) {
 		return Spec{}, &wire.Error{Code: wire.CodeBadRequest, Detail: err.Error()}
 	}
 	return Spec{Run: p.Run, Task: p.Task, Coordinator: p.Coordinator, Argv: cmd.Argv(), Dir: p.Dir, Runner: runner,
-		Stdin: stdin, Thread: p.Profile.Provider == fav.ProviderCodex, Provider: agent.SessionProvider(p.Profile.Provider),
+		Stdin: stdin, Thread: p.Profile.Provider == tend.ProviderCodex, Provider: agent.SessionProvider(p.Profile.Provider),
 		Session: ls.SessionID, Title: p.Title, Created: time.Now()}, nil
 }
 

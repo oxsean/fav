@@ -3,12 +3,12 @@ package index
 import (
 	"maps"
 
-	"github.com/oxsean/fav/internal/fav"
+	"github.com/oxsean/fav/internal/tend"
 )
 
 // SessionFilesOf is what trashing r moves: the files of every id of its Claude continuation chain (idx may be nil),
 // and its pinned copy.
-func SessionFilesOf(idx *Index, r *fav.Rec) []string {
+func SessionFilesOf(idx *Index, r *tend.Rec) []string {
 	ids := []string{r.SessionID}
 	if idx != nil {
 		for _, s := range idx.Sessions() {
@@ -28,8 +28,8 @@ func SessionFilesOf(idx *Index, r *fav.Rec) []string {
 }
 
 // Trash moves files into the trash with a copy of r's record (the reloaded one if newer) and tombstones the record.
-func Trash(s *fav.Store, r *fav.Rec, files []string) (fav.TrashEntry, error) {
-	e := fav.TrashEntry{Provider: r.Provider, SessionID: r.SessionID, Title: r.Title, Cwd: r.Cwd}
+func Trash(s *tend.Store, r *tend.Rec, files []string) (tend.TrashEntry, error) {
+	e := tend.TrashEntry{Provider: r.Provider, SessionID: r.SessionID, Title: r.Title, Cwd: r.Cwd}
 	if r.ID != "" {
 		if cur := s.Get(r.ID); cur != nil {
 			r = cur
@@ -40,7 +40,7 @@ func Trash(s *fav.Store, r *fav.Rec, files []string) (fav.TrashEntry, error) {
 	if e.SessionID == "" {
 		e.SessionID = r.ID
 	}
-	e, err := fav.MoveToTrash(e, files)
+	e, err := tend.MoveToTrash(e, files)
 	if err != nil || r.ID == "" {
 		return e, err
 	}
@@ -49,8 +49,8 @@ func Trash(s *fav.Store, r *fav.Rec, files []string) (fav.TrashEntry, error) {
 }
 
 // Restore puts a trashed session back; force lists the files a rescan must read from scratch (an undone move).
-func Restore(s *fav.Store, provider, sessionID string) (e fav.TrashEntry, force map[string]bool, err error) {
-	if e, err = fav.RestoreTrash(provider, sessionID); err != nil {
+func Restore(s *tend.Store, provider, sessionID string) (e tend.TrashEntry, force map[string]bool, err error) {
+	if e, err = tend.RestoreTrash(provider, sessionID); err != nil {
 		return e, nil, err
 	}
 	if e.Record != nil {

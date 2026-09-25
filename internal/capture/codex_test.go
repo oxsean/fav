@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/oxsean/fav/internal/fav"
+	"github.com/oxsean/fav/internal/tend"
 )
 
 func writeRollout(t *testing.T, root string, day time.Time, sessionID, cwd string, big bool) string {
@@ -107,10 +107,10 @@ func TestTranscriptPathFindsOldAndArchivedRollouts(t *testing.T) {
 	archived := filepath.Join(root, "archived_sessions", "rollout-2025-01-02T03-04-05-arch-2222.jsonl")
 	os.MkdirAll(filepath.Dir(archived), 0o755)
 	os.WriteFile(archived, []byte("{}\n"), 0o600)
-	if got := TranscriptPath(fav.ProviderCodex, "old-1111"); got != old {
+	if got := TranscriptPath(tend.ProviderCodex, "old-1111"); got != old {
 		t.Errorf("a rollout from two years ago: %q", got)
 	}
-	if got := TranscriptPath(fav.ProviderCodex, "arch-2222"); got != archived {
+	if got := TranscriptPath(tend.ProviderCodex, "arch-2222"); got != archived {
 		t.Errorf("an archived rollout: %q", got)
 	}
 }
