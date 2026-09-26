@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -37,6 +39,13 @@ func TestMain(m *testing.M) {
 		}
 		os.Exit(0)
 	}
+	if len(os.Args) > 2 && os.Args[1] == "_notify" { // a notify command: keeps what it read
+		b, _ := io.ReadAll(os.Stdin)
+		f, _ := os.OpenFile(os.Args[2], os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+		f.Write(b)
+		f.Close()
+		os.Exit(0)
+	}
 	testkit.Main(m)
 }
 
@@ -49,6 +58,7 @@ type env struct {
 	cancel context.CancelFunc
 	cli    *wire.Conn
 	cmd    atomic.Int64
+	probe  func(provider string) agent.Check
 }
 
 func newEnv(t *testing.T, cfg tend.Config) *env {
@@ -79,7 +89,9 @@ func killRuns(home string) {
 
 func (e *env) start() {
 	e.t.Helper()
-	c, err := Open(Options{Home: e.home, Version: "test", Config: e.cfg, Node: node.New(e.home), Sessions: remote.NewLocal("test"), Dial: e.dial})
+	n := node.New(e.home)
+	n.Probe = e.probe
+	c, err := Open(Options{Home: e.home, Version: "test", Config: e.cfg, Node: n, Sessions: remote.NewLocal("test"), Dial: e.dial})
 	if err != nil {
 		e.t.Fatal(err)
 	}
@@ -273,6 +285,7 @@ type far struct {
 	fail  error
 	conns []*wire.Conn
 	dials int
+	hide  string // a run run.list leaves out, as when its snapshot cannot be read
 }
 
 func newFar(t *testing.T) *far {
@@ -289,7 +302,18 @@ func (f *far) dial(h tend.Host, opt wire.Options) (Conn, error) {
 		return nil, f.fail
 	}
 	n := node.New(f.home)
-	a, b := wire.Pipe(opt, wire.Options{Handler: n.Handler(remote.NewLocal("far"))})
+	handle := n.Handler(remote.NewLocal("far"))
+	a, b := wire.Pipe(opt, wire.Options{Handler: func(ctx context.Context, r *wire.Request) (any, error) {
+		res, err := handle(ctx, r)
+		f.mu.Lock()
+		hide := f.hide
+		f.mu.Unlock()
+		if runs, ok := res.(node.Runs); ok && hide != "" {
+			runs.Runs = slices.DeleteFunc(slices.Clone(runs.Runs), func(s node.Snapshot) bool { return s.Run == hide })
+			return runs, err
+		}
+		return res, err
+	}})
 	go n.Watch(b.Done(), func(runs []string) { b.Push(node.MChanged, node.Changed{Runs: runs}) })
 	f.conns = append(f.conns, b)
 	return a, nil
@@ -703,6 +727,34 @@ func TestAnAbandonedRunKeepsItsDirectoryUntilItStops(t *testing.T) {
 		}
 		e.c.poke()
 	}
+	e.wait(b.ID, state(task.Running))
+	e.must(MRunStop, task.RunRef{ID: b.ID}, nil)
+	e.wait(b.ID, ended)
+}
+
+func TestAnAbandonedRunTheNodeDoesNotListKeepsItsDirectory(t *testing.T) {
+	f := newFar(t)
+	e := newEnv(t, tend.Config{Hosts: []tend.Host{{Name: "far", SSH: "far"}}})
+	e.dial = f.dial
+	e.start()
+	dir := t.TempDir()
+	a := e.dispatch(Dispatch{Task: e.taskIn("a", "slow", dir).ID, Machine: "far"})
+	e.wait(a.ID, state(task.Running))
+	f.mu.Lock()
+	f.hide = a.ID
+	f.mu.Unlock()
+	e.must(MRunAbandon, task.RunRef{ID: a.ID}, nil)
+	b := e.dispatch(Dispatch{Task: e.taskIn("b", "slow", dir).ID, Machine: "far"})
+	for range 20 {
+		e.c.poke()
+		time.Sleep(100 * time.Millisecond)
+		if st := e.c.State(); st.Runs[b.ID].State != task.Queued {
+			t.Fatalf("b started while a may still run in its directory: a %s, b %s", st.Runs[a.ID].State, st.Runs[b.ID].State)
+		}
+	}
+	f.mu.Lock()
+	f.hide = ""
+	f.mu.Unlock()
 	e.wait(b.ID, state(task.Running))
 	e.must(MRunStop, task.RunRef{ID: b.ID}, nil)
 	e.wait(b.ID, ended)

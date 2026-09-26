@@ -1,7 +1,8 @@
 #!/bin/sh
 # End to end over ssh (mode 1): this Mac is the coordinator in a throwaway home; each remote runs its installed tend with
 # TEND_HOME / CLAUDE_CONFIG_DIR / CODEX_HOME in a throwaway directory, so no real session or run is touched. Each host
-# runs a fake agent to its end, one run is stopped, and the runs' sessions must be listed by `sessions host:<name>`.
+# runs a fake agent to its end (it ends on a question, which a reply continues in the same session), one run is
+# stopped, and the runs' sessions must be listed by `sessions host:<name>`.
 # Hosts: mba (macOS), linux (container on mba), wsl and win (lg-win); pass names to run a subset.
 # Needs tend installed on every remote (`tend hosts install <name>`) at the same protocol.
 set -u
@@ -67,7 +68,7 @@ EOF
 done
 cat >"$TEND_HOME/config.json" <<EOF
 {"hosts": [$hosts],
- "agents": [{"name": "quick", "provider": "fake", "args": ["--steps", "2", "--every", "300ms"]},
+ "agents": [{"name": "quick", "provider": "fake", "args": ["--steps", "2", "--every", "300ms", "--final", "ASK: e2e question?"]},
             {"name": "waiter", "provider": "fake", "args": ["--steps", "1", "--every", "300ms", "--ask"]}]}
 EOF
 
@@ -108,6 +109,15 @@ for h in "$@"; do
 	sid=$(jq_runs "print([r.get('session','') for r in rs if r['id']=='$run'][0])")
 	check "$h output" "$("$tend" run logs "$run" | grep -c 'fake step')" 2
 	check "$h session listed" "$("$tend" sessions "host:$h" turns:0 --json | grep -c "\"session_id\": \"$sid\"")" 1
+	check "$h waits" "$(jq_runs "print([r.get('attention','')+':'+r.get('ask','') for r in rs if r['id']=='$run'][0])")" "asked:e2e question?"
+	check "$h agents checked" "$("$tend" machine list --connect --json | python3 -c "import json,sys; print(sorted([m for m in json.load(sys.stdin) if m['name']=='$h'][0].get('agents',{})))")" "['claude', 'codex']"
+	"$tend" run continue "$run" "e2e reply on $h" >/dev/null
+done
+deadline=$(($(date +%s) + 120))
+until [ "$(jq_runs "print(sum(1 for r in rs if r.get('parent') and r['state'] in ('queued','starting','running','unknown')))")" = 0 ] || [ "$(date +%s)" -gt "$deadline" ]; do sleep 3; done
+for h in "$@"; do
+	first=$(jq_runs "print([r['id'] for r in rs if r['machine']=='$h' and r['agent']=='quick' and not r.get('parent')][0])")
+	check "$h reply continues the session" "$(jq_runs "print(' '.join(r['state']+str(r.get('exit_code'))+(':same' if r.get('session')==[x for x in rs if x['id']=='$first'][0].get('session') else ':other') for r in rs if r.get('parent')=='$first'))")" "exited0:same"
 done
 check "stop on $1" "$(jq_runs "print([r['state']+':'+r.get('reason','') for r in rs if r['agent']=='waiter'][0])")" "stopped:asked"
 

@@ -4,7 +4,9 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -12,6 +14,7 @@ import (
 
 	"github.com/oxsean/fav/internal/coord"
 	"github.com/oxsean/fav/internal/i18n"
+	"github.com/oxsean/fav/internal/journal"
 	"github.com/oxsean/fav/internal/node"
 	"github.com/oxsean/fav/internal/paths"
 	"github.com/oxsean/fav/internal/remote"
@@ -40,6 +43,31 @@ type tasksState struct {
 	out        map[string]runOutput // by run id
 	ticking    bool
 	polling    bool
+	feed       *feed     // journal pushes of the current connection
+	subscribed bool      // the state follows the pushes; a full read is needed only after a gap
+	machinesAt time.Time // when the machines were last read
+}
+
+// feed carries the coordinator's journal pushes from the connection to the model; lost is set when it overflowed.
+type feed struct {
+	ch   chan journal.Envelope
+	lost atomic.Bool
+}
+
+func newFeed() *feed { return &feed{ch: make(chan journal.Envelope, 512)} }
+
+func (f *feed) options() wire.Options {
+	return wire.Options{OnPush: func(method string, params json.RawMessage) {
+		var env journal.Envelope
+		if method != coord.PushJournal || json.Unmarshal(params, &env) != nil {
+			return
+		}
+		select {
+		case f.ch <- env:
+		default:
+			f.lost.Store(true)
+		}
+	}}
 }
 
 type runOutput struct {
@@ -48,9 +76,10 @@ type runOutput struct {
 }
 
 const (
-	tasksEvery = 2 * time.Second
-	tasksWait  = 20 * time.Second
-	tailBytes  = 16 << 10
+	tasksEvery    = 2 * time.Second
+	machinesEvery = 5 * time.Second
+	tasksWait     = 20 * time.Second
+	tailBytes     = 16 << 10
 )
 
 // SetCoordinator lets the Tasks view reach the coordinator; without it the view says tasks are unavailable.
@@ -134,26 +163,51 @@ func (m *Model) tasksOpen() tea.Cmd {
 		return nil
 	case t.cl == nil && !t.connecting:
 		t.connecting, t.err = true, nil
-		connect := t.connect
+		connect, f := t.connect, newFeed()
+		t.feed, t.subscribed = f, false
 		return func() tea.Msg {
-			cl, err := connect(wire.Options{})
+			cl, err := connect(f.options())
 			return tasksConnMsg{cl, err}
 		}
 	case t.cl != nil && !t.ticking:
 		t.ticking = true
-		return m.pollTasks()
+		return tea.Batch(m.pollTasks(), tickTasks())
 	}
 	return nil
 }
 
+// pollTasks reads what the pushes do not bring: the whole state when it is not followed yet or a push was lost, the
+// machines every machinesEvery, and the selected run's output while it runs.
 func (m *Model) pollTasks() tea.Cmd {
 	t := &m.tasks
 	if t.cl == nil || t.polling {
 		return nil
 	}
+	var cmds []tea.Cmd
+	if r := m.selectedRun(); r != nil {
+		if o, ok := t.out[r.ID]; !ok || !o.end {
+			cmds = append(cmds, readOutput(t.cl, r.ID, !task.Open(r.State)))
+		}
+	}
+	if t.subscribed && !t.feed.lost.Load() && t.st != nil {
+		if time.Since(t.machinesAt) < machinesEvery {
+			return tea.Batch(cmds...)
+		}
+		t.machinesAt = time.Now()
+		cl := t.cl
+		return tea.Batch(append(cmds, func() tea.Msg {
+			ctx, cancel := context.WithTimeout(context.Background(), tasksWait)
+			defer cancel()
+			var ms coord.Machines
+			err := cl.Call(ctx, coord.MMachineList, coord.MachinesParams{}, &ms)
+			return tasksMachinesMsg{machines: ms.Machines, err: err}
+		})...)
+	}
 	t.polling = true
+	t.feed.lost.Store(false)
+	t.machinesAt = time.Now()
 	cl, needAgents := t.cl, len(t.agents) == 0
-	cmds := []tea.Cmd{func() tea.Msg {
+	cmds = append(cmds, func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), tasksWait)
 		defer cancel()
 		var msg tasksStateMsg
@@ -178,13 +232,107 @@ func (m *Model) pollTasks() tea.Cmd {
 			}
 		}
 		return msg
-	}}
-	if r := m.selectedRun(); r != nil {
-		if o, ok := t.out[r.ID]; !ok || !o.end {
-			cmds = append(cmds, readOutput(cl, r.ID, !task.Open(r.State)))
+	})
+	return tea.Batch(cmds...)
+}
+
+func tickTasks() tea.Cmd {
+	return tea.Tick(tasksEvery, func(time.Time) tea.Msg { return tasksTickMsg{} })
+}
+
+type tasksMachinesMsg struct {
+	machines []coord.Machine
+	err      error
+}
+
+func (msg tasksMachinesMsg) apply(m *Model) tea.Cmd {
+	if msg.err == nil {
+		m.tasks.machines = msg.machines
+	}
+	return nil
+}
+
+// subscribe asks for the journal after seq on cl; the pushes then arrive on f.
+func subscribe(cl *coord.Client, f *feed, seq int64) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), tasksWait)
+		defer cancel()
+		err := cl.Call(ctx, coord.MSubscribe, coord.SubscribeParams{AfterSeq: seq}, nil)
+		return tasksSubscribedMsg{cl: cl, f: f, err: err}
+	}
+}
+
+type tasksSubscribedMsg struct {
+	cl  *coord.Client
+	f   *feed
+	err error
+}
+
+func (msg tasksSubscribedMsg) apply(m *Model) tea.Cmd {
+	t := &m.tasks
+	if t.cl != msg.cl || t.feed != msg.f {
+		return nil
+	}
+	if msg.err != nil {
+		t.subscribed = false
+		return nil
+	}
+	return waitPush(msg.cl, msg.f)
+}
+
+// waitPush waits for the next journal pushes (all that are there) or the end of the connection.
+func waitPush(cl *coord.Client, f *feed) tea.Cmd {
+	return func() tea.Msg {
+		select {
+		case env := <-f.ch:
+			envs := []journal.Envelope{env}
+			for len(envs) < cap(f.ch) {
+				select {
+				case env := <-f.ch:
+					envs = append(envs, env)
+					continue
+				default:
+				}
+				break
+			}
+			return tasksPushMsg{cl: cl, f: f, envs: envs}
+		case <-cl.Done():
+			return tasksPushMsg{cl: cl, f: f, closed: true}
 		}
 	}
-	return tea.Batch(cmds...)
+}
+
+type tasksPushMsg struct {
+	cl     *coord.Client
+	f      *feed
+	envs   []journal.Envelope
+	closed bool
+}
+
+// apply folds the pushed envelopes into the state; a gap in seq makes the next poll read the whole state.
+func (msg tasksPushMsg) apply(m *Model) tea.Cmd {
+	t := &m.tasks
+	if t.cl != msg.cl || t.feed != msg.f {
+		return nil
+	}
+	if msg.closed {
+		t.subscribed = false
+		return nil
+	}
+	for _, env := range msg.envs {
+		switch {
+		case t.st == nil || env.Seq <= t.st.Seq:
+		case env.Seq == t.st.Seq+1 && t.st.Apply(env) == nil:
+		default:
+			msg.f.lost.Store(true)
+		}
+	}
+	m.filterTasks()
+	cmd := waitPush(msg.cl, msg.f)
+	if msg.f.lost.Load() && m.view == viewTasks && !t.polling {
+		cmd = tea.Batch(cmd, m.pollTasks())
+	}
+	return cmd
 }
 
 func readOutput(cl *coord.Client, run string, ended bool) tea.Cmd {
@@ -209,7 +357,7 @@ func (msg tasksConnMsg) apply(m *Model) tea.Cmd {
 		return nil
 	}
 	t.ticking = true
-	return m.pollTasks()
+	return tea.Batch(m.pollTasks(), tickTasks())
 }
 
 func (msg tasksStateMsg) apply(m *Model) tea.Cmd {
@@ -229,13 +377,14 @@ func (msg tasksStateMsg) apply(m *Model) tea.Cmd {
 		}
 		m.filterTasks()
 	}
-	if m.view != viewTasks {
-		t.ticking = false
-		return nil
+	if msg.err == nil && !t.subscribed && t.cl != nil && t.feed != nil {
+		t.subscribed = true // the pushes after msg.st.Seq are replayed, so the state is followed from here
+		return subscribe(t.cl, t.feed, msg.st.Seq)
 	}
-	return tea.Tick(tasksEvery, func(time.Time) tea.Msg { return tasksTickMsg{} })
+	return nil
 }
 
+// apply is the one place the next tick is set, so one loop runs while the view shows.
 func (tasksTickMsg) apply(m *Model) tea.Cmd {
 	if m.view != viewTasks {
 		m.tasks.ticking = false
@@ -245,7 +394,7 @@ func (tasksTickMsg) apply(m *Model) tea.Cmd {
 		m.tasks.ticking = false
 		return m.tasksOpen()
 	}
-	return m.pollTasks()
+	return tea.Batch(m.pollTasks(), tickTasks())
 }
 
 func (msg runOutMsg) apply(m *Model) tea.Cmd {
@@ -315,18 +464,25 @@ func (m *Model) filterTasks() {
 		cur = s.ID
 	}
 	q := strings.ToLower(strings.TrimSpace(m.search.Value()))
-	var open, closed []*task.Task
-	for _, x := range t.st.Sorted() {
-		if q != "" && !strings.Contains(strings.ToLower(x.Title+"\n"+x.Brief+"\n"+x.Dir), q) {
-			continue
+	match := func(x *task.Task) bool {
+		return q == "" || strings.Contains(strings.ToLower(x.Title+"\n"+x.Brief+"\n"+x.Dir), q)
+	}
+	var needs, open, closed []*task.Task
+	for _, r := range t.st.NeedsYou() { // longest waiting first
+		if x := t.st.Tasks[r.Task]; x != nil && match(x) {
+			needs = append(needs, x)
 		}
-		if x.Status == task.StatusTodo || t.st.Running(x.ID) {
+	}
+	for _, x := range t.st.Sorted() {
+		switch {
+		case !match(x) || m.needsYou(x):
+		case x.Status == task.StatusTodo || t.st.Running(x.ID):
 			open = append(open, x)
-		} else {
+		default:
 			closed = append(closed, x)
 		}
 	}
-	t.list = append(open, closed...)
+	t.list = append(append(needs, open...), closed...)
 	for i, x := range t.list {
 		if x.ID == cur {
 			t.cursor = i
@@ -360,6 +516,12 @@ func (m *Model) selectedRun() *task.Run {
 		return m.lastRun(x.ID)
 	}
 	return nil
+}
+
+// needsYou: x is open and its newest run waits for an answer, asked something, went quiet, failed or is unknown.
+func (m *Model) needsYou(x *task.Task) bool {
+	r := m.lastRun(x.ID)
+	return x.Status == task.StatusTodo && r != nil && r.NeedsYou()
 }
 
 func (m *Model) openTaskCount() int {
@@ -516,8 +678,15 @@ func (m *Model) taskButtons() []btn {
 	}
 	var bs []btn
 	open := r != nil && task.Open(r.State)
+	waiting := r != nil && r.Waiting()
+	if waiting {
+		bs = append(bs, btn{keyed(enterKey, i18n.T("tasks.btn_reply")), true, (*Model).openReply})
+	}
 	if !open && x.Status == task.StatusTodo {
-		bs = append(bs, btn{keyed(enterKey, i18n.T("tasks.btn_run")), true, (*Model).openRunDialog})
+		bs = append(bs, btn{keyed(enterKey, i18n.T("tasks.btn_run")), !waiting, (*Model).openRunDialog})
+	}
+	if canReply(r) && !waiting {
+		bs = append(bs, btn{i18n.T("tasks.btn_reply"), false, (*Model).openReply})
 	}
 	if open && r.Want != "stop" {
 		bs = append(bs, btn{keyed(keyOf(inList, actCloseTab), i18n.T("tasks.btn_stop")), false, func(mm *Model) { mm.closeOverlay(); mm.askStopRun() }})
@@ -557,9 +726,7 @@ func (m *Model) renderTask() string {
 	body = append(body, frame.Render(strings.Repeat(hRule, inner)))
 	if r := m.selectedRun(); r != nil {
 		body = append(body, m.runLine(r, inner, false))
-		if r.Reason != "" && !task.Open(r.State) {
-			body = append(body, dimmed.Render(render.Truncate(i18n.F("tasks.reason", r.Reason), inner)))
-		}
+		body = append(body, runFacts(r, inner, 4)...)
 	} else {
 		body = append(body, dimmed.Render(i18n.T("tasks.never_ran")))
 	}
@@ -607,6 +774,33 @@ var runStateKeys = map[string]string{
 	task.Failed: "tasks.run_failed", task.Canceled: "tasks.run_canceled", task.Abandoned: "tasks.run_abandoned",
 }
 
+// runFacts: why r ended, what it asked or last noted, and what to do next, at most room lines of question.
+func runFacts(r *task.Run, inner, room int) []string {
+	var out []string
+	if r.Reason != "" && !task.Open(r.State) {
+		why := render.RunReason(r.Reason)
+		if r.Detail != "" && r.Detail != r.Reason {
+			why += " — " + render.Sanitize(r.Detail)
+		}
+		out = append(out, dimmed.Render(render.Truncate(i18n.F("tasks.reason", why), inner)))
+	}
+	if r.Ask != "" {
+		lines := render.Wrap(i18n.F("tasks.ask", render.Sanitize(r.Ask)), inner)
+		if len(lines) > room {
+			lines = append(lines[:room-1], dimmed.Render(i18n.F("tasks.more_lines", len(lines)-room+1)))
+		}
+		for _, l := range lines {
+			out = append(out, accent.Render(l))
+		}
+	} else if r.Note != "" && task.Open(r.State) {
+		out = append(out, dimmed.Render(render.Truncate(i18n.F("tasks.note", render.Sanitize(r.Note)), inner)))
+	}
+	if h := render.RunHint(r); h != "" && !r.Waiting() {
+		out = append(out, dimmed.Render(render.Truncate(i18n.F("tasks.next", h), inner)))
+	}
+	return out
+}
+
 // taskWhere: status, default machine and agent, directory.
 func (m *Model) taskWhere(x *task.Task) string {
 	parts := []string{i18n.T(taskStatusKeys[x.Status])}
@@ -648,6 +842,9 @@ func (m *Model) runLine(r *task.Run, w int, dim bool) string {
 func runGlyph(r *task.Run) (string, lipgloss.Style) {
 	switch r.State {
 	case task.Running, task.Starting:
+		if r.Attention != "" {
+			return render.GlyphWarn, accent
+		}
 		return render.GlyphLive, accent
 	case task.Queued:
 		return render.GlyphClock, dimmed
@@ -670,11 +867,16 @@ func runStateText(r *task.Run) string {
 	if r.Want == "stop" && task.Open(r.State) {
 		s = i18n.F("tasks.stopping_state", s)
 	}
+	if a := render.RunAttention(r); a != "" {
+		s = i18n.F("tasks.with_attention", s, a)
+	}
 	return s
 }
 
 func taskGlyph(m *Model, x *task.Task) (string, lipgloss.Style) {
 	switch {
+	case m.needsYou(x):
+		return render.GlyphWarn, errSty
 	case m.tasks.st != nil && m.tasks.st.Running(x.ID):
 		return render.GlyphLive, accent
 	case x.Status == task.StatusDone:
@@ -704,6 +906,11 @@ func (m *Model) tasksBody(y0, h int) []string {
 func (m *Model) taskList(y0, x0, w, h int) []string {
 	t := &m.tasks
 	title := i18n.F("tasks.title", m.openTaskCount(), len(t.list))
+	if t.st != nil {
+		if n := len(t.st.NeedsYou()); n > 0 {
+			title = i18n.F("tasks.title_needs_you", m.openTaskCount(), len(t.list), n)
+		}
+	}
 	out := []string{fit(dimmed.Render(title), w)}
 	room := h - 1
 	switch {
@@ -768,6 +975,9 @@ func (m *Model) taskDetail(w, h int) []string {
 		body = append(body, "", accent.Render(i18n.F("tasks.runs", len(runs))))
 		for i := len(runs) - 1; i >= 0 && i >= len(runs)-4; i-- {
 			body = append(body, m.runLine(runs[i], inner, i != len(runs)-1))
+			if i == len(runs)-1 {
+				body = append(body, runFacts(runs[i], inner, 3)...)
+			}
 		}
 	}
 	if r := m.selectedRun(); r != nil {

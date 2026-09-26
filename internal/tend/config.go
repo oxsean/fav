@@ -32,6 +32,10 @@ type Config struct {
 	Machines    map[string]MachineConfig `json:"machines,omitempty"`
 	Node        NodeConfig               `json:"node,omitempty"`
 	Coordinator *CoordinatorConfig       `json:"coordinator,omitempty"` // mode 2: the server this machine's clients use
+	// NotifyCommand runs when a run wants someone (waiting, asked, failed, stalled) with the event as JSON on stdin;
+	// NotifyEvents narrows which (run.waiting, run.asked, run.failed, run.stalled).
+	NotifyCommand []string `json:"notify_command,omitempty"`
+	NotifyEvents  []string `json:"notify_events,omitempty"`
 }
 
 // AgentProfile is one way to run an agent.
@@ -56,6 +60,8 @@ type NodeConfig struct {
 	AllowDirs     []string `json:"allow_dirs,omitempty"`
 	AllowBypass   bool     `json:"allow_bypass,omitempty"`
 	AllowProfiles []string `json:"allow_profiles,omitempty"`
+	StallAfter    string   `json:"stall_after,omitempty"`
+	Slots         int      `json:"slots,omitempty"` // runs this node takes at once, whoever sends them; 0 no bound // a background run silent this long is marked stalled; default 15m, "off"
 }
 
 type CoordinatorConfig struct {

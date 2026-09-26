@@ -297,7 +297,7 @@ func TestANodeRunsItsOwnProfilesAndNoBypass(t *testing.T) {
 		t.Fatalf("the node's own lint profile runs, not the coordinator's: %v", spec.Argv)
 	}
 	n.Limits = Limits{AllowBypass: true}
-	if _, err := n.Start(StartParams{Run: NewRunID(), Profile: sh, Dir: dir}); err != nil {
+	if _, err := n.Start(StartParams{Run: NewRunID(), Profile: sh, Dir: t.TempDir()}); err != nil {
 		t.Fatalf("allow_bypass lets any profile run: %v", err)
 	}
 }
@@ -319,7 +319,7 @@ func TestListIsPerCoordinatorAndForgetsOldAcknowledgedRuns(t *testing.T) {
 	if runs, _ := n.List("a", nil); len(runs) != 0 {
 		t.Fatalf("an acknowledged run past keepDone is removed: %+v", runs)
 	}
-	if !slices.Equal(Methods, []string{MRunStart, MRunStop, MRunList, MRunTail}) {
+	if !slices.Equal(Methods, []string{MRunStart, MRunStop, MRunList, MRunTail, MRunResume, MAgents}) {
 		t.Fatal(Methods)
 	}
 }
@@ -416,9 +416,8 @@ func TestStartsRacingSnapshotsAllLaunch(t *testing.T) {
 			}
 		}
 	}()
-	dir := t.TempDir()
 	for range 200 {
-		s, err := n.Start(StartParams{Run: NewRunID(), Task: "t", Coordinator: "c1", Profile: fake(), Dir: dir, Runner: RunnerBackground})
+		s, err := n.Start(StartParams{Run: NewRunID(), Task: "t", Coordinator: "c1", Profile: fake(), Dir: t.TempDir(), Runner: RunnerBackground})
 		if err != nil || s.State.State != StateStarting {
 			close(stop)
 			<-done
@@ -496,6 +495,7 @@ func TestWithoutBypassClaudeAndCodexTakeOnlyTheNodesArgs(t *testing.T) {
 		{Name: "codex", Provider: "codex", Args: []string{"-sdanger-full-access"}},
 		{Name: "claude", Provider: "claude", Permission: "bypassPermissions"},
 		{Name: "codex", Provider: "codex", Permission: "danger-full-access"},
+		{Name: "claude", Provider: "claude", Permission: "auto"},
 		{Name: "fast", Provider: "claude", Model: "haiku", Args: []string{"--add-dir", "/y"}},
 	} {
 		if err := n.admit(&StartParams{Run: NewRunID(), Profile: p, Dir: dir}); wire.Code(err) != wire.CodeUnauthorized {
@@ -505,6 +505,8 @@ func TestWithoutBypassClaudeAndCodexTakeOnlyTheNodesArgs(t *testing.T) {
 	for _, p := range []agent.Profile{
 		{Name: "claude", Provider: "claude", Permission: "acceptEdits", Model: "opus"},
 		{Name: "codex", Provider: "codex", Permission: "workspace-write"},
+		{Name: "claude", Provider: "claude", Permission: "manual"},
+		{Name: "claude", Provider: "claude", Permission: "dontAsk"},
 		{Name: "fast", Provider: "claude", Model: "haiku", Args: []string{"--add-dir", "/x"}, Machine: "m"},
 	} {
 		if err := n.admit(&StartParams{Run: NewRunID(), Profile: p, Dir: dir}); err != nil {

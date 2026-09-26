@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"cmp"
 	"os"
 	"path/filepath"
 	"slices"
@@ -26,7 +27,7 @@ type claude struct{}
 
 func (claude) Name() string { return tend.ProviderClaude }
 func (claude) Caps() Caps {
-	return Caps{Resume: true, Fork: true, Headless: true, PresetSession: true, Sessions: true}
+	return Caps{Resume: true, Fork: true, Headless: true, Continue: true, PresetSession: true, Sessions: true}
 }
 func (claude) Installed() bool { return onPath("claude") }
 
@@ -54,9 +55,13 @@ func (claude) Start(cwd, prompt string) (CommandSpec, error) {
 func (claude) Launch(s LaunchSpec) (CommandSpec, error) {
 	var args []string
 	if s.Headless {
-		args = append(args, "-p", "--output-format", "stream-json", "--verbose")
+		// ⚠️ no one answers a question in the background: the run convention makes it the final message
+		args = append(args, "-p", "--output-format", "stream-json", "--verbose", "--disallowedTools", "AskUserQuestion")
 	}
-	if s.SessionID != "" {
+	switch {
+	case s.Resume != "":
+		args = append(args, "--resume", s.Resume)
+	case s.SessionID != "":
 		args = append(args, "--session-id", s.SessionID)
 	}
 	if s.Name != "" && !s.Headless {
@@ -75,8 +80,10 @@ func (claude) Launch(s LaunchSpec) (CommandSpec, error) {
 
 type codex struct{}
 
-func (codex) Name() string    { return tend.ProviderCodex }
-func (codex) Caps() Caps      { return Caps{Resume: true, Fork: true, Headless: true, Sessions: true} }
+func (codex) Name() string { return tend.ProviderCodex }
+func (codex) Caps() Caps {
+	return Caps{Resume: true, Fork: true, Headless: true, Continue: true, Sessions: true}
+}
 func (codex) Installed() bool { return onPath("codex") }
 
 func (codex) Resume(r *tend.Rec, _ string) (CommandSpec, error) {
@@ -108,6 +115,9 @@ func (codex) Launch(s LaunchSpec) (CommandSpec, error) {
 		args = append(args, "--sandbox", s.Profile.Permission)
 	}
 	args = append(args, s.Profile.Args...)
+	if s.Headless && s.Resume != "" {
+		args = append(args, "resume", s.Resume)
+	}
 	switch {
 	case s.Prompt != "":
 		args = append(args, s.Prompt)
@@ -122,7 +132,7 @@ type fake struct{}
 
 func (fake) Name() string { return ProviderFake }
 func (fake) Caps() Caps {
-	return Caps{Headless: true, PresetSession: true}
+	return Caps{Headless: true, Continue: true, PresetSession: true}
 }
 func (fake) Installed() bool { return true }
 func (fake) Resume(r *tend.Rec, name string) (CommandSpec, error) {
@@ -135,7 +145,7 @@ func (fake) Launch(s LaunchSpec) (CommandSpec, error) {
 	if err != nil {
 		return CommandSpec{}, err
 	}
-	args := []string{"_fake-agent", "--session", s.SessionID, "--dir", s.Dir}
+	args := []string{"_fake-agent", "--session", cmp.Or(s.Resume, s.SessionID), "--dir", s.Dir}
 	if s.PromptFile != "" {
 		args = append(args, "--prompt-file", s.PromptFile)
 	}

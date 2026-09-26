@@ -16,8 +16,8 @@ func StartDetached(c *exec.Cmd) error {
 	return c.Start()
 }
 
-// Alive: pid runs (a zombie still counts; callers that need more hold a lock).
-func Alive(pid int) bool { return pid > 0 && syscall.Kill(pid, 0) == nil }
+// Alive: pid runs; a zombie (exited, not reaped: a container whose init reaps nothing) does not.
+func Alive(pid int) bool { return pid > 0 && syscall.Kill(pid, 0) == nil && !zombie(pid) }
 
 type tree struct{ pgid int }
 
@@ -42,6 +42,9 @@ func (t *Tree) stop(hard bool) error {
 	}
 	return syscall.Kill(-t.pgid, sig)
 }
+
+// KillTree ends the process group that process pid leads (a tree StartTree started) now.
+func KillTree(pid int) error { return syscall.Kill(-pid, syscall.SIGKILL) }
 
 // KillPID ends process pid now.
 func KillPID(pid int) error { return syscall.Kill(pid, syscall.SIGKILL) }

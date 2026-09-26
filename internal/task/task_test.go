@@ -1,6 +1,7 @@
 package task
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -69,5 +70,36 @@ func TestCancelOnlyTakesQueuedRuns(t *testing.T) {
 	}
 	if err := s.Apply(journal.Envelope{Seq: 9, Events: []journal.Event{journal.NewEvent("nope", 1)}}); err == nil {
 		t.Fatal("an unknown event")
+	}
+}
+
+func TestNeedsYouIsTheLatestRunOfOpenTasksThatWantsSomeone(t *testing.T) {
+	at := func(m int) *time.Time { x := time.Date(2026, 9, 26, 10, m, 0, 0, time.UTC); return &x }
+	two, zero := 2, 0
+	s := New()
+	add := func(id, status string) { s.Tasks[id] = &Task{ID: id, Status: status} }
+	run := func(id, tk string, q int, r Run) {
+		r.ID, r.Task, r.QueuedAt = id, tk, *at(q)
+		s.Runs[id] = &r
+	}
+	add("t_wait", StatusTodo)
+	run("r_old", "t_wait", 0, Run{State: Failed, EndedAt: at(1)})
+	run("r_wait", "t_wait", 2, Run{State: Exited, ExitCode: &zero, Attention: AttentionAsked, EndedAt: at(5)})
+	add("t_fail", StatusTodo)
+	run("r_fail", "t_fail", 1, Run{State: Exited, ExitCode: &two, EndedAt: at(3)})
+	add("t_ok", StatusTodo)
+	run("r_ok", "t_ok", 1, Run{State: Exited, ExitCode: &zero, EndedAt: at(2)})
+	add("t_done", StatusDone)
+	run("r_done", "t_done", 1, Run{State: Failed, EndedAt: at(1)})
+	add("t_stall", StatusTodo)
+	run("r_stall", "t_stall", 1, Run{State: Running, Attention: AttentionStalled, StartedAt: at(4)})
+	add("t_run", StatusTodo)
+	run("r_run", "t_run", 1, Run{State: Running, StartedAt: at(1)})
+	var got []string
+	for _, r := range s.NeedsYou() {
+		got = append(got, r.ID)
+	}
+	if strings.Join(got, " ") != "r_fail r_stall r_wait" {
+		t.Fatal(got)
 	}
 }

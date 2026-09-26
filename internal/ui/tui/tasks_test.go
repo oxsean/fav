@@ -21,15 +21,19 @@ import (
 // tasksModel is a Model whose Tasks view talks to a coordinator in a temporary home; its node records every run as
 // already running with some output instead of starting a process.
 func tasksModel(t *testing.T) (*Model, string) {
-	t.Helper()
-	home := t.TempDir()
-	n := node.New(home)
-	n.Launch = func(dir string, spec node.Spec) (string, error) {
+	return tasksModelWith(t, func(dir string, spec node.Spec) (string, error) {
 		now := time.Now()
 		os.WriteFile(filepath.Join(dir, "output.log"), []byte("step one\nstep two\n"), 0o600)
 		return "", writeState(dir, node.State{Rev: 1, State: node.StateExited, ExitCode: new(0), Provider: spec.Provider,
 			Session: spec.Session, StartedAt: &now, EndedAt: &now})
-	}
+	})
+}
+
+func tasksModelWith(t *testing.T, launch func(dir string, spec node.Spec) (string, error)) (*Model, string) {
+	t.Helper()
+	home := t.TempDir()
+	n := node.New(home)
+	n.Launch = launch
 	m := sized(t, 140, 40)
 	var clients []*coord.Client
 	m.SetCoordinator(func(w wire.Options) (*coord.Client, error) {
@@ -54,9 +58,22 @@ func writeState(dir string, st node.State) error {
 }
 
 // pump runs cmd and feeds the Tasks view's messages back until none come; commands that take longer than a moment
-// (ticks, blinks) are dropped.
+// (ticks, blinks, waiting for a push) are left running, and what they return later is fed in by the next pump.
 func pump(m *Model, cmd tea.Cmd) {
 	queue := []tea.Cmd{cmd}
+	for _, ch := range late[m] {
+		ch := ch
+		queue = append(queue, func() tea.Msg {
+			select {
+			case msg := <-ch:
+				return msg
+			default:
+				late[m] = append(late[m], ch)
+				return nil
+			}
+		})
+	}
+	delete(late, m)
 	for len(queue) > 0 {
 		c := queue[0]
 		queue = queue[1:]
@@ -69,6 +86,7 @@ func pump(m *Model, cmd tea.Cmd) {
 		select {
 		case msg = <-got:
 		case <-time.After(300 * time.Millisecond):
+			late[m] = append(late[m], got)
 			continue
 		}
 		switch msg := msg.(type) {
@@ -81,6 +99,9 @@ func pump(m *Model, cmd tea.Cmd) {
 		}
 	}
 }
+
+// late are the commands pump stopped waiting for, per model.
+var late = map[*Model][]chan tea.Msg{}
 
 func key(m *Model, k string) {
 	_, cmd := m.Update(press(k))
@@ -225,5 +246,87 @@ func TestAClickInTheBriefPutsTheCursorThere(t *testing.T) {
 	m.placeAreaCursor(2, 2) // the second visual row of the wrapped line
 	if li := m.ov.area.LineInfo(); m.ov.area.Line() != 1 || li.RowOffset != 1 || li.ColumnOffset != 3 {
 		t.Fatalf("line %d %+v", m.ov.area.Line(), li)
+	}
+}
+
+func TestARunThatAsksIsAnsweredFromItsDialog(t *testing.T) {
+	var launched []node.Spec
+	m, _ := tasksModelWith(t, func(dir string, spec node.Spec) (string, error) {
+		launched = append(launched, spec)
+		b := `{"rev":1,"state":"exited","exit_code":0,"provider":"claude","session":"` + spec.Session + `","attention":"asked","ask":"Which branch?"}`
+		return "", os.WriteFile(filepath.Join(dir, "state.json"), []byte(b), 0o600)
+	})
+	key(m, "5")
+	var tk task.Task
+	if err := m.tasks.cl.CallCommand(t.Context(), coord.MTaskCreate, "c1", coord.TaskCreate{Title: "pick", Dir: t.TempDir(), Agent: "fake"}, &tk); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, m, func() bool { return len(m.tasks.list) == 1 })
+	key(m, "enter")
+	key(m, "enter")
+	if m.ov.kind != ovTaskRun {
+		t.Fatalf("%v", m.ov.kind)
+	}
+	waitFor(t, m, func() bool { return m.ov.preview != nil })
+	if s := screenText(m); !strings.Contains(s, "后台运行") && !strings.Contains(s, "runs in the background") {
+		t.Fatalf("the run dialog says how it will run:\n%s", s)
+	}
+	key(m, "enter")
+	waitFor(t, m, func() bool { r := m.selectedRun(); return r != nil && r.Waiting() })
+	key(m, "enter")
+	if s := screenText(m); !strings.Contains(s, "Which branch?") {
+		t.Fatalf("the dialog shows the question:\n%s", s)
+	}
+	key(m, "enter")
+	if m.ov.kind != ovTaskReply {
+		t.Fatalf("Enter on a waiting run replies: %v", m.ov.kind)
+	}
+	typeText(m, "main")
+	for i, l := range strings.Split(m.screen(), "\n") {
+		if w := ansi.StringWidth(l); w != m.w {
+			t.Fatalf("line %d is %d wide, not %d", i, w, m.w)
+		}
+	}
+	key(m, "ctrl+s")
+	waitFor(t, m, func() bool { return len(launched) == 2 })
+	if launched[1].Session != launched[0].Session {
+		t.Fatalf("the reply continues the session: %+v", launched[1])
+	}
+	first := m.tasks.st.RunsOf(tk.ID)[0]
+	var next *task.Run
+	waitFor(t, m, func() bool { rs := m.tasks.st.RunsOf(tk.ID); next = rs[len(rs)-1]; return len(rs) == 2 })
+	if next.Resume != first.Session || next.Brief != "main" && next.Brief != "" {
+		t.Fatalf("%+v", next)
+	}
+}
+
+func TestTasksThatNeedYouComeFirstLongestWaitingFirst(t *testing.T) {
+	m, _ := tasksModel(t)
+	key(m, "5")
+	waitFor(t, m, func() bool { return m.tasks.loaded })
+	at := func(min int) *time.Time { x := time.Date(2026, 9, 26, 10, min, 0, 0, time.UTC); return &x }
+	two := 2
+	st := task.New()
+	add := func(id string, q int, r *task.Run) {
+		st.Tasks[id] = &task.Task{ID: id, Title: id, Status: task.StatusTodo, CreatedAt: *at(q)}
+		if r != nil {
+			r.ID, r.Task, r.QueuedAt = "r"+id, id, *at(q)
+			st.Runs[r.ID] = r
+		}
+	}
+	add("t_new", 9, nil)
+	add("t_late", 1, &task.Run{State: task.Exited, ExitCode: &two, EndedAt: at(8)})
+	add("t_early", 2, &task.Run{State: task.Failed, EndedAt: at(3)})
+	m.tasks.st = st
+	m.filterTasks()
+	var got []string
+	for _, x := range m.tasks.list {
+		got = append(got, x.ID)
+	}
+	if strings.Join(got, " ") != "t_early t_late t_new" {
+		t.Fatal(got)
+	}
+	if s := screenText(m); !strings.Contains(s, "2 need you") && !strings.Contains(s, "2 个等你处理") {
+		t.Fatalf("the title counts them:\n%s", s)
 	}
 }

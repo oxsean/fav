@@ -3,6 +3,7 @@ package node
 import (
 	"bufio"
 	"bytes"
+	"cmp"
 	"encoding/json"
 	"errors"
 	"io"
@@ -10,16 +11,21 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"slices"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
 
+	"github.com/oxsean/fav/internal/agent"
+	"github.com/oxsean/fav/internal/capture"
 	"github.com/oxsean/fav/internal/fileio"
 	"github.com/oxsean/fav/internal/filelock"
 	"github.com/oxsean/fav/internal/herdr"
 	"github.com/oxsean/fav/internal/paths"
 	"github.com/oxsean/fav/internal/proc"
 	"github.com/oxsean/fav/internal/shell"
+	"github.com/oxsean/fav/internal/tend"
 )
 
 // stopGrace is how long an agent asked to stop may take before it is killed.
@@ -118,6 +124,10 @@ func Supervise(dir string) error {
 	if s.stopAsked() {
 		return s.end(StateStopped, "asked", nil)
 	}
+	if time.Since(spec.Created) > notLaunched { // snapshots already report it not launched
+		return s.end(StateFailed, "not_launched", nil)
+	}
+	crashAt("claimed")
 	if err := s.save(); err != nil {
 		return err // ⚠️ the agent starts only after its first state is written: the node reports it not launched
 	}
@@ -129,6 +139,20 @@ type sup struct {
 	spec Spec
 	mu   sync.Mutex
 	st   State
+	out  outcome
+	seen time.Time // the agent's latest output
+	read int64     // how far reports.jsonl has been read
+
+	transcript string    // an interactive run's transcript, once found
+	liveAt     time.Time // when the pane, hook events and transcript were last read
+	liveAsked  bool      // the attention was set by what they showed, so it goes when they stop showing it
+}
+
+// outcome is what the agent's output said about how it ends.
+type outcome struct {
+	final  string   // its final message so far
+	err    string   // the last error it reported
+	denied []string // tools a permission prompt denied (no one answers them in the background)
 }
 
 func (s *sup) save() error {
@@ -161,6 +185,189 @@ func (s *sup) keep(f func(*State)) error {
 
 func (s *sup) stopAsked() bool { return paths.Exists(filepath.Join(s.dir, "stop")) }
 
+// EnvCrashAt names a point where the supervisor exits at once, as if killed: claimed, started (agent running, no
+// pid recorded), running (pid recorded), ending (agent exited, no end recorded). Tests only.
+const EnvCrashAt = "TEND_CRASH_AT"
+
+func crashAt(point string) {
+	if os.Getenv(EnvCrashAt) == point {
+		os.Exit(86)
+	}
+}
+
+// finish ends a run someone stopped: nothing it asked for waits any more.
+func (s *sup) finish(state, reason string, code *int) error {
+	now := time.Now()
+	return s.keep(func(st *State) {
+		st.State, st.Reason, st.ExitCode, st.EndedAt = state, reason, code, &now
+		st.Attention, st.Ask = "", ""
+	})
+}
+
+// exited ends a run whose agent exited by itself, with what its output said: a question it ends on, tools it was
+// denied, why it failed.
+func (s *sup) exited(code int) error {
+	s.mu.Lock()
+	o := s.out
+	s.mu.Unlock()
+	tail := ""
+	if code != 0 && o.err == "" {
+		tail = s.logTail(4 << 10)
+	}
+	now := time.Now()
+	return s.keep(func(st *State) {
+		st.State, st.ExitCode, st.EndedAt = StateExited, &code, &now
+		if st.Attention == AttentionStalled {
+			st.Attention = ""
+		}
+		if len(o.denied) > 0 {
+			st.Attention, st.Reason, st.Detail = AttentionPermission, agent.ReasonPermission, strings.Join(o.denied, ", ")
+		}
+		if ask := agent.AskOf(o.final); ask != "" {
+			st.Attention, st.Ask = AttentionAsked, clip(ask, maxReport)
+		}
+		if code != 0 || o.err != "" {
+			said := cmp.Or(o.err, tail)
+			r := agent.Classify(said)
+			if r != "" {
+				st.Reason = r
+			}
+			st.Detail = clip(saying(said, r), 300)
+		}
+	})
+}
+
+// reports takes in what the agent reported since the last look (tend run ask / note).
+func (s *sup) reports() {
+	rs, next := reportsFrom(s.dir, s.read)
+	s.read = next
+	if len(rs) == 0 {
+		return
+	}
+	s.mu.Lock()
+	s.seen = time.Now()
+	s.mu.Unlock()
+	s.keep(func(st *State) {
+		for _, r := range rs {
+			switch r.Kind {
+			case ReportAsk:
+				st.Attention, st.Ask = AttentionAsked, r.Text
+			case ReportNote:
+				st.Note = clip(r.Text, maxNote)
+				if st.Attention == AttentionStalled {
+					st.Attention = ""
+				}
+			}
+		}
+	})
+}
+
+// stall marks a run whose agent has said nothing for spec.StallAfter, and unmarks it when it speaks again; it never
+// stops it.
+func (s *sup) stall() {
+	if s.spec.StallAfter <= 0 {
+		return
+	}
+	s.mu.Lock()
+	quiet, att := time.Since(s.seen) > s.spec.StallAfter, s.st.Attention
+	s.mu.Unlock()
+	switch {
+	case quiet && att == "":
+		s.keep(func(st *State) { st.Attention = AttentionStalled })
+	case !quiet && att == AttentionStalled:
+		s.keep(func(st *State) { st.Attention = "" })
+	}
+}
+
+// liveEvery is how often an interactive run's pane, hook events and transcript are read.
+const liveEvery = 3 * time.Second
+
+// paneStatus is Herdr's status of an agent pane (working | idle | blocked | done | unknown), "" when unknown.
+var paneStatus = func(pane string) string {
+	agents, err := herdr.Agents()
+	if err != nil {
+		return ""
+	}
+	for _, a := range agents {
+		if a.PaneID == pane {
+			return a.AgentStatus
+		}
+	}
+	return ""
+}
+
+// watchLive marks an interactive run asked while its agent waits for the user, and unmarks it when it goes on: Herdr
+// shows its pane blocked, its latest Claude hook event is a prompt, or its transcript ends on a question.
+func (s *sup) watchLive() {
+	if time.Since(s.liveAt) < liveEvery {
+		return
+	}
+	s.liveAt = time.Now()
+	s.mu.Lock()
+	pane, session, att := s.st.Pane, s.st.Session, s.st.Attention
+	s.mu.Unlock()
+	waiting := pane != "" && paneStatus(pane) == "blocked"
+	if !waiting && session != "" && s.spec.Provider == tend.ProviderClaude {
+		if s.transcript == "" {
+			s.transcript = capture.TranscriptPath(tend.ProviderClaude, session)
+		}
+		if p, ok := capture.ReadPulse(s.transcript); ok {
+			waiting = p.Asking || capture.HookWaiting(session, p.Size)
+		}
+	}
+	switch {
+	case waiting && att == "":
+		s.liveAsked = true
+		s.keep(func(st *State) { st.Attention = AttentionAsked })
+	case !waiting && s.liveAsked && att == AttentionAsked:
+		s.liveAsked = false
+		s.keep(func(st *State) { st.Attention, st.Ask = "", "" })
+	case !waiting:
+		s.liveAsked = false
+	}
+}
+
+// logTail is the end of output.log, at most n bytes.
+func (s *sup) logTail(n int64) string {
+	f, err := os.Open(filepath.Join(s.dir, "output.log"))
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+	fi, err := f.Stat()
+	if err != nil {
+		return ""
+	}
+	from := max(0, fi.Size()-n)
+	b := make([]byte, fi.Size()-from)
+	f.ReadAt(b, from)
+	return string(b)
+}
+
+// saying is the last line of text that tells reason (stdout and stderr interleave in the log), else its last line.
+func saying(text, reason string) string {
+	if reason != "" {
+		lines := strings.Split(text, "\n")
+		for i := len(lines) - 1; i >= 0; i-- {
+			if agent.Classify(lines[i]) == reason {
+				return strings.TrimSpace(lines[i])
+			}
+		}
+	}
+	return lastLine(text)
+}
+
+// lastLine is the last line of text that says something.
+func lastLine(text string) string {
+	lines := strings.Split(strings.TrimSpace(text), "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		if l := strings.TrimSpace(lines[i]); l != "" {
+			return l
+		}
+	}
+	return ""
+}
+
 // drainWait is how long the agent's output may stay open after it exits (a child it left holds it) before the tree
 // is ended.
 const drainWait = 2 * time.Second
@@ -168,7 +375,7 @@ const drainWait = 2 * time.Second
 func (s *sup) run() error {
 	c := exec.Command(s.spec.Argv[0], s.spec.Argv[1:]...)
 	c.Dir = s.spec.Dir
-	c.Env = append(os.Environ(), "TEND_RUN="+s.spec.Run)
+	c.Env = append(os.Environ(), EnvRun+"="+s.spec.Run, EnvRunDir+"="+s.dir)
 	interactive := s.spec.Runner == RunnerHerdr
 	if s.spec.Stdin {
 		f, err := os.Open(filepath.Join(s.dir, "prompt.md"))
@@ -186,8 +393,9 @@ func (s *sup) run() error {
 	if interactive {
 		c.Stdout, c.Stderr = os.Stdout, os.Stderr
 	} else {
-		out := &rolling{path: filepath.Join(s.dir, "output.log")}
-		defer out.Close()
+		log := &rolling{path: filepath.Join(s.dir, "output.log")}
+		defer log.Close()
+		out := activity{log, s}
 		// ⚠️ os.Pipe, not StdoutPipe: Wait then returns when the agent exits, not when every child it left closes
 		// the output
 		or, ow, err := os.Pipe()
@@ -219,9 +427,14 @@ func (s *sup) run() error {
 	now := time.Now()
 	var pane map[string]string
 	readJSON(filepath.Join(s.dir, "pane.json"), &pane)
+	s.mu.Lock()
+	s.seen = now
+	s.mu.Unlock()
+	crashAt("started")
 	s.keep(func(st *State) {
-		st.State, st.Pid, st.StartedAt, st.Pane = StateRunning, c.Process.Pid, &now, pane["pane"]
+		st.State, st.Pid, st.PidStart, st.StartedAt, st.Pane = StateRunning, c.Process.Pid, proc.StartTime(c.Process.Pid), &now, pane["pane"]
 	})
+	crashAt("running")
 
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs, syscall.SIGHUP, syscall.SIGTERM, os.Interrupt)
@@ -240,14 +453,16 @@ func (s *sup) run() error {
 			if asked.IsZero() && s.stopAsked() {
 				asked, reason = time.Now(), "asked"
 			}
+			s.reports()
+			crashAt("ending")
 			if !asked.IsZero() {
-				return s.end(StateStopped, reason, &code)
+				return s.finish(StateStopped, reason, &code)
 			}
 			var ee *exec.ExitError
 			if err != nil && !errors.As(err, &ee) {
 				return s.end(StateFailed, err.Error(), nil)
 			}
-			return s.end(StateExited, "", &code)
+			return s.exited(code)
 		case sig := <-sigs:
 			if asked.IsZero() {
 				asked, reason = time.Now(), "signal"
@@ -257,6 +472,12 @@ func (s *sup) run() error {
 				tree.Stop()
 			}
 		case <-tick.C:
+			s.reports()
+			if interactive {
+				s.watchLive()
+			} else {
+				s.stall()
+			}
 			if asked.IsZero() {
 				if s.stopAsked() {
 					asked, reason = time.Now(), "asked"
@@ -299,8 +520,8 @@ func closeAll(fs []*os.File) {
 	}
 }
 
-// copyOut writes the agent's stdout to the log and picks codex's thread id out of its JSON events; a line longer
-// than the buffer goes to the log in pieces and is not parsed.
+// copyOut writes the agent's stdout to the log and reads it as it goes: codex's thread id, the final message, errors
+// and denied permissions; a line longer than the buffer goes to the log in pieces and is not read.
 func (s *sup) copyOut(r io.Reader, w io.Writer) {
 	br := bufio.NewReaderSize(r, 64<<10)
 	piece := false
@@ -308,14 +529,8 @@ func (s *sup) copyOut(r io.Reader, w io.Writer) {
 		line, err := br.ReadSlice('\n')
 		if len(line) > 0 {
 			w.Write(line)
-			if err == nil && !piece && s.spec.Thread && !s.bound() && bytes.Contains(line, []byte(`"thread.started"`)) {
-				var ev struct {
-					Type     string `json:"type"`
-					ThreadID string `json:"thread_id"`
-				}
-				if json.Unmarshal(line, &ev) == nil && ev.ThreadID != "" {
-					s.keep(func(st *State) { st.Session = ev.ThreadID })
-				}
+			if err == nil && !piece {
+				s.line(line)
 			}
 		}
 		piece = errors.Is(err, bufio.ErrBufferFull)
@@ -325,10 +540,96 @@ func (s *sup) copyOut(r io.Reader, w io.Writer) {
 	}
 }
 
+// event is the part of a claude stream-json or codex exec --json line the supervisor reads.
+type event struct {
+	Type     string `json:"type"`
+	Subtype  string `json:"subtype"`
+	ThreadID string `json:"thread_id"`
+	Result   string `json:"result"`
+	IsError  bool   `json:"is_error"`
+	Message  string `json:"message"`
+	Denials  []struct {
+		ToolName string `json:"tool_name"`
+	} `json:"permission_denials"`
+	Item struct {
+		Type string `json:"type"`
+		Text string `json:"text"`
+	} `json:"item"`
+	Error json.RawMessage `json:"error"`
+}
+
+const maxFinal = 16 << 10
+
+func (s *sup) line(line []byte) {
+	text := bytes.TrimSpace(line)
+	if len(text) == 0 {
+		return
+	}
+	var ev event
+	if text[0] != '{' || json.Unmarshal(text, &ev) != nil || ev.Type == "" {
+		if s.spec.Agent != tend.ProviderClaude && s.spec.Agent != tend.ProviderCodex {
+			s.mu.Lock()
+			s.out.final = clip(string(text), maxFinal) // a plain CLI: its last line is its final message
+			s.mu.Unlock()
+		}
+		return
+	}
+	switch ev.Type {
+	case "thread.started":
+		if s.spec.Thread && ev.ThreadID != "" && !s.bound() {
+			s.keep(func(st *State) { st.Session = ev.ThreadID })
+		}
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	switch ev.Type {
+	case "result": // claude's last event
+		s.out.final = clip(ev.Result, maxFinal)
+		if ev.IsError {
+			s.out.err = clip(cmp.Or(ev.Result, ev.Subtype), maxFinal)
+		}
+		s.out.denied = s.out.denied[:0]
+		for _, d := range ev.Denials {
+			if d.ToolName != "" && !slices.Contains(s.out.denied, d.ToolName) {
+				s.out.denied = append(s.out.denied, d.ToolName)
+			}
+		}
+	case "item.completed": // codex
+		if ev.Item.Type == "agent_message" {
+			s.out.final = clip(ev.Item.Text, maxFinal)
+		}
+	case "error", "turn.failed": // codex
+		msg := ev.Message
+		var e struct {
+			Message string `json:"message"`
+		}
+		if msg == "" && json.Unmarshal(ev.Error, &e) == nil {
+			msg = e.Message
+		}
+		if msg != "" {
+			s.out.err = clip(msg, maxFinal)
+		}
+	}
+}
+
 func (s *sup) bound() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.st.Session != ""
+}
+
+// activity is the agent's output on its way to the log: it marks when the agent last said something.
+type activity struct {
+	w io.Writer
+	s *sup
+}
+
+func (a activity) Write(p []byte) (int, error) {
+	a.s.mu.Lock()
+	a.s.seen = time.Now()
+	a.s.mu.Unlock()
+	return a.w.Write(p)
 }
 
 // rolling is output.log, moved to output.log.1 once it passes logCap.

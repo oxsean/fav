@@ -170,6 +170,11 @@ last=${hosts##* }
 run_on "$last" "srv e2e after restart"
 wait_runs
 check "a run on $last after the restart" "$(jq_runs "print(sum(1 for r in rs if r['machine']=='$last' and r['state']=='exited'))")" 2
+first=$(jq_runs "print([r['id'] for r in rs if r['machine']=='$last'][0])")
+"$tend" run continue "$first" "srv e2e reply" >/dev/null
+wait_runs
+check "a reply on $last continues the session" "$(jq_runs "f=[x for x in rs if x['id']=='$first'][0]; print(' '.join(r['state']+str(r.get('exit_code'))+(':same' if r.get('session')==f.get('session') else ':other') for r in rs if r.get('parent')=='$first'))")" "exited0:same"
+check "$last agents checked" "$("$tend" machine list --connect --json | python3 -c "import json,sys; print(sorted([m for m in json.load(sys.stdin) if m['name']=='$last'][0].get('agents',{})))")" "['claude', 'codex']"
 
 for p in $pids; do kill "$p" 2>/dev/null; done
 stop_server

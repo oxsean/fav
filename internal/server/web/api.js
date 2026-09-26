@@ -121,6 +121,8 @@ const api = (() => {
     runDispatch: write('run.dispatch'),
     runStop: write('run.stop'),
     runAbandon: write('run.abandon'),
+    runContinue: write('run.continue'),
+    runPreview: params => call('run.preview', params),
     runTail: params => call('run.tail', params),
     machineList: params => call('machine.list', params),
     agentList: () => call('agent.list'),

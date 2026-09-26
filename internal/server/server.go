@@ -27,6 +27,7 @@ import (
 	"github.com/oxsean/fav/internal/coord"
 	"github.com/oxsean/fav/internal/fileio"
 	"github.com/oxsean/fav/internal/filelock"
+	"github.com/oxsean/fav/internal/remote"
 	"github.com/oxsean/fav/internal/wire"
 )
 
@@ -41,6 +42,11 @@ type Token struct {
 	Role    string    `json:"role"`
 	Sum     string    `json:"sum"` // sha256 of the token: the token itself is shown once and never stored
 	Created time.Time `json:"created"`
+	// A node token is bound to the machine that first connects with it (its node id); another machine is refused
+	// until the binding is dropped (RebindToken).
+	Bound     string     `json:"bound,omitempty"`
+	BoundHost string     `json:"bound_host,omitempty"`
+	BoundAt   *time.Time `json:"bound_at,omitempty"`
 }
 
 type tokenFile struct {
@@ -119,6 +125,57 @@ func RemoveToken(home, name string) error {
 	if len(ts) == n {
 		return os.ErrNotExist
 	}
+	return saveTokens(home, ts)
+}
+
+// ErrOtherMachine: the node token is bound to another machine.
+var ErrOtherMachine = errors.New("other machine")
+
+// BindToken binds node token name to the machine whose node id is id on its first connection; it answers
+// ErrOtherMachine when the token is bound to another id. A node without an id (an older tend) is let through unbound.
+func BindToken(home, name, id, host string) error {
+	if id == "" {
+		return nil
+	}
+	unlock, err := lockTokens(home)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	ts, err := Tokens(home)
+	if err != nil {
+		return err
+	}
+	i := slices.IndexFunc(ts, func(t Token) bool { return t.Name == name && t.Role == RoleNode })
+	switch {
+	case i < 0:
+		return os.ErrNotExist
+	case ts[i].Bound == id:
+		return nil
+	case ts[i].Bound != "":
+		return fmt.Errorf("%w: %s", ErrOtherMachine, ts[i].BoundHost)
+	}
+	now := time.Now().UTC()
+	ts[i].Bound, ts[i].BoundHost, ts[i].BoundAt = id, host, &now
+	return saveTokens(home, ts)
+}
+
+// RebindToken drops node token name's binding: the next machine to connect with it is bound.
+func RebindToken(home, name string) error {
+	unlock, err := lockTokens(home)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	ts, err := Tokens(home)
+	if err != nil {
+		return err
+	}
+	i := slices.IndexFunc(ts, func(t Token) bool { return t.Name == name && t.Role == RoleNode })
+	if i < 0 {
+		return os.ErrNotExist
+	}
+	ts[i].Bound, ts[i].BoundHost, ts[i].BoundAt = "", "", nil
 	return saveTokens(home, ts)
 }
 
@@ -268,7 +325,14 @@ func (s *Server) handleNode(w http.ResponseWriter, r *http.Request) {
 	c := wire.New(websocket.NetConn(r.Context(), ws, websocket.MessageText), opt)
 	s.track(c, t)
 	defer s.untrack(c)
-	if err := s.opt.Coord.Attach(t.Name, c); err != nil {
+	err = s.opt.Coord.Attach(t.Name, c, func(h remote.Hello) error {
+		if err := BindToken(s.opt.Home, t.Name, h.NodeID, h.Hostname); err != nil {
+			fmt.Fprintf(os.Stderr, "node %s refused: %v (tend server token rebind %s)\n", t.Name, err, t.Name)
+			return &wire.Error{Code: wire.CodeUnauthorized, Detail: "node identity"}
+		}
+		return nil
+	})
+	if err != nil {
 		return
 	}
 	<-c.Done()

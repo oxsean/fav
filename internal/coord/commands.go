@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/oxsean/fav/internal/agent"
 	"github.com/oxsean/fav/internal/journal"
 	"github.com/oxsean/fav/internal/node"
 	"github.com/oxsean/fav/internal/remote"
@@ -52,17 +53,18 @@ type MachinesParams struct {
 }
 
 type Machine struct {
-	Name     string     `json:"name"`
-	State    string     `json:"state"` // connected | connecting | offline | idle
-	Error    string     `json:"error,omitempty"`
-	Detail   string     `json:"detail,omitempty"`
-	RetryAt  *time.Time `json:"retry_at,omitempty"`
-	Slots    int        `json:"slots"`
-	Active   int        `json:"active"` // starting, running or unknown runs
-	Queued   int        `json:"queued"`
-	OS       string     `json:"os,omitempty"`
-	Hostname string     `json:"hostname,omitempty"`
-	Version  string     `json:"version,omitempty"`
+	Name     string                 `json:"name"`
+	State    string                 `json:"state"` // connected | connecting | offline | idle
+	Error    string                 `json:"error,omitempty"`
+	Detail   string                 `json:"detail,omitempty"`
+	RetryAt  *time.Time             `json:"retry_at,omitempty"`
+	Slots    int                    `json:"slots"`
+	Active   int                    `json:"active"` // starting, running or unknown runs
+	Queued   int                    `json:"queued"`
+	OS       string                 `json:"os,omitempty"`
+	Hostname string                 `json:"hostname,omitempty"`
+	Version  string                 `json:"version,omitempty"`
+	Agents   map[string]agent.Check `json:"agents,omitempty"` // how each agent CLI stood when last checked
 }
 
 type Machines struct {
@@ -92,7 +94,7 @@ var readMethods = []string{remote.MHello, remote.MList, remote.MMessages, remote
 
 // Methods are the client methods.
 var Methods = []string{MStateGet, MTaskGet, MTaskCreate, MTaskEdit, MTaskStatus, MRunDispatch, MRunStop, MRunAbandon, MRunTail,
-	MAgentList, MMachineList, MSubscribe, MNodeCall}
+	MAgentList, MMachineList, MSubscribe, MNodeCall, MRunPreview, MRunContinue}
 
 // Handler answers clients.
 func (c *Coord) Handler() wire.Handler {
@@ -162,6 +164,14 @@ func (c *Coord) Handler() wire.Handler {
 			return c.command(r, c.taskStatus, taskView)
 		case MRunDispatch:
 			return c.command(r, c.runDispatch, runView)
+		case MRunContinue:
+			return c.command(r, c.runContinue, runView)
+		case MRunPreview:
+			var p Dispatch
+			if err := r.Decode(&p); err != nil {
+				return nil, err
+			}
+			return c.Preview(ctx, p)
 		case MRunStop:
 			return c.command(r, c.runStop, runView)
 		case MRunAbandon:
@@ -336,40 +346,49 @@ func (c *Coord) runDispatch(r *wire.Request) (string, []journal.Event, error) {
 	if err := r.Decode(&p); err != nil {
 		return "", nil, err
 	}
+	run, err := c.plan(p)
+	if err != nil {
+		return "", nil, err
+	}
+	return run.ID, []journal.Event{journal.NewEvent(task.ERunQueued, run)}, nil
+}
+
+// plan is the run a dispatch would queue; the caller holds mu.
+func (c *Coord) plan(p Dispatch) (task.Run, error) {
 	t := c.st.Tasks[p.Task]
 	if t == nil {
-		return "", nil, notFound(p.Task)
+		return task.Run{}, notFound(p.Task)
 	}
 	if t.Status != task.StatusTodo {
-		return "", nil, conflict("task " + t.Status)
+		return task.Run{}, conflict("task " + t.Status)
 	}
 	if open := c.st.OpenRun(t.ID); open != nil {
-		return "", nil, conflict("open run " + open.ID)
+		return task.Run{}, conflict("open run " + open.ID)
 	}
 	if t.Dir == "" {
-		return "", nil, bad("dir")
+		return task.Run{}, bad("dir")
 	}
 	if !slices.Contains([]string{"", node.RunnerBackground, node.RunnerHerdr}, p.Runner) {
-		return "", nil, bad("runner " + p.Runner)
+		return task.Run{}, bad("runner " + p.Runner)
 	}
 	name := firstOf(p.Agent, t.Agent, tend.ProviderClaude)
 	prof, ok := c.profile(name)
 	if !ok {
-		return "", nil, notFound("agent " + name)
+		return task.Run{}, notFound("agent " + name)
 	}
 	machine := firstOf(p.Machine, prof.Machine, t.Machine)
 	if machine == "" && c.opt.Remote {
-		return "", nil, bad("machine")
+		return task.Run{}, bad("machine")
 	}
 	machine = firstOf(machine, Local)
 	if p.Runner == node.RunnerHerdr && prof.Provider != tend.ProviderClaude {
-		return "", nil, bad("runner herdr runs claude only")
+		return task.Run{}, bad("runner herdr runs claude only")
 	}
 	if prof.Machine != "" && machine != prof.Machine {
-		return "", nil, bad("agent " + name + " runs on " + prof.Machine)
+		return task.Run{}, bad("agent " + name + " runs on " + prof.Machine)
 	}
 	if err := c.checkMachine(machine); err != nil {
-		return "", nil, err
+		return task.Run{}, err
 	}
 	brief := t.Brief
 	if strings.TrimSpace(brief) == "" {
@@ -379,9 +398,8 @@ func (c *Coord) runDispatch(r *wire.Request) (string, []journal.Event, error) {
 	if from == "" && !c.opt.Remote {
 		from = Local
 	}
-	run := task.Run{ID: node.NewRunID(), Task: t.ID, Machine: machine, Agent: name, Profile: prof, Dir: t.Dir, From: from,
-		Brief: brief, Title: t.Title, Runner: p.Runner}
-	return run.ID, []journal.Event{journal.NewEvent(task.ERunQueued, run)}, nil
+	return task.Run{ID: node.NewRunID(), Task: t.ID, Machine: machine, Agent: name, Profile: prof, Dir: t.Dir, From: from,
+		Brief: brief, Title: t.Title, Runner: p.Runner}, nil
 }
 
 func (c *Coord) run(r *wire.Request) (*task.Run, error) {
@@ -436,40 +454,13 @@ func (c *Coord) Machines(ctx context.Context, connect bool) Machines {
 		}
 		c.mu.Unlock()
 		c.waitDials(ctx)
+		c.refreshChecks(ctx)
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	var out Machines
 	for _, m := range c.ms {
-		x := Machine{Name: m.name, Slots: c.slots(m.name), OS: m.hello.OS, Hostname: m.hello.Hostname, Version: m.hello.Version}
-		for _, r := range c.st.Runs {
-			if r.Machine == m.name && r.State == task.Queued {
-				x.Queued++
-			} else if r.Machine == m.name && task.Open(r.State) {
-				x.Active++
-			}
-		}
-		switch {
-		case m.conn != nil:
-			x.State = MachineConnected
-		case m.dialing:
-			x.State = MachineConnecting
-		case m.err != nil || m.attached:
-			x.State = MachineOffline
-			if !m.retryAt.IsZero() {
-				at := m.retryAt
-				x.RetryAt = &at
-			}
-		default:
-			x.State = MachineIdle
-		}
-		if m.err != nil {
-			x.Error, x.Detail = wire.Code(m.err), m.err.Error()
-			if x.Error == "" {
-				x.Error = wire.CodeInternal
-			}
-		}
-		out.Machines = append(out.Machines, x)
+		out.Machines = append(out.Machines, c.machineView(m))
 	}
 	slices.SortFunc(out.Machines, func(a, b Machine) int {
 		if (a.Name == Local) != (b.Name == Local) {
@@ -481,6 +472,40 @@ func (c *Coord) Machines(ctx context.Context, connect bool) Machines {
 		return strings.Compare(a.Name, b.Name)
 	})
 	return out
+}
+
+// machineView is how m stands; the caller holds mu.
+func (c *Coord) machineView(m *machine) Machine {
+	x := Machine{Name: m.name, Slots: c.slots(m.name), OS: m.hello.OS, Hostname: m.hello.Hostname, Version: m.hello.Version,
+		Agents: m.checks}
+	for _, r := range c.st.Runs {
+		if r.Machine == m.name && r.State == task.Queued {
+			x.Queued++
+		} else if r.Machine == m.name && task.Open(r.State) {
+			x.Active++
+		}
+	}
+	switch {
+	case m.conn != nil:
+		x.State = MachineConnected
+	case m.dialing:
+		x.State = MachineConnecting
+	case m.err != nil || m.attached:
+		x.State = MachineOffline
+		if !m.retryAt.IsZero() {
+			at := m.retryAt
+			x.RetryAt = &at
+		}
+	default:
+		x.State = MachineIdle
+	}
+	if m.err != nil {
+		x.Error, x.Detail = wire.Code(m.err), m.err.Error()
+		if x.Error == "" {
+			x.Error = wire.CodeInternal
+		}
+	}
+	return x
 }
 
 func firstOf(xs ...string) string {

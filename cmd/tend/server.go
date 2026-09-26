@@ -94,14 +94,25 @@ func cmdServerToken(args []string) error {
 		}
 		fmt.Print(i18n.F("cli.server.token_removed", args[1]))
 		return nil
+	case "rebind":
+		if len(args) != 2 {
+			return i18n.E("cli.server.token_rebind_usage")
+		}
+		if err := server.RebindToken(tend.Home(), args[1]); errors.Is(err, os.ErrNotExist) {
+			return i18n.E("cli.server.token_missing", args[1])
+		} else if err != nil {
+			return err
+		}
+		fmt.Print(i18n.F("cli.server.token_rebound", args[1]))
+		return nil
 	case "", "list", "ls":
 		ts, err := server.Tokens(tend.Home())
 		if err != nil {
 			return err
 		}
-		rows := [][]string{{i18n.T("cli.server.col_name"), i18n.T("cli.server.col_role"), i18n.T("cli.server.col_created")}}
+		rows := [][]string{{i18n.T("cli.server.col_name"), i18n.T("cli.server.col_role"), i18n.T("cli.server.col_created"), i18n.T("cli.server.col_machine")}}
 		for _, t := range ts {
-			rows = append(rows, []string{t.Name, t.Role, t.Created.Local().Format(time.DateTime)})
+			rows = append(rows, []string{t.Name, t.Role, t.Created.Local().Format(time.DateTime), orDash(t.BoundHost)})
 		}
 		printTable(rows, termWidth())
 		return nil

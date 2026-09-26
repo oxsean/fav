@@ -87,6 +87,8 @@ func cmdDoctor(args []string) error {
 		printBigStale(s, idx, live)
 	}
 
+	doctorCoordinator()
+
 	if days := loadConfig().TrashDays; days > 0 {
 		if n, err := tend.PurgeTrash(days); err != nil {
 			fmt.Print(i18n.F("cli.doctor.purge_failed", err))

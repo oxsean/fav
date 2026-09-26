@@ -42,6 +42,7 @@ type Hello struct {
 	Codex    string          `json:"codex_home"`
 	CLIs     map[string]bool `json:"clis"` // claude / codex found on PATH
 	Methods  []string        `json:"methods"`
+	NodeID   string          `json:"node_id,omitempty"` // a node's lasting identity (node.ID), which a server binds its token to
 	Role     string          `json:"role,omitempty"`
 }
 

@@ -1,0 +1,290 @@
+package coord
+
+import (
+	"context"
+	"slices"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/oxsean/fav/internal/agent"
+	"github.com/oxsean/fav/internal/journal"
+	"github.com/oxsean/fav/internal/node"
+	"github.com/oxsean/fav/internal/task"
+	"github.com/oxsean/fav/internal/tend"
+	"github.com/oxsean/fav/internal/wire"
+)
+
+// ReasonNodeOutdated: the machine's tend is older than what the run needs (`tend hosts install` updates it).
+const ReasonNodeOutdated = "node_outdated"
+
+// Why is one reason a run cannot start, or will start late or differently; Code is stable, clients word it.
+type Why struct {
+	Code   string `json:"code"`
+	Detail string `json:"detail,omitempty"`
+}
+
+// What a preview says.
+const (
+	WhyCLIMissing   = agent.ReasonCLIMissing  // blocks: the agent's CLI is not on the machine
+	WhyAuthMissing  = agent.ReasonAuthMissing // blocks: the CLI is not logged in there
+	WhyOutdated     = ReasonNodeOutdated      // blocks: the machine's tend cannot do it
+	WhyOffline      = "offline"               // it queues until the machine answers
+	WhyConnecting   = "connecting"
+	WhySlots        = "slots"    // it queues until a slot frees (Detail: active/slots)
+	WhyDirBusy      = "dir_busy" // it queues until the run in the same directory ends (Detail: run id)
+	WhyAuthUnknown  = "auth_unknown"
+	WhyUnchecked    = "unchecked" // the machine was not reached, so its CLI is not checked
+	WhyHerdr        = "herdr"     // it may open in a Herdr tab there
+	WhyBackground   = "background"
+	WhyContinuation = "continues" // it continues session Detail
+)
+
+// Preview is how a dispatch would go, asked before it is made.
+type Preview struct {
+	Machine  string       `json:"machine"`
+	Agent    string       `json:"agent"`
+	Provider string       `json:"provider"`
+	Model    string       `json:"model,omitempty"`
+	Dir      string       `json:"dir"`
+	State    string       `json:"state"` // the machine's
+	Version  string       `json:"version,omitempty"`
+	Check    *agent.Check `json:"check,omitempty"`
+	Blockers []Why        `json:"blockers,omitempty"` // the run would fail at once
+	Notes    []Why        `json:"notes,omitempty"`    // how it will go
+}
+
+// Preview says how dispatching p would go: where, with what, and anything that would hold it back or fail it. It
+// checks the machine's agent CLI when the machine answers.
+func (c *Coord) Preview(ctx context.Context, p Dispatch) (Preview, error) {
+	c.mu.Lock()
+	run, err := c.plan(p)
+	c.mu.Unlock()
+	if err != nil {
+		return Preview{}, err
+	}
+	return c.preview(ctx, run), nil
+}
+
+func (c *Coord) preview(ctx context.Context, run task.Run) Preview {
+	c.mu.Lock()
+	m := c.ms[run.Machine]
+	pv := Preview{Machine: run.Machine, Agent: run.Agent, Provider: run.Profile.Provider, Model: run.Profile.Model, Dir: run.Dir}
+	if m == nil {
+		c.mu.Unlock()
+		return pv
+	}
+	m.busyAt = time.Now()
+	c.ensure(m)
+	c.mu.Unlock()
+	c.waitMachine(ctx, m)
+
+	c.mu.Lock()
+	x := c.machineView(m)
+	pv.State, pv.Version = x.State, x.Version
+	switch x.State {
+	case MachineOffline:
+		pv.Notes = append(pv.Notes, Why{WhyOffline, x.Detail})
+	case MachineConnecting, MachineIdle:
+		pv.Notes = append(pv.Notes, Why{WhyConnecting, ""})
+	}
+	if x.Active >= x.Slots {
+		pv.Notes = append(pv.Notes, Why{WhySlots, strconv.Itoa(x.Active) + "/" + strconv.Itoa(x.Slots)})
+	}
+	if dir, ok := c.mapDir(&run, m); ok {
+		pv.Dir = dir
+		for _, r := range c.st.Runs {
+			if r.Machine == m.name && task.Open(r.State) && r.State != task.Queued && dirKey(r.Dir, m.hello.OS) == dirKey(dir, m.hello.OS) {
+				pv.Notes = append(pv.Notes, Why{WhyDirBusy, r.ID})
+				break
+			}
+		}
+	}
+	resumes := slices.Contains(m.hello.Methods, node.MRunResume)
+	connected := m.conn != nil
+	c.mu.Unlock()
+
+	if run.Resume != "" {
+		pv.Notes = append(pv.Notes, Why{WhyContinuation, run.Resume})
+		if connected && !resumes {
+			pv.Blockers = append(pv.Blockers, Why{WhyOutdated, pv.Version})
+		}
+	}
+	switch {
+	case run.Resume != "", run.Runner == node.RunnerBackground, run.Profile.Provider != tend.ProviderClaude:
+		pv.Notes = append(pv.Notes, Why{WhyBackground, ""})
+	default:
+		pv.Notes = append(pv.Notes, Why{WhyHerdr, ""})
+	}
+	if !slices.Contains(agent.Sessions(), run.Profile.Provider) {
+		return pv
+	}
+	checks := c.checksOf(ctx, m)
+	ck, ok := checks[run.Profile.Provider]
+	if !ok {
+		pv.Notes = append(pv.Notes, Why{WhyUnchecked, ""})
+		return pv
+	}
+	pv.Check = &ck
+	switch ck.Blocker() {
+	case agent.ReasonCLIMissing:
+		pv.Blockers = append(pv.Blockers, Why{WhyCLIMissing, run.Profile.Provider})
+	case agent.ReasonAuthMissing:
+		pv.Blockers = append(pv.Blockers, Why{WhyAuthMissing, run.Profile.Provider})
+	default:
+		if ck.Auth == agent.AuthUnknown {
+			pv.Notes = append(pv.Notes, Why{WhyAuthUnknown, run.Profile.Provider})
+		}
+	}
+	return pv
+}
+
+// waitMachine waits while m is being dialed.
+func (c *Coord) waitMachine(ctx context.Context, m *machine) {
+	for {
+		c.mu.Lock()
+		dialing := m.dialing
+		c.mu.Unlock()
+		if !dialing {
+			return
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(50 * time.Millisecond):
+		}
+	}
+}
+
+// checksOf asks m's node how its agent CLIs stand (a node that cannot say answers what was known).
+func (c *Coord) checksOf(ctx context.Context, m *machine) map[string]agent.Check {
+	c.mu.Lock()
+	conn, can, known := m.conn, slices.Contains(m.hello.Methods, node.MAgents), m.checks
+	c.mu.Unlock()
+	if conn == nil || !can {
+		return known
+	}
+	var out node.Checks
+	if ok, err := c.callNode(ctx, m, conn, node.MAgents, node.ChecksParams{}, &out); !ok || err != nil {
+		return known
+	}
+	c.mu.Lock()
+	m.checks = out.Agents
+	c.mu.Unlock()
+	return out.Agents
+}
+
+// refreshChecks asks every connected machine how its agent CLIs stand.
+func (c *Coord) refreshChecks(ctx context.Context) {
+	c.mu.Lock()
+	var ms []*machine
+	for _, m := range c.ms {
+		if m.conn != nil {
+			ms = append(ms, m)
+		}
+	}
+	c.mu.Unlock()
+	var wg sync.WaitGroup
+	for _, m := range ms {
+		wg.Add(1)
+		go func() { defer wg.Done(); c.checksOf(ctx, m) }()
+	}
+	wg.Wait()
+}
+
+// Continue answers a waiting run, or any indexed session, with a new run in the same session.
+type Continue struct {
+	Run  string `json:"run,omitempty"` // the run whose session goes on
+	Text string `json:"text"`
+	// A session no run of this coordinator left: where it is and whose it is.
+	Machine  string `json:"machine,omitempty"`
+	Provider string `json:"provider,omitempty"`
+	Session  string `json:"session,omitempty"`
+	Dir      string `json:"dir,omitempty"` // as its machine names it
+	Title    string `json:"title,omitempty"`
+	Agent    string `json:"agent,omitempty"` // default: the run's profile, else the provider's
+}
+
+func (c *Coord) runContinue(r *wire.Request) (string, []journal.Event, error) {
+	var p Continue
+	if err := r.Decode(&p); err != nil {
+		return "", nil, err
+	}
+	if strings.TrimSpace(p.Text) == "" || len(p.Text) > maxBrief {
+		return "", nil, bad("text")
+	}
+	if p.Run != "" {
+		prev := c.st.Runs[p.Run]
+		if prev == nil {
+			return "", nil, notFound(p.Run)
+		}
+		if prev.Session == "" {
+			return "", nil, bad("run " + prev.ID + " has no session")
+		}
+		if open := c.st.OpenRun(prev.Task); open != nil {
+			return "", nil, conflict("open run " + open.ID)
+		}
+		prof := prev.Profile
+		if p.Agent != "" {
+			var ok bool
+			if prof, ok = c.profile(p.Agent); !ok {
+				return "", nil, notFound("agent " + p.Agent)
+			}
+			if prof.Provider != prev.Profile.Provider {
+				return "", nil, bad("agent " + p.Agent + " is not " + prev.Profile.Provider)
+			}
+		}
+		if err := c.canContinue(prof, prev.Machine); err != nil {
+			return "", nil, err
+		}
+		run := task.Run{ID: node.NewRunID(), Task: prev.Task, Machine: prev.Machine, Agent: firstOf(p.Agent, prev.Agent), Profile: prof,
+			Dir: prev.Dir, From: prev.Machine, Brief: p.Text, Title: prev.Title, Runner: node.RunnerBackground, Resume: prev.Session,
+			Parent: prev.ID}
+		return run.ID, []journal.Event{journal.NewEvent(task.ERunQueued, run)}, nil
+	}
+	if p.Session == "" || p.Dir == "" || p.Provider == "" {
+		return "", nil, bad("session")
+	}
+	machine := firstOf(p.Machine, Local)
+	if err := c.checkMachine(machine); err != nil {
+		return "", nil, err
+	}
+	name := firstOf(p.Agent, p.Provider)
+	prof, ok := c.profile(name)
+	if !ok {
+		return "", nil, notFound("agent " + name)
+	}
+	if agent.SessionProvider(prof.Provider) != p.Provider {
+		return "", nil, bad("agent " + name + " is not " + p.Provider)
+	}
+	if prof.Machine != "" && prof.Machine != machine {
+		return "", nil, bad("agent " + name + " runs on " + prof.Machine)
+	}
+	if err := c.canContinue(prof, machine); err != nil {
+		return "", nil, err
+	}
+	title := strings.TrimSpace(p.Title)
+	if title == "" {
+		title, _, _ = strings.Cut(strings.TrimSpace(p.Text), "\n")
+	}
+	if len(title) > maxTitle {
+		title = title[:maxTitle]
+	}
+	t := task.Task{ID: newID("t_"), Title: title, Dir: p.Dir, Machine: machine, Agent: name, Status: task.StatusTodo}
+	run := task.Run{ID: node.NewRunID(), Task: t.ID, Machine: machine, Agent: name, Profile: prof, Dir: p.Dir, From: machine,
+		Brief: p.Text, Title: title, Runner: node.RunnerBackground, Resume: p.Session}
+	return run.ID, []journal.Event{journal.NewEvent(task.ETaskCreated, t), journal.NewEvent(task.ERunQueued, run)}, nil
+}
+
+// canContinue: prof's agent can go on with a session in the background, and machine's tend can start that, as far as
+// is known.
+func (c *Coord) canContinue(prof tend.AgentProfile, machine string) error {
+	if pr, ok := agent.Get(prof.Provider); !ok || !pr.Caps().Continue {
+		return bad("agent " + prof.Name + " cannot continue a session")
+	}
+	if m := c.ms[machine]; m != nil && m.conn != nil && !slices.Contains(m.hello.Methods, node.MRunResume) {
+		return &wire.Error{Code: wire.CodeProto, Detail: ReasonNodeOutdated}
+	}
+	return nil
+}

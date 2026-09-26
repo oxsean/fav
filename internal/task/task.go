@@ -33,6 +33,18 @@ const (
 	Abandoned = "abandoned"
 )
 
+// Attentions: why a run wants someone to look.
+const (
+	AttentionAsked      = "asked"
+	AttentionPermission = "permission"
+	AttentionStalled    = "stalled"
+)
+
+// Waiting: the run ended on a question or a denied permission; a reply continues its session.
+func (r *Run) Waiting() bool {
+	return !Open(r.State) && (r.Attention == AttentionAsked || r.Attention == AttentionPermission)
+}
+
 // Open: the run still holds its task, its slot and its directory.
 func Open(state string) bool {
 	return state == Queued || state == Starting || state == Running || state == Unknown
@@ -62,10 +74,16 @@ type Run struct {
 	Brief     string            `json:"brief,omitempty"` // frozen at dispatch
 	Title     string            `json:"title,omitempty"`
 	Runner    string            `json:"runner,omitempty"` // "": the node picks
+	Resume    string            `json:"resume,omitempty"` // the session this run continues (Brief is the reply)
+	Parent    string            `json:"parent,omitempty"` // the run it answers
 	Want      string            `json:"want"`             // run | stop
 	State     string            `json:"state"`
 	ExitCode  *int              `json:"exit_code,omitempty"`
 	Reason    string            `json:"reason,omitempty"`
+	Detail    string            `json:"detail,omitempty"`
+	Attention string            `json:"attention,omitempty"` // asked | permission | stalled
+	Ask       string            `json:"ask,omitempty"`
+	Note      string            `json:"note,omitempty"`
 	Provider  string            `json:"provider,omitempty"`
 	Session   string            `json:"session,omitempty"`
 	Pane      string            `json:"pane,omitempty"`
@@ -118,6 +136,10 @@ type Observation struct {
 	State     string     `json:"state"`
 	ExitCode  *int       `json:"exit_code,omitempty"`
 	Reason    string     `json:"reason,omitempty"`
+	Detail    string     `json:"detail,omitempty"`
+	Attention string     `json:"attention,omitempty"`
+	Ask       string     `json:"ask,omitempty"`
+	Note      string     `json:"note,omitempty"`
 	Provider  string     `json:"provider,omitempty"`
 	Session   string     `json:"session,omitempty"`
 	Pane      string     `json:"pane,omitempty"`
@@ -274,6 +296,12 @@ func (r *Run) observe(o Observation) {
 	if o.Reason != "" {
 		r.Reason = o.Reason
 	}
+	if o.Detail != "" {
+		r.Detail = o.Detail
+	}
+	if o.NodeRev > 0 { // what the node says now; the coordinator's own observations carry none of it
+		r.Attention, r.Ask, r.Note = o.Attention, o.Ask, o.Note
+	}
 	if o.Session != "" {
 		r.Provider, r.Session = o.Provider, o.Session
 	}
@@ -327,5 +355,44 @@ func (s *State) Sorted() []*Task {
 		out = append(out, t)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.After(out[j].CreatedAt) })
+	return out
+}
+
+// NeedsYou: r waits for an answer or a permission, asked something, went quiet, failed, or its end is unknown.
+func (r *Run) NeedsYou() bool {
+	switch {
+	case r.Waiting(), r.State == Failed, r.State == Unknown:
+		return true
+	case r.State == Exited:
+		return r.ExitCode != nil && *r.ExitCode != 0
+	case Open(r.State):
+		return r.Attention == AttentionAsked || r.Attention == AttentionStalled
+	}
+	return false
+}
+
+// Since is when r started to need someone, as far as the state tells: its end, else its start.
+func (r *Run) Since() time.Time {
+	switch {
+	case r.EndedAt != nil:
+		return *r.EndedAt
+	case r.StartedAt != nil:
+		return *r.StartedAt
+	}
+	return r.QueuedAt
+}
+
+// NeedsYou are the latest runs of the open tasks that need someone, longest waiting first.
+func (s *State) NeedsYou() []*Run {
+	var out []*Run
+	for _, t := range s.Tasks {
+		if t.Status != StatusTodo {
+			continue
+		}
+		if runs := s.RunsOf(t.ID); len(runs) > 0 && runs[len(runs)-1].NeedsYou() {
+			out = append(out, runs[len(runs)-1])
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Since().Before(out[j].Since()) })
 	return out
 }

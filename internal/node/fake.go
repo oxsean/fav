@@ -26,6 +26,10 @@ func FakeAgent(args []string) error {
 	ask := fs.Bool("ask", false, "end by asking the user a question and waiting")
 	leave := fs.Duration("leave-child", 0, "leave a child this long holding the output when it exits")
 	sleep := fs.Duration("sleep", 0, "only sleep this long (the child --leave-child leaves)")
+	final := fs.String("final", "", "the last line it prints (its final message)")
+	stderr := fs.String("stderr", "", "a line it prints to stderr before it ends")
+	note := fs.String("note", "", "report this progress note to its run first")
+	askReport := fs.String("ask-report", "", "report this question to its run first")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -54,6 +58,16 @@ func FakeAgent(args []string) error {
 	if err := t.User(strings.TrimSpace(brief)); err != nil {
 		return err
 	}
+	if *note != "" {
+		if err := AddReport(os.Getenv(EnvRunDir), ReportNote, *note); err != nil {
+			return err
+		}
+	}
+	if *askReport != "" {
+		if err := AddReport(os.Getenv(EnvRunDir), ReportAsk, *askReport); err != nil {
+			return err
+		}
+	}
 	for i := 1; i <= *steps; i++ {
 		time.Sleep(*every)
 		msg := fmt.Sprintf("fake step %d of %d", i, *steps)
@@ -68,6 +82,15 @@ func FakeAgent(args []string) error {
 		for {
 			time.Sleep(time.Hour) // ⚠️ not select{}: with no other goroutine the runtime ends it as a deadlock
 		}
+	}
+	if *final != "" {
+		fmt.Println(*final)
+		if err := t.Reply(*final); err != nil {
+			return err
+		}
+	}
+	if *stderr != "" {
+		fmt.Fprintln(os.Stderr, *stderr)
 	}
 	if *leave > 0 {
 		self, err := os.Executable()

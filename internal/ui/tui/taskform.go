@@ -251,6 +251,9 @@ func (m *Model) selector(body *[]string, label string, field, i, inner int, focu
 			mm.ov.field, mm.ov.focus = field, -1
 		}
 		mm.pickNext(i, 1)
+		if mm.ov.kind == ovTaskRun {
+			mm.pending = tea.Batch(mm.pending, mm.previewRun())
+		}
 	})
 	*body = append(*body, sty.Render("<")+" "+render.Truncate(v, inner-6)+" "+sty.Render(">"))
 	*body = append(*body, "")
@@ -310,6 +313,7 @@ func (m *Model) openRunDialog() {
 	machines, agents := m.machineNames(), m.agentNames()
 	m.ov = overlay{kind: ovTaskRun, focus: -1, taskID: x.ID, opts: [][]string{machines, agents},
 		pick: []int{choice(machines, firstNonEmpty(x.Machine, coord.Local)), choice(agents, firstNonEmpty(x.Agent, "claude"))}}
+	m.pending = tea.Batch(m.pending, m.previewRun())
 }
 
 func (m *Model) runTask() tea.Cmd {
@@ -336,6 +340,7 @@ func (m *Model) taskRunKey(msg tea.KeyPressMsg) tea.Cmd {
 		d := map[act]int{actLeft: -1, actRight: 1}[a]
 		if f < runButtons {
 			m.pickNext(f, d)
+			return m.previewRun()
 		} else {
 			m.moveFocus(d)
 		}
@@ -370,8 +375,9 @@ func (m *Model) renderTaskRun() string {
 	m.selector(&body, i18n.T("tasks.field_machine"), runMachine, 0, inner, m.ov.field == runMachine)
 	m.selector(&body, i18n.T("tasks.field_agent"), runAgent, 1, inner, m.ov.field == runAgent)
 	if x != nil && x.Dir != "" {
-		body = append(body, dimmed.Render(render.Truncate(i18n.F("tasks.run_dir", x.Dir), inner)), "")
+		body = append(body, dimmed.Render(render.Truncate(i18n.F("tasks.run_dir", x.Dir), inner)))
 	}
+	body = append(append(body, m.previewLines(inner)...), "")
 	body = append(body, m.buttons(len(body)+1, []btn{
 		{keyed(enterKey, i18n.T("tasks.btn_run")), true, func(mm *Model) { mm.pending = mm.runTask() }},
 		cancelBtn(),

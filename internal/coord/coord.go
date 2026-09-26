@@ -42,6 +42,8 @@ const (
 	MSubscribe     = "subscribe"
 	MNodeCall      = "node.call"
 	MTaskGet       = "task.get"
+	MRunPreview    = "run.preview"
+	MRunContinue   = "run.continue"
 	PushJournal    = "journal"
 	defaultSlots   = 2
 	subscribeQueue = 256
@@ -81,6 +83,8 @@ type Coord struct {
 	missing  map[string]int // open runs by how many lists of their node in a row lacked them
 	passMu   sync.Mutex
 	wake     chan struct{}
+	// localCalls are the calls this machine's node is answering in this process: Close lets them finish
+	localCalls sync.WaitGroup
 }
 
 // Open takes the coordinator lock and reads the journal; ErrLocked when another process has it.
@@ -143,6 +147,12 @@ func (c *Coord) Close() {
 	c.mu.Unlock()
 	c.passMu.Lock()
 	defer c.passMu.Unlock()
+	done := make(chan struct{})
+	go func() { c.localCalls.Wait(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+	}
 	c.log.Close()
 	c.unlock()
 }
@@ -187,9 +197,11 @@ func (c *Coord) commit(cmd *journal.Receipt, events ...journal.Event) error {
 	if cmd != nil {
 		c.receipts[cmd.ID] = *cmd
 	}
+	before := c.observed(events)
 	if err := c.st.Apply(env); err != nil {
 		return err
 	}
+	c.notify(before)
 	c.publish(env)
 	return nil
 }

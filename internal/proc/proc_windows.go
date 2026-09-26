@@ -90,6 +90,9 @@ func (t *Tree) start(bool) error {
 
 func (t *Tree) stop(bool) error { return windows.TerminateJobObject(t.job, 1) }
 
+// KillTree ends process pid now; its job ended the rest with the supervisor that held it.
+func KillTree(pid int) error { return KillPID(pid) }
+
 // KillPID ends process pid now.
 func KillPID(pid int) error {
 	h, err := windows.OpenProcess(windows.PROCESS_TERMINATE, false, uint32(pid))

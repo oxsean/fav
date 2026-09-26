@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/oxsean/fav/internal/agent"
 	"github.com/oxsean/fav/internal/journal"
 	"github.com/oxsean/fav/internal/node"
 	"github.com/oxsean/fav/internal/pathmap"
@@ -50,6 +51,7 @@ type machine struct {
 	dialing  bool
 	attached bool // mode 2: the node dialed in; never dialed from here
 	busyAt   time.Time
+	checks   map[string]agent.Check // node.agents, when it last answered
 }
 
 // machines are this machine and every configured host.
@@ -122,6 +124,18 @@ func (c *Coord) dial(m *machine) {
 	}
 	c.mu.Unlock()
 	c.poke()
+	if err == nil {
+		c.checkSoon(m)
+	}
+}
+
+// checkSoon asks m's node, in the background, how its agent CLIs stand.
+func (c *Coord) checkSoon(m *machine) {
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), callWait)
+		defer cancel()
+		c.checksOf(ctx, m)
+	}()
 }
 
 // greet says hello and checks the node can run things.
@@ -142,8 +156,12 @@ func greet(conn Conn) (remote.Hello, error) {
 func (c *Coord) NodeOptions() wire.Options { return c.nodeOptions() }
 
 // Attach makes conn machine name's connection (mode 2: the node dialed in); a connection it already had is closed.
-func (c *Coord) Attach(name string, conn Conn) error {
+// check, when set, may refuse the node by its hello.
+func (c *Coord) Attach(name string, conn Conn, check func(remote.Hello) error) error {
 	h, err := greet(conn)
+	if err == nil && check != nil {
+		err = check(h)
+	}
 	if err != nil {
 		conn.Close()
 		return err
@@ -160,12 +178,18 @@ func (c *Coord) Attach(name string, conn Conn) error {
 	m.attached, m.conn, m.hello, m.err = true, conn, h, nil
 	c.mu.Unlock()
 	c.poke()
+	c.checkSoon(m)
 	return nil
 }
 
 // local is this machine's node, served in this process.
 func (c *Coord) local() Conn {
-	a, b := wire.Pipe(c.nodeOptions(), wire.Options{Handler: c.opt.Node.Handler(c.opt.Sessions)})
+	handle := c.opt.Node.Handler(c.opt.Sessions)
+	a, b := wire.Pipe(c.nodeOptions(), wire.Options{Handler: func(ctx context.Context, r *wire.Request) (any, error) {
+		c.localCalls.Add(1)
+		defer c.localCalls.Done()
+		return handle(ctx, r)
+	}})
 	go c.opt.Node.Watch(b.Done(), func(runs []string) { b.Push(node.MChanged, node.Changed{Runs: runs}) })
 	return a
 }
@@ -298,6 +322,10 @@ func (c *Coord) Pass(ctx context.Context) {
 	wg.Wait()
 }
 
+// keepListed: an ended run the coordinator has not acknowledged is still asked for this long, so its acknowledgement
+// reaches the node.
+const keepListed = 7 * 24 * time.Hour
+
 // missingAfter is how many lists in a row must lack an open run before it is taken for gone from its node.
 const missingAfter = 2
 
@@ -323,12 +351,22 @@ func (c *Coord) callNode(ctx context.Context, m *machine, conn Conn, method stri
 func (c *Coord) converge(ctx context.Context, m *machine) {
 	c.mu.Lock()
 	conn, ack := m.conn, c.acked[m.name]
+	var ids []string
+	for _, r := range c.st.Runs { // the runs whose node state matters: all the node would list otherwise are acknowledged
+		if r.Machine == m.name && !c.ackDone[r.ID] && (task.Open(r.State) || r.State == task.Abandoned || r.EndedAt == nil ||
+			time.Since(*r.EndedAt) < keepListed) {
+			ids = append(ids, r.ID)
+		}
+	}
 	c.mu.Unlock()
 	if conn == nil {
 		return
 	}
+	if len(ids) == 0 {
+		ids = []string{"-"} // none: a run id never matches it
+	}
 	var list node.Runs
-	if _, err := c.callNode(ctx, m, conn, node.MRunList, node.ListParams{Coordinator: c.id, Ack: ack}, &list); err != nil {
+	if _, err := c.callNode(ctx, m, conn, node.MRunList, node.ListParams{Coordinator: c.id, Ack: ack, Runs: ids}, &list); err != nil {
 		return
 	}
 
@@ -394,9 +432,10 @@ func (c *Coord) converge(ctx context.Context, m *machine) {
 	}
 	sort.Slice(mine, func(i, j int) bool { return mine[i].QueuedAt.Before(mine[j].QueuedAt) })
 	used, dirs := 0, map[string]bool{}
-	for _, r := range c.st.Runs { // given up on but still running there: it keeps its slot and directory until it ends
-		if s, onNode := seen[r.ID]; r.Machine == m.name && r.State == task.Abandoned && onNode && !node.Terminal(s.State.State) &&
-			s.State.State != node.StateUnknown {
+	for _, r := range c.st.Runs { // given up on but maybe running there: it keeps its slot and directory until the node says it ended
+		s, onNode := seen[r.ID]
+		if r.Machine == m.name && r.State == task.Abandoned && !c.ackDone[r.ID] &&
+			(!onNode || !node.Terminal(s.State.State) && s.State.State != node.StateUnknown) {
 			used++
 			dirs[dirKey(r.Dir, m.hello.OS)] = true
 		}
@@ -450,8 +489,9 @@ func (c *Coord) converge(ctx context.Context, m *machine) {
 	for i, r := range starts {
 		c.sent[r.ID] = time.Now()
 		params[i] = node.StartParams{Run: r.ID, Task: r.Task, Coordinator: c.id, Profile: r.Profile, Dir: r.Dir,
-			Brief: r.Brief, Title: r.Title, Runner: r.Runner}
+			Brief: r.Brief, Title: r.Title, Runner: r.Runner, Resume: r.Resume}
 	}
+	canResume := slices.Contains(m.hello.Methods, node.MRunResume)
 	c.mu.Unlock()
 
 	for _, id := range stops {
@@ -462,16 +502,26 @@ func (c *Coord) converge(ctx context.Context, m *machine) {
 	}
 	for _, p := range params {
 		var s node.Snapshot
-		ok, err := c.callNode(ctx, m, conn, node.MRunStart, p, &s)
+		method := node.MRunStart
+		if p.Resume != "" {
+			method = node.MRunResume
+		}
+		ok, err := true, error(nil)
+		if method == node.MRunStart || canResume {
+			ok, err = c.callNode(ctx, m, conn, method, p, &s)
+		}
 		if !ok {
 			return
 		}
-		if err != nil && transport(err) {
-			continue // timed out: the next list tells whether it arrived
+		if err != nil && (transport(err) || heldBack(err)) {
+			continue // timed out, or the node holds it back: it is sent again after resendAfter
 		}
 		o := observation(s)
-		if err != nil {
+		switch {
+		case err != nil:
 			o = task.Observation{ID: p.Run, State: task.Failed, Reason: err.Error()}
+		case method == node.MRunResume && !canResume:
+			o = task.Observation{ID: p.Run, State: task.Failed, Reason: ReasonNodeOutdated}
 		}
 		c.mu.Lock()
 		if r := c.st.Runs[p.Run]; r != nil && r.Would(o) {
@@ -481,9 +531,16 @@ func (c *Coord) converge(ctx context.Context, m *machine) {
 	}
 }
 
+// heldBack: the node refused the start only for now, because another run holds the directory or every slot.
+func heldBack(err error) bool {
+	var we *wire.Error
+	return errors.As(err, &we) && we.Code == wire.CodeConflict && (strings.HasPrefix(we.Detail, "dir_busy") || strings.HasPrefix(we.Detail, "slots"))
+}
+
 func observation(s node.Snapshot) task.Observation {
-	return task.Observation{ID: s.Run, State: s.State.State, ExitCode: s.ExitCode, Reason: s.Reason, Provider: s.Provider,
-		Session: s.Session, Pane: s.Pane, NodeRev: s.Rev, StartedAt: s.StartedAt, EndedAt: s.EndedAt}
+	return task.Observation{ID: s.Run, State: s.State.State, ExitCode: s.ExitCode, Reason: s.Reason, Detail: s.Detail,
+		Attention: s.Attention, Ask: s.Ask, Note: s.Note, Provider: s.Provider, Session: s.Session, Pane: s.Pane, NodeRev: s.Rev,
+		StartedAt: s.StartedAt, EndedAt: s.EndedAt}
 }
 
 // mapDir is r's directory as machine m names it; false while the machine it was written for has not been reached (it

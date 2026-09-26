@@ -15,6 +15,8 @@ import (
 	"regexp"
 	"slices"
 	"sort"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/oxsean/fav/internal/agent"
@@ -23,6 +25,7 @@ import (
 	"github.com/oxsean/fav/internal/filelock"
 	"github.com/oxsean/fav/internal/paths"
 	"github.com/oxsean/fav/internal/proc"
+	"github.com/oxsean/fav/internal/shell"
 	"github.com/oxsean/fav/internal/tend"
 	"github.com/oxsean/fav/internal/wire"
 )
@@ -58,22 +61,25 @@ type StartParams struct {
 	Brief       string        `json:"brief"`
 	Title       string        `json:"title,omitempty"`
 	Runner      string        `json:"runner,omitempty"` // "" = herdr when it fits, else background
+	Resume      string        `json:"resume,omitempty"` // run.resume: the session the brief continues
 }
 
 // Spec is a run frozen at its start.
 type Spec struct {
-	Run         string    `json:"run"`
-	Task        string    `json:"task"`
-	Coordinator string    `json:"coordinator"`
-	Argv        []string  `json:"argv"`
-	Dir         string    `json:"dir"`
-	Runner      string    `json:"runner"`
-	Stdin       bool      `json:"stdin,omitempty"`  // prompt.md goes to the agent's stdin
-	Thread      bool      `json:"thread,omitempty"` // the session id comes as codex's thread.started on stdout
-	Provider    string    `json:"provider,omitempty"`
-	Session     string    `json:"session,omitempty"`
-	Title       string    `json:"title,omitempty"`
-	Created     time.Time `json:"created"`
+	Run         string        `json:"run"`
+	Task        string        `json:"task"`
+	Coordinator string        `json:"coordinator"`
+	Argv        []string      `json:"argv"`
+	Dir         string        `json:"dir"`
+	Runner      string        `json:"runner"`
+	Stdin       bool          `json:"stdin,omitempty"`    // prompt.md goes to the agent's stdin
+	Thread      bool          `json:"thread,omitempty"`   // the session id comes as codex's thread.started on stdout
+	Provider    string        `json:"provider,omitempty"` // whose sessions it leaves
+	Agent       string        `json:"agent,omitempty"`    // the profile's provider
+	Session     string        `json:"session,omitempty"`
+	Title       string        `json:"title,omitempty"`
+	StallAfter  time.Duration `json:"stall_after,omitempty"` // no output this long marks it stalled; 0 never
+	Created     time.Time     `json:"created"`
 }
 
 // State is what the supervisor writes.
@@ -81,15 +87,27 @@ type State struct {
 	Rev       int        `json:"rev"`
 	State     string     `json:"state"`
 	Pid       int        `json:"pid,omitempty"`        // the agent
+	PidStart  int64      `json:"pid_start,omitempty"`  // when the agent started (proc.StartTime): pid's identity
 	Sup       int        `json:"supervisor,omitempty"` // the supervisor
 	Pane      string     `json:"pane,omitempty"`
 	Provider  string     `json:"provider,omitempty"`
 	Session   string     `json:"session,omitempty"`
 	ExitCode  *int       `json:"exit_code,omitempty"`
 	Reason    string     `json:"reason,omitempty"`
+	Detail    string     `json:"detail,omitempty"`    // what the agent or its CLI said about how it ended
+	Attention string     `json:"attention,omitempty"` // asked | permission | stalled: someone should look
+	Ask       string     `json:"ask,omitempty"`       // the question it asked
+	Note      string     `json:"note,omitempty"`      // its latest progress note
 	StartedAt *time.Time `json:"started_at,omitempty"`
 	EndedAt   *time.Time `json:"ended_at,omitempty"`
 }
+
+// Attentions.
+const (
+	AttentionAsked      = "asked"      // it asked a question and waits for the answer
+	AttentionPermission = "permission" // a tool it needed was denied
+	AttentionStalled    = "stalled"    // no output for a long time
+)
 
 // Snapshot is a run as a coordinator reads it.
 type Snapshot struct {
@@ -115,6 +133,11 @@ type Node struct {
 	Profiles []agent.Profile
 	// Launch starts the supervisor for a run directory; tests replace it.
 	Launch func(dir string, spec Spec) (pane string, err error)
+	// Probe checks an agent CLI; nil is agent.Probe.
+	Probe   func(provider string) agent.Check
+	checks  checks
+	sweepMu sync.Mutex
+	swept   time.Time
 }
 
 // Limits is what this machine lets a coordinator do (mode 2 sets them).
@@ -129,7 +152,8 @@ func New(home string) *Node {
 
 func (n *Node) runDir(id string) string { return filepath.Join(n.Dir, "runs", id) }
 
-// Start makes run p.Run happen once: a second Start of the same run answers how it goes.
+// Start makes run p.Run happen once: a second Start of the same run answers how it goes. The run directory appears
+// whole (made aside, then renamed into place); a directory or slot another run holds refuses it with conflict.
 func (n *Node) Start(p StartParams) (Snapshot, error) {
 	if !runID.MatchString(p.Run) {
 		return Snapshot{}, &wire.Error{Code: wire.CodeBadRequest, Detail: "run id"}
@@ -148,31 +172,121 @@ func (n *Node) Start(p StartParams) (Snapshot, error) {
 	if err != nil {
 		return Snapshot{}, err
 	}
+	blocked := n.Check(p.Profile.Provider, false).Blocker()
 	if err := os.MkdirAll(filepath.Dir(dir), 0o700); err != nil {
 		return Snapshot{}, err
 	}
-	if err := os.Mkdir(dir, 0o700); err != nil {
-		if errors.Is(err, os.ErrExist) { // another Start of the same run got here first
-			return n.Snapshot(p.Run)
-		}
+	unlock, err := filelock.Lock(filepath.Join(n.Dir, "admit.lock"))
+	if err != nil {
 		return Snapshot{}, err
 	}
-	err = fileio.WriteFile(filepath.Join(dir, "prompt.md"), []byte(p.Brief), 0o600)
-	if err == nil {
-		err = writeJSON(filepath.Join(dir, "spec.json"), spec)
+	defer unlock()
+	if _, err := os.Stat(dir); err == nil {
+		return n.Snapshot(p.Run)
 	}
-	if err == nil {
+	if blocked == "" {
+		if busy := n.busy(p.Dir); busy != "" {
+			return Snapshot{}, &wire.Error{Code: wire.CodeConflict, Detail: busy}
+		}
+	}
+	err = n.publish(dir, func(tmp string) error {
+		if err := fileio.WriteFile(filepath.Join(tmp, "prompt.md"), []byte(n.brief(p, spec, dir)), 0o600); err != nil {
+			return err
+		}
+		return writeJSON(filepath.Join(tmp, "spec.json"), spec)
+	})
+	if errors.Is(err, os.ErrExist) { // another Start or a stop's tombstone got here first
+		return n.Snapshot(p.Run)
+	}
+	if err != nil {
+		return Snapshot{}, err
+	}
+	reason := blocked
+	if reason == "" {
 		var pane string
 		pane, err = n.Launch(dir, spec)
 		if err == nil && pane != "" {
 			writeJSON(filepath.Join(dir, "pane.json"), map[string]string{"pane": pane})
 		}
+		if err != nil {
+			reason = err.Error()
+		}
 	}
-	if err != nil {
+	if reason != "" {
 		now := time.Now()
-		decide(dir, State{Rev: 1, State: StateFailed, Reason: err.Error(), EndedAt: &now})
+		decide(dir, State{Rev: 1, State: StateFailed, Reason: reason, Provider: spec.Provider, Session: spec.Session, EndedAt: &now})
 	}
 	return n.Snapshot(p.Run)
+}
+
+// publish makes run directory dir whole: fill writes it aside, and it is renamed into place unless dir exists
+// (os.ErrExist).
+func (n *Node) publish(dir string, fill func(tmp string) error) error {
+	var b [4]byte
+	rand.Read(b[:])
+	tmp := filepath.Join(filepath.Dir(dir), newPrefix+filepath.Base(dir)+"-"+hex.EncodeToString(b[:]))
+	if err := os.Mkdir(tmp, 0o700); err != nil {
+		return err
+	}
+	err := fill(tmp)
+	if err == nil {
+		if _, serr := os.Stat(dir); serr == nil {
+			err = os.ErrExist
+		} else if err = fileio.Rename(tmp, dir); err != nil && paths.Exists(dir) {
+			err = os.ErrExist
+		}
+	}
+	if err != nil {
+		os.RemoveAll(tmp)
+	}
+	return err
+}
+
+// newPrefix marks a run directory being made; one left by a crash is removed after staleNew.
+const (
+	newPrefix = ".new-"
+	staleNew  = time.Hour
+)
+
+// busy says why this node takes no new run in dir now: another run holds the directory, or every slot is taken; ""
+// when it may start. The caller holds the admission lock.
+func (n *Node) busy(dir string) string {
+	real, _ := realPath(dir)
+	ents, _ := os.ReadDir(filepath.Join(n.Dir, "runs"))
+	used := 0
+	for _, e := range ents {
+		if !runID.MatchString(e.Name()) {
+			continue
+		}
+		s, err := n.Snapshot(e.Name())
+		if err != nil || !holds(s, n.runDir(e.Name())) {
+			continue
+		}
+		used++
+		var spec Spec
+		if readJSON(filepath.Join(n.runDir(e.Name()), "spec.json"), &spec) != nil || spec.Dir == "" {
+			continue
+		}
+		if other, err := realPath(spec.Dir); err == nil && real != "" && paths.Same(other, real) {
+			return "dir_busy " + e.Name()
+		}
+	}
+	if n.Limits.Slots > 0 && used >= n.Limits.Slots {
+		return fmt.Sprintf("slots %d/%d", used, n.Limits.Slots)
+	}
+	return ""
+}
+
+// holds: the run may still be writing its directory: it has not ended, or its supervisor is gone while its agent may
+// live on.
+func holds(s Snapshot, dir string) bool {
+	switch {
+	case Terminal(s.State.State):
+		return false
+	case s.State.State == StateUnknown:
+		return s.Pid > 0 && proc.Alive(s.Pid)
+	}
+	return true
 }
 
 // admit applies this machine's limits to p: the profile it runs (with allow_profiles, this machine's own of that
@@ -204,7 +318,7 @@ func (n *Node) admit(p *StartParams) error {
 
 // safePermissions are the permission modes a coordinator may ask for on a node that allows no bypass.
 var safePermissions = map[string][]string{
-	tend.ProviderClaude: {"", "default", "acceptEdits", "plan"},
+	tend.ProviderClaude: {"", "default", "manual", "acceptEdits", "plan", "dontAsk"}, // not auto: it acts without asking
 	tend.ProviderCodex:  {"", "read-only", "workspace-write"},
 }
 
@@ -237,6 +351,15 @@ func (n *Node) spec(p StartParams, dir string) (Spec, error) {
 	if runner == RunnerHerdr && p.Profile.Provider != tend.ProviderClaude {
 		return Spec{}, &wire.Error{Code: wire.CodeBadRequest, Detail: "runner herdr runs claude only"}
 	}
+	if p.Resume != "" {
+		if !prov.Caps().Continue {
+			return Spec{}, &wire.Error{Code: wire.CodeBadRequest, Detail: "provider " + p.Profile.Provider + " cannot continue a session"}
+		}
+		if runner == RunnerHerdr {
+			return Spec{}, &wire.Error{Code: wire.CodeBadRequest, Detail: "runner herdr cannot continue a session"}
+		}
+		runner = RunnerBackground
+	}
 	if runner == "" {
 		runner = RunnerBackground
 		if p.Profile.Provider == tend.ProviderClaude && herdrFits(p.Dir) {
@@ -244,8 +367,9 @@ func (n *Node) spec(p StartParams, dir string) (Spec, error) {
 		}
 	}
 	promptFile := filepath.Join(dir, "prompt.md")
-	ls := agent.LaunchSpec{Profile: p.Profile, Dir: p.Dir, PromptFile: promptFile, Headless: runner == RunnerBackground, Name: p.Title}
-	if prov.Caps().PresetSession {
+	ls := agent.LaunchSpec{Profile: p.Profile, Dir: p.Dir, PromptFile: promptFile, Headless: runner == RunnerBackground, Name: p.Title,
+		Resume: p.Resume}
+	if prov.Caps().PresetSession && p.Resume == "" {
 		ls.SessionID = newUUID()
 	}
 	stdin := false
@@ -270,8 +394,48 @@ func (n *Node) spec(p StartParams, dir string) (Spec, error) {
 	}
 	return Spec{Run: p.Run, Task: p.Task, Coordinator: p.Coordinator, Argv: cmd.Argv(), Dir: p.Dir, Runner: runner,
 		Stdin: stdin, Thread: p.Profile.Provider == tend.ProviderCodex, Provider: agent.SessionProvider(p.Profile.Provider),
-		Session: ls.SessionID, Title: p.Title, Created: time.Now()}, nil
+		Agent: p.Profile.Provider, Session: cmp.Or(ls.SessionID, p.Resume), Title: p.Title, StallAfter: n.stallAfter(),
+		Created: time.Now()}, nil
 }
+
+// defaultStall is how long a background run may say nothing before it is marked stalled.
+const defaultStall = 15 * time.Minute
+
+func (n *Node) stallAfter() time.Duration {
+	switch s := n.Limits.StallAfter; s {
+	case "":
+		return defaultStall
+	case "off", "0":
+		return 0
+	default:
+		if d, err := time.ParseDuration(s); err == nil && d > 0 {
+			return d
+		}
+		return defaultStall
+	}
+}
+
+// brief is what prompt.md holds: the task brief and, for a run no one watches, how to ask and report.
+func (n *Node) brief(p StartParams, spec Spec, dir string) string {
+	if spec.Runner != RunnerBackground {
+		return p.Brief
+	}
+	self, err := os.Executable()
+	if err != nil {
+		self = "tend"
+	}
+	tendCmd := shell.POSIX.Join([]string{self, "run"})
+	return strings.TrimRight(p.Brief, "\n") + "\n\n" + fmt.Sprintf(convention, p.Run, agent.AskMark, tendCmd, tendCmd)
+}
+
+// convention tells a background agent how to ask and report: nobody answers a prompt while it runs.
+const convention = `---
+This task runs unattended under tend (run %[1]s); nobody watches it live and nobody can answer a prompt.
+- If you need a decision or information from the user to go on, stop working and make your final message start with
+  "%[2]s" followed by the question. The answer comes back as a new message in this session.
+- To report progress, you may run: %[3]s note "<one line>"
+- To ask while you keep working on something else, you may run: %[4]s ask "<question>"
+`
 
 // readBrief is an interactive agent's first message; the brief itself stays in the file (argv shows in ps).
 const readBrief = "Read the task brief in %s and do the task it describes."
@@ -286,21 +450,62 @@ func (n *Node) Stop(r RunRef) (Snapshot, error) {
 	if err := os.MkdirAll(filepath.Dir(dir), 0o700); err != nil {
 		return Snapshot{}, err
 	}
-	if err := os.Mkdir(dir, 0o700); err == nil {
-		if err := writeJSON(filepath.Join(dir, "spec.json"), Spec{Run: r.Run, Coordinator: r.Coordinator, Created: time.Now()}); err != nil {
-			return Snapshot{}, err
-		}
+	if !paths.Exists(dir) {
 		now := time.Now()
-		if _, err := decide(dir, State{Rev: 1, State: StateStopped, Reason: "never_started", EndedAt: &now}); err != nil {
+		err := n.publish(dir, func(tmp string) error { // a tombstone: a start arriving later finds the run stopped
+			if err := writeJSON(filepath.Join(tmp, "spec.json"), Spec{Run: r.Run, Coordinator: r.Coordinator, Created: now}); err != nil {
+				return err
+			}
+			if !claim(tmp) {
+				return os.ErrExist
+			}
+			return writeJSON(filepath.Join(tmp, "state.json"), State{Rev: 1, State: StateStopped, Reason: "never_started", EndedAt: &now})
+		})
+		if err != nil && !errors.Is(err, os.ErrExist) {
 			return Snapshot{}, err
 		}
-	} else if !errors.Is(err, os.ErrExist) {
-		return Snapshot{}, err
 	}
 	if err := fileio.WriteFile(filepath.Join(dir, "stop"), nil, 0o600); err != nil {
 		return Snapshot{}, err
 	}
+	settle(dir)
 	return n.Snapshot(r.Run)
+}
+
+// settle ends a run whose supervisor is gone: its agent, if it still runs and is provably the same process (pid and
+// start time), is ended, and the run is recorded stopped. An agent whose identity cannot be proved is left running and
+// the run unknown. Taking the run's lock is taking the dead supervisor's right to write its state.
+func settle(dir string) {
+	unlock, err := filelock.TryLock(filepath.Join(dir, "lock"))
+	if err != nil {
+		return
+	}
+	defer unlock()
+	var st State
+	if readState(dir, &st) != nil || Terminal(st.State) {
+		return
+	}
+	reason := "supervisor_gone"
+	if st.Pid > 0 && proc.Alive(st.Pid) {
+		if now := proc.StartTime(st.Pid); st.PidStart == 0 || now == 0 {
+			return
+		} else if now == st.PidStart {
+			proc.KillTree(st.Pid)
+			for deadline := time.Now().Add(2 * time.Second); proc.Alive(st.Pid) && time.Now().Before(deadline); {
+				time.Sleep(20 * time.Millisecond)
+			}
+			if proc.Alive(st.Pid) {
+				return
+			}
+			reason = "orphan_stopped"
+		}
+	} else if st.State == StateStarting && st.Pid == 0 && st.Sup > 0 {
+		return // the supervisor died starting it: whether an agent runs is unknown
+	}
+	now := time.Now()
+	st.Rev++
+	st.State, st.Reason, st.EndedAt, st.Attention, st.Ask = StateStopped, reason, &now, "", ""
+	writeJSON(filepath.Join(dir, "state.json"), st)
 }
 
 // claim takes the one right to decide how run directory dir goes: its supervisor claims it before it writes a state,
@@ -347,10 +552,10 @@ func (n *Node) Snapshot(id string) (Snapshot, error) {
 		return Snapshot{}, err
 	}
 	s := Snapshot{Run: id, Task: spec.Task, StopAsked: paths.Exists(filepath.Join(dir, "stop"))}
-	err := readJSON(filepath.Join(dir, "state.json"), &s.State)
+	err := readState(dir, &s.State)
 	held := filelock.Held(filepath.Join(dir, "lock"))
 	if !held && (err != nil || !Terminal(s.State.State)) { // the supervisor may have written and left in between
-		err = readJSON(filepath.Join(dir, "state.json"), &s.State)
+		err = readState(dir, &s.State)
 	}
 	switch {
 	case err == nil:
@@ -361,22 +566,16 @@ func (n *Node) Snapshot(id string) (Snapshot, error) {
 		return Snapshot{}, err
 	case held || !paths.Exists(filepath.Join(dir, "claim")) && time.Since(created) <= notLaunched:
 		s.State = State{State: StateStarting, Provider: spec.Provider, Session: spec.Session}
-	default: // the agent starts only after its first state is written: it never started
-		now := time.Now()
-		st, err := decide(dir, State{Rev: 1, State: StateFailed, Reason: "not_launched", Provider: spec.Provider,
-			Session: spec.Session, EndedAt: &now})
-		if errors.Is(err, os.ErrNotExist) {
-			st = State{State: StateStarting, Provider: spec.Provider, Session: spec.Session}
-		} else if err != nil {
-			return Snapshot{}, err
-		}
-		s.State = st
+	default: // the agent starts only after its first state is written, and a supervisor this late starts none
+		ended := created.Add(notLaunched)
+		s.State = State{State: StateFailed, Reason: "not_launched", Provider: spec.Provider, Session: spec.Session, EndedAt: &ended}
 	}
 	return s, nil
 }
 
-// List is every run coordinator started here, oldest first; finished runs it acknowledged long ago are removed.
-func (n *Node) List(coordinator string, ack []string) ([]Snapshot, error) {
+// List is every run coordinator started here (only, when given), oldest first; finished runs it acknowledged long ago
+// are removed.
+func (n *Node) List(coordinator string, ack []string, only ...string) ([]Snapshot, error) {
 	for _, id := range ack {
 		if runID.MatchString(id) {
 			acked := filepath.Join(n.runDir(id), "acked")
@@ -384,6 +583,20 @@ func (n *Node) List(coordinator string, ack []string) ([]Snapshot, error) {
 				fileio.WriteFile(acked, nil, 0o600) // its mtime starts the keepDone clock
 			}
 		}
+	}
+	if len(only) > 0 && !n.sweepDue() {
+		var out []Snapshot
+		for _, id := range only {
+			var spec Spec
+			if !runID.MatchString(id) || readJSON(filepath.Join(n.runDir(id), "spec.json"), &spec) == nil && spec.Coordinator != coordinator {
+				continue
+			}
+			if s, err := n.Snapshot(id); err == nil {
+				out = append(out, s)
+			}
+		}
+		sort.Slice(out, func(i, j int) bool { return out[i].Run < out[j].Run })
+		return out, nil
 	}
 	ents, err := os.ReadDir(filepath.Join(n.Dir, "runs"))
 	if errors.Is(err, os.ErrNotExist) {
@@ -395,6 +608,12 @@ func (n *Node) List(coordinator string, ack []string) ([]Snapshot, error) {
 	var out []Snapshot
 	for _, e := range ents {
 		id := e.Name()
+		if strings.HasPrefix(id, newPrefix) {
+			if fi, err := e.Info(); err == nil && time.Since(fi.ModTime()) > staleNew {
+				os.RemoveAll(filepath.Join(n.Dir, "runs", id))
+			}
+			continue
+		}
 		if !runID.MatchString(id) {
 			continue
 		}
@@ -407,6 +626,9 @@ func (n *Node) List(coordinator string, ack []string) ([]Snapshot, error) {
 		if readJSON(filepath.Join(dir, "spec.json"), &spec) == nil && spec.Coordinator != coordinator {
 			continue
 		}
+		if len(only) > 0 && !slices.Contains(only, id) {
+			continue
+		}
 		s, err := n.Snapshot(id)
 		if err != nil {
 			continue
@@ -415,6 +637,20 @@ func (n *Node) List(coordinator string, ack []string) ([]Snapshot, error) {
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Run < out[j].Run })
 	return out, nil
+}
+
+// sweepEvery is how often a list reads every run directory (removing the ones acknowledged long ago) even when it
+// is asked for a few runs.
+const sweepEvery = 10 * time.Minute
+
+func (n *Node) sweepDue() bool {
+	n.sweepMu.Lock()
+	defer n.sweepMu.Unlock()
+	if time.Since(n.swept) < sweepEvery {
+		return false
+	}
+	n.swept = time.Now()
+	return true
 }
 
 // forget removes run id's directory; its session stays listed as a run's session.
@@ -433,6 +669,19 @@ func (n *Node) forget(id string) {
 		}
 	}
 	os.RemoveAll(dir)
+}
+
+// readState reads dir's state.json; a read that fails other than for a missing file is tried again for a moment
+// (Windows refuses reads while the file is being replaced).
+func readState(dir string, st *State) error {
+	var err error
+	for i := 0; i < 5; i++ {
+		if err = readJSON(filepath.Join(dir, "state.json"), st); err == nil || errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	return err
 }
 
 func writeJSON(path string, v any) error {

@@ -349,9 +349,12 @@ TUI 里用机器筹码（`m`）选本机、全部或某一台；远端行带 `@�
 ```bash
 tend task add "修掉不稳定的分页测试" --dir ~/dev/webapp --brief-file brief.md --agent claude
 tend run start <task> --machine mba --wait   # 排到 mba 上，一直跟到结束
-tend run list · tend run logs <run> -f · tend run stop <run> · tend run abandon <run>
+tend run list · tend run show <run> · tend run logs <run> -f · tend run stop <run> · tend run abandon <run>
+tend run continue <run> "用 main 分支"   # 回复一个在等你的 run，在它自己的会话里接着跑
 tend task list [--all] · tend task show <id> · tend task edit <id> --title … · tend task done|reopen|cancel <id>
 tend agent list · tend machine list [--connect]
+tend inbox                                   # 所有机器上需要你的 run，等得最久的在前
+tend journal verify · tend journal repair    # 检查协调器的任务日志；repair 截掉残缺或损坏的最后一行
 ```
 
 TUI 里第 `5` 页是任务：`w` 新建，`e` 编辑，`x` 标完成 / 重新打开，`Enter` 打开任务对话框（选机器和档案跑起来、停止、放弃、接手），
@@ -371,6 +374,24 @@ TUI 里第 `5` 页是任务：`w` 新建，`e` 编辑，`x` 标完成 / 重新�
 `command` 可以跑任意命令行：`{prompt_file}`、`{model}`、`{dir}` 会被填上，任务书从不出现在命令行上（`"stdin": true` 改成从标准输入给）；
 `machine` 表示这个档案只在那台机器上跑。`machines.<名>.slots`（默认 2）限制一台机器同时跑几个 run；同一目录的 run 排队等前一个结束。
 
+**跑之前。** `tend run start` 先说明 run 会怎么跑：那台机器上 agent 命令行的版本、是否登录，以及要不要等机器、槽位或目录。
+命令行没装或没登录时 run 会直接失败，所以不派发（`--force` 强制派发；节点那边也会以同样的原因拒绝）。TUI 和网页的派发框显示同样的内容；
+`tend machine list` 多了 AGENTS 一列。
+
+**run 需要你的时候。** 后台没人回答提问，所以后台 agent 会被告知怎么问：最后一条消息以 `ASK:` 开头，或者执行 `tend run ask "…"`
+（`tend run note "…"` 报告进展；两者都经 `TEND_RUN_DIR` 写进 run 的状态）。后台时 Claude 的提问工具是关掉的，
+被权限提示拒掉的工具会列出来。这样结束的 run 显示为「等你回复」或「等你批准」；`tend run continue <run> "…"`（TUI 和网页里的
+**回复**）带着你的回答，在同一个会话里起一个新的后台 run。`tend run continue --session <id> "…"` 对任意已索引的会话也一样。
+失败的 run 会说明原因：`cli_missing`、`auth_missing`、`auth`、`quota`、`rate_limit`、`overloaded`、`context_overflow`、`network`、
+`session_missing`、`permission_denied`，附上命令行的原话和下一步（`tend run show`）。15 分钟没有输出的 run 标为「长时间没有输出」
+（`node.stall_after`，`"off"` 关闭），只标记，不会停掉。在 Herdr tab 里跑的 run，Herdr 显示它的 pane 卡住、transcript
+停在一个提问上，或（装了 `tend install-hook` 时）Claude 最新的 hook 事件是提示，都会标成在问你。`tend inbox`、TUI 任务列表顶部和网页的
+**待处理**计数把所有需要你的 run 放在一起，等得最久的在前。
+
+想收到通知就配一个命令：`"notify_command": ["my-notifier"]` 会在 run 需要人的时候运行，标准输入是一个 JSON 对象（`event` 为
+`run.waiting`、`run.asked`、`run.failed` 或 `run.stalled`，还有 run、task、title、machine、agent、state、reason、detail、ask）；
+`notify_events` 可以只选其中几种。
+
 **谁在协调。** 同一时刻只有一个进程记任务日志、派发 run：谁拿到 `~/.agent/tend/coord/` 里的锁就是谁——打开任务页的 TUI、
 执行期间的 `tend task|run …` 命令，或你常驻的 `tend service`。其它进程经本机 socket 找它。run 不依赖它：
 每个 run 在自己的机器上有一个监督进程，记下 run 怎么结束；下一个协调器读到后补上记录。
@@ -388,19 +409,21 @@ tend server --listen 100.101.8.10:7788
 
 # 每台跑 agent 的机器：config.json 里要有 "node": {"allow_dirs": ["~/dev"]}
 tend node --connect ws://100.101.8.10:7788 --token-file ~/.config/tend/node-token
+# 或者让它登录即启动：LaunchAgent（macOS）、systemd --user（Linux）、计划任务（Windows）
+tend node install-service --connect ws://100.101.8.10:7788 --token-file ~/.config/tend/node-token   # 先用 --print 看一眼
 
 # 客户端：config.json {"coordinator": {"url": "ws://100.101.8.10:7788", "token_file": "~/.config/tend/client-token"}}
 tend task list   # 命令行和 TUI 的任务页都改为和 server 说话
 ```
 
 节点只在 `allow_dirs` 里跑。没设 `node.allow_bypass` 时：`command` 档案只按节点自己 `config.json` 里的定义运行；claude / codex 的
-`args` 只接受节点自己档案里的；权限模式只放行 `default` / `acceptEdits` / `plan`（claude）和 `read-only` / `workspace-write`（codex）；
+`args` 只接受节点自己档案里的；权限模式只放行 `default` / `manual` / `acceptEdits` / `plan` / `dontAsk`（claude；不含 `auto`）和 `read-only` / `workspace-write`（codex）；
 带已知绕过参数的命令行拒绝。设了 `node.allow_profiles` 时只跑这些名字，且都按节点自己的定义（要在节点上定义好，带上需要的权限）。
-`tend server token rm <名>` 吊销 token 并断开它的连接。
+`tend server token rm <名>` 吊销 token 并断开它的连接。节点 token 绑定第一台用它连上的机器，换机器会被拒绝，要先 `tend server token rebind <名>`。
 
 **Web UI。** server 在自己的地址上还提供一个网页（`http://100.101.8.10:7788/`）。用 client token 登录
 （`tend server token add --client web`）；浏览器把它存在 HttpOnly cookie 里 30 天，退出登录或 `tend server token rm web` 即失效。
-网页列出任务和它们的 run；新建、编辑、派发任务；跟看 run 的输出和对话；停止或放弃 run；把任务标为完成、重开或取消；
+网页列出任务和它们的 run；新建、编辑、派发任务；派发前预检；跟看 run 的输出和对话；显示 run 为什么结束、问了什么并接受回复；停止或放弃 run；把任务标为完成、重开或取消；
 查看机器和 agent 档案。它实时跟随任务日志，断线后自动重连。
 
 client token 在上述限制内等同于每个节点上的 shell：服务器只部署在 tailnet 内；用 `--plain` 时只让绑定在 tailnet 地址上的转发器连到它。

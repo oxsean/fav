@@ -1,6 +1,37 @@
 'use strict';
 
 const words = {
+  asked: ['等你回复', 'Waiting for you'], permission: ['等你批准', 'Needs permission'], stalled: ['长时间无输出', 'No output lately'],
+  question: ['它问', 'It asked'], progress: ['进展', 'Progress'], nextStep: ['下一步', 'Next'], reply: ['回复', 'Reply'],
+  replyPlaceholder: ['你的回答；会作为新的后台运行进入同一个会话', 'Your answer; it goes to the same session as a new background run'],
+  replied: ['回复已排队', 'Reply queued'], replyEmpty: ['先写回复内容', 'Write a reply first'], checking: ['正在检查机器…', 'Checking the machine…'],
+  'reason.cli_missing': ['那台机器上没装这个 agent 的命令行', "The agent's CLI is not installed on that machine"],
+  'reason.auth_missing': ['那台机器上 agent 的命令行没登录', "The agent's CLI is not logged in on that machine"],
+  'reason.auth': ['agent 的登录被拒（过期或无效）', "The agent's login was refused (expired or invalid)"],
+  'reason.quota': ['账号用量或额度用完了', "The account's usage limit or credit ran out"],
+  'reason.rate_limit': ['接口限流', 'The API rate-limited it'], 'reason.overloaded': ['模型服务过载', 'The model service was overloaded'],
+  'reason.context_overflow': ['对话超出了模型的上下文', "The conversation outgrew the model's context"],
+  'reason.network': ['连模型服务的网络出错', 'The network to the model service failed'],
+  'reason.session_missing': ['那台机器上找不到要续的会话', 'The session to continue is not on that machine'],
+  'reason.permission_denied': ['它要用的工具被拒了（后台没人批准）', 'A tool it needed was denied (no one approves prompts in the background)'],
+  'reason.node_outdated': ['那台机器上的 tend 太旧', 'tend on that machine is too old for this'],
+  'hint.cli_missing': ['在那台机器上装好命令行，再运行一次', 'Install the CLI on that machine, then run the task again'],
+  'hint.auth': ['在那台机器上登录，再运行一次', 'Log in on that machine, then run the task again'],
+  'hint.quota': ['等额度恢复或换账号后再运行', 'Wait for the limit to reset or switch accounts, then run again'],
+  'hint.later': ['过一会儿再运行', 'Run it again in a while'], 'hint.context_overflow': ['缩小任务书重新运行，不要续聊', 'Start a new run with a narrower brief instead of continuing'],
+  'hint.session_missing': ['改为新运行，不要续聊', 'Start a new run instead of continuing'], 'hint.node_outdated': ['在协调器上运行 tend hosts install 更新那台机器', 'Update that machine: tend hosts install'],
+  'why.cli_missing': ['那台机器没装 {0}：运行会直接失败', '{0} is not installed there: the run would fail'],
+  'why.auth_missing': ['那台机器上 {0} 没登录：运行会直接失败', '{0} is not logged in there: the run would fail'],
+  'why.node_outdated': ['那台机器的 tend（{0}）太旧，不能续聊', 'tend there ({0}) is too old to continue a session'],
+  'why.offline': ['机器离线（{0}）：运行先排队', 'The machine is offline ({0}): the run waits in the queue'],
+  'why.connecting': ['正在连接机器：连上前运行先排队', 'Connecting to the machine: the run waits until it answers'],
+  'why.slots': ['槽位已满（{0}）：运行等空出来', 'All slots are busy ({0}): the run waits for one'],
+  'why.dir_busy': ['运行 {0} 占着同一目录：等它结束', 'Run {0} uses the same directory: this one waits for it to end'],
+  'why.auth_unknown': ['看不出 {0} 是否已登录', 'Could not tell whether {0} is logged in'],
+  'why.unchecked': ['没连上机器，没检查它的 agent 命令行', 'The machine was not reached, so its agent CLI is not checked'],
+  'why.herdr': ['那边有 Herdr 工作区包含该目录时在标签页里打开，否则后台运行', 'Opens in a Herdr tab when a workspace there holds the directory, else runs in the background'],
+  'why.background': ['后台运行，输出会保留', 'Runs in the background; its output is kept'],
+  'why.continues': ['续会话 {0}', 'Continues session {0}'],
   tasks: ['任务', 'Tasks'], machines: ['机器', 'Machines'], sessions: ['会话', 'Sessions'], later: ['稍后', 'Later'],
   workspace: ['个人工作区', 'Personal workspace'], operations: ['工作区', 'Workspace'],
   newTask: ['新建任务', 'New task'], editTask: ['编辑任务', 'Edit task'], search: ['搜索标题、ID、目录', 'Search title, ID, directory'],
@@ -9,8 +40,8 @@ const words = {
   todo: ['未完成', 'To do'], done: ['已完成', 'Done'], canceled: ['已取消', 'Canceled'], queued: ['排队', 'Queued'], starting: ['启动中', 'Starting'],
   running: ['运行中', 'Running'], unknown: ['失联', 'Unknown'], exited: ['已退出', 'Exited'], stopped: ['已停止', 'Stopped'],
   failed: ['失败', 'Failed'], abandoned: ['已放弃', 'Abandoned'], connected: ['在线', 'Connected'], connecting: ['连接中', 'Connecting'],
-  offline: ['离线', 'Offline'], idle: ['未连接', 'Idle'], noRun: ['尚未运行', 'No runs yet'], active: ['进行中', 'Active'], needsAttention: ['待处理', 'Attention'],
-  taskFirst: ['未完成优先', 'To do first'], results: ['个任务', 'tasks'], latest: ['最近一次', 'Latest run'],
+  offline: ['离线', 'Offline'], idle: ['未连接', 'Idle'], noRun: ['尚未运行', 'No runs yet'], active: ['进行中', 'Active'], needsAttention: ['待处理', 'Attention'], needsYou: ['等你处理', 'Needs you'],
+  taskFirst: ['等你处理的在前，再到未完成', 'Needs you first, then to do'], results: ['个任务', 'tasks'], latest: ['最近一次', 'Latest run'],
   live: ['实时连接', 'Live connection'], logout: ['登出', 'Log out'], lang: ['切换到 English', 'Switch to 中文'],
   system: ['跟随系统', 'System theme'], light: ['浅色', 'Light'], dark: ['深色', 'Dark'], theme: ['主题', 'Theme'],
   dispatch: ['派发', 'Dispatch'], dispatchRun: ['派发运行', 'Dispatch run'], enqueue: ['确认并排队', 'Confirm & queue'],
@@ -103,7 +134,12 @@ const icon = name => `<svg class="icon" viewBox="0 0 24 24" aria-hidden="true">$
   pause:'<path d="M8 5v14M16 5v14"/>', logout:'<path d="M10 3H4v18h6M9 12h12m-5-5 5 5-5 5"/>'
 })[name] || '<circle cx="12" cy="12" r="8"/>'}</svg>`;
 const openStates = new Set(['queued', 'starting', 'running', 'unknown']);
-const statusSymbols = {queued:'◷', starting:'◌', running:'●', unknown:'?', exited:'✓', stopped:'■', failed:'!', canceled:'×', abandoned:'⊘', todo:'○', done:'✓', connected:'●', connecting:'◌', offline:'×', idle:'○'};
+const statusSymbols = {queued:'◷', starting:'◌', running:'●', unknown:'?', exited:'✓', stopped:'■', failed:'!', canceled:'×', abandoned:'⊘', todo:'○', done:'✓', connected:'●', connecting:'◌', offline:'×', idle:'○', asked:'?', permission:'!', stalled:'…'};
+const why = w => t('why.'+w.code).replace('{0}', w.detail || '');
+const waiting = run => run && !openStates.has(run.state) && ['asked', 'permission'].includes(run.attention);
+const attention = run => run && (waiting(run) || openStates.has(run.state) && ['asked', 'stalled'].includes(run.attention)) ? run.attention : '';
+const runNeedsYou = run => !!run && (waiting(run) || ['failed', 'unknown'].includes(run.state) || run.state === 'exited' && run.exit_code != null && run.exit_code !== 0 || openStates.has(run.state) && ['asked', 'stalled'].includes(run.attention));
+const since = run => run.ended_at || run.started_at || run.queued_at;
 const badge = state => `<span class="status ${esc(state)}"><span class="status-icon" aria-hidden="true">${statusSymbols[state] || '·'}</span>${t(state)}</span>`;
 const clone = value => JSON.parse(JSON.stringify(value));
 const time = value => value ? new Date(value).toLocaleTimeString(lang === 'zh' ? 'zh-CN' : 'en-GB', {hour:'2-digit', minute:'2-digit', second:'2-digit'}) : '—';
@@ -120,7 +156,7 @@ const ui = {
   authenticated:false, loggedOut:false, online:true, reconnecting:false, page:'tasks', loading:false, error:'',
   state:{seq:0,tasks:{},runs:{}}, machines:[], agents:[], task:'t_7a21', run:'', tab:'output', mobileDetail:false,
   search:'', status:'', machine:'', runState:'', who:'', raw:false, follow:true, pending:0,
-  briefs:new Map(), outputs:new Map(), chats:new Map(), busy:new Set(), lastSync:new Date(), unsubscribe:null,
+  briefs:new Map(), drafts:new Map(), outputs:new Map(), chats:new Map(), busy:new Set(), lastSync:new Date(), unsubscribe:null,
   modalType:'', modalTask:'', modalDirty:false, modalReturn:null, requestGeneration:0, viewReadLoading:false,
   detailError:'', modalOpener:null, focusTask:'t_7a21', toastTimer:null, reconnectTimer:null, frozenOutput:null, machineSync:new Date()
 };
@@ -226,17 +262,19 @@ function renderBanner() {
   const el=document.querySelector('#connection-banner');if(!el)return;
   el.innerHTML=ui.online?'':`<div class="banner" role="alert">${icon('offline')}<p><strong>${t('lost')}</strong><br>${t('lostHelp')} <small>${t('lastSync')} ${time(ui.lastSync)}</small></p>${button('reconnect',t(ui.reconnecting?'reconnecting':'reconnect'),ui.reconnecting?'disabled':'')}</div>`;
 }
+const needsYou=task=>task.status==='todo'&&runNeedsYou(latestRun(task.id));
 function filteredTasks() {
+  const rank=task=>needsYou(task)?0:task.status==='todo'?1:2;
   return Object.values(ui.state.tasks).filter(task=>{
     const run=latestRun(task.id), search=`${task.title} ${task.id} ${task.dir}`.toLowerCase();
-    return (!ui.status||task.status===ui.status)&&(!ui.machine||(run?.machine||task.machine)===ui.machine)&&(!ui.runState||(run?.state||'none')===ui.runState)&&(!ui.search||search.includes(ui.search.toLowerCase()));
-  }).sort((a,b)=>(a.status!=='todo')-(b.status!=='todo')||b.updated_at.localeCompare(a.updated_at));
+    return (!ui.status||task.status===ui.status)&&(!ui.machine||(run?.machine||task.machine)===ui.machine)&&(!ui.runState||(ui.runState==='needs'?needsYou(task):(run?.state||'none')===ui.runState))&&(!ui.search||search.includes(ui.search.toLowerCase()));
+  }).sort((a,b)=>rank(a)-rank(b)||(rank(a)===0?since(latestRun(a.id)).localeCompare(since(latestRun(b.id))):b.updated_at.localeCompare(a.updated_at)));
 }
 function renderRows() {
   if(ui.loading)return `<div aria-busy="true" aria-label="${t('loading')}">${Array.from({length:5},()=>'<div class="skeleton-row"><div class="skeleton"></div><div class="skeleton"></div><div class="skeleton"></div></div>').join('')}</div>`;
   if(ui.error)return statePanel('error',t('loadError'),t('loadErrorHelp'),'retry-data',t('retry'));
   const none=!Object.keys(ui.state.tasks).length,tasks=filteredTasks();if(!tasks.length)return statePanel('tasks',t(none?'empty':'noMatches'),t(none?'emptyHelp':'noMatchesHelp'),none?'new':'clear-filters',t(none?'newTask':'clearFilters'));
-  return tasks.map(task=>{const run=latestRun(task.id);return `<button class="task-row ${ui.task===task.id?'selected':''}" id="row-${task.id}" data-action="select-task" data-id="${task.id}" aria-current="${ui.task===task.id?'true':'false'}" tabindex="${ui.focusTask===task.id?'0':'-1'}"><div class="row-top"><span class="row-id">${task.id}</span>${badge(task.status)}</div><div class="row-title">${esc(task.title)}</div><div class="row-meta"><span class="machine-agent">${esc(run?.machine||task.machine||'—')} / ${esc(run?.agent||task.agent||'—')}</span><span>${elapsed(run)}</span></div><div class="mt-5">${run?badge(run.state):`<span class="muted fs-11">${t('noRun')}</span>`}</div></button>`;}).join('');
+  return tasks.map(task=>{const run=latestRun(task.id);return `<button class="task-row ${ui.task===task.id?'selected':''}" id="row-${task.id}" data-action="select-task" data-id="${task.id}" aria-current="${ui.task===task.id?'true':'false'}" tabindex="${ui.focusTask===task.id?'0':'-1'}"><div class="row-top"><span class="row-id">${task.id}</span>${badge(task.status)}</div><div class="row-title">${esc(task.title)}</div><div class="row-meta"><span class="machine-agent">${esc(run?.machine||task.machine||'—')} / ${esc(run?.agent||task.agent||'—')}</span><span>${elapsed(run)}</span></div><div class="mt-5">${run?badge(run.state)+(attention(run)?' '+badge(attention(run)):''):`<span class="muted fs-11">${t('noRun')}</span>`}</div></button>`;}).join('');
 }
 function statePanel(symbol,title,body,action,label) {return `<div class="state-panel">${icon(symbol)}<h3>${title}</h3><p>${body}</p>${action?button(action,label):''}</div>`;}
 function renderPage() {
@@ -244,11 +282,11 @@ function renderPage() {
   if(ui.page==='machines'){renderMachines();return;}
   const runs=Object.values(ui.state.runs), unfinished=Object.values(ui.state.tasks).filter(task=>task.status==='todo').length;
   el.innerHTML=`<header class="page-heading"><div><h1>${t('tasks')}</h1><p class="page-subtitle">${t('taskSubtitle')}</p></div><div class="flex"><span class="heading-right">${date(new Date())}</span>${button('new',`${icon('plus')}${t('newTask')} <kbd>n</kbd>`,ui.online?'':'disabled','primary')}</div></header>
-    <div class="metric-strip"><span class="metric"><strong>${unfinished}</strong>${t('todo')}</span><span class="metric">${badge('running')}<strong>${runs.filter(r=>['running','starting'].includes(r.state)).length}</strong></span><span class="metric">${badge('queued')}<strong>${runs.filter(r=>r.state==='queued').length}</strong></span><span class="metric">${t('needsAttention')}<strong>${runs.filter(r=>['failed','unknown'].includes(r.state)&&latestRun(r.task)?.id===r.id).length}</strong></span></div>
+    <div class="metric-strip"><span class="metric"><strong>${unfinished}</strong>${t('todo')}</span><span class="metric">${badge('running')}<strong>${runs.filter(r=>['running','starting'].includes(r.state)).length}</strong></span><span class="metric">${badge('queued')}<strong>${runs.filter(r=>r.state==='queued').length}</strong></span><button type="button" class="metric" data-action="needs-you">${t('needsAttention')}<strong>${Object.values(ui.state.tasks).filter(needsYou).length}</strong></button></div>
     <div class="task-workspace ${ui.mobileDetail?'detail-open':''}"><section class="task-list-panel" aria-label="${t('tasks')}"><div class="list-tools"><label class="search-box">${icon('search')}<input id="search-input" value="${esc(ui.search)}" placeholder="${t('search')}" aria-label="${t('search')}"><kbd>/</kbd></label>
     <div class="filter-row"><select id="status-filter" aria-label="${t('allStatus')}"><option value="">${t('allStatus')}</option>${['todo','done','canceled'].map(v=>`<option value="${v}" ${ui.status===v?'selected':''}>${t(v)}</option>`).join('')}</select>
     <select id="machine-filter" aria-label="${t('allMachines')}"><option value="">${t('allMachines')}</option>${ui.machines.map(m=>`<option value="${m.name}" ${ui.machine===m.name?'selected':''}>${m.name}</option>`).join('')}</select></div>
-    <select id="run-filter" aria-label="${t('allRuns')}"><option value="">${t('allRuns')}</option>${['queued','starting','running','unknown','exited','stopped','failed','canceled','abandoned'].map(v=>`<option value="${v}" ${ui.runState===v?'selected':''}>${t(v)}</option>`).join('')}</select>
+    <select id="run-filter" aria-label="${t('allRuns')}"><option value="">${t('allRuns')}</option><option value="needs" ${ui.runState==='needs'?'selected':''}>${t('needsYou')}</option>${['queued','starting','running','unknown','exited','stopped','failed','canceled','abandoned'].map(v=>`<option value="${v}" ${ui.runState===v?'selected':''}>${t(v)}</option>`).join('')}</select>
     <div class="list-caption"><span id="result-count">${filteredTasks().length} ${t('results')}</span><span>${t('taskFirst')}</span></div></div><div class="task-list" id="task-list">${renderRows()}</div></section>
     <section class="task-detail" id="task-detail" aria-label="${t('viewDetails')}"></section></div>`;
   renderDetail();
@@ -263,7 +301,7 @@ function renderDetail() {
   if(ui.loading){el.innerHTML=statePanel('refresh',t('loading'),'');return;}
   if(ui.error){el.innerHTML=statePanel('tasks',t('selectTask'),t('selectHelp'));return;}
   const task=currentTask();if(!task){el.innerHTML=statePanel('tasks',t('selectTask'),t('selectHelp'));return;}
-  const runs=taskRuns(task.id),run=selectedRun(),writeDisabled=ui.online?'':'disabled';
+  const runs=taskRuns(task.id),run=selectedRun(),writeDisabled=ui.online?'':'disabled',typing=document.activeElement?.id==='reply-text';
   el.innerHTML=`${button('back-tasks',`${icon('back')}${t('backTasks')}`,'','mobile-back')}<div class="detail-eyebrow"><span class="mono">${task.id}</span><span>·</span>${badge(task.status)}<span>· rev ${task.rev}</span></div>
     <div class="detail-header"><h2>${esc(task.title)}</h2><div class="detail-actions">${button('edit',`${icon('edit')}${t('edit')}`,writeDisabled)}${button('dispatch',`${icon('play')}${t('dispatch')}`,writeDisabled,'primary')}</div></div>
     <div class="task-actions">${button(task.status==='todo'?'done':'reopen',`${icon(task.status==='todo'?'check':'refresh')}${t(task.status==='todo'?'markDone':'reopen')}`,writeDisabled,'quiet')}${task.status!=='canceled'?button('cancel-task',t('cancelTask'),writeDisabled,'quiet'):''}</div>
@@ -278,8 +316,10 @@ function renderDetail() {
   body.innerHTML=`<div class="run-context"><div class="grow"><label class="sr-only" for="run-select">${t('history')}</label><select id="run-select">${runs.map((r,i)=>`<option value="${r.id}" ${r.id===run.id?'selected':''}>${r.id} · ${t(r.state)}${i===0?' · '+t('latest'):''}</option>`).join('')}</select></div>${badge(run.state)}${openStates.has(run.state)?button('stop',`${icon('stop')}${t(run.want==='stop'?'stopping':'stop')}`,`${writeDisabled} ${run.want==='stop'?'disabled':''}`,'danger'):''}${run.state==='unknown'?button('abandon',t('abandon'),writeDisabled,'danger'):''}</div>
     <div class="run-details"><span class="mono">${esc(run.machine)} / ${esc(run.agent)}</span><span>${elapsed(run)}</span><span>${run.exit_code!==undefined?`${t('exitCode')} ${run.exit_code}`:esc(run.runner)}</span></div>
     ${run.state==='unknown'?`<div class="run-alert">${t('unknownReason')} ${run.reason==='supervisor_gone'?t('reasonSupervisor'):t('reasonMissing')} · <code>${esc(run.reason)}</code></div>`:run.want==='stop'&&!terminal?`<div class="run-alert">${t('pendingStop')}</div>`:''}
+    ${runFacts(run,terminal,writeDisabled)}
     ${ui.tab==='conversation'?renderChatPanel(run):renderOutputPanel(run)}
     <details class="history-note"><summary>${t('snapshot')} · ${esc(run.id)}</summary><p class="hint mt-10">${t('frozenDir')} <code>${esc(run.dir)}</code><br>${t('profileModel')}: ${esc(run.profile?.model||'—')} · ${t('permissions')}: ${esc(run.profile?.permission||'—')}</p><article class="brief">${markdown(run.brief)}</article></details>`;
+  if(typing){const r=document.querySelector('#reply-text');if(r){r.focus();r.setSelectionRange(r.value.length,r.value.length);}}
   bindOutputScroll();
 }
 function renderOutputPanel(run) {
@@ -369,6 +409,27 @@ async function openTaskForm(edit=false) {
     <div class="form-grid"><label>${t('defaultMachine')}<select name="machine">${machineOptions(task.machine,true)}</select></label><label>${t('defaultAgent')}<select name="agent">${agentOptions(task.agent,true)}</select></label></div></div>
     <footer class="modal-footer">${button('close-modal',t('cancel'))}<button type="submit" class="primary">${t(edit?'save':'create')}</button></footer></form>`,'',true);
 }
+const hints = {cli_missing:'hint.cli_missing', auth_missing:'hint.auth', auth:'hint.auth', quota:'hint.quota', rate_limit:'hint.later',
+  overloaded:'hint.later', network:'hint.later', context_overflow:'hint.context_overflow', session_missing:'hint.session_missing', node_outdated:'hint.node_outdated'};
+// runFacts: why the run ended, what it asked or last noted, what to do next, and a reply box when its session can go on.
+function runFacts(run, terminal, writeDisabled) {
+  const lines=[];
+  if(attention(run))lines.push(`<div>${badge(attention(run))}</div>`);
+  if(terminal&&run.reason&&words['reason.'+run.reason])lines.push(`<div>${t('reason.'+run.reason)}${run.detail?` · <code>${esc(run.detail)}</code>`:''}</div>`);
+  else if(terminal&&run.detail)lines.push(`<div><code>${esc(run.detail)}</code></div>`);
+  if(run.ask)lines.push(`<div><strong>${t('question')}</strong><article class="brief">${markdown(run.ask)}</article></div>`);
+  else if(run.note&&!terminal)lines.push(`<div><strong>${t('progress')}</strong> ${esc(run.note)}</div>`);
+  if(terminal&&hints[run.reason])lines.push(`<div class="hint">${t('nextStep')}: ${t(hints[run.reason])}</div>`);
+  const reply=terminal&&run.session&&!openRun(run.task)?`<form id="reply-form" class="stack mt-10" data-run="${esc(run.id)}" data-command="${commandID()}"><div class="form-error" role="alert" hidden></div><label class="sr-only" for="reply-text">${t('reply')}</label><textarea name="text" id="reply-text" rows="3" placeholder="${t('replyPlaceholder')}" ${writeDisabled}>${esc(ui.drafts.get(run.id)||'')}</textarea><div class="flex"><button class="${waiting(run)?'primary':''}" type="submit" ${writeDisabled}>${t('reply')}</button></div></form>`:'';
+  return lines.length||reply?`<div class="run-alert stack">${lines.join('')}${reply}</div>`:'';
+}
+async function submitReply(form) {
+  const text=new FormData(form).get('text')||'';
+  if(!text.trim()){const e=form.querySelector('.form-error');e.hidden=false;e.textContent=t('replyEmpty');return;}
+  const result=await api.runContinue({run:form.dataset.run,text},{command_id:form.dataset.command});
+  ui.drafts.delete(form.dataset.run);ui.state.runs[result.id]=result;ui.run=result.id;ui.tab='output';ui.follow=true;ui.raw=false;ui.pending=0;
+  renderPage();await fetchOutput();toast(t('replied'));
+}
 function dispatchProblem(task) {
   const open=openRun(task.id);
   if(open)return `${t('openRunReason')}${open.id} (${t(open.state)})。${t('resolveRun')}`;
@@ -381,7 +442,7 @@ function openDispatch() {
   const problem=dispatchProblem(task),chosenMachine=task.machine||ui.machines.find(m=>m.state==='connected')?.name||'',chosenAgent=task.agent||ui.agents[0]?.name||'';
   showModal('dispatch',t('dispatchRun'),`<form id="dispatch-form" data-command="${commandID()}" data-task="${task.id}"><div class="modal-body stack"><div class="form-error" role="alert" hidden></div><div><strong>${esc(task.title)}</strong><div class="mono muted">${task.id}</div></div>
     ${problem?`<div class="notice" role="status" id="dispatch-block">${esc(problem)}</div>`:''}<div class="form-grid"><label>${t('machine')}<select name="machine" id="dispatch-machine" required>${machineOptions(chosenMachine)}</select></label><label>${t('agent')}<select name="agent" id="dispatch-agent" required>${agentOptions(chosenAgent)}</select></label></div>
-    <div class="confirm-context"><span class="meta-label">${t('directory')}</span><code>${esc(task.dir||'—')}</code></div><div id="dispatch-advice" class="notice" hidden></div><p class="hint">${t('frozenHelp')}</p></div>
+    <div class="confirm-context"><span class="meta-label">${t('directory')}</span><code>${esc(task.dir||'—')}</code></div><div id="dispatch-advice" class="notice" hidden></div><div id="dispatch-preview" class="hint stack" aria-live="polite"></div><p class="hint">${t('frozenHelp')}</p></div>
     <footer class="modal-footer">${button('close-modal',t('cancel'),'autofocus')}<button class="primary" id="dispatch-submit" type="submit" ${problem?'disabled':''}>${t('enqueue')}</button></footer></form>`,'');
   refreshDispatchAdvice();
 }
@@ -395,6 +456,18 @@ function refreshDispatchAdvice() {
   document.querySelector('#dispatch-submit').disabled=Boolean(problem||wrong||!machine||!agent);
   const block=document.querySelector('#dispatch-block');if(block)block.textContent=problem;
   if(problem&&!block){const warning=document.createElement('div');warning.className='notice';warning.id='dispatch-block';warning.textContent=problem;form.querySelector('.modal-body').prepend(warning);}
+  if(!problem&&!wrong&&machine&&agent)previewDispatch(form,task.id,machine.name,agent.name);
+}
+// previewDispatch asks the coordinator how the run would go (the machine's agent CLI, the queue) and lists it.
+async function previewDispatch(form, task, machine, agent) {
+  const el=form.querySelector('#dispatch-preview'),key=`${task}/${machine}/${agent}`;if(!el||el.dataset.key===key)return;
+  el.dataset.key=key;el.textContent=t('checking');
+  try{
+    const pv=await api.runPreview({task,machine,agent,runner:'background'});
+    if(el.dataset.key!==key)return;
+    el.replaceChildren(...[...(pv.blockers||[]).map(w=>['notice',why(w)]),...(pv.notes||[]).map(w=>['',why(w)])].map(([cls,text])=>{const d=document.createElement('div');if(cls)d.className=cls;d.textContent=text;return d;}));
+    if(pv.check){const d=document.createElement('div');d.textContent=`${pv.provider} ${pv.check.version||''}`;el.prepend(d);}
+  }catch(error){if(el.dataset.key===key)el.textContent=errorText(error);}
 }
 function confirmAction(action) {
   const task=currentTask(),run=selectedRun();
@@ -568,7 +641,8 @@ document.addEventListener('submit',async event=>{
     else if(form.id==='task-form')await submitTask(form);
     else if(form.id==='dispatch-form')await submitDispatch(form);
     else if(form.id==='confirm-form')await submitConfirm(form);
-  }catch(error){modalError(errorText(error));if(error.code==='conflict'){const state=await api.stateGet({no_briefs:true});ui.state=state;refreshDispatchAdvice();}}
+    else if(form.id==='reply-form')await submitReply(form);
+  }catch(error){if(form.id==='reply-form'){const e=form.querySelector('.form-error');e.hidden=false;e.textContent=errorText(error);}else modalError(errorText(error));if(error.code==='conflict'){const state=await api.stateGet({no_briefs:true});ui.state=state;refreshDispatchAdvice();}}
   finally{ui.modalSubmitting=false;if(submitter?.isConnected)submitter.disabled=false;if(form.id==='dispatch-form')refreshDispatchAdvice();}
 });
 document.addEventListener('click',async event=>{
@@ -598,6 +672,7 @@ document.addEventListener('click',async event=>{
       case 'retry-output':ui.outputs.delete(selectedRun().id);await fetchOutput();break;
       case 'retry-chat':ui.chats.delete(selectedRun().id);await fetchChat();break;
       case 'retry-detail':ui.briefs.delete(ui.task);await loadDetail();break;
+      case 'needs-you':ui.runState='needs';ui.status='';renderPage();break;
       case 'clear-filters':ui.search='';ui.status='';ui.machine='';ui.runState='';renderPage();break;
       case 'retry-data':ui.loading=true;renderPage();await refreshData();break;
       case 'back-tasks':ui.mobileDetail=false;renderPage();document.querySelector(`#row-${ui.task}`)?.focus();break;
@@ -611,6 +686,7 @@ document.addEventListener('click',async event=>{
 document.addEventListener('input',event=>{
   const el=event.target;
   if(el.id==='search-input'){ui.search=el.value;renderTaskList();}
+  if(el.id==='reply-text')ui.drafts.set(el.closest('form').dataset.run,el.value);
   if(modal.open&&ui.modalType==='task-form'){
     ui.modalDirty=true;
     if(el.id==='task-brief'){document.querySelector('#brief-bytes').textContent=new TextEncoder().encode(el.value).length;document.querySelector('#brief-preview').innerHTML=markdown(el.value);}

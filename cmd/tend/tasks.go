@@ -73,11 +73,22 @@ func commandID() string {
 	return "cli-" + hex.EncodeToString(b[:])
 }
 
+// write sends a command; one that timed out is sent again under the same id, so it happens once.
 func write(cl *coord.Client, method string, params, out any) error {
-	ctx, cancel := callTimeout()
-	defer cancel()
-	return cl.CallCommand(ctx, method, commandID(), params, out)
+	id := commandID()
+	var err error
+	for range writeTries {
+		ctx, cancel := callTimeout()
+		err = cl.CallCommand(ctx, method, id, params, out)
+		cancel()
+		if wire.Code(err) != wire.CodeTimeout && !errors.Is(err, context.DeadlineExceeded) {
+			return err
+		}
+	}
+	return err
 }
+
+const writeTries = 3
 
 func readState(cl *coord.Client) (*task.State, error) {
 	ctx, cancel := callTimeout()
@@ -139,6 +150,9 @@ func runState(r *task.Run) string {
 	}
 	if r.Want == "stop" && task.Open(r.State) {
 		s = i18n.F("cli.run.stopping", s)
+	}
+	if a := render.RunAttention(r); a != "" {
+		s = i18n.F("cli.run.with_attention", s, a)
 	}
 	return s
 }
@@ -431,6 +445,10 @@ func cmdRun(args []string) error {
 		return cmdRunShow(args[1:])
 	case "logs":
 		return cmdRunLogs(args[1:])
+	case "continue", "reply":
+		return cmdRunContinue(args[1:])
+	case "ask", "note":
+		return cmdRunReport(args[0], args[1:])
 	}
 	return i18n.E("cli.unknown_subcommand", "run "+args[0], usage())
 }
@@ -441,21 +459,13 @@ func cmdRunStart(args []string) error {
 	agentName := fs.String("agent", "", i18n.T("cli.run.flag_agent"))
 	runner := fs.String("runner", "", i18n.T("cli.run.flag_runner"))
 	wait := fs.Bool("wait", false, i18n.T("cli.run.flag_wait"))
+	force := fs.Bool("force", false, i18n.T("cli.run.flag_force"))
 	pos, err := parseWithArgs(fs, args, 1)
 	if err != nil {
 		return err
 	}
 	events := make(chan journal.Envelope, 64)
-	wopt := wire.Options{OnPush: func(method string, params json.RawMessage) {
-		var env journal.Envelope
-		if method == coord.PushJournal && json.Unmarshal(params, &env) == nil {
-			select {
-			case events <- env:
-			default:
-			}
-		}
-	}}
-	return withCoord(wopt, func(cl *coord.Client) error {
+	return withCoord(journalPushes(events), func(cl *coord.Client) error {
 		st, err := readState(cl)
 		if err != nil {
 			return err
@@ -464,8 +474,12 @@ func cmdRunStart(args []string) error {
 		if err != nil {
 			return err
 		}
+		d := coord.Dispatch{Task: id, Machine: *machine, Agent: *agentName, Runner: *runner}
+		if err := preview(cl, d, *force); err != nil {
+			return err
+		}
 		var r task.Run
-		if err := write(cl, coord.MRunDispatch, coord.Dispatch{Task: id, Machine: *machine, Agent: *agentName, Runner: *runner}, &r); err != nil {
+		if err := write(cl, coord.MRunDispatch, d, &r); err != nil {
 			return err
 		}
 		fmt.Print(i18n.F("cli.run.queued", r.ID, r.Machine, r.Agent))
@@ -474,6 +488,19 @@ func cmdRunStart(args []string) error {
 		}
 		return waitRun(cl, r.ID, st.Seq, events)
 	})
+}
+
+// journalPushes are options that pass the coordinator's journal pushes to events.
+func journalPushes(events chan<- journal.Envelope) wire.Options {
+	return wire.Options{OnPush: func(method string, params json.RawMessage) {
+		var env journal.Envelope
+		if method == coord.PushJournal && json.Unmarshal(params, &env) == nil {
+			select {
+			case events <- env:
+			default:
+			}
+		}
+	}}
 }
 
 // waitRun prints r's states as they change until it ends; a run that did not exit 0 is an error.
@@ -617,8 +644,21 @@ func cmdRunShow(args []string) error {
 		if *asJSON {
 			return printJSON(r)
 		}
+		reason := "-"
+		if r.Reason != "" {
+			reason = render.RunReason(r.Reason)
+			if reason != r.Reason {
+				reason += " (" + r.Reason + ")"
+			}
+		}
 		fmt.Print(i18n.F("cli.run.show", r.ID, r.Task, r.Machine, r.Agent, r.Dir, runState(r), took(r, time.Now()),
-			orDash(r.Provider), orDash(r.Session), orDash(r.Reason)))
+			orDash(r.Provider), orDash(r.Session), reason))
+		for _, l := range []struct{ key, v string }{{"cli.run.show_detail", r.Detail}, {"cli.run.show_parent", r.Parent},
+			{"cli.run.show_note", r.Note}, {"cli.run.show_ask", r.Ask}, {"cli.run.show_hint", render.RunHint(r)}} {
+			if l.v != "" {
+				fmt.Print(i18n.F(l.key, render.Sanitize(l.v)))
+			}
+		}
 		return nil
 	})
 }
@@ -729,14 +769,14 @@ func cmdMachine(args []string) error {
 			return printJSON(ms.Machines)
 		}
 		rows := [][]string{{i18n.T("cli.machine.col_name"), i18n.T("cli.machine.col_state"), i18n.T("cli.machine.col_runs"),
-			i18n.T("cli.machine.col_os"), i18n.T("cli.machine.col_version"), i18n.T("cli.machine.col_error")}}
+			i18n.T("cli.machine.col_os"), i18n.T("cli.machine.col_version"), i18n.T("cli.machine.col_agents"), i18n.T("cli.machine.col_error")}}
 		for _, m := range ms.Machines {
 			errText := "-"
 			if m.Error != "" {
 				errText = reasonOf(&wire.Error{Code: m.Error, Detail: strings.TrimPrefix(m.Detail, m.Error+": ")})
 			}
 			rows = append(rows, []string{m.Name, i18n.T(machineStates[m.State]), i18n.F("cli.machine.runs_cell", m.Active, m.Slots, m.Queued),
-				orDash(m.OS), orDash(m.Version), errText})
+				orDash(m.OS), orDash(m.Version), agentsCell(m.Agents), errText})
 		}
 		printTable(rows, termWidth())
 		return nil

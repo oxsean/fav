@@ -36,6 +36,7 @@ type Caps struct {
 	Resume        bool // resume a session by id
 	Fork          bool // a new session carrying another's history
 	Headless      bool // runs a prompt without a terminal
+	Continue      bool // runs a prompt without a terminal in an existing session
 	PresetSession bool // the session id can be chosen before launch
 	Sessions      bool // its sessions are indexed (transcripts on disk that capture reads)
 }
@@ -51,6 +52,7 @@ type LaunchSpec struct {
 	PromptFile string // where the task brief is; the prompt refers to it
 	Headless   bool
 	SessionID  string // preset session id, when the provider takes one
+	Resume     string // the session a headless run continues
 	Name       string // short name shown by the agent (claude --name)
 }
 

@@ -24,6 +24,9 @@ const nodeKeepalive = 30 * time.Second
 // server and answers it until interrupted (`node --connect URL --token-file F`, mode 2).
 // ⚠️ stdout carries protocol lines only: while serving, os.Stdout points at stderr so a stray print cannot corrupt them.
 func cmdNode(args []string) error {
+	if v := first(args); v == "install-service" || v == "uninstall-service" {
+		return cmdNodeService(v, args[1:])
+	}
 	fs := newFlags("node")
 	fs.Bool("stdio", true, i18n.T("cli.rpc.flag_stdio"))
 	url := fs.String("connect", "", i18n.T("cli.node.flag_connect"))

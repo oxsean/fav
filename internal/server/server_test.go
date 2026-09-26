@@ -69,10 +69,11 @@ type rig struct {
 	srv    *Server
 	nodeT  string
 	client string
+	nodeAt string // the node's home: one machine unless a test names another
 }
 
 func newRig(t *testing.T) *rig {
-	r := &rig{t: t, home: t.TempDir()}
+	r := &rig{t: t, home: t.TempDir(), nodeAt: t.TempDir()}
 	var err error
 	if r.nodeT, err = AddToken(r.home, RoleNode, "n1"); err != nil {
 		t.Fatal(err)
@@ -110,18 +111,25 @@ func newRig(t *testing.T) *rig {
 // node connects a node whose runs end at once with some output.
 func (r *rig) node(token string) *wire.Conn {
 	r.t.Helper()
-	n := node.New(r.t.TempDir())
+	c, err := r.dialNode(r.nodeAt, token)
+	if err != nil {
+		r.t.Fatal(err)
+	}
+	return c
+}
+
+func (r *rig) dialNode(home, token string) (*wire.Conn, error) {
+	n := node.New(home)
 	n.Limits = tend.NodeConfig{AllowDirs: []string{os.TempDir(), r.t.TempDir()}}
 	n.Launch = func(dir string, spec node.Spec) (string, error) {
 		os.WriteFile(filepath.Join(dir, "output.log"), []byte("done here\n"), 0o600)
 		return "", os.WriteFile(filepath.Join(dir, "state.json"), []byte(`{"rev":1,"state":"exited","exit_code":0,"session":"`+spec.Session+`"}`), 0o600)
 	}
 	c, err := Dial(context.Background(), r.url, RoleNode, token, wire.Options{Handler: n.Handler(remote.NewLocal("n1"))})
-	if err != nil {
-		r.t.Fatal(err)
+	if err == nil {
+		r.t.Cleanup(func() { c.Close() })
 	}
-	r.t.Cleanup(func() { c.Close() })
-	return c
+	return c, err
 }
 
 func (r *rig) machine(name string) coord.Machine {
@@ -241,4 +249,34 @@ func TestATokenReplacedUnderTheSameNameDropsTheOldConnection(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("the replaced token keeps its connection")
 	}
+}
+
+func TestANodeTokenStaysWithTheMachineThatFirstUsedIt(t *testing.T) {
+	r := newRig(t)
+	first := r.node(r.nodeT)
+	r.waitMachine("n1", coord.MachineConnected)
+	ts, _ := Tokens(r.home)
+	if ts[0].Bound == "" {
+		t.Fatalf("the first connection binds the token: %+v", ts[0])
+	}
+	first.Close()
+	r.waitMachine("n1", coord.MachineOffline)
+	other, err := r.dialNode(t.TempDir(), r.nodeT)
+	if err == nil {
+		select {
+		case <-other.Done():
+		case <-time.After(5 * time.Second):
+			t.Fatal("another machine with the token is refused")
+		}
+	}
+	if r.machine("n1").State == coord.MachineConnected {
+		t.Fatal("the other machine never became n1")
+	}
+	if err := RebindToken(r.home, "n1"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.dialNode(t.TempDir(), r.nodeT); err != nil {
+		t.Fatal(err)
+	}
+	r.waitMachine("n1", coord.MachineConnected)
 }

@@ -122,6 +122,10 @@ func run(args []string) error {
 		return cmdTask(args)
 	case "run":
 		return cmdRun(args)
+	case "journal":
+		return cmdJournal(args)
+	case "inbox":
+		return cmdInbox(args)
 	case "agent":
 		return cmdAgent(args)
 	case "machine":

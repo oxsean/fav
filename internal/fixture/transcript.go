@@ -1,6 +1,7 @@
 package fixture
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -210,6 +211,9 @@ func NewLiveClaude(claudeHome, sid, cwd, entry string) *LiveClaude {
 	l := &LiveClaude{claudeSession{id: sid, cwd: cwd, entry: entry}}
 	l.s.path = filepath.Join(claudeHome, "projects", index.ClaudeProjectName(cwd), sid+".jsonl")
 	l.s.t = time.Now().Add(-time.Minute)
+	if b, err := os.ReadFile(l.s.path); err == nil { // a resumed session goes on after what it holds
+		l.s.seq = bytes.Count(b, []byte("\n"))
+	}
 	return l
 }
 

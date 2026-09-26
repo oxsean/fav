@@ -353,9 +353,12 @@ resume it, or run the task again elsewhere.
 ```bash
 tend task add "Fix the flaky pager test" --dir ~/dev/webapp --brief-file brief.md --agent claude
 tend run start <task> --machine mba --wait   # queue it on mba and follow it until it ends
-tend run list · tend run logs <run> -f · tend run stop <run> · tend run abandon <run>
+tend run list · tend run show <run> · tend run logs <run> -f · tend run stop <run> · tend run abandon <run>
+tend run continue <run> "use the main branch"   # answer a run that waits, in its own session
 tend task list [--all] · tend task show <id> · tend task edit <id> --title … · tend task done|reopen|cancel <id>
 tend agent list · tend machine list [--connect]
+tend inbox                                   # runs that need you, on every machine, longest waiting first
+tend journal verify · tend journal repair    # check the coordinator's journal; repair cuts a torn or bad last line
 ```
 
 In the TUI, view `5` lists the tasks: `w` new task, `e` edit, `x` done / reopen, `Enter` the task dialog (run it on a machine
@@ -377,6 +380,29 @@ the directory), `codex` (`codex exec --json`) and `fake` (for tests). More go in
 (`"stdin": true` pipes it instead); `machine` keeps a profile to that one machine. `machines.<name>.slots` (default 2) bounds the runs a machine takes at once; runs in the same
 directory wait for each other.
 
+**Before a run starts.** `tend run start` first says where and how the run would go: the machine's agent CLI and
+version, whether it is logged in, and whether the run waits for the machine, a slot or a directory. A CLI that is missing
+or not logged in there would fail the run at once, so it is not dispatched (`--force` dispatches anyway; the node refuses
+it too, with that reason). The TUI's and the web page's run dialogs show the same; `tend machine list` has an AGENTS
+column.
+
+**When a run needs you.** Nobody answers a prompt in the background, so a background agent is told how to ask: end with
+a final message starting `ASK:`, or run `tend run ask "…"` (`tend run note "…"` reports progress; both reach the run's
+state through `TEND_RUN_DIR`). Claude's question tool is off in the background, and tools a permission prompt
+denied are named. A run that ends like that shows as *waiting for your reply* or *needs your permission*;
+`tend run continue <run> "…"` (the TUI's and the web page's **Reply**) starts a new background run in the same session
+with your answer. `tend run continue --session <id> "…"` does the same for any indexed session. A failed run says why:
+`cli_missing`, `auth_missing`, `auth`, `quota`, `rate_limit`, `overloaded`, `context_overflow`, `network`,
+`session_missing`, `permission_denied`, with what the CLI said and what to do next (`tend run show`). A run silent
+for 15 minutes is marked stalled (`node.stall_after`, `"off"`), never stopped. A run in a Herdr tab is marked as asking
+while Herdr shows its pane blocked, its transcript ends on a question, or (with `tend install-hook`) Claude's latest hook
+event is a prompt. `tend inbox`, the top of the TUI's task list and the web page's **Attention** count gather every run
+that needs you, longest waiting first.
+
+To hear about it, set a command: `"notify_command": ["my-notifier"]` runs with one JSON object on stdin
+(`event`: `run.waiting`, `run.asked`, `run.failed` or `run.stalled`, plus run, task, title, machine, agent, state,
+reason, detail, ask) whenever a run comes to want someone; `notify_events` narrows the events.
+
 **Who coordinates.** One process at a time keeps the task journal and sends runs out: whichever holds the lock in
 `~/.agent/tend/coord/` — the TUI while its Tasks view is used, a `tend task|run …` command for its length, or `tend service`
 if you keep one running. Everyone else talks to it over a local socket. Runs do not need it: each run has its own supervisor
@@ -395,6 +421,8 @@ tend server --listen 100.101.8.10:7788
 
 # on each machine that runs agents: config.json needs "node": {"allow_dirs": ["~/dev"]}
 tend node --connect ws://100.101.8.10:7788 --token-file ~/.config/tend/node-token
+# or keep it running from login: a LaunchAgent (macOS), a systemd --user unit (Linux) or a scheduled task (Windows)
+tend node install-service --connect ws://100.101.8.10:7788 --token-file ~/.config/tend/node-token   # --print shows it first
 
 # on a client: config.json {"coordinator": {"url": "ws://100.101.8.10:7788", "token_file": "~/.config/tend/client-token"}}
 tend task list   # the CLI and the TUI's Tasks view now talk to the server
@@ -402,14 +430,15 @@ tend task list   # the CLI and the TUI's Tasks view now talk to the server
 
 A node only runs in `allow_dirs`. Unless `node.allow_bypass` is set, it runs `command` profiles only as its own
 `config.json` defines them, takes claude / codex `args` only from its own profiles, allows the permission modes
-`default` / `acceptEdits` / `plan` (claude) and `read-only` / `workspace-write` (codex), and refuses a command line with a
+`default` / `manual` / `acceptEdits` / `plan` / `dontAsk` (claude; not `auto`) and `read-only` / `workspace-write` (codex), and refuses a command line with a
 known bypass flag. With `node.allow_profiles` it runs just those names, each as its own config defines it (define them
-there, with the permission they need). `tend server token rm <name>` revokes a token and drops its connections.
+there, with the permission they need). `tend server token rm <name>` revokes a token and drops its connections. A node token is bound to the first machine that connects with it; another machine is refused until `tend server token rebind <name>`.
 
 **Web UI.** The server also serves a page at its own address (`http://100.101.8.10:7788/`). Sign in with a client
 token (`tend server token add --client web`); the browser keeps it in an HttpOnly cookie for 30 days, and signing out or
 `tend server token rm web` ends the session. The page lists tasks and their runs; creates, edits and dispatches tasks;
-follows a run's output and conversation; stops or abandons runs; marks tasks done, reopens or cancels them; and shows the
+previews a dispatch; follows a run's output and conversation; shows why a run ended or what it asks and takes a reply;
+stops or abandons runs; marks tasks done, reopens or cancels them; and shows the
 machines and agent profiles. It follows the journal live and reconnects on its own.
 
 A client token is as good as a shell on every node within those limits: run the server only inside a tailnet, and

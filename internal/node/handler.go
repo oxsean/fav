@@ -14,11 +14,13 @@ import (
 
 // Methods a node answers besides the session reads.
 const (
-	MRunStart = "run.start"
-	MRunStop  = "run.stop"
-	MRunList  = "run.list"
-	MRunTail  = "run.tail"
-	MChanged  = "node.changed" // push: a run's state changed
+	MRunStart  = "run.start"
+	MRunStop   = "run.stop"
+	MRunList   = "run.list"
+	MRunTail   = "run.tail"
+	MRunResume = "run.resume"   // run.start continuing a session (StartParams.Resume)
+	MAgents    = "node.agents"  // how each agent CLI stands here
+	MChanged   = "node.changed" // push: a run's state changed
 )
 
 type RunRef struct {
@@ -28,7 +30,8 @@ type RunRef struct {
 
 type ListParams struct {
 	Coordinator string   `json:"coordinator"`
-	Ack         []string `json:"ack,omitempty"` // finished runs the coordinator has recorded
+	Ack         []string `json:"ack,omitempty"`  // finished runs the coordinator has recorded
+	Runs        []string `json:"runs,omitempty"` // only these runs ("" all); an older node lists all
 }
 
 type Runs struct {
@@ -53,12 +56,23 @@ type Tail struct {
 func (n *Node) Handler(sessions remote.Handler) wire.Handler {
 	return func(ctx context.Context, r *wire.Request) (any, error) {
 		switch r.Method {
-		case MRunStart:
+		case MRunStart, MRunResume:
 			var p StartParams
 			if err := r.Decode(&p); err != nil {
 				return nil, err
 			}
+			if r.Method == MRunStart {
+				p.Resume = ""
+			} else if p.Resume == "" {
+				return nil, &wire.Error{Code: wire.CodeBadRequest, Detail: "resume"}
+			}
 			return n.Start(p)
+		case MAgents:
+			var p ChecksParams
+			if err := r.Decode(&p); err != nil {
+				return nil, err
+			}
+			return n.Checks(p.Fresh), nil
 		case MRunStop:
 			var p RunRef
 			if err := r.Decode(&p); err != nil {
@@ -70,7 +84,7 @@ func (n *Node) Handler(sessions remote.Handler) wire.Handler {
 			if err := r.Decode(&p); err != nil {
 				return nil, err
 			}
-			runs, err := n.List(p.Coordinator, p.Ack)
+			runs, err := n.List(p.Coordinator, p.Ack, p.Runs...)
 			return Runs{Runs: runs}, err
 		case MRunTail:
 			var p TailParams
@@ -82,6 +96,7 @@ func (n *Node) Handler(sessions remote.Handler) wire.Handler {
 		res, err := sessions.Handle(ctx, r.Method, r.Params)
 		if h, ok := res.(remote.Hello); ok && err == nil {
 			h.Methods = append(append([]string(nil), h.Methods...), Methods...)
+			h.NodeID = n.ID()
 			return h, nil
 		}
 		return res, err
@@ -89,7 +104,7 @@ func (n *Node) Handler(sessions remote.Handler) wire.Handler {
 }
 
 // Methods lists what Handler answers.
-var Methods = []string{MRunStart, MRunStop, MRunList, MRunTail}
+var Methods = []string{MRunStart, MRunStop, MRunList, MRunTail, MRunResume, MAgents}
 
 // Tail reads a page of a run's output.log backwards from p.Before.
 func (n *Node) Tail(p TailParams) (Tail, error) {

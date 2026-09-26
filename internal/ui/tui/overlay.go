@@ -14,6 +14,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/oxsean/fav/internal/capture"
+	"github.com/oxsean/fav/internal/coord"
 	"github.com/oxsean/fav/internal/i18n"
 	"github.com/oxsean/fav/internal/render"
 	"github.com/oxsean/fav/internal/task"
@@ -37,47 +38,50 @@ const (
 	ovTask
 	ovTaskForm
 	ovTaskRun
+	ovTaskReply
 )
 
 // ovPad: border + padding columns left of the overlay box; box-local zones add it.
 const ovPad = 3
 
 type overlay struct {
-	kind      ovKind
-	page      int // help: the page shown
-	scrollMax int // set by scrollWindow
-	room      int // lines shown
-	title     string
-	hint      string
-	items     []item
-	filter    textinput.Model
-	checked   map[string]bool
-	cursor    int
-	multi     bool
-	apply     func(m *Model, chosen []string)
-	parse     func(string) (item, bool) // the search text itself is selectable (custom date input)
-	browse    func(string) []item       // dir picker: the list follows the typed path, items unused
-	btns      []btn                     // buttons drawn this frame; arrow keys move focus among them
-	focus     int                       // focused button; -1 = none, Enter runs the default
-	rec       *tend.Rec
-	plan      capture.Plan
-	edit      textinput.Model
-	edit2     textinput.Model
-	area      textarea.Model
-	field     int
-	editing   bool
-	confirm   func(*Model)
-	back      func(*Model) // ovConfirm cancel goes back here (nil = close)
-	okLabel   string
-	app       bool        // resume dialog: opening in the desktop app is the primary action
-	providers []string    // handoff / new session: the CLIs a new session can start in, the default first
-	running   []*tend.Rec // new session: sessions already running in that directory
-	armed     string      // peek: the digit pressed once, sent on the second press
-	armedAt   time.Time
-	taskID    string     // task form: the task edited ("" = a new one); run dialog: the task to run
-	taskWas   *task.Task // task form: the task as task.get read it; only fields changed from it are saved
-	opts      [][]string // task form and run dialog: the choices (machines, agents)
-	pick      []int      // the chosen index of each
+	kind       ovKind
+	page       int // help: the page shown
+	scrollMax  int // set by scrollWindow
+	room       int // lines shown
+	title      string
+	hint       string
+	items      []item
+	filter     textinput.Model
+	checked    map[string]bool
+	cursor     int
+	multi      bool
+	apply      func(m *Model, chosen []string)
+	parse      func(string) (item, bool) // the search text itself is selectable (custom date input)
+	browse     func(string) []item       // dir picker: the list follows the typed path, items unused
+	btns       []btn                     // buttons drawn this frame; arrow keys move focus among them
+	focus      int                       // focused button; -1 = none, Enter runs the default
+	rec        *tend.Rec
+	plan       capture.Plan
+	edit       textinput.Model
+	edit2      textinput.Model
+	area       textarea.Model
+	field      int
+	editing    bool
+	confirm    func(*Model)
+	back       func(*Model) // ovConfirm cancel goes back here (nil = close)
+	okLabel    string
+	app        bool        // resume dialog: opening in the desktop app is the primary action
+	providers  []string    // handoff / new session: the CLIs a new session can start in, the default first
+	running    []*tend.Rec // new session: sessions already running in that directory
+	armed      string      // peek: the digit pressed once, sent on the second press
+	armedAt    time.Time
+	taskID     string         // task form: the task edited ("" = a new one); run dialog: the task to run
+	taskWas    *task.Task     // task form: the task as task.get read it; only fields changed from it are saved
+	opts       [][]string     // task form and run dialog: the choices (machines, agents)
+	pick       []int          // the chosen index of each
+	preview    *coord.Preview // run dialog: how the choice would run
+	previewErr error
 
 	msg   capture.Message
 	steps []string // the full text of msg's steps
@@ -335,6 +339,8 @@ func (m *Model) renderOverlay() string {
 		return m.renderTaskForm()
 	case ovTaskRun:
 		return m.renderTaskRun()
+	case ovTaskReply:
+		return m.renderReply()
 	}
 	return ""
 }
@@ -440,7 +446,7 @@ func (m *Model) ovWidth() int {
 		w = min(m.w-8, 96)
 	case ovTask:
 		w = min(max(w, 64, groupsWidth([]btnGroup{{bs: m.taskButtons()}})), m.w-4)
-	case ovTaskForm:
+	case ovTaskForm, ovTaskReply:
 		w = min(m.w-8, 100)
 	}
 	return w
