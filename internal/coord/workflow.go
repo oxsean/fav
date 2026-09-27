@@ -118,6 +118,12 @@ func (c *Coord) stagePlan(who Principal, t *task.Task) (task.Run, error) {
 		return task.Run{}, err
 	}
 	run.Stage, run.Judge = t.Stage, st.Output == task.OutputVerdict
+	if run.Work != nil && run.Judge {
+		run.Work.ReadOnly, run.Work.Setup = true, nil
+	}
+	if st.Role == "review" {
+		readOnly(&run.Profile)
+	}
 	if pr := c.st.Projects[t.Project]; st.Check && pr != nil && len(pr.Hooks["check"]) > 0 {
 		run.Check = pr.Hooks["check"]
 	}
@@ -150,7 +156,7 @@ func (c *Coord) stageMoves() []journal.Event {
 		if next := t.Flow.Next(t.Stage); next != "" {
 			events = append(events, journal.NewEvent(task.ETaskStaged, task.TaskStage{ID: t.ID, Stage: next, Loops: t.Loops}))
 		} else {
-			events = append(events, journal.NewEvent(task.ETaskStatus, task.TaskStatus{ID: t.ID, Status: task.StatusDone}))
+			events = append(events, c.finish(t)...)
 		}
 	}
 	for _, t := range c.st.Reworking() {
@@ -208,7 +214,7 @@ func (c *Coord) taskGate(who Principal, r *wire.Request) (string, []journal.Even
 		if task.SourceWaits(t) == task.WhySourceChanged {
 			return "", nil, conflict(task.WhySourceChanged)
 		}
-		events = append(events, journal.NewEvent(task.ETaskStatus, task.TaskStatus{ID: t.ID, Status: task.StatusDone}))
+		events = append(events, c.finish(t)...)
 	}
 	return t.ID, events, nil
 }

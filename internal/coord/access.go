@@ -80,6 +80,7 @@ var methodAccess = map[string]access{
 	MTaskSync:       internal,
 	MTaskSourceAck:  writer,
 	MTaskGate:       writer,
+	MTaskMerge:      writer,
 	MTaskMessage:    writer,
 	MRunDispatch:    writer,
 	MRunStop:        writer,

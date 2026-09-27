@@ -224,7 +224,7 @@ func Check(d AgentDef) (errs, warnings []string) {
 		warnings = append(warnings, "tools.allow is not applied: it would widen what the node allows")
 	}
 	if len(d.Skills) > 0 || len(d.MCP) > 0 || len(d.Hooks) > 0 {
-		warnings = append(warnings, "skills, mcp and hooks are kept but not applied yet: they reach the node with the files feature")
+		warnings = append(warnings, "skills, mcp and hooks apply to claude only: skills must be installed on the machine, mcp names its node.mcp servers, hooks need node.allow_hooks")
 	}
 	if d.Import != "" {
 		warnings = append(warnings, "import is read when the definition is imported, not later")
@@ -299,6 +299,7 @@ func Compile(d AgentDef, base func(string) (tend.AgentProfile, bool)) (tend.Agen
 	if len(d.Machines.Require) == 1 {
 		p.Machine = d.Machines.Require[0]
 	}
+	p.Hooks, p.MCP, p.Skills = d.Hooks, slices.Clone(d.MCP), slices.Clone(d.Skills)
 	return p, nil
 }
 

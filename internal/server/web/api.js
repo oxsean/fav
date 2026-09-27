@@ -148,6 +148,7 @@ const api = (() => {
     taskSourceAck: write('task.source_ack'),
     taskGate: write('task.gate'),
     taskMessage: write('task.message'),
+    taskMerge: write('task.merge'),
     inboxList: () => call('inbox.list'),
     agentDefList: () => call('agentdef.list'),
     agentDefGet: params => call('agentdef.get', params),

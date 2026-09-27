@@ -82,6 +82,12 @@ func (claude) Launch(s LaunchSpec) (CommandSpec, error) {
 	if len(s.Profile.Deny) > 0 {
 		args = append(args, "--disallowedTools", strings.Join(s.Profile.Deny, ","))
 	}
+	if s.Settings != "" {
+		args = append(args, "--settings", s.Settings)
+	}
+	if s.MCPConfig != "" {
+		args = append(args, "--mcp-config", s.MCPConfig)
+	}
 	args = append(args, s.Profile.Args...)
 	if s.Prompt != "" { // -p reads the prompt from stdin without it
 		args = append(args, s.Prompt)

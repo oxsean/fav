@@ -1,7 +1,9 @@
 package render
 
 import (
+	"cmp"
 	"strconv"
+	"strings"
 
 	"github.com/oxsean/fav/internal/agent"
 	"github.com/oxsean/fav/internal/i18n"
@@ -119,4 +121,53 @@ func Why(code, detail string) string {
 		return i18n.T(k)
 	}
 	return i18n.F(k, detail)
+}
+
+// RunWork is what run r did to its task's branch, in one line; "" when it worked in a plain directory.
+func RunWork(r *task.Run) string {
+	w, done := r.Work, r.Worked
+	if w == nil {
+		return ""
+	}
+	head := ""
+	if done != nil {
+		head = shortHead(done.Head)
+	}
+	var parts []string
+	switch {
+	case w.Merge != "" && done != nil && done.Merged:
+		parts = append(parts, i18n.F("run.work.merged", w.Merge, w.Branch))
+	case w.Merge != "" && done != nil && len(done.Conflict) > 0:
+		parts = append(parts, i18n.F("run.work.conflict", w.Merge, w.Branch, strings.Join(done.Conflict, ", ")))
+	case w.Merge != "":
+		return ""
+	case w.ReadOnly:
+		parts = append(parts, i18n.F("run.work.copy", w.Branch, cmp.Or(head, "-")))
+		if done != nil && done.Discarded > 0 {
+			parts = append(parts, i18n.F("run.work.discarded", done.Discarded))
+		}
+	case done != nil && done.Head != "":
+		parts = append(parts, i18n.F("run.work.branch", w.Branch, head, done.Commits))
+		if done.Diffstat != "" {
+			parts = append(parts, done.Diffstat)
+		}
+	default:
+		parts = append(parts, w.Branch)
+	}
+	if done != nil {
+		if done.PR != "" {
+			parts = append(parts, i18n.F("run.work.pr", done.PR))
+		}
+		for _, x := range done.Warnings {
+			parts = append(parts, i18n.F("run.work.warning", x))
+		}
+	}
+	return strings.Join(parts, " · ")
+}
+
+func shortHead(h string) string {
+	if len(h) > 10 {
+		return h[:10]
+	}
+	return h
 }

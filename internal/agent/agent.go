@@ -56,6 +56,8 @@ type LaunchSpec struct {
 	SessionID  string // preset session id, when the provider takes one
 	Resume     string // the session a headless run continues
 	Name       string // short name shown by the agent (claude --name)
+	Settings   string // claude: a settings file with the definition's hooks
+	MCPConfig  string // claude: the definition's MCP servers
 }
 
 // Provider starts, resumes and forks one CLI's sessions.

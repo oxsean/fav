@@ -14,10 +14,10 @@ import (
 )
 
 type fakeOpts struct {
-	sid, dir, final, stderr, note, askReport, permission, question, verdicts string
-	steps, exit                                                              int
-	every, leave                                                             time.Duration
-	ask                                                                      bool
+	sid, dir, final, stderr, note, askReport, permission, question, verdicts, write string
+	steps, exit                                                                     int
+	every, leave                                                                    time.Duration
+	ask                                                                             bool
 }
 
 // fakeStream is `_fake-agent --stream`: claude's stream-json both ways. It answers initialize, takes the first user
@@ -96,6 +96,7 @@ func fakeStream(o fakeOpts) error {
 		AddReport(os.Getenv(EnvRunDir), ReportAsk, o.askReport)
 	}
 	fakeVerdict(cwd, o.verdicts)
+	fakeWrite(cwd, o.write)
 	say := func(text string) {
 		emit(map[string]any{"type": "assistant", "message": map[string]any{"role": "assistant",
 			"content": []any{map[string]any{"type": "text", "text": text}}}})

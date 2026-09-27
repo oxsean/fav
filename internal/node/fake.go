@@ -35,7 +35,8 @@ func FakeAgent(args []string) error {
 	stream := fs.Bool("stream", false, "talk claude's stream-json both ways on stdin and stdout")
 	permission := fs.String("permission", "", "stream: after the first step, ask to use a tool (TOOL:WHAT)")
 	question := fs.String("question", "", "stream: after the first step, ask the user (QUESTION|OPTION|OPTION…)")
-	verdicts := fs.String("verdicts", "", "report these verdicts in turn, one per run in its directory (rework,pass)")
+	verdicts := fs.String("verdicts", "", "report these verdicts in turn, one per run of its task (rework,pass)")
+	write := fs.String("write", "", "append a line naming its run to this file in its directory")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -46,7 +47,7 @@ func FakeAgent(args []string) error {
 	if *stream {
 		return fakeStream(fakeOpts{sid: *sid, dir: *dir, steps: *steps, every: *every, exit: *exit, ask: *ask, final: *final,
 			stderr: *stderr, note: *note, askReport: *askReport, permission: *permission, question: *question, leave: *leave,
-			verdicts: *verdicts})
+			verdicts: *verdicts, write: *write})
 	}
 	brief := ""
 	if *promptFile != "" {
@@ -80,6 +81,9 @@ func FakeAgent(args []string) error {
 		}
 	}
 	if err := fakeVerdict(cwd, *verdicts); err != nil {
+		return err
+	}
+	if err := fakeWrite(cwd, *write); err != nil {
 		return err
 	}
 	for i := 1; i <= *steps; i++ {
@@ -121,7 +125,21 @@ func FakeAgent(args []string) error {
 	return nil
 }
 
-// fakeVerdict reports the next of verdicts (comma separated) to the run: the nth run in dir reports the nth, the last
+// fakeWrite appends a line naming the run to file name in dir.
+func fakeWrite(dir, name string) error {
+	if name == "" {
+		return nil
+	}
+	f, err := os.OpenFile(filepath.Join(dir, name), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	_, err = fmt.Fprintf(f, "written by %s\n", os.Getenv(EnvRun))
+	return err
+}
+
+// fakeVerdict reports the next of verdicts (comma separated) to the run: the nth run of its task reports the nth, the last
 // one after they run out.
 func fakeVerdict(dir, verdicts string) error {
 	if verdicts == "" {
@@ -129,6 +147,11 @@ func fakeVerdict(dir, verdicts string) error {
 	}
 	vs := strings.Split(verdicts, ",")
 	count := filepath.Join(dir, ".tend-fake-verdicts")
+	var spec Spec
+	if runDir := os.Getenv(EnvRunDir); readJSON(filepath.Join(runDir, "spec.json"), &spec) == nil && spec.Task != "" {
+		count = filepath.Join(filepath.Dir(filepath.Dir(runDir)), "fake", spec.Task+".verdicts")
+		os.MkdirAll(filepath.Dir(count), 0o700)
+	}
 	b, _ := os.ReadFile(count)
 	n := len(b)
 	os.WriteFile(count, append(b, '.'), 0o600)

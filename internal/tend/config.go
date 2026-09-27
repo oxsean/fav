@@ -73,6 +73,11 @@ type AgentProfile struct {
 	Command    []string `json:"command,omitempty"`    // provider "command": the argv template
 	Stdin      bool     `json:"stdin,omitempty"`      // provider "command": the task brief goes to stdin
 	Machine    string   `json:"machine,omitempty"`    // the only machine it runs on
+	// From an agent definition, applied by nodes with the files feature (claude): hooks as in claude's settings, the
+	// node's MCP servers by name, skills that must be installed there.
+	Hooks  map[string]any `json:"hooks,omitempty"`
+	MCP    []string       `json:"mcp,omitempty"`
+	Skills []string       `json:"skills,omitempty"`
 }
 
 // MachineConfig tunes one machine the coordinator runs agents on ("local" is this one).
@@ -85,9 +90,11 @@ type NodeConfig struct {
 	AllowDirs     []string `json:"allow_dirs,omitempty"`
 	AllowBypass   bool     `json:"allow_bypass,omitempty"`
 	AllowProfiles []string `json:"allow_profiles,omitempty"`
-	AllowHooks    bool     `json:"allow_hooks,omitempty"` // run a project's check hooks (allow_bypass does too)
-	StallAfter    string   `json:"stall_after,omitempty"`
-	Slots         int      `json:"slots,omitempty"` // runs this node takes at once, whoever sends them; 0 no bound // a background run silent this long is marked stalled; default 15m, "off"
+	AllowHooks    bool     `json:"allow_hooks,omitempty"` // run a project's hooks and a definition's claude hooks (allow_bypass does too)
+	StallAfter    string   `json:"stall_after,omitempty"` // a background run silent this long is marked stalled; default 15m, "off"
+	Slots         int      `json:"slots,omitempty"`       // runs this node takes at once, whoever sends them; 0 no bound
+	// MCP are the MCP servers a definition may name, as claude's mcpServers entries; their values stay on this machine.
+	MCP map[string]json.RawMessage `json:"mcp,omitempty"`
 	// ShareSessions is which of this machine's sessions the node answers: all | runs | none; a node that dials a
 	// server defaults to runs.
 	ShareSessions string `json:"share_sessions,omitempty"`

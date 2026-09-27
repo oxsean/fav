@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -26,7 +27,7 @@ func foldScenario() []journal.Envelope {
 		envs = append(envs, journal.Envelope{V: journal.Version, Seq: seq, At: at.Add(time.Duration(seq) * time.Second), Events: events})
 	}
 	ev := journal.NewEvent
-	exit0, started := 0, at.Add(time.Minute)
+	exit0, exit1, started := 0, 1, at.Add(time.Minute)
 	add(ev(task.EProjectCreated, task.Project{ID: "p1", Name: "One", Owner: "u_a"}))
 	add(ev(task.EMemberSet, task.MemberSet{Project: "p1", User: "u_b", Role: task.RoleParticipant}),
 		ev(task.EMemberSet, task.MemberSet{Project: "p1", User: "u_c", Role: task.RoleReader}))
@@ -100,6 +101,32 @@ func foldScenario() []journal.Envelope {
 	add(ev(task.ETaskCreated, task.Task{ID: "t9", Title: "flow 2", Dir: "/w", Status: task.StatusTodo, Workflow: "feature", Flow: flow, Stage: "implement"}))
 	add(ev(task.ETaskEdited, task.TaskEdit{ID: "t9", Workflow: ptr("")}))
 	add(ev(task.ETaskStaged, task.TaskStage{ID: "t8", Stage: "accept", Loops: 1}))
+	ws := func(branch string, chain ...string) *agent.Workspace {
+		return &agent.Workspace{Checkout: "/src", Branch: branch, Chain: chain, Base: "main"}
+	}
+	add(ev(task.ETaskCreated, task.Task{ID: "t10", Title: "tree", Status: task.StatusTodo, Workflow: "feature", Flow: flow, Stage: "implement"}),
+		ev(task.ETaskCreated, task.Task{ID: "t11", Title: "leaf", Parent: "t10", Status: task.StatusTodo}),
+		ev(task.ETaskCreated, task.Task{ID: "t12", Title: "leaf 2", Parent: "t10", Status: task.StatusTodo}))
+	add(ev(task.ETaskStarted, task.TaskStart{IDs: []string{"t10", "t11", "t12"}}))
+	add(ev(task.ERunQueued, task.Run{ID: "r8", Task: "t11", Machine: "mba", Agent: "fake", Dir: "/src", Work: ws("tend/t11", "tend/t10")}),
+		ev(task.ERunQueued, task.Run{ID: "r9", Task: "t12", Machine: "mba", Agent: "fake", Dir: "/src", Work: ws("tend/t12", "tend/t10")}))
+	add(ev(task.ERunObserved, task.Observation{ID: "r8", State: task.Exited, NodeRev: 1, ExitCode: &exit0, Work: &agent.Work{Head: "a1", Commits: 1}}),
+		ev(task.ERunObserved, task.Observation{ID: "r9", State: task.Exited, NodeRev: 1, ExitCode: &exit0, Work: &agent.Work{Head: "b1"}}))
+	merge := func(id, run, branch string) *task.Run {
+		w := ws("tend/t10")
+		w.Merge = branch
+		return &task.Run{ID: run, Task: id, Machine: "mba", Agent: "git", Dir: "/src", Stage: task.StageMerge, Work: w}
+	}
+	add(ev(task.ERunQueued, *merge("t11", "r10", "tend/t11")), ev(task.ERunQueued, *merge("t12", "r11", "tend/t12")))
+	add(ev(task.ERunObserved, task.Observation{ID: "r10", State: task.Exited, NodeRev: 1, ExitCode: &exit0, Work: &agent.Work{Merged: true, Head: "m1"}}),
+		ev(task.ERunObserved, task.Observation{ID: "r11", State: task.Exited, NodeRev: 1, ExitCode: &exit1, Reason: task.WhyMergeConflict,
+			Work: &agent.Work{Conflict: []string{"a.go"}}}))
+	add(ev(task.ETaskStatus, task.TaskStatus{ID: "t12", Status: task.StatusCanceled}), ev(task.ETaskStatus, task.TaskStatus{ID: "t11", Status: task.StatusDone}))
+	add(ev(task.ETaskStaged, task.TaskStage{ID: "t10", Stage: "review"}))
+	add(ev(task.ERunQueued, task.Run{ID: "r12", Task: "t10", Machine: "mba", Agent: "fake", Dir: "/src", Stage: "review", Judge: true,
+		Work: &agent.Workspace{Checkout: "/src", Branch: "tend/t10", ReadOnly: true}}))
+	add(ev(task.ERunObserved, task.Observation{ID: "r12", State: task.Exited, NodeRev: 1, ExitCode: &exit0,
+		Verdict: &agent.Verdict{Verdict: agent.VerdictPass, At: started}, Work: &agent.Work{Head: "m0", Discarded: 1}}))
 	add(ev("some_future_event", map[string]string{"id": "t1"}))
 	return envs
 }
@@ -151,6 +178,9 @@ func TestThePageFoldsEnvelopesAsTheCoordinatorDoes(t *testing.T) {
 	if err != nil {
 		t.Skip("node is not installed")
 	}
+	if v, err := exec.Command(nodeBin, "--version").Output(); err != nil || !strings.HasPrefix(string(v), "v") {
+		t.Skip("node does not run here")
+	}
 	envs := foldScenario()
 	st := task.New()
 	for _, env := range envs {
@@ -183,7 +213,7 @@ process.stdout.write(JSON.stringify({state:s,sits}));`
 	var goState any
 	gb, _ := json.Marshal(st)
 	json.Unmarshal(gb, &goState)
-	if runs, _ := page.(map[string]any)["runs"].(map[string]any); len(runs) != 7 || len(st.Runs) != 7 {
+	if runs, _ := page.(map[string]any)["runs"].(map[string]any); len(runs) != 12 || len(st.Runs) != 12 {
 		t.Fatalf("the page folded %d runs: %s", len(runs), out)
 	}
 	for id, x := range st.Tasks {

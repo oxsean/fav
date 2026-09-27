@@ -26,6 +26,11 @@ func TestMain(m *testing.M) {
 		}
 		os.Exit(0)
 	}
+	if len(os.Args) > 2 && os.Args[1] == "_touch" { // a hook: leaves a file where it ran
+		cwd, _ := os.Getwd()
+		os.WriteFile(os.Args[2], []byte(cwd), 0o600)
+		os.Exit(0)
+	}
 	if len(os.Args) > 1 && os.Args[1] == "_fake-agent" {
 		if err := FakeAgent(os.Args[2:]); err != nil {
 			os.Exit(2)

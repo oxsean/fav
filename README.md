@@ -410,8 +410,9 @@ Read everything twice. Run the tests before you stop.
 it is used by name like a profile: its effort and denied tools go to the agent's command line, its text goes ahead of the
 brief. `tend agent defs | export | check | rm | share` manage them. Without a server they are files in
 `~/.agent/tend/defs/agents/`; on a server a definition is its owner's (or a project's) until it is shared with people,
-projects or everyone (`--view` lets them read it too). `skills`, `mcp`, `hooks`, `output` and `budget` are kept but not
-applied yet; the dispatch preview says so.
+projects or everyone (`--view` lets them read it too). For claude, `hooks` go into the run's settings (the node needs
+`node.allow_hooks`), `mcp` names servers from the node's own `node.mcp` (their values never leave that machine) and
+`skills` must be installed there; `output` and `budget` are kept but not applied yet.
 
 **Workflows.** A task can go through stages instead of one run: `tend task add … --workflow feature` (or a project's
 default workflow). Built in: `feature` (implement → review → accept), `fix` (implement → test → accept) and `docs`
@@ -425,6 +426,17 @@ notes (`--rework "…"`). `tend task message <id> "…"` goes into the implement
 on the task's workpad for the next stage — what every stage's brief carries along. A project defines its own workflows
 as Markdown: the stages in the front matter, a `## <stage>` section per stage for its brief (`{{task.brief}}`,
 `{{task.acceptance}}`, `{{#rework}}…{{rework.notes}}…{{/rework}}`, `{{workpad}}`). A task keeps the workflow it was given.
+
+**Branches.** Mark a project's repository `worktrees` and each task works on its own branch, `tend/<task>`, in a
+worktree beside the checkout (`<checkout>-wt/<task>`); your own checkout is left alone. The project's `hooks.setup` runs
+once a worktree is made. Whatever the agent leaves uncommitted is committed for it; a review or test runs on a read-only
+copy of the branch that is thrown away after (the run says how many files it changed there). Subtasks start from their
+parent's branch and run side by side; each one done is merged into its parent's branch before it counts as done, so a
+task that comes after another starts with that work in. A merge that conflicts is undone and waits: merge it yourself in
+the parent's worktree, then `tend task merge <id>` (or **Merge again**). A top-level task done is **ready to merge**:
+merging into `main` is yours. With a `remote` the branches are pushed after every run and fetched before, so stages can
+run on different machines; without one a tree stays on the machine that started it. `tend run note --pr <url>` records a
+pull request.
 
 **Before a run starts.** `tend run start` first says where and how the run would go: the machine's agent CLI and
 version, whether it is logged in, and whether the run waits for the machine, a slot or a directory. A CLI that is missing

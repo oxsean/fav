@@ -400,7 +400,7 @@ machines: {prefer: [mba]}
 `tend agent import careful.md` 保存它（里面写 `import: ~/.claude/agents/foo.md` 可以复用 Claude Code 的 subagent），之后按名字像档案一样用：
 effort 和禁用的工具进 agent 的命令行，正文放在任务书前面。`tend agent defs | export | check | rm | share` 管理它们。没有 server 时它们是
 `~/.agent/tend/defs/agents/` 里的文件；有 server 时定义归主人（或某个项目），分享给人、项目或所有人之后别人才能用（`--view` 让他们也能看正文）。
-`skills`、`mcp`、`hooks`、`output`、`budget` 会保存，但还不生效；派发预检会提示。
+对 claude：`hooks` 写进这次运行的设置（节点要打开 `node.allow_hooks`），`mcp` 按名字引用节点自己 `node.mcp` 里的服务器（值不离开那台机器），`skills` 要求那台机器已装好；`output`、`budget` 会保存但还不生效。
 
 **工作流。** 任务可以分阶段走，而不是只跑一个 run：`tend task add … --workflow feature`（或者用项目的默认工作流）。内置
 `feature`（实现 → 评审 → 验收）、`fix`（实现 → 测试 → 验收）、`docs`（实现 → 验收）。每个阶段按角色（`implement`、`review`、`test`）
@@ -411,6 +411,13 @@ effort 和禁用的工具进 agent 的命令行，正文放在任务书前面。
 会插进正在实现的 run、回复在等你的 run，否则记进任务的工作记录，每个阶段的任务书都会带上它。项目可以用 Markdown 定义自己的工作流：
 frontmatter 写阶段，每个 `## <阶段名>` 小节是那个阶段的任务书模板（`{{task.brief}}`、`{{task.acceptance}}`、
 `{{#rework}}…{{rework.notes}}…{{/rework}}`、`{{workpad}}`）。任务拿到工作流时就定下来，之后改定义不影响它。
+
+**分支。** 项目的仓库标上 `worktrees` 后，每个任务在自己的分支 `tend/<任务>` 上、在 checkout 旁边的工作区（`<checkout>-wt/<任务>`）里做，
+你自己的 checkout 不动。工作区建好后跑一次项目的 `hooks.setup`。agent 没提交的改动由 tend 替它提交；评审和测试在分支的只读副本里跑，结束后
+丢弃（run 会写明它在副本里改了几个文件）。子任务从父任务的分支切出来，可以并行；每个子任务完成前先合进父任务的分支，所以排在它后面的任务
+一开始就带着它的代码。合并冲突时 tend 撤销合并并停下等你：在父任务的工作区里自己合好并提交，再 `tend task merge <id>`（或点「重试合并」）。
+顶层任务完成后显示「可合并」，合进 `main` 由你来。配了 `remote` 时每个 run 结束都推分支、开始前先拉，阶段可以换机器；没配时一棵树留在最先
+开工的那台机器上。`tend run note --pr <url>` 记下 PR。
 
 **跑之前。** `tend run start` 先说明 run 会怎么跑：那台机器上 agent 命令行的版本、是否登录，以及要不要等机器、槽位或目录。
 命令行没装或没登录时 run 会直接失败，所以不派发（`--force` 强制派发；节点那边也会以同样的原因拒绝）。TUI 和网页的派发框显示同样的内容；

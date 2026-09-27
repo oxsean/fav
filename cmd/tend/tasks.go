@@ -211,6 +211,8 @@ func cmdTask(args []string) error {
 		return cmdTaskMove(args[1:])
 	case "gate":
 		return cmdTaskGate(args[1:])
+	case "merge":
+		return cmdTaskMerge(args[1:])
 	case "message", "say":
 		return cmdTaskMessage(args[1:])
 	}
@@ -693,7 +695,7 @@ func cmdRunShow(args []string) error {
 			orDash(r.Provider), orDash(r.Session), reason))
 		for _, l := range []struct{ key, v string }{{"cli.run.show_detail", r.Detail}, {"cli.run.show_parent", r.Parent},
 			{"cli.run.show_note", r.Note}, {"cli.run.show_last", r.Last}, {"cli.run.show_usage", render.RunUsage(r.Usage)},
-			{"cli.run.show_ask", r.Ask}, {"cli.run.show_hint", render.RunHint(r)}} {
+			{"cli.run.show_ask", r.Ask}, {"cli.run.show_work", render.RunWork(r)}, {"cli.run.show_hint", render.RunHint(r)}} {
 			if l.v != "" {
 				fmt.Print(i18n.F(l.key, render.Sanitize(l.v)))
 			}
@@ -907,6 +909,30 @@ func cmdTaskStart(args []string) error {
 			return err
 		}
 		fmt.Print(i18n.F("cli.task.started", t.ID, len(st.Subtree(t.ID))))
+		return nil
+	})
+}
+
+// cmdTaskMerge merges a task's branch into its parent's again, once its conflict was resolved there.
+func cmdTaskMerge(args []string) error {
+	fs := newFlags("task")
+	pos, err := parseWithArgs(fs, args, 1)
+	if err != nil {
+		return err
+	}
+	return withCoord(wire.Options{}, func(cl *coord.Client) error {
+		st, err := readState(cl)
+		if err != nil {
+			return err
+		}
+		id, err := taskID(st, pos[0])
+		if err != nil {
+			return err
+		}
+		if err := write(cl, coord.MTaskMerge, coord.TaskRef{ID: id}, nil); err != nil {
+			return err
+		}
+		fmt.Print(i18n.F("cli.task.merging", id))
 		return nil
 	})
 }

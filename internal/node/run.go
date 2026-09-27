@@ -66,6 +66,7 @@ type StartParams struct {
 	Dispatcher  *Person       `json:"dispatcher,omitempty"` // who started it: the author of its commits (feature dispatcher)
 	Verdict     bool          `json:"verdict,omitempty"`    // it is to end with tend run verdict (feature verdict)
 	Check       []string      `json:"check,omitempty"`      // argv run where it worked once it exits well (feature check)
+	Work        *Workspace    `json:"work,omitempty"`       // where it works in git (feature worktree); Dir is then the checkout
 }
 
 // Person is a user of the coordinator's team, as a node needs them.
@@ -86,6 +87,9 @@ const FeatureVerdict = "verdict"
 
 // FeatureCheck: run.start's check hook runs after the agent, and how it went is reported.
 const FeatureCheck = "check"
+
+// FeatureFiles: a profile's hooks, MCP servers and skills are applied (claude).
+const FeatureFiles = "files"
 
 // Spec is a run frozen at its start.
 type Spec struct {
@@ -108,6 +112,7 @@ type Spec struct {
 	Dispatcher  *Person       `json:"dispatcher,omitempty"`
 	Verdict     bool          `json:"verdict,omitempty"`
 	Check       []string      `json:"check,omitempty"`
+	Work        *Workspace    `json:"work,omitempty"`
 }
 
 // env is what the agent's environment gains: its commits are authored by the run's dispatcher, and committed by
@@ -136,6 +141,7 @@ type State struct {
 	Ask       string             `json:"ask,omitempty"`       // the question it asked
 	Verdict   *agent.Verdict     `json:"verdict,omitempty"`   // what it concluded (tend run verdict)
 	Check     *agent.CheckResult `json:"check,omitempty"`     // how the check hook went after it
+	Work      *agent.Work        `json:"work,omitempty"`      // what it did to its task's branch
 	Note      string             `json:"note,omitempty"`      // its latest progress note
 	Last      string             `json:"last,omitempty"`      // the newest thing it said
 	Usage     *agent.Usage       `json:"usage,omitempty"`
@@ -206,17 +212,32 @@ func (n *Node) Start(p StartParams) (Snapshot, error) {
 	if _, err := os.Stat(dir); err == nil {
 		return n.Snapshot(p.Run)
 	}
+	if w := p.Work; w != nil {
+		if err := checkWork(w); err != nil {
+			return Snapshot{}, err
+		}
+		if p.Runner == RunnerHerdr {
+			return Snapshot{}, &wire.Error{Code: wire.CodeBadRequest, Detail: "runner herdr has no worktree"}
+		}
+		p.Dir, p.Runner = w.Checkout, RunnerBackground
+	}
 	if err := n.admit(&p); err != nil {
 		return Snapshot{}, err
 	}
 	if fi, err := os.Stat(p.Dir); err != nil || !fi.IsDir() {
 		return Snapshot{}, &wire.Error{Code: wire.CodeNotFound, Detail: "dir " + p.Dir}
 	}
+	if p.Work != nil {
+		p.Dir = workDir(p.Work, p.Run)
+	}
 	spec, err := n.spec(p, dir)
 	if err != nil {
 		return Snapshot{}, err
 	}
-	blocked := n.Check(p.Profile.Provider, false).Blocker()
+	blocked := ""
+	if !merging(p) {
+		blocked = n.Check(p.Profile.Provider, false).Blocker()
+	}
 	if err := os.MkdirAll(filepath.Dir(dir), 0o700); err != nil {
 		return Snapshot{}, err
 	}
@@ -233,9 +254,18 @@ func (n *Node) Start(p StartParams) (Snapshot, error) {
 			return Snapshot{}, &wire.Error{Code: wire.CodeConflict, Detail: busy}
 		}
 	}
+	files, err := n.agentFiles(p.Profile)
+	if err != nil {
+		return Snapshot{}, err
+	}
 	err = n.publish(dir, func(tmp string) error {
 		if err := fileio.WriteFile(filepath.Join(tmp, "prompt.md"), []byte(n.brief(p, spec, dir)), 0o600); err != nil {
 			return err
+		}
+		for name, b := range files {
+			if err := fileio.WriteFile(filepath.Join(tmp, name), b, 0o600); err != nil {
+				return err
+			}
 		}
 		return writeJSON(filepath.Join(tmp, "spec.json"), spec)
 	})
@@ -337,6 +367,18 @@ func holds(s Snapshot, dir string) bool {
 // name), its directory, and no command profile it does not define itself unless bypass is allowed.
 func (n *Node) admit(p *StartParams) error {
 	l := n.Limits
+	if (len(p.Check) > 0 || p.Work != nil && workHooks(p.Work) || len(p.Profile.Hooks) > 0) && !l.AllowBypass && !l.AllowHooks {
+		return &wire.Error{Code: wire.CodeUnauthorized, Detail: "hooks (node.allow_hooks)"}
+	}
+	if len(l.AllowDirs) > 0 && !underAny(p.Dir, l.AllowDirs) {
+		return &wire.Error{Code: wire.CodeUnauthorized, Detail: "dir " + p.Dir}
+	}
+	if pr, ok := l.Projects[p.Project]; ok && p.Project != "" && len(pr.Dirs) > 0 && !underAny(p.Dir, pr.Dirs) {
+		return &wire.Error{Code: wire.CodeUnauthorized, Detail: "dir " + p.Dir + " for project " + p.Project}
+	}
+	if merging(*p) {
+		return nil
+	}
 	own, defined := n.profile(p.Profile.Name)
 	if len(l.AllowProfiles) > 0 {
 		if !contains(l.AllowProfiles, p.Profile.Name) || !defined {
@@ -357,17 +399,14 @@ func (n *Node) admit(p *StartParams) error {
 	if !contains(efforts, p.Profile.Effort) || slices.ContainsFunc(p.Profile.Deny, func(t string) bool { return !toolName.MatchString(t) }) {
 		return &wire.Error{Code: wire.CodeBadRequest, Detail: "profile " + p.Profile.Name}
 	}
-	if len(p.Check) > 0 && !l.AllowBypass && !l.AllowHooks {
-		return &wire.Error{Code: wire.CodeUnauthorized, Detail: "hooks (node.allow_hooks)"}
-	}
-	if len(l.AllowDirs) > 0 && !underAny(p.Dir, l.AllowDirs) {
-		return &wire.Error{Code: wire.CodeUnauthorized, Detail: "dir " + p.Dir}
-	}
-	if pr, ok := l.Projects[p.Project]; ok && p.Project != "" && len(pr.Dirs) > 0 && !underAny(p.Dir, pr.Dirs) {
-		return &wire.Error{Code: wire.CodeUnauthorized, Detail: "dir " + p.Dir + " for project " + p.Project}
+	if err := n.admitFiles(p.Profile); err != nil {
+		return err
 	}
 	return nil
 }
+
+// merging: p merges branches and runs no agent.
+func merging(p StartParams) bool { return p.Work != nil && p.Work.Merge != "" }
 
 // safePermissions are the permission modes a coordinator may ask for on a node that allows no bypass.
 var safePermissions = map[string][]string{
@@ -402,6 +441,10 @@ func (n *Node) profile(name string) (agent.Profile, bool) {
 
 // spec builds the frozen command line.
 func (n *Node) spec(p StartParams, dir string) (Spec, error) {
+	if merging(p) {
+		return Spec{Run: p.Run, Task: p.Task, Coordinator: p.Coordinator, Dir: p.Dir, Runner: RunnerBackground, Title: p.Title,
+			Created: time.Now(), Project: p.Project, Dispatcher: p.Dispatcher, Work: p.Work}, nil
+	}
 	prov, ok := agent.Get(p.Profile.Provider)
 	if !ok {
 		return Spec{}, &wire.Error{Code: wire.CodeBadRequest, Detail: "provider " + p.Profile.Provider}
@@ -450,13 +493,24 @@ func (n *Node) spec(p StartParams, dir string) (Spec, error) {
 	if !n.Limits.AllowBypass && agent.BypassArgv(cmd.Argv()) {
 		return Spec{}, &wire.Error{Code: wire.CodeUnauthorized, Detail: "permission"}
 	}
+	if files, _ := n.agentFiles(p.Profile); len(files) > 0 { // the node's own files, made after the check that refuses the caller's
+		if files[settingsFile] != nil {
+			ls.Settings = filepath.Join(dir, settingsFile)
+		}
+		if files[mcpFile] != nil {
+			ls.MCPConfig = filepath.Join(dir, mcpFile)
+		}
+		if cmd, err = prov.Launch(ls); err != nil {
+			return Spec{}, err
+		}
+	}
 	if err := proc.CheckArgs(cmd.Argv()); err != nil {
 		return Spec{}, &wire.Error{Code: wire.CodeBadRequest, Detail: err.Error()}
 	}
 	return Spec{Run: p.Run, Task: p.Task, Coordinator: p.Coordinator, Argv: cmd.Argv(), Dir: p.Dir, Runner: runner,
 		Stdin: stdin, Stream: stream, Thread: p.Profile.Provider == tend.ProviderCodex, Provider: agent.SessionProvider(p.Profile.Provider),
 		Agent: p.Profile.Provider, Session: cmp.Or(ls.SessionID, p.Resume), Title: p.Title, StallAfter: n.stallAfter(),
-		Created: time.Now(), Project: p.Project, Dispatcher: p.Dispatcher, Verdict: p.Verdict, Check: p.Check}, nil
+		Created: time.Now(), Project: p.Project, Dispatcher: p.Dispatcher, Verdict: p.Verdict, Check: p.Check, Work: p.Work}, nil
 }
 
 // defaultStall is how long a background run may say nothing before it is marked stalled.
@@ -494,6 +548,13 @@ func (n *Node) brief(p StartParams, spec Spec, dir string) string {
 	if spec.Verdict {
 		out += fmt.Sprintf(verdictConvention, tendCmd)
 	}
+	switch w := spec.Work; {
+	case w == nil:
+	case w.ReadOnly:
+		out += fmt.Sprintf(copyConvention, w.Branch)
+	default:
+		out += fmt.Sprintf(workConvention, w.Branch)
+	}
 	return out
 }
 
@@ -516,7 +577,6 @@ AskUserQuestion waits until the user answers it remotely, which may take a while
 - To ask while you keep working on something else, you may run: %[4]s ask "<question>"
 `
 
-// readBrief is an interactive agent's first message; the brief itself stays in the file (argv shows in ps).
 // verdictConvention tells a run that judges work how to report its conclusion.
 const verdictConvention = `
 - You are judging this work. Before you stop, report your conclusion with exactly one of:
@@ -525,6 +585,7 @@ const verdictConvention = `
   %[1]s verdict blocked "<why>"         (you cannot judge it)
 `
 
+// readBrief is an interactive agent's first message; the brief itself stays in the file (argv shows in ps).
 const readBrief = "Read the task brief in %s and do the task it describes."
 
 // Stop asks run r.Run to stop; the supervisor ends it. Stopping a finished run changes nothing; stopping a run whose

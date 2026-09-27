@@ -79,6 +79,10 @@ type Task struct {
 	Loops     int       `json:"loops,omitempty"`     // how often a stage sent it back
 	StageSeq  int64     `json:"stage_seq,omitempty"` // the seq it came to Stage at; runs before it were other stages'
 	Notes     []Note    `json:"notes,omitempty"`     // its workpad's own lines
+	Branch    string    `json:"branch,omitempty"`    // the branch its work is on, once a run made it
+	WorkOn    string    `json:"work_on,omitempty"`   // the machine that made it
+	Head      string    `json:"head,omitempty"`      // the branch's head as its latest run left it
+	Merged    bool      `json:"merged,omitempty"`    // its branch went into its parent's
 	Rev       int       `json:"rev,omitzero"`
 	CreatedAt time.Time `json:"created_at,omitzero"`
 	UpdatedAt time.Time `json:"updated_at,omitzero"`
@@ -102,6 +106,8 @@ type Run struct {
 	Check      []string           `json:"check,omitempty"`      // the hook its node runs after it
 	Verdict    *agent.Verdict     `json:"verdict,omitempty"`    // what it concluded
 	Checked    *agent.CheckResult `json:"checked,omitempty"`    // how the hook went
+	Work       *agent.Workspace   `json:"work,omitempty"`       // where it works in git; Dir is then the checkout
+	Worked     *agent.Work        `json:"worked,omitempty"`     // what it did there
 	Project    string             `json:"project,omitempty"`    // its task's when it was queued
 	Dispatcher string             `json:"dispatcher,omitempty"` // the user who queued it
 	Want       string             `json:"want,omitempty"`       // run | stop
@@ -207,6 +213,7 @@ type Observation struct {
 	Sends     []agent.Send       `json:"sends,omitempty"`
 	Verdict   *agent.Verdict     `json:"verdict,omitempty"`
 	Check     *agent.CheckResult `json:"check,omitempty"`
+	Work      *agent.Work        `json:"work,omitempty"`
 	Provider  string             `json:"provider,omitempty"`
 	Session   string             `json:"session,omitempty"`
 	Pane      string             `json:"pane,omitempty"`
@@ -313,6 +320,7 @@ func (s *State) apply(e journal.Event, seq int64, at time.Time) error {
 		}
 		r.State, r.Want, r.QueuedAt, r.Seq = Queued, "run", at, seq
 		s.Runs[r.ID] = &r
+		s.queuedWork(&r)
 	case ERunStarting:
 		var d RunStarting
 		if err := json.Unmarshal(e.Data, &d); err != nil {
@@ -337,7 +345,11 @@ func (s *State) apply(e journal.Event, seq int64, at time.Time) error {
 		if r == nil {
 			return fmt.Errorf("no run %s", o.ID)
 		}
+		open := Open(r.State)
 		r.observe(o)
+		if open && !Open(r.State) {
+			s.worked(r)
+		}
 	case ERunStopAsked:
 		return s.run(e, func(r *Run) { r.Want = "stop" })
 	case ERunCanceled:
@@ -441,7 +453,7 @@ func (r *Run) observe(o Observation) {
 	if o.NodeRev > 0 { // what the node says now; the coordinator's own observations carry none of it
 		r.Attention, r.Ask, r.Note, r.Last, r.Usage = o.Attention, o.Ask, o.Note, o.Last, o.Usage
 		r.Stream, r.Requests = o.Stream, o.Requests
-		r.Verdict, r.Checked = o.Verdict, o.Check
+		r.Verdict, r.Checked, r.Worked = o.Verdict, o.Check, o.Work
 		r.Sends = mergeSends(r.Sends, o.Sends)
 		r.Answers = slices.DeleteFunc(slices.Clone(r.Answers), func(a agent.Answer) bool { // taken, or no longer asked
 			return !slices.ContainsFunc(r.Requests, func(q agent.Request) bool { return q.ID == a.Request })

@@ -17,7 +17,7 @@ import (
 // Report is a line an agent adds to its run with `tend run ask`, `note` or `verdict`.
 type Report struct {
 	At      time.Time `json:"at"`
-	Kind    string    `json:"kind"` // ask | note | verdict
+	Kind    string    `json:"kind"` // ask | note | verdict | pr
 	Text    string    `json:"text"`
 	Verdict string    `json:"verdict,omitempty"` // pass | rework | blocked
 }
@@ -27,6 +27,7 @@ const (
 	ReportAsk     = "ask"
 	ReportNote    = "note"
 	ReportVerdict = "verdict"
+	ReportPR      = "pr" // Text: the pull request its work went into
 )
 
 // Env names the supervisor gives its agent.
@@ -44,7 +45,8 @@ const (
 // AddReport appends a report to run directory dir (the agent's TEND_RUN_DIR).
 func AddReport(dir, kind, text string) error {
 	text = strings.TrimSpace(text)
-	if text == "" || kind != ReportAsk && kind != ReportNote {
+	if text == "" || kind != ReportAsk && kind != ReportNote && kind != ReportPR ||
+		kind == ReportPR && !strings.HasPrefix(text, "https://") && !strings.HasPrefix(text, "http://") {
 		return &wire.Error{Code: wire.CodeBadRequest, Detail: "report"}
 	}
 	if _, err := os.Stat(filepath.Join(dir, "spec.json")); err != nil {

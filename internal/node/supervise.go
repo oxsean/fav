@@ -57,6 +57,9 @@ func (n *Node) launch(dir string, spec Spec) (string, error) {
 	}
 	c := exec.Command(self, "_run", dir)
 	c.Dir = spec.Dir
+	if spec.Work != nil { // its worktree is made by the supervisor
+		c.Dir = spec.Work.Checkout
+	}
 	if err := proc.StartDetached(c); err != nil {
 		return "", err
 	}
@@ -273,6 +276,11 @@ func (s *sup) reports() {
 				st.Attention, st.Ask = AttentionAsked, r.Text
 			case ReportVerdict:
 				st.Verdict = &agent.Verdict{Verdict: r.Verdict, Summary: r.Text, At: r.At}
+			case ReportPR:
+				if st.Work == nil {
+					st.Work = &agent.Work{}
+				}
+				st.Work.PR = r.Text
 			case ReportNote:
 				st.Note = clip(r.Text, maxNote)
 				if st.Attention == AttentionStalled {
@@ -404,6 +412,16 @@ func lastLine(text string) string {
 const drainWait = 2 * time.Second
 
 func (s *sup) run() error {
+	var from string
+	if w := s.spec.Work; w != nil {
+		if w.Merge != "" {
+			return s.merge()
+		}
+		var err error
+		if from, err = s.prepare(); err != nil {
+			return s.workFailed(err)
+		}
+	}
 	c := exec.Command(s.spec.Argv[0], s.spec.Argv[1:]...)
 	c.Dir = s.spec.Dir
 	c.Env = append(append(os.Environ(), EnvRun+"="+s.spec.Run, EnvRunDir+"="+s.dir), s.spec.env()...)
@@ -510,15 +528,22 @@ func (s *sup) run() error {
 			s.reports()
 			s.flushOut()
 			crashAt("ending")
+			var ee *exec.ExitError
+			well := asked.IsZero() && code == 0 && (err == nil || errors.As(err, &ee))
+			if w := s.spec.Work; w != nil && !w.ReadOnly && well {
+				s.commitLeft()
+			}
+			if well && len(s.spec.Check) > 0 {
+				s.check()
+			}
+			if s.spec.Work != nil {
+				s.settle(from)
+			}
 			if !asked.IsZero() {
 				return s.finish(StateStopped, reason, &code)
 			}
-			var ee *exec.ExitError
 			if err != nil && !errors.As(err, &ee) {
 				return s.end(StateFailed, err.Error(), nil)
-			}
-			if code == 0 && len(s.spec.Check) > 0 {
-				s.check()
 			}
 			return s.exited(code)
 		case sig := <-sigs:
@@ -802,16 +827,22 @@ func (l *rolling) Close() error {
 	return l.f.Close()
 }
 
-// checkTimeout bounds a check hook.
-const checkTimeout = 30 * time.Minute
+// hookTimeout bounds a hook.
+const hookTimeout = 30 * time.Minute
 
-// check runs the run's check hook where the agent worked, its output going to output.log, and records how it went.
+// check runs the run's check hook where the agent worked and records how it went.
 func (s *sup) check() {
-	s.keep(func(st *State) { st.Note = clip("check: "+strings.Join(s.spec.Check, " "), maxNote) })
-	ctx, cancel := context.WithTimeout(context.Background(), checkTimeout)
+	exit, tail := s.hook(s.spec.Check, s.spec.Dir, "check")
+	s.keep(func(st *State) { st.Check = &agent.CheckResult{Argv: s.spec.Check, Exit: exit, Tail: tail} })
+}
+
+// hook runs argv in dir, its output going to output.log too; it answers the exit code and the end of the output.
+func (s *sup) hook(argv []string, dir, name string) (int, string) {
+	s.keep(func(st *State) { st.Note = clip(name+": "+strings.Join(argv, " "), maxNote) })
+	ctx, cancel := context.WithTimeout(context.Background(), hookTimeout)
 	defer cancel()
-	c := exec.CommandContext(ctx, s.spec.Check[0], s.spec.Check[1:]...)
-	c.Dir = s.spec.Dir
+	c := exec.CommandContext(ctx, argv[0], argv[1:]...)
+	c.Dir = dir
 	c.Env = append(os.Environ(), s.spec.env()...)
 	var out bytes.Buffer
 	log, err := os.OpenFile(filepath.Join(s.dir, "output.log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
@@ -836,7 +867,14 @@ func (s *sup) check() {
 	if len(tail) > 4<<10 {
 		tail = tail[len(tail)-4<<10:]
 	}
-	s.keep(func(st *State) {
-		st.Check = &agent.CheckResult{Argv: s.spec.Check, Exit: exit, Tail: strings.ToValidUTF8(tail, "")}
-	})
+	return exit, strings.ToValidUTF8(tail, "")
 }
+
+// startedNow marks a run without an agent running; it answers when.
+func (s *sup) startedNow() *time.Time {
+	now := time.Now()
+	s.keep(func(st *State) { st.State, st.StartedAt = StateRunning, &now })
+	return &now
+}
+
+func time1() *time.Time { now := time.Now(); return &now }

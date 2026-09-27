@@ -16,29 +16,29 @@ func needFeature(t *testing.T, f string) {
 }
 
 func TestARunANodeCannotHonourFailsAsOutdated(t *testing.T) {
-	needFeature(t, "worktree")
+	needFeature(t, "teleport")
 	e := newEnv(t, tend.Config{})
 	e.start()
-	tk := e.task("needs a worktree", "quick")
+	tk := e.task("needs a teleport", "quick")
 	var pv Preview
 	e.must(MRunPreview, Dispatch{Task: tk.ID, Runner: node.RunnerBackground}, &pv)
 	if !hasWhy(pv.Blockers, WhyOutdated) {
 		t.Fatalf("the preview says the node is outdated: %+v", pv)
 	}
 	r := e.wait(e.dispatch(Dispatch{Task: tk.ID}).ID, func(r *task.Run) bool { return !task.Open(r.State) })
-	if r.State != task.Failed || r.Reason != ReasonNodeOutdated || r.Detail != "worktree" {
+	if r.State != task.Failed || r.Reason != ReasonNodeOutdated || r.Detail != "teleport" {
 		t.Fatalf("started without what it needs: %+v", r)
 	}
 }
 
 func TestARunStartsWhereItsFeaturesAre(t *testing.T) {
-	needFeature(t, "worktree")
+	needFeature(t, "teleport")
 	old := node.Features
-	node.Features = []string{"worktree"}
+	node.Features = []string{"teleport"}
 	t.Cleanup(func() { node.Features = old })
 	e := newEnv(t, tend.Config{})
 	e.start()
-	tk := e.task("has a worktree", "quick")
+	tk := e.task("has a teleport", "quick")
 	r := e.wait(e.dispatch(Dispatch{Task: tk.ID}).ID, func(r *task.Run) bool { return !task.Open(r.State) })
 	if r.State != task.Exited {
 		t.Fatalf("%+v", r)

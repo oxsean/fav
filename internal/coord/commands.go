@@ -110,7 +110,7 @@ var readMethods = []string{remote.MHello, remote.MList, remote.MMessages, remote
 var Methods = []string{MStateGet, MTaskGet, MTaskCreate, MTaskEdit, MTaskStatus, MRunDispatch, MRunStop, MRunAbandon, MRunTail,
 	MAgentList, MMachineList, MSubscribe, MNodeCall, MRunPreview, MRunContinue, MRunAnswer, MRunSend, MRunMessages,
 	MProjectCreate, MProjectEdit, MProjectMember, MMachineShare, MTaskStart, MTaskMove,
-	MAgentDefList, MAgentDefGet, MAgentDefSave, MAgentDefRemove, MAgentDefShare, MInboxList, MUserOffboard, MTaskSync, MTaskSourceAck, MTaskGate, MTaskMessage}
+	MAgentDefList, MAgentDefGet, MAgentDefSave, MAgentDefRemove, MAgentDefShare, MInboxList, MUserOffboard, MTaskSync, MTaskSourceAck, MTaskGate, MTaskMerge, MTaskMessage}
 
 // Handler answers this machine's user.
 func (c *Coord) Handler() wire.Handler { return c.HandlerFor(Owner) }
@@ -222,6 +222,8 @@ func (c *Coord) HandlerFor(p Principal) wire.Handler {
 			return c.command(p, r, c.taskSourceAck, taskView)
 		case MTaskGate:
 			return c.command(p, r, c.taskGate, taskView)
+		case MTaskMerge:
+			return c.command(p, r, c.taskMerge, taskView)
 		case MTaskMessage:
 			return c.command(p, r, c.taskMessage, messageView)
 		case MRunDispatch:
@@ -515,6 +517,12 @@ func (c *Coord) taskStatus(who Principal, r *wire.Request) (string, []journal.Ev
 	if p.Status == task.StatusCanceled {
 		return t.ID, c.cancelTree(t), nil
 	}
+	if p.Status == task.StatusDone {
+		if c.st.OpenRun(t.ID) != nil && c.st.NeedsMerge(t) {
+			return "", nil, conflict("open run")
+		}
+		return t.ID, c.finish(t), nil
+	}
 	return t.ID, []journal.Event{journal.NewEvent(task.ETaskStatus, p)}, nil
 }
 
@@ -566,6 +574,9 @@ func (c *Coord) plan(who Principal, p Dispatch) (task.Run, error) {
 		return task.Run{}, bad("machine")
 	}
 	machine = firstOf(machine, Local)
+	if machine, err = c.workMachine(t, pr, machine, p.Machine); err != nil {
+		return task.Run{}, err
+	}
 	if p.Runner == node.RunnerHerdr && prof.Provider != tend.ProviderClaude {
 		return task.Run{}, bad("runner herdr runs claude only")
 	}
@@ -592,15 +603,22 @@ func (c *Coord) plan(who Principal, p Dispatch) (task.Run, error) {
 	if from == "" && !c.opt.Remote {
 		from = Local
 	}
+	var work *agent.Workspace
 	if dir == "" {
-		d, ok := pr.DirOn(machine)
+		repo, ok := pr.RepoOn(machine)
 		if !ok {
 			return task.Run{}, bad("dir")
 		}
-		dir, from = d, machine
+		dir, from = repo.Dirs[machine], machine
+		if repo.Worktrees {
+			if p.Runner == node.RunnerHerdr {
+				return task.Run{}, bad("runner herdr has no worktree")
+			}
+			work = c.workspace(t, pr, repo, dir)
+		}
 	}
 	return task.Run{ID: node.NewRunID(), Task: t.ID, Machine: machine, Agent: name, Profile: prof, Dir: dir, From: from,
-		Brief: brief, Title: t.Title, Runner: p.Runner, Project: t.Project, Dispatcher: who.User}, nil
+		Brief: brief, Title: t.Title, Runner: p.Runner, Project: t.Project, Dispatcher: who.User, Work: work}, nil
 }
 
 // writableTask is task id when who may change it: not found when they may not even see it. The caller holds mu.

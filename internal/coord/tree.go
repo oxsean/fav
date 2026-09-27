@@ -213,7 +213,7 @@ func (c *Coord) flow() {
 	for range 10 {
 		var events []journal.Event
 		for _, t := range c.st.Completing() {
-			events = append(events, journal.NewEvent(task.ETaskStatus, task.TaskStatus{ID: t.ID, Status: task.StatusDone}))
+			events = append(events, c.finish(t)...)
 		}
 		events = append(events, c.stageMoves()...)
 		for _, t := range c.st.Ready() {

@@ -181,6 +181,9 @@ func (s *State) stageSituation(t *Task) Situation {
 	case last.Waiting():
 		return Situation{Kind: SitWaiting, Reason: last.Attention, Run: last.ID}
 	case last.State == Exited && last.ExitCode != nil && *last.ExitCode == 0 && last.Attention == "":
+		if st.Output == OutputVerdict && last.Verdict != nil && stale(t, last) {
+			return Situation{Kind: SitQueued, Reason: WhyStale, Run: last.ID}
+		}
 		switch verdictOf(st, last) {
 		case agent.VerdictPass:
 			return Situation{Kind: SitQueued, Reason: WhyAdvance, Run: last.ID}

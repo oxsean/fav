@@ -39,6 +39,9 @@ type Repo struct {
 	Remote string            `json:"remote,omitempty"` // shared by the machines that hand work on
 	Base   string            `json:"base,omitempty"`   // the branch new work starts from
 	Dirs   map[string]string `json:"dirs,omitempty"`   // machine → its checkout there
+	// Worktrees: each task works on its own branch (tend/<task>) in a worktree beside the checkout, subtasks merge into
+	// their parent's branch, reviews run on a read-only copy.
+	Worktrees bool `json:"worktrees,omitempty"`
 }
 
 type Link struct {
@@ -67,15 +70,21 @@ func (p *Project) Agent() string {
 
 // DirOn is where p's first repository with a checkout on machine is there.
 func (p *Project) DirOn(machine string) (string, bool) {
+	r, ok := p.RepoOn(machine)
+	return r.Dirs[machine], ok
+}
+
+// RepoOn is p's first repository with a checkout on machine.
+func (p *Project) RepoOn(machine string) (Repo, bool) {
 	if p == nil {
-		return "", false
+		return Repo{}, false
 	}
 	for _, r := range p.Repos {
-		if d := r.Dirs[machine]; d != "" {
-			return d, true
+		if r.Dirs[machine] != "" {
+			return r, true
 		}
 	}
-	return "", false
+	return Repo{}, false
 }
 
 // Role is user's role in p: the owner participates; "" is none.

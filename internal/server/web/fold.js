@@ -23,7 +23,7 @@ globalThis.Fold = (() => {
     if (o.detail) r.detail = o.detail;
     if ((o.node_rev || 0) > 0) {
       r.attention = o.attention; r.ask = o.ask; r.note = o.note; r.last = o.last; r.usage = o.usage;
-      r.stream = o.stream; r.requests = o.requests; r.verdict = o.verdict; r.checked = o.check;
+      r.stream = o.stream; r.requests = o.requests; r.verdict = o.verdict; r.checked = o.check; r.worked = o.work;
       const node = o.sends || [];
       r.sends = [...node, ...(r.sends || []).filter(m => !node.some(x => x.id === m.id))];
       r.answers = (r.answers || []).filter(a => (r.requests || []).some(q => q.id === a.request));
@@ -97,15 +97,19 @@ globalThis.Fold = (() => {
       }
       case 'run_queued':
         s.runs[d.id] = {...d, state: 'queued', want: 'run', queued_at: at, seq};
+        queuedWork(s, s.runs[d.id]);
         break;
       case 'run_starting': {
         const r = need(s.runs, d.id, 'run');
         if (r.state === 'queued') { r.state = 'starting'; if (d.dir) r.dir = d.dir; }
         break;
       }
-      case 'run_observed':
-        observe(need(s.runs, d.id, 'run'), d);
+      case 'run_observed': {
+        const r = need(s.runs, d.id, 'run'), open = openStates.has(r.state);
+        observe(r, d);
+        if (open && !openStates.has(r.state)) worked(s, r);
         break;
+      }
       case 'run_stop_requested':
         need(s.runs, d.id, 'run').want = 'stop';
         break;
@@ -228,6 +232,7 @@ globalThis.Fold = (() => {
     const waiting = !openStates.has(last.state) && (last.attention === 'asked' || last.attention === 'permission');
     if (waiting) return {kind: 'waiting', reason: last.attention, run: last.id};
     if (last.state === 'exited' && last.exit_code === 0 && !last.attention) {
+      if (st.output === 'verdict' && last.verdict && stale(t, last)) return {kind: 'queued', reason: 'stale', run: last.id};
       const v = verdictOf(st, last);
       if (v === 'pass') return {kind: 'queued', reason: 'advance', run: last.id};
       if (v === 'rework') return (t.loops || 0) >= (t.flow.max_loops || 0) ? {kind: 'waiting', reason: 'max_loops', run: last.id} : {kind: 'queued', reason: 'rework', run: last.id};
@@ -236,6 +241,32 @@ globalThis.Fold = (() => {
     if (last.reason && last.state !== 'exited') return {kind: 'waiting', reason: last.reason, run: last.id};
     return {kind: 'waiting', reason: last.state, run: last.id};
   }
+  // queuedWork gives a queued run's task, and those whose branches it makes, their branches (task.State.queuedWork).
+  function queuedWork(s, r) {
+    const w = r.work;
+    if (!w || w.read_only || w.merge) return;
+    for (const b of [...(w.chain || []), w.branch]) {
+      const t = s.tasks[b.replace(/^tend\//, '')];
+      if (!t) continue;
+      if (!t.branch) t.branch = b;
+      if (!t.work_on) t.work_on = r.machine;
+    }
+  }
+  // worked records what an ended run did to its task's branch (task.State.worked).
+  function worked(s, r) {
+    const t = s.tasks[r.task], w = r.worked;
+    if (!t || !w || !r.work) return;
+    if (r.work.merge) {
+      if (w.merged) { t.merged = true; const p = s.tasks[t.parent]; if (p && w.head) p.head = w.head; }
+    } else if (!r.work.read_only && w.head) t.head = w.head;
+  }
+  function mergeSituation(last) {
+    if (last.worked && last.worked.merged) return {kind: 'queued', reason: 'completing', run: last.id};
+    if (last.reason === 'merge_conflict') return {kind: 'waiting', reason: 'merge_conflict', run: last.id};
+    if (last.reason) return {kind: 'waiting', reason: last.reason, run: last.id};
+    return {kind: 'waiting', reason: last.state, run: last.id};
+  }
+  const stale = (t, r) => !!(r.worked && r.worked.head && t.head && r.worked.head !== t.head);
   // held is what keeps a started task from its own work (task.State.held).
   function held(s, t) {
     if (t.held) return {kind: 'waiting', reason: 'held'};
@@ -270,13 +301,14 @@ globalThis.Fold = (() => {
     }
     const why = sourceWaits(t);
     if (why) return {kind: 'waiting', reason: why};
+    let last = null;
+    for (const r of runs) if (!last || (r.seq || 0) > (last.seq || 0) || (r.seq || 0) === (last.seq || 0) && r.queued_at > last.queued_at) last = r;
+    if (last && last.stage === 'merge') return mergeSituation(last);
     const kids = Object.values(s.tasks).filter(k => k.parent === t.id);
     if (kids.some(k => k.status !== 'canceled')) {
       if (kids.some(k => k.status !== 'done' && k.status !== 'canceled')) return {kind: 'queued', reason: 'children'};
       if (!t.flow) return {kind: 'waiting', reason: 'accept'};
     }
-    let last = null;
-    for (const r of runs) if (!last || (r.seq || 0) > (last.seq || 0) || (r.seq || 0) === (last.seq || 0) && r.queued_at > last.queued_at) last = r;
     if (t.flow && t.auto) return held(s, t) || stageSituation(s, t, last);
     if (last && (!t.auto || (last.seq || 0) > (t.start_seq || 0))) {
       const waiting = !openStates.has(last.state) && (last.attention === 'asked' || last.attention === 'permission');

@@ -135,9 +135,11 @@ func cmdRunContinue(args []string) error {
 	})
 }
 
-// cmdRunReport is `tend run ask|note <text>`, run by an agent inside a run: it reaches the run's state.
+// cmdRunReport is `tend run ask|note <text>`, run by an agent inside a run: it reaches the run's state. `note --pr
+// <url>` reports the pull request its work went into.
 func cmdRunReport(kind string, args []string) error {
 	fs := newFlags("run")
+	pr := fs.String("pr", "", i18n.T("cli.run.flag_pr"))
 	pos, err := parseMixed(fs, args)
 	if err != nil {
 		return err
@@ -145,6 +147,11 @@ func cmdRunReport(kind string, args []string) error {
 	dir := os.Getenv(node.EnvRunDir)
 	if dir == "" {
 		return errors.New(i18n.T("cli.run.no_run_dir"))
+	}
+	if *pr != "" {
+		if err := node.AddReport(dir, node.ReportPR, *pr); err != nil || len(pos) == 0 {
+			return err
+		}
 	}
 	text := strings.Join(pos, " ")
 	if strings.TrimSpace(text) == "" {

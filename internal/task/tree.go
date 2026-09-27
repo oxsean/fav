@@ -235,6 +235,9 @@ func (s *State) Situation(t *Task) Situation {
 	if why := SourceWaits(t); why != "" {
 		return Situation{Kind: SitWaiting, Reason: why}
 	}
+	if last := s.Latest(t.ID); last != nil && last.Stage == StageMerge {
+		return mergeSituation(last)
+	}
 	if kids := s.Children(t.ID); slices.ContainsFunc(kids, func(k *Task) bool { return k.Status != StatusCanceled }) {
 		if slices.ContainsFunc(kids, func(k *Task) bool { return !Finished(k.Status) }) {
 			return Situation{Kind: SitQueued, Reason: WhyChildren}
@@ -290,16 +293,16 @@ func (s *State) held(t *Task) (Situation, bool) {
 	return Situation{}, false
 }
 
-// Ready are the started tasks the coordinator dispatches now, oldest first.
-func (s *State) Ready() []*Task { return s.situated(WhyReady) }
+// Ready are the started tasks the coordinator dispatches now, oldest first: new work, and stages to judge again.
+func (s *State) Ready() []*Task { return s.situated(WhyReady, WhyStale) }
 
 // Completing are the started tasks whose run succeeded, which the coordinator marks done now.
 func (s *State) Completing() []*Task { return s.situated(WhyCompleting) }
 
-func (s *State) situated(why string) []*Task {
+func (s *State) situated(why ...string) []*Task {
 	var out []*Task
 	for _, t := range s.Tasks {
-		if t.Status == StatusTodo && s.Situation(t).Reason == why {
+		if t.Status == StatusTodo && slices.Contains(why, s.Situation(t).Reason) {
 			out = append(out, t)
 		}
 	}

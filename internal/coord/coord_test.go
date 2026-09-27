@@ -91,14 +91,21 @@ func newEnv(t *testing.T, cfg tend.Config) *env {
 // killRuns ends every supervisor and agent a test left running (a failed test would leave --ask agents for good).
 func killRuns(home string) {
 	dirs, _ := filepath.Glob(filepath.Join(home, "node", "runs", "*"))
+	var killed []int
 	for _, d := range dirs {
 		var st node.State
 		if b, err := os.ReadFile(filepath.Join(d, "state.json")); err == nil && json.Unmarshal(b, &st) == nil {
 			for _, pid := range []int{st.Pid, st.Sup} {
 				if pid > 0 {
 					proc.KillPID(pid)
+					killed = append(killed, pid)
 				}
 			}
+		}
+	}
+	for deadline := time.Now().Add(3 * time.Second); time.Now().Before(deadline); time.Sleep(50 * time.Millisecond) { // ⚠️ Windows keeps their files until they are gone
+		if !slices.ContainsFunc(killed, proc.Alive) {
+			return
 		}
 	}
 }

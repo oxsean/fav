@@ -91,3 +91,34 @@ type CheckResult struct {
 	Exit int      `json:"exit"`
 	Tail string   `json:"tail,omitempty"` // the end of what it printed
 }
+
+// Work is what a run did to its task's branch, as the node recorded it: where it worked, the branch's head after it (a
+// read-only run: the commit it looked at), what the branch holds since it forked, and what went wrong on the way. A
+// merge run says whether it merged or which files were in conflict.
+type Work struct {
+	Dir       string   `json:"dir,omitempty"`
+	Branch    string   `json:"branch,omitempty"`
+	Head      string   `json:"head,omitempty"`
+	Commits   int      `json:"commits,omitempty"`
+	Diffstat  string   `json:"diffstat,omitempty"`
+	Discarded int      `json:"discarded,omitempty"` // files a read-only run changed, thrown away
+	Merged    bool     `json:"merged,omitempty"`
+	Conflict  []string `json:"conflict,omitempty"`
+	PR        string   `json:"pr,omitempty"`
+	Warnings  []string `json:"warnings,omitempty"`
+}
+
+// Workspace is where a run works in git (a node's feature worktree): task branch Branch in a worktree beside the project's checkout, the branch
+// made from the last of Chain (its ancestors' integration branches, outermost first, the first made from Base). With
+// Remote the branches are fetched before and pushed after, so another machine can go on with them.
+type Workspace struct {
+	Checkout string   `json:"checkout"`
+	Branch   string   `json:"branch"`
+	Chain    []string `json:"chain,omitempty"`
+	Base     string   `json:"base,omitempty"` // default: the checkout's HEAD
+	Remote   string   `json:"remote,omitempty"`
+	ReadOnly bool     `json:"read_only,omitempty"` // a detached copy of the branch's head, thrown away after
+	Merge    string   `json:"merge,omitempty"`     // a merge run: this branch goes into Branch; no agent runs
+	Setup    []string `json:"setup,omitempty"`     // run in a worktree once it is made
+	Cleanup  []string `json:"cleanup,omitempty"`   // run in a merged branch's worktree before it is removed
+}

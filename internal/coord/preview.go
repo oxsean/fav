@@ -29,6 +29,12 @@ var runFeatures = func(run *task.Run) []string {
 	if run.Profile.Effort != "" || len(run.Profile.Deny) > 0 {
 		out = append(out, node.FeatureAgentDef)
 	}
+	if run.Work != nil {
+		out = append(out, node.FeatureWorktree)
+	}
+	if len(run.Profile.Hooks) > 0 || len(run.Profile.MCP) > 0 || len(run.Profile.Skills) > 0 {
+		out = append(out, node.FeatureFiles)
+	}
 	return append(out, stageFeatures(run)...)
 }
 
@@ -55,7 +61,7 @@ const (
 	WhyAuthMissing  = agent.ReasonAuthMissing // blocks: the CLI is not logged in there
 	WhyOutdated     = ReasonNodeOutdated      // blocks: the machine's tend cannot do it
 	WhyNoAccess     = "no_access"             // blocks: the machine is not open to the caller or the task's project
-	WhyDefPending   = "def_pending"           // the definition's skills, MCP servers or hooks are not applied yet
+	WhyDefPending   = "def_pending"           // the definition's MCP servers or hooks do not apply to its provider
 	WhyOffline      = "offline"               // it queues until the machine answers
 	WhyConnecting   = "connecting"
 	WhySlots        = "slots"    // it queues until a slot frees (Detail: active/slots)
@@ -94,8 +100,8 @@ func (c *Coord) PreviewFor(ctx context.Context, who Principal, p Dispatch) (Prev
 	run, err := c.plan(who, p)
 	open := err == nil && c.canUse(who, run.Machine, run.Project)
 	var pending []string
-	if d := c.agentDefs()[run.Agent]; err == nil && d != nil {
-		for name, n := range map[string]int{"skills": len(d.Skills), "mcp": len(d.MCP), "hooks": len(d.Hooks)} {
+	if d := c.agentDefs()[run.Agent]; err == nil && d != nil && run.Profile.Provider != tend.ProviderClaude {
+		for name, n := range map[string]int{"mcp": len(d.MCP), "hooks": len(d.Hooks)} {
 			if n > 0 {
 				pending = append(pending, name)
 			}
@@ -145,7 +151,7 @@ func (c *Coord) preview(ctx context.Context, run task.Run) Preview {
 	if dir, ok := c.mapDir(&run, m); ok {
 		pv.Dir = dir
 		for _, r := range c.st.Runs {
-			if r.Machine == m.name && task.Open(r.State) && r.State != task.Queued && dirKey(r.Dir, m.hello.OS) == dirKey(dir, m.hello.OS) {
+			if r.Machine == m.name && task.Open(r.State) && r.State != task.Queued && runKey(r, r.Dir, m.hello.OS) == runKey(&run, dir, m.hello.OS) {
 				pv.Notes = append(pv.Notes, Why{WhyDirBusy, r.ID})
 				break
 			}

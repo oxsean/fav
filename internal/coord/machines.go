@@ -447,7 +447,7 @@ func (c *Coord) converge(ctx context.Context, m *machine) {
 		if r.Machine == m.name && r.State == task.Abandoned && !c.ackDone[r.ID] &&
 			(!onNode || !node.Terminal(s.State.State) && s.State.State != node.StateUnknown) {
 			used++
-			dirs[dirKey(r.Dir, m.hello.OS)] = true
+			dirs[runKey(r, r.Dir, m.hello.OS)] = true
 		}
 	}
 	for _, r := range mine {
@@ -455,7 +455,7 @@ func (c *Coord) converge(ctx context.Context, m *machine) {
 			continue
 		}
 		used++
-		dirs[dirKey(r.Dir, m.hello.OS)] = true
+		dirs[runKey(r, r.Dir, m.hello.OS)] = true
 		s, onNode := seen[r.ID]
 		switch {
 		case r.Want == "stop" && onNode && !node.Terminal(s.State.State) && !s.StopAsked:
@@ -484,11 +484,11 @@ func (c *Coord) converge(ctx context.Context, m *machine) {
 			continue
 		}
 		dir, ok := c.mapDir(r, m)
-		if !ok || dirs[dirKey(dir, m.hello.OS)] {
+		if !ok || dirs[runKey(r, dir, m.hello.OS)] {
 			continue
 		}
 		used++
-		dirs[dirKey(dir, m.hello.OS)] = true
+		dirs[runKey(r, dir, m.hello.OS)] = true
 		starting = append(starting, journal.NewEvent(task.ERunStarting, task.RunStarting{ID: r.ID, Dir: dir}))
 	}
 	if err == nil {
@@ -512,7 +512,7 @@ func (c *Coord) converge(ctx context.Context, m *machine) {
 		c.sent[r.ID] = time.Now()
 		params[i] = node.StartParams{Run: r.ID, Task: r.Task, Coordinator: c.id, Profile: r.Profile, Dir: r.Dir,
 			Brief: r.Brief, Title: r.Title, Runner: r.Runner, Resume: r.Resume, Project: r.Project, Dispatcher: c.person(r.Dispatcher),
-			Verdict: r.Judge, Check: r.Check}
+			Verdict: r.Judge, Check: r.Check, Work: r.Work}
 	}
 	canResume := slices.Contains(m.hello.Methods, node.MRunResume)
 	var inputs []input
@@ -590,7 +590,7 @@ func heldBack(err error) bool {
 func observation(s node.Snapshot) task.Observation {
 	return task.Observation{ID: s.Run, State: s.State.State, ExitCode: s.ExitCode, Reason: s.Reason, Detail: s.Detail,
 		Attention: s.Attention, Ask: s.Ask, Note: s.Note, Last: s.Last, Usage: s.Usage, Stream: s.Stream, Requests: s.Requests,
-		Sends: s.Sends, Verdict: s.Verdict, Check: s.Check, Provider: s.Provider, Session: s.Session, Pane: s.Pane, NodeRev: s.Rev,
+		Sends: s.Sends, Verdict: s.Verdict, Check: s.Check, Work: s.Work, Provider: s.Provider, Session: s.Session, Pane: s.Pane, NodeRev: s.Rev,
 		StartedAt: s.StartedAt, EndedAt: s.EndedAt}
 }
 
@@ -617,6 +617,19 @@ func (c *Coord) mapDir(r *task.Run, m *machine) (string, bool) {
 }
 
 // dirKey is dir as a key for the one-run-per-directory rule on a machine running os.
+// runKey is what run r holds while it runs in dir: the directory, or in a checkout with worktrees its branch's
+// worktree (a read-only copy is its own).
+func runKey(r *task.Run, dir, os string) string {
+	key := dirKey(dir, os)
+	switch w := r.Work; {
+	case w == nil:
+		return key
+	case w.ReadOnly:
+		return key + "\x00" + r.ID
+	}
+	return key + "\x00" + r.Work.Branch
+}
+
 func dirKey(dir, os string) string {
 	if os == "windows" {
 		return path.Clean(strings.ToLower(strings.ReplaceAll(dir, `\`, "/")))

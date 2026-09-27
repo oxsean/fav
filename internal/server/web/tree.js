@@ -29,7 +29,7 @@ const treeWords = {
   agentSaved: ['定义已保存', 'Definition saved'], readonlyDef: ['只分享给你使用，不能查看内容。', 'Shared with you for use, not for reading.'],
   giveToProject: ['归属', 'Owner'], me: ['我', 'Me'], projectSettings: ['项目设置', 'Project settings'],
   context: ['项目说明', 'Project context'], contextHint: ['每个 run 的任务书开头都会带上。', 'Put at the head of every run\'s brief.'],
-  repos: ['仓库', 'Repositories'], reposHint: ['每行一个：名称 远端 基准分支 机器=目录 …', 'One per line: name remote base machine=dir …'],
+  repos: ['仓库', 'Repositories'], reposHint: ['每行一个：名称 远端 基准分支 [worktrees] 机器=目录 …；写 worktrees 则每个任务在自己的分支和工作区里做，子任务合进父任务的分支', 'One per line: name remote base [worktrees] machine=dir …; with worktrees each task works on its own branch and worktree, and subtasks merge into their parent’s branch'],
   implementAgent: ['实现 agent', 'Implementing agent'], reviewAgent: ['评审 agent', 'Review agent'], testAgent: ['测试 agent', 'Test agent'],
   plannerAgent: ['拆解 agent', 'Planner agent'], checkHook: ['check hook（阶段结束后运行）', 'check hook (runs after a stage)'],
   setupHook: ['setup hook（worktree 建好后运行）', 'setup hook (runs once the worktree is made)'], settingsSaved: ['项目设置已保存', 'Project settings saved'],
@@ -76,6 +76,12 @@ const treeWords = {
   defaultWorkflow: ['默认工作流', 'Default workflow'], customWorkflows: ['自定义工作流', 'Custom workflows'], newWorkflow: ['新建工作流', 'New workflow'],
   editWorkflow: ['编辑工作流', 'Edit workflow'], workflowSaved: ['工作流已保存', 'Workflow saved'], noCustomWorkflows: ['没有自定义工作流；内置 feature、fix、docs。', 'None; feature, fix and docs are built in.'],
   workflowNameMissing: ['frontmatter 里要有 name。', 'The front matter needs a name.'],
+  'why.merge_conflict': ['合进父任务时冲突', 'Merging into its parent conflicted'], 'why.stale': ['分支有了新提交，重新评审', 'Its branch moved on; judged again'],
+  'why.setup_failed': ['setup hook 失败', 'The setup hook failed'], 'why.work': ['建不了工作区', 'Its worktree could not be made'],
+  branch: ['分支', 'Branch'], mergeable: ['可合并', 'Ready to merge'], mergedIn: ['已合进父任务', 'Merged into its parent'],
+  commits: ['{0} 个提交', '{0} commits'], discarded: ['改了 {0} 个文件，已丢弃', '{0} changed files thrown away'],
+  conflictIn: ['合并冲突的文件：', 'Files in conflict:'], resolveHint: ['在 {0} 里合并并提交，然后重试。', 'Merge and commit in {0}, then try again.'],
+  retryMerge: ['重试合并', 'Merge again'], merging: ['正在合并', 'Merging'], pullRequest: ['PR', 'Pull request'],
 };
 
 const Tree = (() => {
@@ -113,9 +119,37 @@ const Tree = (() => {
     const src = task.source ? sourceBlock(task) : '';
     const sub = kids.length ? `<div class="tree-block"><span class="meta-label">${t('subtasks')}</span>${kids.map(k => `<div class="flex">${link(k.id)}${badge(k.status)}${sitBadge(k)}</div>`).join('')}</div>` : '';
     const can = ui.online && !finished(task.status);
-    const flow = task.flow ? flowBlock(task) : '';
+    const flow = (task.flow ? flowBlock(task) : '') + workBlock(task);
     const actions = can ? `<div class="task-actions">${button('tree-start', `${icon('play')}${t(task.auto ? 'startAgain' : 'start')}`, `data-id="${esc(task.id)}"`, task.status === 'backlog' ? 'primary' : 'quiet')}${button('tree-move', t('moveTask'), `data-id="${esc(task.id)}"`, 'quiet')}</div>` : '';
     return `${rows.length ? `<div class="metadata">${rows.join('')}</div>` : ''}${src}${flow}${acc}${sub}${actions}`;
+  }
+
+  const short = h => (h || '').slice(0, 10);
+  // workLine is what run r did to its branch, in one line (render.RunWork).
+  function workLine(r) {
+    const w = r.work, d = r.worked;
+    if (!w || w.merge || !d) return '';
+    const parts = [];
+    if (w.read_only) { if (d.discarded) parts.push(t('discarded').replace('{0}', d.discarded)); }
+    else if (d.head) parts.push(`${t('commits').replace('{0}', d.commits || 0)}${d.diffstat ? ' · ' + esc(d.diffstat) : ''}`);
+    if (d.pr) parts.push(`<a href="${esc(d.pr)}" target="_blank" rel="noreferrer noopener">${t('pullRequest')}</a>`);
+    for (const x of d.warnings || []) parts.push(`<span class="muted">${esc(x)}</span>`);
+    return parts.join(' · ');
+  }
+
+  // workBlock is where a task's work is in git: its branch, what its latest run left there, a merge conflict to resolve.
+  function workBlock(task) {
+    if (!task.branch) return '';
+    const runs = Object.values(ui.state.runs).filter(r => r.task === task.id && r.work).sort((a, b) => (a.seq || 0) - (b.seq || 0));
+    const lastWork = runs.filter(r => !r.work.merge && !r.work.read_only && r.worked).at(-1), lastMerge = runs.filter(r => r.work.merge).at(-1);
+    const state = task.merged ? `<span class="status exited">${t('mergedIn')}</span>` : task.status === 'done' && !task.parent ? `<span class="status done">${t('mergeable')}</span>` : '';
+    let body = `<div class="flex"><span class="meta-label">${t('branch')}</span><code>${esc(task.branch)}</code>${task.head ? `<span class="muted mono">${esc(short(task.head))}</span>` : ''}${state}</div>`;
+    if (lastWork) { const line = workLine(lastWork); if (line) body += `<div class="hint">${line}</div>`; }
+    if (sit(task).reason === 'merge_conflict' && lastMerge?.worked) {
+      body += `<div class="notice">${t('conflictIn')} <code>${(lastMerge.worked.conflict || []).map(esc).join(', ')}</code><br>${t('resolveHint').replace('{0}', `<code>${esc(lastMerge.worked.dir || '')}</code>`)}</div>
+        ${ui.online ? `<div class="flex">${button('tree-merge', t('retryMerge'), `data-id="${esc(task.id)}"`, 'primary')}</div>` : ''}`;
+    }
+    return `<div class="tree-block">${body}</div>`;
   }
 
   // flowBlock is a workflow task's stages with where it stands, its human gate, its workpad and a message box.
@@ -140,7 +174,8 @@ const Tree = (() => {
       let what = r.verdict ? `<span class="status verdict-${esc(r.verdict.verdict)}">${t('verdict.' + r.verdict.verdict)}</span> ${esc(r.verdict.summary || '')}`
         : r.state === 'exited' && r.exit_code === 0 ? esc(r.last || t('exited')) : esc(t('runEnded').replace('{0}', t(r.state) + (r.reason ? ' · ' + r.reason : '')));
       if (r.checked && r.checked.exit !== 0) what += `<details><summary class="pointer">${t('checkFailed').replace('{0}', r.checked.exit)} <code>${esc(r.checked.argv.join(' '))}</code></summary><pre class="tail">${esc(r.checked.tail || '')}</pre></details>`;
-      items.push({at: r.queued_at, html: `<li><span class="mono">[${esc(r.stage)}]</span> <button type="button" class="link-button mono" data-action="select-run" data-id="${esc(r.id)}">${esc(r.id)}</button> ${what}</li>`});
+      const work = workLine(r);
+      items.push({at: r.queued_at, html: `<li><span class="mono">[${esc(r.stage)}]</span> <button type="button" class="link-button mono" data-action="select-run" data-id="${esc(r.id)}">${esc(r.id)}</button> ${what}${work ? ` <span class="hint">· ${work}</span>` : ''}</li>`});
     }
     for (const n of (task.notes || []).filter(n => n.kind !== 'rework')) items.push({at: n.at, html: `<li><span class="mono">[${esc(n.stage || '')}]</span> <strong>${t('note.' + n.kind)}</strong>${n.by ? ` · ${esc(Team.name(n.by))}` : ''} <span class="pre-line">${esc(n.text)}</span></li>`});
     items.sort((a, b) => String(a.at).localeCompare(String(b.at)));
@@ -304,14 +339,14 @@ const Tree = (() => {
   }
 
   // Project settings: the text forms of repos (one per line) and hooks (argv split on spaces).
-  const repoLine = r => [r.name, r.remote || '-', r.base || '-', ...Object.entries(r.dirs || {}).map(([m, d]) => `${m}=${d}`)].join(' ');
+  const repoLine = r => [r.name, r.remote || '-', r.base || '-', ...(r.worktrees ? ['worktrees'] : []), ...Object.entries(r.dirs || {}).map(([m, d]) => `${m}=${d}`)].join(' ');
   function parseRepos(text) {
     return text.split('\n').map(l => l.trim()).filter(Boolean).map(l => {
       const [name, remote, base, ...dirs] = l.split(/\s+/);
       const r = {name, dirs: {}};
       if (remote && remote !== '-') r.remote = remote;
       if (base && base !== '-') r.base = base;
-      for (const d of dirs) { const i = d.indexOf('='); if (i > 0) r.dirs[d.slice(0, i)] = d.slice(i + 1); }
+      for (const d of dirs) { const i = d.indexOf('='); if (i > 0) r.dirs[d.slice(0, i)] = d.slice(i + 1); else if (d === 'worktrees') r.worktrees = true; }
       return r;
     });
   }
@@ -363,6 +398,7 @@ const Tree = (() => {
       case 'tree-offboard': offboard(d.id); break;
       case 'tree-pass': { const task = ui.state.tasks[d.id]; await api.taskGate({id: d.id, pass: true, expected_rev: task.rev}, {command_id: commandID()}); toast(t('passed')); break; }
       case 'tree-rework': gateForm(ui.state.tasks[d.id]); break;
+      case 'tree-merge': await api.taskMerge({id: d.id}, {command_id: commandID()}); toast(t('merging')); break;
       case 'tree-edit-flow': flowForm(d.project, d.name); break;
       case 'tree-remove-flow': {
         const flows = {...ui.state.projects[d.project]?.workflows}; delete flows[d.name];
