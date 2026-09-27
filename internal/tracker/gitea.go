@@ -1,24 +1,39 @@
 package tracker
 
 import (
-	"bytes"
 	"context"
-	"crypto/hmac"
-	"crypto/sha256"
-	"encoding/hex"
-	"encoding/json"
-	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"strconv"
 	"time"
 )
 
-// giteaPage is how many issues a page of Gitea's API holds at most (its default MAX_RESPONSE_ITEMS is 50).
-const giteaPage = 50
+// gitea speaks Gitea's API, and GitHub's, which it follows: they differ in where the API is, how the token goes and
+// how large a page is.
+type gitea struct {
+	rest
+	page      int    // Gitea's default MAX_RESPONSE_ITEMS is 50; GitHub's per_page is 100 at most
+	pageParam string // limit | per_page
+}
 
-type gitea struct{ cfg Config }
+func newGitea(cfg Config) *gitea {
+	g := &gitea{rest: rest{cfg: cfg, api: cfg.Base + "/api/v1", accept: "application/json"}, page: 50, pageParam: "limit"}
+	g.auth = func(h http.Header) { h.Set("Authorization", "token "+cfg.Token) }
+	return g
+}
+
+func newGitHub(cfg Config) *gitea {
+	api := cfg.Base + "/api/v3"
+	if cfg.Base == "https://github.com" {
+		api = "https://api.github.com"
+	}
+	g := &gitea{rest: rest{cfg: cfg, api: api, accept: "application/vnd.github+json"}, page: 100, pageParam: "per_page"}
+	g.auth = func(h http.Header) {
+		h.Set("Authorization", "Bearer "+cfg.Token)
+		h.Set("X-GitHub-Api-Version", "2022-11-28")
+	}
+	return g
+}
 
 type giteaUser struct {
 	ID    int64  `json:"id"`
@@ -44,53 +59,11 @@ type giteaComment struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
-func (g *gitea) repoPath(rest string) string { return "/api/v1/repos/" + g.cfg.Repo + rest }
-
-// do sends a request with a JSON body (when in is not nil) and decodes a JSON answer into out (when not nil).
-func (g *gitea) do(ctx context.Context, method, path string, header http.Header, in, out any) (*http.Response, error) {
-	var body io.Reader
-	if in != nil {
-		b, err := json.Marshal(in)
-		if err != nil {
-			return nil, err
-		}
-		body = bytes.NewReader(b)
-	}
-	req, err := http.NewRequestWithContext(ctx, method, g.cfg.Base+path, body)
-	if err != nil {
-		return nil, err
-	}
-	for k, v := range header {
-		req.Header[k] = v
-	}
-	req.Header.Set("Authorization", "token "+g.cfg.Token)
-	req.Header.Set("Accept", "application/json")
-	if in != nil {
-		req.Header.Set("Content-Type", "application/json")
-	}
-	res, err := g.cfg.Client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer res.Body.Close()
-	b, _ := io.ReadAll(io.LimitReader(res.Body, 8<<20))
-	if res.StatusCode == http.StatusNotModified {
-		return res, nil
-	}
-	if res.StatusCode/100 != 2 {
-		return res, statusError(res, b, time.Now())
-	}
-	if out != nil && len(b) > 0 {
-		if err := json.Unmarshal(b, out); err != nil {
-			return res, fmt.Errorf("tracker answer: %w", err)
-		}
-	}
-	return res, nil
-}
+func (g *gitea) repoPath(rest string) string { return "/repos/" + g.cfg.Repo + rest }
 
 func (g *gitea) Me(ctx context.Context) (string, error) {
 	var u giteaUser
-	_, err := g.do(ctx, http.MethodGet, "/api/v1/user", nil, nil, &u)
+	_, err := g.do(ctx, http.MethodGet, "/user", nil, nil, &u)
 	return u.Login, err
 }
 
@@ -118,7 +91,7 @@ func (i giteaIssue) issue() Issue {
 func (g *gitea) Issues(ctx context.Context, since time.Time, label, etag string) (Page, error) {
 	var out Page
 	for page := 1; ; page++ {
-		q := url.Values{"state": {"all"}, "type": {"issues"}, "limit": {strconv.Itoa(giteaPage)}, "page": {strconv.Itoa(page)}}
+		q := url.Values{"state": {"all"}, "type": {"issues"}, g.pageParam: {strconv.Itoa(g.page)}, "page": {strconv.Itoa(page)}}
 		if !since.IsZero() {
 			q.Set("since", since.UTC().Format(time.RFC3339))
 		}
@@ -145,7 +118,7 @@ func (g *gitea) Issues(ctx context.Context, since time.Time, label, etag string)
 				out.Issues = append(out.Issues, i.issue())
 			}
 		}
-		if len(batch) < giteaPage {
+		if len(batch) < g.page {
 			return out, nil
 		}
 	}
@@ -161,14 +134,14 @@ func (g *gitea) Comments(ctx context.Context, number int64) ([]Comment, error) {
 	var out []Comment
 	for page := 1; ; page++ {
 		var batch []giteaComment
-		q := url.Values{"limit": {strconv.Itoa(giteaPage)}, "page": {strconv.Itoa(page)}}
+		q := url.Values{g.pageParam: {strconv.Itoa(g.page)}, "page": {strconv.Itoa(page)}}
 		if _, err := g.do(ctx, http.MethodGet, g.repoPath("/issues/"+strconv.FormatInt(number, 10)+"/comments?"+q.Encode()), nil, nil, &batch); err != nil {
 			return nil, err
 		}
 		for _, c := range batch {
 			out = append(out, Comment{ID: c.ID, Body: c.Body, Author: c.User.Login, UpdatedAt: c.UpdatedAt})
 		}
-		if len(batch) < giteaPage {
+		if len(batch) < g.page {
 			return out, nil
 		}
 	}
@@ -180,7 +153,7 @@ func (g *gitea) CreateComment(ctx context.Context, number int64, body string) (C
 	return Comment{ID: c.ID, Body: c.Body, Author: c.User.Login, UpdatedAt: c.UpdatedAt}, err
 }
 
-func (g *gitea) EditComment(ctx context.Context, id int64, body string) error {
+func (g *gitea) EditComment(ctx context.Context, _, id int64, body string) error {
 	_, err := g.do(ctx, http.MethodPatch, g.repoPath("/issues/comments/"+strconv.FormatInt(id, 10)), nil, map[string]string{"body": body}, nil)
 	return err
 }
@@ -193,22 +166,4 @@ func (g *gitea) Close(ctx context.Context, number int64) error {
 func (g *gitea) Label(ctx context.Context, number int64, label string) error {
 	_, err := g.do(ctx, http.MethodPost, g.repoPath("/issues/"+strconv.FormatInt(number, 10)+"/labels"), nil, map[string][]string{"labels": {label}}, nil)
 	return err
-}
-
-// GiteaSigned: sig (X-Gitea-Signature) is the HMAC-SHA256 of body under secret.
-func GiteaSigned(secret, body []byte, sig string) bool {
-	m := hmac.New(sha256.New, secret)
-	m.Write(body)
-	want, err := hex.DecodeString(sig)
-	return err == nil && hmac.Equal(m.Sum(nil), want)
-}
-
-// GiteaHook is what the sync worker needs of a Gitea webhook delivery: which repository and issue it is about.
-type GiteaHook struct {
-	Repository struct {
-		ID int64 `json:"id"`
-	} `json:"repository"`
-	Issue struct {
-		Number int64 `json:"number"`
-	} `json:"issue"`
 }

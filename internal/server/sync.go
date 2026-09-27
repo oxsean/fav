@@ -389,7 +389,7 @@ func (s *Syncer) issue(ctx context.Context, x store.Tracker, tr tracker.Tracker,
 // answer got lost is found again by its marker on the next read.
 func (s *Syncer) writeComment(ctx context.Context, tr tracker.Tracker, row *store.TrackerIssue, body string) error {
 	if row.CommentID != 0 {
-		err := tr.EditComment(ctx, row.CommentID, body)
+		err := tr.EditComment(ctx, row.Number, row.CommentID, body)
 		if !errors.Is(err, tracker.ErrNotFound) {
 			if err == nil {
 				row.BodyHash, row.Written = hash(body), s.now()

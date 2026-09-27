@@ -535,13 +535,14 @@ open, and at a personal webhook (Account page; a JSON POST with a `text` field f
 the task when `public_url` is set). An admin's **Hand over and disable** on the Admin page gives a leaving member's projects,
 tasks and definitions to others and ends their credentials.
 
-**Issues.** A project can follow a Gitea repository (Projects page, **Issue sync**; GitLab and GitHub come later): give
-its address, the repository and a bot account's token (kept encrypted on the server, with the key in `server.key` or
+**Issues.** A project can follow a Gitea, GitHub or GitLab repository (Projects page, **Issue sync**): give its address
+(`https://github.com` for GitHub), the repository (`owner/name`, with subgroups on GitLab) and a bot account's token (kept encrypted on the server, with the key in `server.key` or
 `TEND_SERVER_KEY`). Issues with the label (`tend` by default), or optionally assigned to a member, become requirements of
-the project, owned by the assignee when they signed in with that Gitea. tend keeps one progress comment on each issue and
+the project, owned by the assignee when they signed in with that tracker. tend keeps one progress comment on each issue and
 closes it once the requirement is done. When an issue changes, its requirement waits until someone takes the new revision
 or keeps the current scope; when it is closed outside tend, someone decides whether to go on. The server polls (60 s by
-default); a webhook to `<public_url>/hooks/<id>` with the secret shown at binding time makes it quicker. A refused token
+default); a webhook to `<public_url>/hooks/<id>` with the secret shown at binding time (GitHub: content type
+`application/json`; GitLab: as the secret token) makes it quicker. A refused token
 stops the binding and tells the project's owner and the admins; a rate limit pauses it.
 
 **Web UI.** The server also serves a page at its own address (`http://100.101.8.10:7788/`). Sign in with a provider, or

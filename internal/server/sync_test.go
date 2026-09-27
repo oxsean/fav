@@ -19,17 +19,18 @@ import (
 	"github.com/oxsean/fav/internal/store"
 	"github.com/oxsean/fav/internal/task"
 	"github.com/oxsean/fav/internal/tend"
-	"github.com/oxsean/fav/internal/tracker/giteatest"
+	"github.com/oxsean/fav/internal/tracker"
+	"github.com/oxsean/fav/internal/tracker/trackertest"
 	"github.com/oxsean/fav/internal/wire"
 )
 
-// syncRig is a team server's coordinator and database, a Gitea, and the sync worker on a clock the test moves.
+// syncRig is a team server's coordinator and database, a tracker, and the sync worker on a clock the test moves.
 type syncRig struct {
 	t       *testing.T
 	team    *store.Team
 	c       *coord.Coord
 	s       *Syncer
-	g       *giteatest.Server
+	g       *trackertest.Server
 	x       store.Tracker
 	ann     string
 	clock   time.Time
@@ -38,14 +39,16 @@ type syncRig struct {
 	cmd     int
 }
 
-func newSyncRig(t *testing.T) *syncRig {
+func newSyncRig(t *testing.T) *syncRig { return newSyncRigOf(t, tracker.KindGitea) }
+
+func newSyncRigOf(t *testing.T, kind string) *syncRig {
 	r := &syncRig{t: t, clock: time.Date(2026, 9, 27, 10, 0, 0, 0, time.UTC)}
 	home := t.TempDir()
 	var err error
 	if r.team, err = store.OpenTeam(filepath.Join(home, "coord", store.File)); err != nil {
 		t.Fatal(err)
 	}
-	r.g = giteatest.New("acme/app", "tend-bot", "tok")
+	r.g = trackertest.New(kind, "acme/app", "tend-bot", "tok")
 	must := func(err error) {
 		t.Helper()
 		if err != nil {
@@ -69,7 +72,7 @@ func newSyncRig(t *testing.T) *syncRig {
 	r.s = NewSyncer(r.team, r.c, seal, func(n coord.Notice) { r.mu.Lock(); r.notices = append(r.notices, n); r.mu.Unlock() })
 	r.s.now = func() time.Time { return r.clock }
 	b, _ := json.Marshal(DefaultSettings())
-	r.x, err = r.team.AddTracker(store.Tracker{Project: "p1", Kind: "gitea", Base: r.g.URL, Repo: "acme/app", RepoID: r.g.RepoID, Bot: "tend-bot",
+	r.x, err = r.team.AddTracker(store.Tracker{Project: "p1", Kind: kind, Base: r.g.URL, Repo: "acme/app", RepoID: r.g.RepoID, Bot: "tend-bot",
 		Token: seal.Seal([]byte("tok")), HookSecret: seal.Seal([]byte("hook-key")), Settings: string(b), CreatedBy: store.LocalUser})
 	must(err)
 	return r
@@ -126,9 +129,14 @@ func (r *syncRig) tracker() store.Tracker {
 }
 
 func TestLabelledIssuesBecomeRequirementsWithOneProgressComment(t *testing.T) {
-	r := newSyncRig(t)
+	for _, kind := range []string{tracker.KindGitea, tracker.KindGitHub, tracker.KindGitLab} {
+		t.Run(kind, func(t *testing.T) { labelledIssuesBecomeRequirements(t, newSyncRigOf(t, kind)) })
+	}
+}
+
+func labelledIssuesBecomeRequirements(t *testing.T, r *syncRig) {
 	r.g.Open(1, "Export CSV", "rows as CSV", "tend")
-	r.g.Change(1, func(i *giteatest.Issue) { i.Assignees = []string{"ann"} })
+	r.g.Change(1, func(i *trackertest.Issue) { i.Assignees = []string{"ann"} })
 	r.g.Open(2, "Unrelated", "no label")
 	r.pass(0)
 	x := r.task(1)
@@ -198,7 +206,7 @@ func TestALostAnswerLeavesOneCommentAndAClosedIssueWaits(t *testing.T) {
 		t.Fatalf("found again by its marker, not made twice: %+v %+v", cs, row)
 	}
 	r.g.DeleteComment(cs[0].ID)
-	r.g.Change(3, func(i *giteatest.Issue) { i.Closed = true })
+	r.g.Change(3, func(i *trackertest.Issue) { i.Closed = true })
 	r.pass(61 * time.Second)
 	x := r.task(3)
 	if r.situation(x.ID).Reason != task.WhySourceClosed {
@@ -231,7 +239,7 @@ func TestARateLimitPausesAndARefusedTokenStopsTheBinding(t *testing.T) {
 		t.Fatalf("it goes on after the pause: %+v", r.tracker())
 	}
 	r.g.Refuse = true
-	r.g.Change(4, func(i *giteatest.Issue) { i.Body = "changed" })
+	r.g.Change(4, func(i *trackertest.Issue) { i.Body = "changed" })
 	r.pass(61 * time.Second)
 	if x = r.tracker(); x.Stopped != "auth" || !strings.Contains(x.LastError, "401") {
 		t.Fatalf("a refused token stops it: %+v", x)
@@ -256,40 +264,54 @@ func TestARateLimitPausesAndARefusedTokenStopsTheBinding(t *testing.T) {
 }
 
 func TestAWebhookOnlyMarksItsOwnRepositorysIssue(t *testing.T) {
-	r := newSyncRig(t)
-	dir, _ := NewDirectory(r.team)
-	srv := New(Options{Home: t.TempDir(), Coord: r.c, Dir: dir, Syncer: r.s})
-	h := srv.Handler()
-	post := func(body, sig, delivery string) int {
-		req := httptest.NewRequest(http.MethodPost, "/hooks/"+r.x.ID, bytes.NewReader([]byte(body)))
-		req.Header.Set("X-Gitea-Signature", sig)
-		req.Header.Set("X-Gitea-Delivery", delivery)
-		w := httptest.NewRecorder()
-		h.ServeHTTP(w, req)
-		return w.Code
-	}
 	sign := func(body string) string {
 		m := hmac.New(sha256.New, []byte("hook-key"))
 		m.Write([]byte(body))
 		return hex.EncodeToString(m.Sum(nil))
 	}
-	good := `{"action":"edited","repository":{"id":42},"issue":{"number":7}}`
-	if code := post(good, sign(good)[:10], "d1"); code != http.StatusUnauthorized {
-		t.Fatalf("an unsigned delivery: %d", code)
+	cases := []struct {
+		kind, good, other string
+		secret, delivery  string
+		signature         func(body string) string
+	}{
+		{tracker.KindGitea, `{"action":"edited","repository":{"id":42},"issue":{"number":7}}`, `{"repository":{"id":9},"issue":{"number":7}}`,
+			"X-Gitea-Signature", "X-Gitea-Delivery", sign},
+		{tracker.KindGitHub, `{"action":"created","repository":{"id":42},"issue":{"number":7},"comment":{"id":1}}`, `{"repository":{"id":9},"issue":{"number":7}}`,
+			"X-Hub-Signature-256", "X-GitHub-Delivery", func(body string) string { return "sha256=" + sign(body) }},
+		{tracker.KindGitLab, `{"object_kind":"note","project":{"id":42},"issue":{"iid":7}}`, `{"object_kind":"issue","project":{"id":9},"object_attributes":{"iid":7}}`,
+			"X-Gitlab-Token", "X-Gitlab-Event-UUID", func(string) string { return "hook-key" }},
 	}
-	other := `{"repository":{"id":9},"issue":{"number":7}}`
-	if code := post(other, sign(other), "d2"); code != http.StatusBadRequest {
-		t.Fatalf("another repository: %d", code)
-	}
-	if code := post(good, sign(good), "d3"); code != http.StatusNoContent {
-		t.Fatalf("%d", code)
-	}
-	if rows, _ := r.team.TrackerIssues(r.x.ID, true); len(rows) != 1 || rows[0].Number != 7 {
-		t.Fatalf("it marks the issue to read: %+v", rows)
-	}
-	r.team.PutTrackerIssue(store.TrackerIssue{Tracker: r.x.ID, Number: 7})
-	post(good, sign(good), "d3")
-	if rows, _ := r.team.TrackerIssues(r.x.ID, true); len(rows) != 0 {
-		t.Fatalf("a delivery counts once: %+v", rows)
+	for _, c := range cases {
+		t.Run(c.kind, func(t *testing.T) {
+			r := newSyncRigOf(t, c.kind)
+			dir, _ := NewDirectory(r.team)
+			srv := New(Options{Home: t.TempDir(), Coord: r.c, Dir: dir, Syncer: r.s})
+			h := srv.Handler()
+			post := func(body, sig, delivery string) int {
+				req := httptest.NewRequest(http.MethodPost, "/hooks/"+r.x.ID, bytes.NewReader([]byte(body)))
+				req.Header.Set(c.secret, sig)
+				req.Header.Set(c.delivery, delivery)
+				w := httptest.NewRecorder()
+				h.ServeHTTP(w, req)
+				return w.Code
+			}
+			if code := post(c.good, c.signature(c.good)[:5], "d1"); code != http.StatusUnauthorized {
+				t.Fatalf("an unsigned delivery: %d", code)
+			}
+			if code := post(c.other, c.signature(c.other), "d2"); code != http.StatusBadRequest {
+				t.Fatalf("another repository: %d", code)
+			}
+			if code := post(c.good, c.signature(c.good), "d3"); code != http.StatusNoContent {
+				t.Fatalf("%d", code)
+			}
+			if rows, _ := r.team.TrackerIssues(r.x.ID, true); len(rows) != 1 || rows[0].Number != 7 {
+				t.Fatalf("it marks the issue to read: %+v", rows)
+			}
+			r.team.PutTrackerIssue(store.TrackerIssue{Tracker: r.x.ID, Number: 7})
+			post(c.good, c.signature(c.good), "d3")
+			if rows, _ := r.team.TrackerIssues(r.x.ID, true); len(rows) != 0 {
+				t.Fatalf("a delivery counts once: %+v", rows)
+			}
+		})
 	}
 }

@@ -40,13 +40,16 @@ const treeWords = {
   keepGoing: ['继续做', 'Keep going'], acked: ['已记下', 'Noted'], requirement: ['需求', 'Requirement'],
   trackers: ['工单同步', 'Issue sync'], trackersHelp: ['打了标签的 issue 自动成为这个项目的需求；tend 在 issue 上维护一条进度评论，需求完成后关单。', 'Issues with the label become requirements of this project; tend keeps one progress comment on each and closes it once the requirement is done.'],
   noTrackers: ['还没有绑定仓库', 'No repository bound yet'], bindRepo: ['绑定仓库', 'Bind a repository'], trackerBase: ['地址', 'Address'],
-  trackerRepo: ['仓库（owner/name）', 'Repository (owner/name)'], trackerToken: ['机器人账号的 token', "The bot account's token"],
+  trackerRepo: ['仓库（owner/name，GitLab 可带子组）', 'Repository (owner/name; GitLab subgroups too)'], trackerToken: ['机器人账号的 token', "The bot account's token"],
   trackerTokenHint: ['只存在 server 上，加密保存；需要读写 issue 的权限。', 'Kept on the server only, encrypted; it needs read and write access to issues.'],
   trackerLabel: ['导入标签', 'Import label'], trackerAssigned: ['也导入指派给项目成员的 issue', 'Also import issues assigned to members of the project'],
   trackerComment: ['维护进度评论', 'Keep a progress comment'], trackerDetail: ['评论里列出子任务（仓库的读者都能看到）', 'List subtasks in it (every reader of the repository sees them)'],
   trackerOnAccept: ['需求完成后', 'Once a requirement is done'], 'accept.close': ['关闭 issue', 'Close the issue'], 'accept.label': ['只打标签', 'Only add a label'],
   trackerPoll: ['轮询间隔（秒）', 'Poll interval (seconds)'], rescan: ['重新同步', 'Sync again'], replaceToken: ['换凭据', 'Replace token'], unbind: ['解绑', 'Unbind'],
-  trackerBound: ['已绑定。要更快收到变化，可在仓库里加这个 webhook（Gitea，事件选 Issues 和 Issue Comment），密钥只显示这一次：', 'Bound. For faster updates, add this webhook to the repository (Gitea, events Issues and Issue Comment); the secret is shown only this once:'],
+  trackerKind: ['工单系统', 'Tracker'],
+  'trackerBound.gitea': ['已绑定。要更快收到变化，可在仓库设置 → Webhooks 加这个 Gitea webhook（事件选 Issues 和 Issue Comment），密钥只显示这一次：', 'Bound. For faster updates, add this Gitea webhook under the repository settings → Webhooks (events Issues and Issue Comment); the secret is shown only this once:'],
+  'trackerBound.github': ['已绑定。要更快收到变化，可在仓库 Settings → Webhooks 加这个 webhook（Content type 选 application/json，事件选 Issues 和 Issue comments，Secret 填下面的密钥），密钥只显示这一次：', 'Bound. For faster updates, add this webhook under the repository Settings → Webhooks (content type application/json, events Issues and Issue comments, the secret below as Secret); the secret is shown only this once:'],
+  'trackerBound.gitlab': ['已绑定。要更快收到变化，可在项目 Settings → Webhooks 加这个 webhook（触发器选 Issues events 和 Comments，Secret token 填下面的密钥），密钥只显示这一次：', 'Bound. For faster updates, add this webhook under the project Settings → Webhooks (triggers Issues events and Comments, the secret below as Secret token); the secret is shown only this once:'],
   trackerOK: ['正常', 'Syncing'], trackerStopped: ['已停：凭据被拒，换凭据后继续', 'Stopped: the token was refused; replace it to go on'],
   trackerPaused: ['限流中，稍后继续', 'Rate limited; it goes on later'], trackerLastOK: ['上次成功', 'Last success'], syncedIssues: ['{0} 条需求', '{0} requirements'],
   failingIssues: ['{0} 条出错', '{0} failing'], tracker_auth: ['token 被拒或权限不够。', 'The token was refused or lacks access.'],
@@ -371,17 +374,19 @@ const Tree = (() => {
       <label>${t('handTo')}<select name="to" required autofocus>${heirs}</select></label></div><footer class="modal-footer">${button('close-modal', t('cancel'))}<button type="submit" class="primary danger">${t('offboard')}</button></footer></form>`, '');
   }
 
+  const trackerKinds = {gitea: 'Gitea', github: 'GitHub', gitlab: 'GitLab'};
+
   // trackers shows project's bindings with how each is syncing, and a form to bind another repository.
   async function trackers(project) {
     const all = await Team.rest('GET', '/api/trackers'), mine = all.filter(x => x.project === project);
     const state = x => x.stopped ? `<span class="status failed">${t('trackerStopped')}</span>` : x.paused_until ? `<span class="status queued">${t('trackerPaused')}</span>` : `<span class="status exited">${t('trackerOK')}</span>`;
-    const rows = mine.map(x => `<div class="agent-row"><strong class="mono">${esc(x.repo)}</strong><span>${esc(x.base)} · @${esc(x.bot)}</span>${state(x)}
+    const rows = mine.map(x => `<div class="agent-row"><strong class="mono">${esc(x.repo)}</strong><span>${esc(trackerKinds[x.kind] || x.kind)} · ${esc(x.base)} · @${esc(x.bot)}</span>${state(x)}
       <span>${t('syncedIssues').replace('{0}', x.issues)}${x.failing ? ' · ' + t('failingIssues').replace('{0}', x.failing) : ''}</span><span>${t('trackerLastOK')} ${x.last_ok ? date(x.last_ok) : '—'}</span>
       ${x.last_error ? `<code class="muted">${esc(x.last_error)}</code>` : ''}${button('tree-rescan', t('rescan'), `data-id="${esc(x.id)}" data-project="${esc(project)}"`, 'quiet')}${button('tree-token', t('replaceToken'), `data-id="${esc(x.id)}" data-project="${esc(project)}"`, 'quiet')}${button('tree-unbind', t('unbind'), `data-id="${esc(x.id)}" data-project="${esc(project)}"`, 'quiet danger')}</div>`);
     const check = (name, label, on) => `<label class="choice"><input type="checkbox" name="${name}" value="1" ${on ? 'checked' : ''}>${label}</label>`;
     showModal('tree-form', `${t('trackers')} · ${esc(ui.state.projects[project]?.name || project)}`, `<form id="tree-tracker-form" data-project="${esc(project)}"><div class="modal-body stack"><div class="form-error" role="alert" hidden></div>
       <p class="hint">${t('trackersHelp')}</p><div class="agent-list">${rows.join('') || `<div class="agent-row"><span>${t('noTrackers')}</span></div>`}</div>
-      <h3>${t('bindRepo')} · Gitea</h3><div class="form-grid"><label>${t('trackerBase')}<input name="base" required class="mono" placeholder="https://git.example"></label><label>${t('trackerRepo')}<input name="repo" required class="mono" placeholder="team/app"></label></div>
+      <h3>${t('bindRepo')}</h3><div class="form-grid"><label>${t('trackerKind')}<select name="kind">${Object.entries(trackerKinds).map(([k, v]) => `<option value="${k}">${v}</option>`).join('')}</select></label><label>${t('trackerBase')}<input name="base" required class="mono" placeholder="https://git.example"></label><label>${t('trackerRepo')}<input name="repo" required class="mono" placeholder="team/app"></label></div>
       <label>${t('trackerToken')}<input name="token" type="password" required autocomplete="off"><small>${t('trackerTokenHint')}</small></label>
       <div class="form-grid"><label>${t('trackerLabel')}<input name="label" value="tend" class="mono"></label><label>${t('trackerPoll')}<input name="poll" type="number" min="30" max="3600" value="60"></label></div>
       ${check('assigned', t('trackerAssigned'), false)}${check('comment', t('trackerComment'), true)}${check('detail', t('trackerDetail'), false)}
@@ -529,10 +534,10 @@ const Tree = (() => {
         await Team.rest('POST', '/api/users/offboard', {user: form.dataset.id, to: fd.get('to')});
         closeModal(true); toast(t('offboarded')); await Team.enter('admin'); break;
       case 'tree-tracker-form': {
-        const v = await Team.rest('POST', '/api/trackers', {project: form.dataset.project, kind: 'gitea', base: fd.get('base'), repo: fd.get('repo'), token: fd.get('token'),
+        const v = await Team.rest('POST', '/api/trackers', {project: form.dataset.project, kind: fd.get('kind'), base: fd.get('base'), repo: fd.get('repo'), token: fd.get('token'),
           settings: {label: String(fd.get('label') || '').trim(), assigned: fd.has('assigned'), comment: fd.has('comment'), detail: fd.has('detail'),
             on_accept: fd.get('on_accept'), accept_label: 'tend:accepted', poll: Number(fd.get('poll')) || 60}});
-        showModal('tree-form', t('trackers'), `<div class="modal-body stack"><p>${t('trackerBound')}</p>${v.hook ? `<code class="secret">${esc(v.hook)}</code>` : ''}<code class="secret" id="secret-value">${esc(v.hook_secret)}</code></div>`,
+        showModal('tree-form', t('trackers'), `<div class="modal-body stack"><p>${t('trackerBound.' + fd.get('kind'))}</p>${v.hook ? `<code class="secret">${esc(v.hook)}</code>` : ''}<code class="secret" id="secret-value">${esc(v.hook_secret)}</code></div>`,
           `<footer class="modal-footer">${button('tree-trackers', t('close'), `data-project="${esc(form.dataset.project)}" autofocus`)}</footer>`, true);
         break;
       }

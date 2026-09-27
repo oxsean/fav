@@ -61,7 +61,7 @@ HERDR_LIVE=1 go test ./internal/herdr -run TestLiveCreateTabAndRun   # inside He
 | `internal/wire` | the protocol: JSON frames over any two-way stream, either end may call, answers out of order, cancel, keepalive |
 | `internal/remote` | other machines' sessions over `wire`: methods and types (`proto.go`), answering side (`local.go`), ssh `Client`, `Hosts` cache, `Source` |
 | `internal/agent` | provider adapters (claude, codex, fake, command): launch, resume, fork, capabilities |
-| `internal/tracker` | issue trackers (Gitea; GitLab and GitHub fit the same `Tracker` interface): issues, comments, close, label, webhook signatures; `giteatest` is a fake Gitea with faults for tests; tend-server only |
+| `internal/tracker` | issue trackers behind one `Tracker` interface: Gitea and GitHub (`gitea.go`), GitLab, a shared REST layer; issues, comments, close, label; webhook checks per kind (`hook.go`); `trackertest` is a fake speaking all three with faults for tests; tend-server only |
 | `internal/defs` | agent definitions: Markdown with a YAML front matter (`Parse`, `Format`, `Check`, `Import` on the client only, `Compile` into a profile) |
 | `internal/workflow` | workflows: Markdown definitions (`Parse`, `Check`, the embedded built-ins, `Resolve`), a stage's brief from its template, the task's workpad; the stage rules themselves are `task` (`flow.go`) and `coord` (`workflow.go`) |
 | `internal/node` | runs on this machine: run directories, the `_run` supervisor, snapshots, `run.*` methods |

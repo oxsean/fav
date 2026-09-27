@@ -285,7 +285,7 @@ func (s *Server) rescanTracker(w http.ResponseWriter, r *http.Request, c caller)
 // delivery id; it only marks the issue to read again.
 func (s *Server) trackerHook(w http.ResponseWriter, r *http.Request) {
 	x, err := s.team().Tracker(r.PathValue("id"))
-	if err != nil || s.syncer == nil || x.Kind != tracker.KindGitea {
+	if err != nil || s.syncer == nil {
 		http.NotFound(w, r)
 		return
 	}
@@ -295,24 +295,24 @@ func (s *Server) trackerHook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	secret, err := s.syncer.seal.Open(x.HookSecret)
-	if err != nil || !tracker.GiteaSigned(secret, body, r.Header.Get("X-Gitea-Signature")) {
+	if err != nil || !tracker.Verify(x.Kind, secret, body, r.Header) {
 		s.audit(r, "", "denied", "hook "+x.ID)
 		http.Error(w, "bad signature", http.StatusUnauthorized)
 		return
 	}
-	if id := r.Header.Get("X-Gitea-Delivery"); id != "" {
+	if id := tracker.Delivery(x.Kind, r.Header); id != "" {
 		if first, err := s.team().TakeDelivery(x.ID + "/" + id); err != nil || !first {
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}
 	}
-	var h tracker.GiteaHook
-	if json.Unmarshal(body, &h) != nil || h.Repository.ID != x.RepoID {
+	repo, number, err := tracker.HookIssue(x.Kind, body)
+	if err != nil || repo != x.RepoID {
 		http.Error(w, "not this repository", http.StatusBadRequest)
 		return
 	}
-	if h.Issue.Number > 0 {
-		s.team().MarkDirty(x.ID, h.Issue.Number)
+	if number > 0 {
+		s.team().MarkDirty(x.ID, number)
 		s.syncer.Wake()
 	}
 	w.WriteHeader(http.StatusNoContent)

@@ -1,4 +1,4 @@
-// Package tracker speaks to issue trackers (Gitea now; GitLab and GitHub fit the same interface): it reads a
+// Package tracker speaks to issue trackers (Gitea, GitHub, GitLab): it reads a
 // repository's issues and their comments, and writes one comment, a close or a label back. Only tend-server carries it.
 package tracker
 
@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -59,7 +60,7 @@ type Tracker interface {
 	Issue(ctx context.Context, number int64) (Issue, error)
 	Comments(ctx context.Context, number int64) ([]Comment, error)
 	CreateComment(ctx context.Context, number int64, body string) (Comment, error)
-	EditComment(ctx context.Context, id int64, body string) error // ErrNotFound when it was deleted
+	EditComment(ctx context.Context, number, id int64, body string) error // ErrNotFound when it was deleted
 	Close(ctx context.Context, number int64) error
 	Label(ctx context.Context, number int64, label string) error
 }
@@ -68,7 +69,7 @@ type Tracker interface {
 type Config struct {
 	Kind   string
 	Base   string // https://git.example
-	Repo   string // owner/name
+	Repo   string // owner/name; group/…/name on GitLab
 	Token  string
 	Client *http.Client
 }
@@ -96,12 +97,17 @@ func New(cfg Config) (Tracker, error) {
 		cfg.Client = &http.Client{Timeout: 30 * time.Second}
 	}
 	cfg.Base = strings.TrimRight(cfg.Base, "/")
-	if owner, name, ok := strings.Cut(cfg.Repo, "/"); !ok || owner == "" || name == "" || strings.Contains(name, "/") {
+	parts := strings.Split(cfg.Repo, "/")
+	if len(parts) < 2 || len(parts) > 2 && cfg.Kind != KindGitLab || slices.Contains(parts, "") { // GitLab nests groups
 		return nil, fmt.Errorf("repository %q: owner/name", cfg.Repo)
 	}
 	switch cfg.Kind {
 	case KindGitea:
-		return &gitea{cfg: cfg}, nil
+		return newGitea(cfg), nil
+	case KindGitHub:
+		return newGitHub(cfg), nil
+	case KindGitLab:
+		return newGitLab(cfg), nil
 	}
 	return nil, fmt.Errorf("tracker kind %q is not supported yet", cfg.Kind)
 }
@@ -116,7 +122,7 @@ func statusError(res *http.Response, body []byte, now time.Time) error {
 	case res.StatusCode == http.StatusNotFound:
 		return ErrNotFound
 	case res.StatusCode == http.StatusTooManyRequests,
-		res.StatusCode == http.StatusForbidden && (res.Header.Get("Retry-After") != "" || res.Header.Get("X-RateLimit-Remaining") == "0"):
+		res.StatusCode == http.StatusForbidden && (res.Header.Get("Retry-After") != "" || res.Header.Get("X-RateLimit-Remaining") == "0" || res.Header.Get("RateLimit-Remaining") == "0"):
 		return &RateLimited{Wait: retryAfter(res.Header, now)}
 	case res.StatusCode == http.StatusUnauthorized, res.StatusCode == http.StatusForbidden:
 		return &AuthError{Status: res.StatusCode, Detail: detail}
@@ -124,7 +130,7 @@ func statusError(res *http.Response, body []byte, now time.Time) error {
 	return fmt.Errorf("tracker answered %s: %s", res.Status, detail)
 }
 
-// retryAfter is how long a rate-limited request waits: Retry-After (seconds or a date), X-RateLimit-Reset (Unix
+// retryAfter is how long a rate-limited request waits: Retry-After (seconds or a date), X-RateLimit-Reset or RateLimit-Reset (Unix
 // seconds), else a minute.
 func retryAfter(h http.Header, now time.Time) time.Duration {
 	if v := h.Get("Retry-After"); v != "" {
@@ -135,7 +141,11 @@ func retryAfter(h http.Header, now time.Time) time.Duration {
 			return t.Sub(now)
 		}
 	}
-	if v := h.Get("X-RateLimit-Reset"); v != "" {
+	for _, k := range []string{"X-RateLimit-Reset", "RateLimit-Reset"} { // GitHub, GitLab
+		v := h.Get(k)
+		if v == "" {
+			continue
+		}
 		if s, err := strconv.ParseInt(v, 10, 64); err == nil && s > now.Unix() {
 			return time.Unix(s, 0).Sub(now)
 		}
