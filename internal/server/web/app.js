@@ -28,6 +28,7 @@ const words = {
   'why.auth_missing': ['那台机器上 {0} 没登录：运行会直接失败', '{0} is not logged in there: the run would fail'],
   'why.node_outdated': ['那台机器的 tend（{0}）太旧，不能续聊', 'tend there ({0}) is too old to continue a session'],
   'why.no_access': ['机器 {0} 没有对你或这个任务的项目开放：可以请它的主人分享', 'Machine {0} is not open to you or to this task\'s project: its owner can share it'],
+  'why.def_pending': ['这个 agent 定义里的 {0} 已保存，但暂未生效', "This agent's {0} are kept but not applied yet"],
   'why.offline': ['机器离线（{0}）：运行先排队', 'The machine is offline ({0}): the run waits in the queue'],
   'why.connecting': ['正在连接机器：连上前运行先排队', 'Connecting to the machine: the run waits until it answers'],
   'why.slots': ['槽位已满（{0}）：运行等空出来', 'All slots are busy ({0}): the run waits for one'],
@@ -120,7 +121,7 @@ const words = {
   snapshot: ['运行快照', 'Run snapshot'], automatic: ['自动', 'Automatic'], cancelledQueue: ['已取消排队', 'Queued run canceled'],
   readonlyChat: ['仅查看已有对话，不在这里发送消息。', 'Read existing messages. Sending is not available here.']
 };
-Object.assign(words, teamWords);
+Object.assign(words, teamWords, treeWords);
 let lang = (navigator.language || 'zh').startsWith('zh') ? 'zh' : 'en';
 let theme = 'system';
 try { lang = localStorage.getItem('tend-lang') || lang; theme = localStorage.getItem('tend-theme') || theme; } catch (_) {}
@@ -257,7 +258,7 @@ function renderShell() {
     <div class="shell"><aside class="sidebar"><nav class="nav-section" aria-label="${t('workspace')}"><span class="nav-label">${t('operations')}</span>
       <button class="nav-item ${ui.page==='tasks'?'active':''}" data-action="page" data-page="tasks" ${ui.page==='tasks'?'aria-current="page"':''}>${icon('tasks')}${t('tasks')}<span class="count" id="count-tasks"></span></button>
       <button class="nav-item ${ui.page==='machines'?'active':''}" data-action="page" data-page="machines" ${ui.page==='machines'?'aria-current="page"':''}>${icon('machine')}${t('machines')}<span class="count" id="count-machines"></span></button>
-      <button class="nav-item future-nav" disabled title="${t('later')}">${icon('chat')}${t('sessions')}<small>${t('later')}</small></button>${Team.nav()}</nav>
+      <button class="nav-item future-nav" disabled title="${t('later')}">${icon('chat')}${t('sessions')}<small>${t('later')}</small></button>${Tree.nav()}${Team.nav()}</nav>
       <div class="sidebar-bottom">${button('keyboard',`${t('shortcuts')} <kbd>?</kbd>`,'','quiet')}<div class="sidebar-note">tend server · ${esc(ui.who)}</div></div></aside>
     <main id="main" class="main"><div id="connection-banner"></div><div id="page-content"></div></main></div>`;
   renderCounts();renderBanner();renderPage();
@@ -272,29 +273,32 @@ function renderBanner() {
   el.innerHTML=ui.online?'':`<div class="banner" role="alert">${icon('offline')}<p><strong>${t('lost')}</strong><br>${t('lostHelp')} <small>${t('lastSync')} ${time(ui.lastSync)}</small></p>${button('reconnect',t(ui.reconnecting?'reconnecting':'reconnect'),ui.reconnecting?'disabled':'')}</div>`;
 }
 const needsYou=task=>task.status==='todo'&&runNeedsYou(latestRun(task.id));
+const openTask=task=>task.status==='todo'||task.status==='backlog';
 function filteredTasks() {
-  const rank=task=>needsYou(task)?0:task.status==='todo'?1:2;
-  return Object.values(ui.state.tasks).filter(task=>{
+  const rank=task=>needsYou(task)?0:openTask(task)?1:2;
+  const tasks=Object.values(ui.state.tasks).filter(task=>{
     const run=latestRun(task.id), search=`${task.title} ${task.id} ${task.dir}`.toLowerCase();
     return (!ui.status||task.status===ui.status)&&(!ui.machine||(run?.machine||task.machine)===ui.machine)&&(!ui.runState||(ui.runState==='needs'?needsYou(task):(run?.state||'none')===ui.runState))&&(!ui.search||search.includes(ui.search.toLowerCase()));
   }).sort((a,b)=>rank(a)-rank(b)||(rank(a)===0?since(latestRun(a.id)).localeCompare(since(latestRun(b.id))):b.updated_at.localeCompare(a.updated_at)));
+  return Tree.order(tasks).map(x=>x.task);
 }
 function renderRows() {
   if(ui.loading)return `<div aria-busy="true" aria-label="${t('loading')}">${Array.from({length:5},()=>'<div class="skeleton-row"><div class="skeleton"></div><div class="skeleton"></div><div class="skeleton"></div></div>').join('')}</div>`;
   if(ui.error)return statePanel('error',t('loadError'),t('loadErrorHelp'),'retry-data',t('retry'));
   const none=!Object.keys(ui.state.tasks).length,tasks=filteredTasks();if(!tasks.length)return statePanel('tasks',t(none?'empty':'noMatches'),t(none?'emptyHelp':'noMatchesHelp'),none?'new':'clear-filters',t(none?'newTask':'clearFilters'));
-  return tasks.map(task=>{const run=latestRun(task.id);return `<button class="task-row ${ui.task===task.id?'selected':''}" id="row-${task.id}" data-action="select-task" data-id="${task.id}" aria-current="${ui.task===task.id?'true':'false'}" tabindex="${ui.focusTask===task.id?'0':'-1'}"><div class="row-top"><span class="row-id">${task.id}</span>${badge(task.status)}</div><div class="row-title">${esc(task.title)}</div><div class="row-meta"><span class="machine-agent">${esc(run?.machine||task.machine||'—')} / ${esc(run?.agent||task.agent||'—')}</span><span>${elapsed(run)}</span></div><div class="mt-5">${run?badge(run.state)+(attention(run)?' '+badge(attention(run)):''):`<span class="muted fs-11">${t('noRun')}</span>`}</div></button>`;}).join('');
+  return Tree.order(tasks).map(({task,depth})=>{const run=latestRun(task.id);return `<button class="task-row depth-${Math.min(depth,3)} ${ui.task===task.id?'selected':''}" id="row-${task.id}" data-action="select-task" data-id="${task.id}" aria-current="${ui.task===task.id?'true':'false'}" tabindex="${ui.focusTask===task.id?'0':'-1'}"><div class="row-top"><span class="row-id">${task.id}</span>${badge(task.status)}</div><div class="row-title">${esc(task.title)}</div><div class="row-meta"><span class="machine-agent">${esc(run?.machine||task.machine||'—')} / ${esc(run?.agent||task.agent||'—')}</span><span>${elapsed(run)}</span></div><div class="mt-5 flex">${run?badge(run.state)+(attention(run)?' '+badge(attention(run)):''):`<span class="muted fs-11">${t('noRun')}</span>`}${Tree.sitBadge(task)}</div></button>`;}).join('');
 }
 function statePanel(symbol,title,body,action,label) {return `<div class="state-panel">${icon(symbol)}<h3>${title}</h3><p>${body}</p>${action?button(action,label):''}</div>`;}
 function renderPage() {
   const el=document.querySelector('#page-content');if(!el)return;
   if(ui.page==='machines'){renderMachines();return;}
+  if(Tree.pages.includes(ui.page)){Tree.render();return;}
   if(Team.pages.includes(ui.page)){Team.render();return;}
   const runs=Object.values(ui.state.runs), unfinished=Object.values(ui.state.tasks).filter(task=>task.status==='todo').length;
   el.innerHTML=`<header class="page-heading"><div><h1>${t('tasks')}</h1><p class="page-subtitle">${t('taskSubtitle')}</p></div><div class="flex"><span class="heading-right">${date(new Date())}</span>${button('new',`${icon('plus')}${t('newTask')} <kbd>n</kbd>`,ui.online?'':'disabled','primary')}</div></header>
     <div class="metric-strip"><span class="metric"><strong>${unfinished}</strong>${t('todo')}</span><span class="metric">${badge('running')}<strong>${runs.filter(r=>['running','starting'].includes(r.state)).length}</strong></span><span class="metric">${badge('queued')}<strong>${runs.filter(r=>r.state==='queued').length}</strong></span><button type="button" class="metric" data-action="needs-you">${t('needsAttention')}<strong>${Object.values(ui.state.tasks).filter(needsYou).length}</strong></button></div>
     <div class="task-workspace ${ui.mobileDetail?'detail-open':''}"><section class="task-list-panel" aria-label="${t('tasks')}"><div class="list-tools"><label class="search-box">${icon('search')}<input id="search-input" value="${esc(ui.search)}" placeholder="${t('search')}" aria-label="${t('search')}"><kbd>/</kbd></label>
-    <div class="filter-row"><select id="status-filter" aria-label="${t('allStatus')}"><option value="">${t('allStatus')}</option>${['todo','done','canceled'].map(v=>`<option value="${v}" ${ui.status===v?'selected':''}>${t(v)}</option>`).join('')}</select>
+    <div class="filter-row"><select id="status-filter" aria-label="${t('allStatus')}"><option value="">${t('allStatus')}</option>${['backlog','todo','done','canceled'].map(v=>`<option value="${v}" ${ui.status===v?'selected':''}>${t(v)}</option>`).join('')}</select>
     <select id="machine-filter" aria-label="${t('allMachines')}"><option value="">${t('allMachines')}</option>${ui.machines.map(m=>`<option value="${m.name}" ${ui.machine===m.name?'selected':''}>${m.name}</option>`).join('')}</select></div>
     <select id="run-filter" aria-label="${t('allRuns')}"><option value="">${t('allRuns')}</option><option value="needs" ${ui.runState==='needs'?'selected':''}>${t('needsYou')}</option>${['queued','starting','running','unknown','exited','stopped','failed','canceled','abandoned'].map(v=>`<option value="${v}" ${ui.runState===v?'selected':''}>${t(v)}</option>`).join('')}</select>
     <div class="list-caption"><span id="result-count">${filteredTasks().length} ${t('results')}</span><span>${t('taskFirst')}</span></div></div><div class="task-list" id="task-list">${renderRows()}</div></section>
@@ -314,7 +318,7 @@ function renderDetail() {
   const runs=taskRuns(task.id),run=selectedRun(),writeDisabled=ui.online?'':'disabled',typing=document.activeElement?.id==='reply-text';
   el.innerHTML=`${button('back-tasks',`${icon('back')}${t('backTasks')}`,'','mobile-back')}<div class="detail-eyebrow"><span class="mono">${task.id}</span><span>·</span>${badge(task.status)}<span>· rev ${task.rev}</span></div>
     <div class="detail-header"><h2>${esc(task.title)}</h2><div class="detail-actions">${button('edit',`${icon('edit')}${t('edit')}`,writeDisabled)}${button('dispatch',`${icon('play')}${t('dispatch')}`,writeDisabled,'primary')}</div></div>
-    <div class="task-actions">${button(task.status==='todo'?'done':'reopen',`${icon(task.status==='todo'?'check':'refresh')}${t(task.status==='todo'?'markDone':'reopen')}`,writeDisabled,'quiet')}${task.status!=='canceled'?button('cancel-task',t('cancelTask'),writeDisabled,'quiet'):''}</div>
+    <div class="task-actions">${button(openTask(task)?'done':'reopen',`${icon(openTask(task)?'check':'refresh')}${t(openTask(task)?'markDone':'reopen')}`,writeDisabled,'quiet')}${task.status!=='canceled'?button('cancel-task',t('cancelTask'),writeDisabled,'quiet'):''}</div>${Tree.detail(task)}
     <div class="metadata"><div><span class="meta-label">${t('directory')}</span><code class="meta-value">${esc(task.dir||'—')}</code></div><div><span class="meta-label">${t('defaultMachine')}</span><span class="meta-value mono">${esc(task.machine||t('unspecified'))}</span></div><div><span class="meta-label">${t('defaultAgent')}</span><span class="meta-value mono">${esc(task.agent||t('unspecified'))}</span></div></div>
     <div class="tabs" role="tablist" aria-label="${t('viewDetails')}">${['output','conversation','brief','history'].map(tab=>`<button class="tab ${ui.tab===tab?'active':''}" role="tab" id="tab-${tab}" aria-selected="${ui.tab===tab}" aria-controls="detail-body" tabindex="${ui.tab===tab?'0':'-1'}" data-action="tab" data-tab="${tab}">${t(tab)}${tab==='history'?`<span class="count">${runs.length}</span>`:''}</button>`).join('')}</div>
     <div id="detail-body" role="tabpanel" aria-labelledby="tab-${ui.tab}"></div>`;
@@ -416,7 +420,7 @@ async function openTaskForm(edit=false) {
     <label>${t('brief')}<textarea name="brief" id="task-brief" rows="8" placeholder="${t('briefPlaceholder')}">${esc(task.brief||'')}</textarea><small>${t('briefHint')} · <span id="brief-bytes">${new TextEncoder().encode(task.brief||'').length}</span> B</small></label>
     <details><summary class="pointer">${t('preview')}</summary><div id="brief-preview" class="preview brief">${markdown(task.brief||'')}</div><small class="muted">${t('safeMarkdown')}</small></details>
     <label>${t('directory')}<input name="dir" class="mono" value="${esc(task.dir)}" placeholder="/work/project"><small>${t('dirHint')}</small></label>
-    ${Team.projectField(task.project||'')}<div class="form-grid"><label>${t('defaultMachine')}<select name="machine">${machineOptions(task.machine,true)}</select></label><label>${t('defaultAgent')}<select name="agent">${agentOptions(task.agent,true)}</select></label></div></div>
+    ${Team.projectField(task.project||'')}<div class="form-grid"><label>${t('defaultMachine')}<select name="machine">${machineOptions(task.machine,true)}</select></label><label>${t('defaultAgent')}<select name="agent">${agentOptions(task.agent,true)}</select></label></div>${Tree.formFields(task,edit)}</div>
     <footer class="modal-footer">${button('close-modal',t('cancel'))}<button type="submit" class="primary">${t(edit?'save':'create')}</button></footer></form>`,'',true);
 }
 const hints = {cli_missing:'hint.cli_missing', auth_missing:'hint.auth', auth:'hint.auth', quota:'hint.quota', rate_limit:'hint.later',
@@ -525,6 +529,7 @@ async function submitTask(form) {
   if(new TextEncoder().encode(data.brief).length>256*1024)return modalError(t('badBrief'));
   const editing=form.dataset.edit==='true';
   if(editing)data.id=form.dataset.id;
+  Tree.formData(form,data,editing);
   const result=await api[editing?'taskEdit':'taskCreate'](data,{command_id:form.dataset.command});
   ui.state.tasks[result.id]=result;ui.briefs.set(result.id,result.brief||'');ui.task=result.id;ui.focusTask=result.id;ui.tab='brief';ui.mobileDetail=true;ui.search='';ui.status='';ui.machine='';ui.runState='';ui.run=latestRun(result.id)?.id||'';
   closeModal(true);renderShell();toast(t(editing?'saved':'created'));
@@ -555,7 +560,9 @@ async function login(token) {
 }
 // enter shows the workspace of the session the browser holds.
 async function enter() {
+  const linked=location.hash.match(/^#task-([\w-]+)$/)?.[1];
   const who=await api.session();ui.who=who?.name||'';ui.me=who;Team.afterSignIn();
+  if(linked){ui.page='tasks';ui.task=linked;ui.mobileDetail=true;}
   ui.authenticated=true;ui.online=true;ui.loggedOut=false;ui.loading=true;renderShell();await refreshData();
 }
 async function refreshData() {
@@ -566,7 +573,7 @@ async function refreshData() {
     ui.state=state;ui.machines=machines.machines;ui.agents=agents.agents;ui.lastSync=new Date();ui.machineSync=new Date();ui.loading=false;
     if(!ui.state.tasks[ui.task])ui.task=Object.keys(ui.state.tasks)[0]||'';
     ui.focusTask=ui.task;ui.unsubscribe?.();ui.unsubscribe=api.subscribe({after_seq:state.seq},receiveJournal,()=>{scheduleSync();refreshMachines();});
-    renderShell();await loadDetail();
+    renderShell();Tree.stateChanged();await loadDetail();
   } catch(error){ui.loading=false;ui.error=errorText(error);renderPage();}
 }
 let journalRenderTimer,syncTimer;
@@ -589,7 +596,7 @@ async function syncState() {
   }catch(error){if(error.code!=='closed')toast(errorText(error));}
 }
 async function stateChanged() {
-  ui.lastSync=new Date();refreshDispatchAdvice();preserveRender();
+  ui.lastSync=new Date();refreshDispatchAdvice();preserveRender();Tree.stateChanged();
   if(!ui.briefs.has(ui.task))await loadDetail();else if(ui.tab==='output')fetchOutput();
 }
 function preserveRender() {
@@ -689,7 +696,7 @@ document.addEventListener('submit',async event=>{
     else if(form.id==='reply-form')await submitReply(form);
     else if(form.id==='send-form')await submitSend(form);
     else if(form.classList.contains('answer-form'))await submitAnswer(form,submitter);
-    else await Team.submit(form);
+    else if(!await Tree.submit(form))await Team.submit(form);
   }catch(error){if(form.id==='reply-form'||form.id==='send-form'||form.classList.contains('answer-form')){const e=form.querySelector('.form-error');e.hidden=false;e.textContent=errorText(error);}else if(!modal.contains(form))toast(errorText(error));else modalError(errorText(error));if(error.code==='conflict'){const state=await api.stateGet({no_briefs:true});ui.state=state;refreshDispatchAdvice();}}
   finally{ui.modalSubmitting=false;if(submitter?.isConnected)submitter.disabled=false;if(form.id==='dispatch-form')refreshDispatchAdvice();}
 });
@@ -700,7 +707,7 @@ document.addEventListener('click',async event=>{
     switch(action){
       case 'language':lang=lang==='zh'?'en':'zh';applyPreferences();renderShell();break;
       case 'logout':confirmAction('logout');break;
-      case 'page':ui.page=target.dataset.page;renderShell();if(ui.page==='tasks')await loadDetail();else await Team.enter(ui.page);break;
+      case 'page':ui.page=target.dataset.page;renderShell();if(ui.page==='tasks')await loadDetail();else if(Tree.pages.includes(ui.page))await Tree.enter(ui.page);else await Team.enter(ui.page);break;
       case 'new':await openTaskForm();break;
       case 'edit':await openTaskForm(true);break;
       case 'select-task':await selectTask(target.dataset.id);break;
@@ -728,7 +735,7 @@ document.addEventListener('click',async event=>{
       case 'machine-tasks':ui.page='tasks';ui.machine=target.dataset.machine;ui.status='';ui.runState='';ui.search='';ui.mobileDetail=false;renderShell();break;
       case 'reconnect':await reconnect();break;
       case 'keyboard':showKeyboard();break;
-      default:await Team.click(action,target);
+      default:if(!await Tree.click(action,target))await Team.click(action,target);
     }
   }catch(error){toast(errorText(error));}
 });
@@ -780,5 +787,8 @@ setInterval(()=>{if(ui.authenticated&&ui.online&&!document.hidden)refreshMachine
 document.addEventListener('visibilitychange',()=>{if(!document.hidden&&ui.authenticated&&ui.online){refreshMachines();if(ui.tab==='output')fetchOutput();}});
 applyPreferences();renderShell();
 Team.loadLogins().then(()=>{if(!ui.authenticated)renderShell();});
-window.addEventListener('hashchange',()=>{if(!ui.authenticated)renderShell();});
+window.addEventListener('hashchange',()=>{
+  const linked=location.hash.match(/^#task-([\w-]+)$/)?.[1];
+  if(!ui.authenticated)renderShell();else if(linked){ui.page='tasks';renderShell();selectTask(linked);}
+});
 api.session().then(enter,()=>{});

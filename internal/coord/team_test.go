@@ -328,3 +328,56 @@ func TestTheLocalOwnerKeepsEverythingInModeOne(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestALeavingMemberHandsTheirWorkOn(t *testing.T) {
+	e := team(t, tend.Config{})
+	e.start()
+	e.project()
+	x := e.taskAs(bob, "bobs", "p1", "")
+	mine := e.taskAs(bob, "private", "", "")
+	if err := callAs(e.as(bob), MAgentDefSave, "d", AgentDefSave{Text: careful}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := callAs(e.as(bob), MUserOffboard, "o0", Offboard{User: bob.User}, nil); wire.Code(err) != wire.CodeUnauthorized {
+		t.Fatalf("only an admin hands someone's work on: %v", err)
+	}
+	if err := callAs(e.as(root), MUserOffboard, "o1", Offboard{User: bob.User, To: cy.User}, nil); err != nil {
+		t.Fatal(err)
+	}
+	st := e.c.State()
+	if st.Tasks[x.ID].Owner != ann.User || st.Tasks[mine.ID].Owner != cy.User || st.Projects["p1"].Role(bob.User) != "" ||
+		st.AgentDefs["careful"].Owner != cy.User {
+		t.Fatalf("p1's task goes to p1's owner, the rest to cy; bob leaves p1: %+v %+v %v", st.Tasks[x.ID], st.Tasks[mine.ID], st.Projects["p1"].Members)
+	}
+	if err := callAs(e.as(root), MUserOffboard, "o2", Offboard{User: ann.User}, nil); err != nil {
+		t.Fatal(err)
+	}
+	st = e.c.State()
+	if len(st.Shares) != 0 || st.Projects["p1"].Owner != root.User {
+		t.Fatalf("ann's machines are open to no one else, and p1 is root's: %+v %s", st.Shares, st.Projects["p1"].Owner)
+	}
+}
+
+func TestOwnersAndApproversChangeHandsByTheRules(t *testing.T) {
+	e := team(t, tend.Config{})
+	e.start()
+	e.project()
+	x := e.taskAs(bob, "bobs", "p1", "")
+	if err := callAs(e.as(bob), MTaskEdit, "e1", task.TaskEdit{ID: x.ID, Approver: ptr(dee.User)}, nil); wire.Code(err) != wire.CodeUnauthorized {
+		t.Fatalf("a reader accepts nothing: %v", err)
+	}
+	if err := callAs(e.as(bob), MTaskEdit, "e2", task.TaskEdit{ID: x.ID, Approver: ptr(ann.User)}, nil); err != nil {
+		t.Fatal(err)
+	}
+	y := e.taskAs(ann, "anns", "p1", "")
+	if err := callAs(e.as(bob), MTaskEdit, "e3", task.TaskEdit{ID: y.ID, Owner: ptr(bob.User)}, nil); wire.Code(err) != wire.CodeUnauthorized {
+		t.Fatalf("a participant does not take another's task: %v", err)
+	}
+	var got task.Task
+	if err := callAs(e.as(ann), MTaskEdit, "e4", task.TaskEdit{ID: x.ID, Owner: ptr(ann.User)}, &got); err != nil || got.Owner != ann.User {
+		t.Fatalf("the project's owner hands tasks on: %+v %v", got, err)
+	}
+	if err := callAs(e.as(bob), MTaskCreate, "c1", TaskCreate{Title: "z", Project: "p1", Approver: cy.User}, nil); wire.Code(err) != wire.CodeUnauthorized {
+		t.Fatalf("an approver outside the project: %v", err)
+	}
+}

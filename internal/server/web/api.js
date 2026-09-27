@@ -143,5 +143,13 @@ const api = (() => {
     projectEdit: write('project.edit'),
     projectMember: write('project.member'),
     machineShare: write('machine.share'),
+    taskStart: write('task.start'),
+    taskMove: write('task.move'),
+    inboxList: () => call('inbox.list'),
+    agentDefList: () => call('agentdef.list'),
+    agentDefGet: params => call('agentdef.get', params),
+    agentDefSave: write('agentdef.save'),
+    agentDefRemove: write('agentdef.remove'),
+    agentDefShare: write('agentdef.share'),
   };
 })();

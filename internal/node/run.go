@@ -76,6 +76,9 @@ type Person struct {
 // FeatureDispatcher: run.start's project and dispatcher are kept, checked and used.
 const FeatureDispatcher = "dispatcher"
 
+// FeatureAgentDef: a profile's effort and denied tools are applied.
+const FeatureAgentDef = "agentdef"
+
 // Spec is a run frozen at its start.
 type Spec struct {
 	Run         string        `json:"run"`
@@ -339,6 +342,9 @@ func (n *Node) admit(p *StartParams) error {
 			}
 		}
 	}
+	if !contains(efforts, p.Profile.Effort) || slices.ContainsFunc(p.Profile.Deny, func(t string) bool { return !toolName.MatchString(t) }) {
+		return &wire.Error{Code: wire.CodeBadRequest, Detail: "profile " + p.Profile.Name}
+	}
 	if len(l.AllowDirs) > 0 && !underAny(p.Dir, l.AllowDirs) {
 		return &wire.Error{Code: wire.CodeUnauthorized, Detail: "dir " + p.Dir}
 	}
@@ -357,8 +363,14 @@ var safePermissions = map[string][]string{
 // sameRun: a and b start the same command line (their names and the machine they are pinned to aside).
 func sameRun(a, b agent.Profile) bool {
 	return a.Provider == b.Provider && a.Model == b.Model && a.Permission == b.Permission && a.Stdin == b.Stdin &&
-		slices.Equal(a.Command, b.Command) && slices.Equal(a.Args, b.Args)
+		a.Effort == b.Effort && slices.Equal(a.Deny, b.Deny) && slices.Equal(a.Command, b.Command) && slices.Equal(a.Args, b.Args)
 }
+
+// Efforts a run may ask for; Deny only takes tools away.
+var (
+	efforts  = []string{"", "low", "medium", "high", "xhigh", "max"}
+	toolName = regexp.MustCompile(`^[A-Za-z0-9_*:().-]{1,128}$`)
+)
 
 func (n *Node) profile(name string) (agent.Profile, bool) {
 	profiles := n.Profiles

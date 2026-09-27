@@ -17,13 +17,64 @@ const (
 
 // Project is a team's unit of access: whoever is not a member sees none of its tasks and runs.
 type Project struct {
-	ID        string            `json:"id"`
-	Name      string            `json:"name"`
-	Owner     string            `json:"owner,omitempty"`   // manages the members
-	Members   map[string]string `json:"members,omitempty"` // user → role
-	Rev       int               `json:"rev,omitzero"`
-	CreatedAt time.Time         `json:"created_at,omitzero"`
-	UpdatedAt time.Time         `json:"updated_at,omitzero"`
+	ID        string              `json:"id"`
+	Name      string              `json:"name"`
+	Owner     string              `json:"owner,omitempty"`   // manages the members
+	Members   map[string]string   `json:"members,omitempty"` // user → role
+	Repos     []Repo              `json:"repos,omitempty"`
+	Links     []Link              `json:"links,omitempty"`
+	Context   string              `json:"context,omitempty"` // what every run of the project is told about it
+	Defaults  Defaults            `json:"defaults,omitzero"`
+	Hooks     map[string][]string `json:"hooks,omitempty"` // setup | before_run | check | cleanup → argv
+	Fetch     []string            `json:"fetch,omitempty"` // argv that prints a requirement; {ref} is its link
+	Rev       int                 `json:"rev,omitzero"`
+	CreatedAt time.Time           `json:"created_at,omitzero"`
+	UpdatedAt time.Time           `json:"updated_at,omitzero"`
+}
+
+// Repo is a repository of a project and where it is on each machine.
+type Repo struct {
+	Name   string            `json:"name"`
+	Remote string            `json:"remote,omitempty"` // shared by the machines that hand work on
+	Base   string            `json:"base,omitempty"`   // the branch new work starts from
+	Dirs   map[string]string `json:"dirs,omitempty"`   // machine → its checkout there
+}
+
+type Link struct {
+	Kind string `json:"kind"` // tracker | doc | …
+	URL  string `json:"url"`
+}
+
+// Defaults are what a task of the project runs with when it says nothing itself.
+type Defaults struct {
+	Workflow string            `json:"workflow,omitempty"`
+	Roles    map[string]string `json:"roles,omitempty"` // role → agent
+	Machine  string            `json:"machine,omitempty"`
+	Agent    string            `json:"agent,omitempty"`
+}
+
+// Agent is the agent a task of p runs with by default: Defaults.Agent, else the one for implementing.
+func (p *Project) Agent() string {
+	if p == nil {
+		return ""
+	}
+	if p.Defaults.Agent != "" {
+		return p.Defaults.Agent
+	}
+	return p.Defaults.Roles["implement"]
+}
+
+// DirOn is where p's first repository with a checkout on machine is there.
+func (p *Project) DirOn(machine string) (string, bool) {
+	if p == nil {
+		return "", false
+	}
+	for _, r := range p.Repos {
+		if d := r.Dirs[machine]; d != "" {
+			return d, true
+		}
+	}
+	return "", false
 }
 
 // Role is user's role in p: the owner participates; "" is none.
@@ -59,9 +110,15 @@ const (
 )
 
 type ProjectEdit struct {
-	ID    string  `json:"id"`
-	Name  *string `json:"name,omitempty"`
-	Owner *string `json:"owner,omitempty"`
+	ID       string               `json:"id"`
+	Name     *string              `json:"name,omitempty"`
+	Owner    *string              `json:"owner,omitempty"`
+	Repos    *[]Repo              `json:"repos,omitempty"`
+	Links    *[]Link              `json:"links,omitempty"`
+	Context  *string              `json:"context,omitempty"`
+	Defaults *Defaults            `json:"defaults,omitempty"`
+	Hooks    *map[string][]string `json:"hooks,omitempty"`
+	Fetch    *[]string            `json:"fetch,omitempty"`
 }
 
 // MemberSet gives user a role in project; "" takes it away.
@@ -98,6 +155,24 @@ func (s *State) applyTeam(e journal.Event, at time.Time) (bool, error) {
 		}
 		if d.Owner != nil {
 			p.Owner = *d.Owner
+		}
+		if d.Repos != nil {
+			p.Repos = *d.Repos
+		}
+		if d.Links != nil {
+			p.Links = *d.Links
+		}
+		if d.Context != nil {
+			p.Context = *d.Context
+		}
+		if d.Defaults != nil {
+			p.Defaults = *d.Defaults
+		}
+		if d.Hooks != nil {
+			p.Hooks = *d.Hooks
+		}
+		if d.Fetch != nil {
+			p.Fetch = *d.Fetch
 		}
 		p.Rev++
 		p.UpdatedAt = at

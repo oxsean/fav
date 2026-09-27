@@ -1,9 +1,11 @@
 package coord
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"maps"
+	"reflect"
 	"regexp"
 	"slices"
 	"strings"
@@ -116,6 +118,12 @@ func (c *Coord) projectEdit(who Principal, r *wire.Request) (string, []journal.E
 		}
 		changed = changed || *p.Owner != pr.Owner
 	}
+	if err := c.checkSettings(p); err != nil {
+		return "", nil, err
+	}
+	changed = changed || p.Repos != nil && !reflect.DeepEqual(*p.Repos, pr.Repos) || p.Links != nil && !reflect.DeepEqual(*p.Links, pr.Links) ||
+		p.Context != nil && *p.Context != pr.Context || p.Defaults != nil && !reflect.DeepEqual(*p.Defaults, pr.Defaults) ||
+		p.Hooks != nil && !reflect.DeepEqual(*p.Hooks, pr.Hooks) || p.Fetch != nil && !slices.Equal(*p.Fetch, pr.Fetch)
 	if !changed {
 		return pr.ID, nil, nil
 	}
@@ -198,4 +206,134 @@ func (c *Coord) runMessages(ctx context.Context, who Principal, r *wire.Request)
 	err = c.call(ctx, run.Machine, remote.MMessages, remote.MessagesParams{Ref: remote.Ref{Provider: run.Provider, SessionID: run.Session},
 		Before: p.Before, N: p.N, File: p.File}, &out)
 	return out, err
+}
+
+// Hooks a project may set.
+var hookNames = []string{"setup", "before_run", "check", "cleanup"}
+
+// checkSettings checks what a project edit sets besides its name and owner. The caller holds mu.
+func (c *Coord) checkSettings(p task.ProjectEdit) error {
+	argv := func(what string, a []string) error {
+		if len(a) > 64 || slices.ContainsFunc(a, func(s string) bool { return len(s) > maxLine }) {
+			return bad(what)
+		}
+		return nil
+	}
+	if p.Repos != nil {
+		if len(*p.Repos) > 20 {
+			return bad("repos")
+		}
+		for i, r := range *p.Repos {
+			switch {
+			case r.Name == "" || len(r.Name) > 64 || slices.ContainsFunc((*p.Repos)[:i], func(x task.Repo) bool { return x.Name == r.Name }):
+				return bad("repo name " + r.Name)
+			case len(r.Remote) > maxLine || len(r.Base) > 255:
+				return bad("repo " + r.Name)
+			}
+			for m, d := range r.Dirs {
+				if m == "" || len(m) > 64 || d == "" || len(d) > 4096 {
+					return bad("repo " + r.Name + " dir on " + m)
+				}
+			}
+		}
+	}
+	if p.Links != nil && (len(*p.Links) > 50 || slices.ContainsFunc(*p.Links, func(l task.Link) bool {
+		return l.Kind == "" || len(l.Kind) > 32 || l.URL == "" || len(l.URL) > maxLine
+	})) {
+		return bad("links")
+	}
+	if p.Context != nil && len(*p.Context) > maxBrief {
+		return bad("context")
+	}
+	if d := p.Defaults; d != nil {
+		if err := c.checkMachine(d.Machine); err != nil {
+			return err
+		}
+		for _, a := range append([]string{d.Agent}, slices.Collect(maps.Values(d.Roles))...) {
+			if err := c.checkAgent(a); err != nil {
+				return err
+			}
+		}
+	}
+	if p.Hooks != nil {
+		for k, a := range *p.Hooks {
+			if !slices.Contains(hookNames, k) || len(a) == 0 {
+				return bad("hook " + k)
+			}
+			if err := argv("hook "+k, a); err != nil {
+				return err
+			}
+		}
+	}
+	if p.Fetch != nil {
+		return argv("fetch", *p.Fetch)
+	}
+	return nil
+}
+
+// Offboard is user.offboard: hand what user holds to others before they leave. To takes what no project owner
+// does; "" is the caller.
+type Offboard struct {
+	User string `json:"user"`
+	To   string `json:"to,omitempty"`
+}
+
+// userOffboard hands user's projects, tasks and definitions on, takes them out of every project and closes their
+// machines to everyone else; runs queued there by others are then canceled before they start. The caller holds mu.
+func (c *Coord) userOffboard(who Principal, r *wire.Request) (string, []journal.Event, error) {
+	var p Offboard
+	if err := r.Decode(&p); err != nil {
+		return "", nil, err
+	}
+	if _, ok := c.user(p.User); !ok || p.User == Owner.User {
+		return "", nil, notFound("user " + p.User)
+	}
+	to := cmp.Or(p.To, who.User)
+	if to == p.User {
+		return "", nil, bad("to")
+	}
+	if err := c.checkUser(to); err != nil {
+		return "", nil, err
+	}
+	var events []journal.Event
+	owners := map[string]string{} // project → its owner once this is done
+	for _, id := range slices.Sorted(maps.Keys(c.st.Projects)) {
+		pr := c.st.Projects[id]
+		owners[id] = pr.Owner
+		if pr.Owner == p.User {
+			owners[id] = to
+			events = append(events, journal.NewEvent(task.EProjectEdited, task.ProjectEdit{ID: id, Owner: &to}))
+		}
+		if _, member := pr.Members[p.User]; member {
+			events = append(events, journal.NewEvent(task.EMemberSet, task.MemberSet{Project: id, User: p.User}))
+		}
+	}
+	for _, id := range slices.Sorted(maps.Keys(c.st.Tasks)) {
+		t := c.st.Tasks[id]
+		if task.Finished(t.Status) || t.Owner != p.User && t.Approver != p.User {
+			continue
+		}
+		heir := cmp.Or(owners[t.Project], to)
+		e := task.TaskEdit{ID: id}
+		if t.Owner == p.User {
+			e.Owner = &heir
+		}
+		if t.Approver == p.User {
+			e.Approver = &heir
+		}
+		events = append(events, journal.NewEvent(task.ETaskEdited, e))
+	}
+	for _, name := range slices.Sorted(maps.Keys(c.st.AgentDefs)) {
+		if d := c.st.AgentDefs[name]; d.Owner == p.User {
+			cp := *d
+			cp.Owner = to
+			events = append(events, journal.NewEvent(task.EAgentDefSaved, cp))
+		}
+	}
+	for _, m := range slices.Sorted(maps.Keys(c.st.Shares)) {
+		if c.ownerOf(m) == p.User {
+			events = append(events, journal.NewEvent(task.EMachineShared, task.Share{Machine: m}))
+		}
+	}
+	return p.User, events, nil
 }

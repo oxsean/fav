@@ -105,7 +105,7 @@ var whys = map[string]string{
 	"cli_missing": "why.cli_missing", "auth_missing": "why.auth_missing", "node_outdated": "why.node_outdated",
 	"offline": "why.offline", "connecting": "why.connecting", "slots": "why.slots", "dir_busy": "why.dir_busy",
 	"auth_unknown": "why.auth_unknown", "unchecked": "why.unchecked", "herdr": "why.herdr", "background": "why.background",
-	"continues": "why.continues", "no_access": "why.no_access",
+	"continues": "why.continues", "no_access": "why.no_access", "def_pending": "why.def_pending",
 }
 
 // Why is one line of a dispatch preview (coord.Why) as a sentence.

@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 
 	"github.com/oxsean/fav/internal/i18n"
 	"github.com/oxsean/fav/internal/tend"
@@ -75,6 +76,12 @@ func (claude) Launch(s LaunchSpec) (CommandSpec, error) {
 	if s.Profile.Permission != "" {
 		args = append(args, "--permission-mode", s.Profile.Permission)
 	}
+	if s.Profile.Effort != "" {
+		args = append(args, "--effort", s.Profile.Effort)
+	}
+	if len(s.Profile.Deny) > 0 {
+		args = append(args, "--disallowedTools", strings.Join(s.Profile.Deny, ","))
+	}
 	args = append(args, s.Profile.Args...)
 	if s.Prompt != "" { // -p reads the prompt from stdin without it
 		args = append(args, s.Prompt)
@@ -114,6 +121,9 @@ func (codex) Launch(s LaunchSpec) (CommandSpec, error) {
 		}
 		if s.Profile.Permission != "" {
 			args = append(args, "-c", "sandbox_mode="+s.Profile.Permission)
+		}
+		if s.Profile.Effort != "" {
+			args = append(args, "-c", "model_reasoning_effort="+codexEffort(s.Profile.Effort))
 		}
 		return CommandSpec{Exec: "codex", Args: append(args, s.Profile.Args...), Cwd: s.Dir}, nil
 	}
@@ -194,4 +204,12 @@ func (command) Launch(s LaunchSpec) (CommandSpec, error) {
 		return CommandSpec{}, i18n.E("resume.check.not_installed", exe)
 	}
 	return CommandSpec{Exec: exe, Args: slices.Clone(argv[1:]), Cwd: s.Dir}, nil
+}
+
+// codexEffort is effort as codex names it: it has no max.
+func codexEffort(e string) string {
+	if e == "max" {
+		return "xhigh"
+	}
+	return e
 }

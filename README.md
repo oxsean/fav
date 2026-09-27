@@ -368,6 +368,13 @@ with a profile, stop, abandon, take over), `X` stops the run, `Space` shows the 
 The right pane shows the brief, the latest runs and the last run's output. Taking over opens the resume dialog of the run's
 session; while the run still drives it, the dialog says to stop the run first.
 
+**Task trees.** A task can go under another (`--parent`, three levels at most) and come after others (`--after t1,t2`);
+`--backlog` keeps it aside until it is started. `tend task start <id>` starts a task and everything under it: each one is
+dispatched as soon as what it comes after is done, a task whose run succeeds is marked done, and a parent never runs —
+once its subtasks are done it waits for someone to accept it. Every open task says where it stands: running, queued (and
+for what: tasks before it, its subtasks, a machine slot) or waiting for someone (and why). A task that could not be
+dispatched says why and waits; start it again to retry. `tend task move <id> --parent … --after …` changes its place.
+
 **Agents.** Built in: `claude` (headless `claude -p` talking stream-json both ways, or an interactive Claude in a new Herdr
 tab when a Herdr workspace holds the directory), `codex` (`codex app-server`) and `fake` (for tests). More go into
 `config.json`:
@@ -382,6 +389,29 @@ tab when a Herdr workspace holds the directory), `codex` (`codex app-server`) an
 `command` runs any CLI: `{prompt_file}`, `{model}` and `{dir}` are filled in, the brief never goes on the command line
 (`"stdin": true` pipes it instead); `machine` keeps a profile to that one machine. `machines.<name>.slots` (default 2) bounds the runs a machine takes at once; runs in the same
 directory wait for each other.
+
+**Agent definitions.** A definition is a Markdown file with a YAML front matter, in the shape of a Claude Code subagent:
+
+```markdown
+---
+name: careful
+description: slow and careful
+role: implement
+profile: quick          # or provider: claude / codex, model: …
+effort: high
+permission: acceptEdits
+tools: {deny: [WebFetch]}
+machines: {prefer: [mba]}
+---
+Read everything twice. Run the tests before you stop.
+```
+
+`tend agent import careful.md` stores it (`import: ~/.claude/agents/foo.md` inside it reuses a Claude Code subagent), and
+it is used by name like a profile: its effort and denied tools go to the agent's command line, its text goes ahead of the
+brief. `tend agent defs | export | check | rm | share` manage them. Without a server they are files in
+`~/.agent/tend/defs/agents/`; on a server a definition is its owner's (or a project's) until it is shared with people,
+projects or everyone (`--view` lets them read it too). `skills`, `mcp`, `hooks`, `output` and `budget` are kept but not
+applied yet; the dispatch preview says so.
 
 **Before a run starts.** `tend run start` first says where and how the run would go: the machine's agent CLI and
 version, whether it is logged in, and whether the run waits for the machine, a slot or a directory. A CLI that is missing
@@ -408,7 +438,8 @@ that needs you, longest waiting first.
 
 To hear about it, set a command: `"notify_command": ["my-notifier"]` runs with one JSON object on stdin
 (`event`: `run.waiting`, `run.asked`, `run.permission`, `run.failed` or `run.stalled`, plus run, task, title, machine, agent, state,
-reason, detail, ask) whenever a run comes to want someone; `notify_events` narrows the events.
+reason, detail, ask) whenever a run comes to want someone; `notify_events` narrows the events. Task events,
+`task.needs_you` and `task.done`, go out only when `notify_events` names them.
 
 **Who coordinates.** One process at a time keeps the task journal and sends runs out: whichever holds the lock in
 `~/.agent/tend/coord/` — the TUI while its Tasks view is used, a `tend task|run …` command for its length, or `tend service`
@@ -464,10 +495,19 @@ its owner's claude / codex login, git identity and files — share a machine set
 container), not your laptop. A run's permission requests are for the machine's owner and whoever dispatched it; a share
 can let everyone it opens to approve them too.
 
+A project's owner also sets what its tasks run with: a context put ahead of every brief, its repositories and where each
+is on each machine (a task without a directory uses that), the default agent and machine, and hooks. A task has an owner
+and an approver; a task that comes to wait for someone reaches its owner, its approver when it is to be accepted, and whoever
+dispatched the run it is about — in their **Needs you** list on the web page, as a browser notification while the page is
+open, and at a personal webhook (Account page; a JSON POST with a `text` field for ntfy, Slack and the like, with a link to
+the task when `public_url` is set). An admin's **Hand over and disable** on the Admin page gives a leaving member's projects,
+tasks and definitions to others and ends their credentials.
+
 **Web UI.** The server also serves a page at its own address (`http://100.101.8.10:7788/`). Sign in with a provider, or
 with a token; the browser session lasts 30 days, and signing out or revoking it ends it. The page lists tasks and their
 runs; creates, edits and dispatches tasks; previews a dispatch; follows a run's output and conversation; shows why a run
-ended or what it asks and takes a reply; stops or abandons runs; marks tasks done, reopens or cancels them; shows the
+ended or what it asks and takes a reply; stops or abandons runs; marks tasks done, reopens or cancels them; shows task
+trees and starts them; lists what needs you; edits and shares agent definitions and project settings; shows the
 machines, who owns them and whom they are shared with; manages projects and members; makes personal tokens for the CLI
 and TUI on the Account page; and, for admins, users, admission rules, invitations and the audit log. It follows the
 journal live and reconnects on its own.

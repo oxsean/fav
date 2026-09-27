@@ -47,30 +47,39 @@ const (
 
 // methodAccess covers every method a client may call; one missing here is refused.
 var methodAccess = map[string]access{
-	wire.MPing:     anyone,
-	remote.MHello:  anyone,
-	MStateGet:      reader,
-	MTaskGet:       reader,
-	MAgentList:     reader,
-	MMachineList:   reader,
-	MSubscribe:     reader,
-	MRunTail:       reader,
-	MRunMessages:   reader,
-	MRunPreview:    reader,
-	MNodeCall:      reader, // a machine's own sessions: its owner and admins (nodeCall)
-	MTaskCreate:    writer,
-	MTaskEdit:      writer,
-	MTaskStatus:    writer,
-	MRunDispatch:   writer,
-	MRunStop:       writer,
-	MRunAbandon:    writer,
-	MRunAnswer:     writer,
-	MRunSend:       writer,
-	MRunContinue:   writer, // any session of a machine: its owner only (runContinue)
-	MProjectCreate: admin,
-	MProjectEdit:   writer,
-	MProjectMember: writer,
-	MMachineShare:  writer,
+	wire.MPing:      anyone,
+	remote.MHello:   anyone,
+	MStateGet:       reader,
+	MTaskGet:        reader,
+	MAgentList:      reader,
+	MMachineList:    reader,
+	MSubscribe:      reader,
+	MRunTail:        reader,
+	MRunMessages:    reader,
+	MRunPreview:     reader,
+	MNodeCall:       reader, // a machine's own sessions: its owner and admins (nodeCall)
+	MTaskCreate:     writer,
+	MTaskEdit:       writer,
+	MTaskStatus:     writer,
+	MTaskStart:      writer,
+	MTaskMove:       writer,
+	MAgentDefList:   reader,
+	MAgentDefGet:    reader,
+	MAgentDefSave:   writer,
+	MAgentDefRemove: writer,
+	MAgentDefShare:  writer,
+	MInboxList:      reader,
+	MUserOffboard:   admin,
+	MRunDispatch:    writer,
+	MRunStop:        writer,
+	MRunAbandon:     writer,
+	MRunAnswer:      writer,
+	MRunSend:        writer,
+	MRunContinue:    writer, // any session of a machine: its owner only (runContinue)
+	MProjectCreate:  admin,
+	MProjectEdit:    writer,
+	MProjectMember:  writer,
+	MMachineShare:   writer,
 }
 
 func forbidden(what string) error { return &wire.Error{Code: wire.CodeUnauthorized, Detail: what} }
@@ -235,6 +244,11 @@ func (c *Coord) visibleState(p Principal, st *task.State) *task.State {
 			delete(st.Shares, m)
 		}
 	}
+	for name, d := range st.AgentDefs {
+		if !c.readsDef(p, d) {
+			delete(st.AgentDefs, name)
+		}
+	}
 	c.mu.Unlock()
 	return st
 }
@@ -245,6 +259,7 @@ type subject struct {
 	Task    string `json:"task"`
 	Project string `json:"project"`
 	Machine string `json:"machine"`
+	Name    string `json:"name"`
 }
 
 // sees: p may see event e, by what it is about now; the caller holds mu.
@@ -266,6 +281,17 @@ func (c *Coord) sees(p Principal, e journal.Event) bool {
 		return p.Admin || c.st.Projects[s.Project].Role(p.User) != ""
 	case task.EMachineShared:
 		return c.canSee(p, s.Machine)
+	case task.ETaskMoved, task.ETaskHeld:
+		return canRead(c.st, p, c.st.Tasks[s.ID])
+	case task.ETaskStarted:
+		var d task.TaskStart
+		json.Unmarshal(e.Data, &d)
+		return slices.ContainsFunc(d.IDs, func(id string) bool { return canRead(c.st, p, c.st.Tasks[id]) })
+	case task.EAgentDefSaved, task.EAgentDefShared:
+		d := c.st.AgentDefs[s.Name]
+		return d != nil && c.readsDef(p, d)
+	case task.EAgentDefRemoved:
+		return p.Admin
 	}
 	return p.Admin
 }
@@ -294,7 +320,7 @@ func (c *Coord) visibleEnv(p Principal, env journal.Envelope) journal.Envelope {
 func reshapes(env journal.Envelope) bool {
 	for _, e := range env.Events {
 		switch e.Type {
-		case task.EMemberSet, task.EProjectEdited, task.EMachineShared:
+		case task.EMemberSet, task.EProjectEdited, task.EMachineShared, task.EAgentDefShared, task.EAgentDefRemoved:
 			return true
 		case task.ETaskEdited:
 			var d task.TaskEdit

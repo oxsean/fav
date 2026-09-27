@@ -272,8 +272,8 @@ button.metric:hover strong, button.metric:focus-visible strong { color: var(--ac
 .answer-form fieldset { border: 0; padding: 0; margin: 0; }
 .answer-form legend { font-weight: 600; margin-bottom: 4px; }
 .answer-form pre { white-space: pre-wrap; overflow-wrap: anywhere; margin: 0; }
-.answer-form .choice { display: flex; align-items: center; justify-content: flex-start; gap: 8px; font-weight: 400; }
-.answer-form .choice input { width: auto; height: auto; margin: 0; }
+.choice, .answer-form .choice { display: flex; align-items: center; justify-content: flex-start; gap: 8px; font-weight: 400; }
+.choice input, .answer-form .choice input { width: auto; height: auto; margin: 0; }
 
 .team-section { display: grid; gap: 8px; }
 .team-section h2 { font-size: 14px; }
@@ -289,3 +289,10 @@ a.button.primary { background: var(--accent); border-color: var(--accent); color
 code.secret { display: block; flex: 1; padding: 10px; background: var(--surface-alt); border: 1px solid var(--border); border-radius: var(--radius); font-size: 12px; user-select: all; }
 fieldset { border: 1px solid var(--border); border-radius: var(--radius); padding: 12px; margin: 0; }
 @media (max-width: 640px) { .team-machine { grid-template-columns: 1fr; } }
+.task-row.depth-1 { padding-left: 30px; } .task-row.depth-2 { padding-left: 46px; } .task-row.depth-3 { padding-left: 62px; }
+.status.sit-running { --status: var(--running); } .status.sit-queued { --status: var(--queued); } .status.sit-waiting { --status: var(--unknown); }
+.status.backlog { --status: var(--muted); }
+.tree-block { display: grid; gap: 6px; margin-top: 12px; }
+.tree-block .flex { flex-wrap: wrap; }
+.link-button { border: 0; background: transparent; padding: 0; color: var(--accent); text-decoration: underline; text-underline-offset: 2px; cursor: pointer; font: inherit; text-align: left; }
+ul.plain { margin: 0; padding-left: 18px; line-height: 1.7; }

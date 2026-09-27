@@ -523,3 +523,40 @@ func (t *Team) AuditLog(n int) ([]AuditEntry, error) {
 	}
 	return out, rows.Err()
 }
+
+// SetWebhook is where user's notices go ("" for nowhere).
+func (t *Team) SetWebhook(user, url string) error {
+	return affected(t.w.Exec(`UPDATE users SET webhook = ? WHERE id = ?`, url, user))
+}
+
+// Webhook is where user's notices go, "" for nowhere.
+func (t *Team) Webhook(user string) (string, error) {
+	var url string
+	err := t.r.QueryRow(`SELECT webhook FROM users WHERE id = ? AND disabled = 0`, user).Scan(&url)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	return url, err
+}
+
+// Claim takes the delivery of event seq to user: false when it was taken before.
+func (t *Team) Claim(seq int64, user, event string) (bool, error) {
+	res, err := t.w.Exec(`INSERT OR IGNORE INTO deliveries (seq, user_id, event, at) VALUES (?, ?, ?, ?)`, seq, user, event, time.Now().UnixNano())
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	return n == 1, err
+}
+
+// Delivered records how a claimed delivery went.
+func (t *Team) Delivered(seq int64, user, event, status string) error {
+	_, err := t.w.Exec(`UPDATE deliveries SET status = ? WHERE seq = ? AND user_id = ? AND event = ?`, status, seq, user, event)
+	return err
+}
+
+// RevokeAll ends every credential of user's, their machines' included.
+func (t *Team) RevokeAll(user string) error {
+	_, err := t.w.Exec(`UPDATE credentials SET revoked = 1 WHERE owner = ?`, user)
+	return err
+}

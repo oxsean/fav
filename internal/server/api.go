@@ -8,7 +8,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/oxsean/fav/internal/coord"
 	"github.com/oxsean/fav/internal/store"
+	"github.com/oxsean/fav/internal/wire"
 )
 
 // inviteAge is how long an invitation link works.
@@ -80,6 +82,9 @@ func (s *Server) apiRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/machines/rebind", s.api(s.rebindMachine))
 	mux.HandleFunc("GET /api/identities", s.api(s.listIdentities))
 	mux.HandleFunc("GET /api/audit", s.api(s.adminOnly(s.listAudit)))
+	mux.HandleFunc("GET /api/me/webhook", s.api(s.getWebhook))
+	mux.HandleFunc("POST /api/me/webhook", s.api(s.setWebhook))
+	mux.HandleFunc("POST /api/users/offboard", s.api(s.adminOnly(s.offboard)))
 }
 
 // PublicUser is a user as other members see them.
@@ -357,4 +362,78 @@ func (s *Server) listAudit(w http.ResponseWriter, r *http.Request, c caller) {
 		es = []store.AuditEntry{}
 	}
 	writeJSON(w, http.StatusOK, es)
+}
+
+func (s *Server) getWebhook(w http.ResponseWriter, r *http.Request, c caller) {
+	url, err := s.team().Webhook(c.user.ID)
+	if err != nil {
+		apiError(w, http.StatusInternalServerError, "internal")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"url": url})
+}
+
+func (s *Server) setWebhook(w http.ResponseWriter, r *http.Request, c caller) {
+	var p struct {
+		URL string `json:"url"`
+	}
+	if !decode(w, r, &p) {
+		return
+	}
+	if p.URL = strings.TrimSpace(p.URL); CheckWebhook(p.URL) != nil {
+		apiError(w, http.StatusBadRequest, "url")
+		return
+	}
+	if err := s.team().SetWebhook(c.user.ID, p.URL); err != nil {
+		apiError(w, http.StatusInternalServerError, "internal")
+		return
+	}
+	s.audit(r, c.user.ID, "webhook", c.user.ID)
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// offboard hands a leaving user's work on (user.offboard), then disables them and ends every credential of theirs,
+// their machines' too.
+func (s *Server) offboard(w http.ResponseWriter, r *http.Request, c caller) {
+	var p coord.Offboard
+	if !decode(w, r, &p) {
+		return
+	}
+	if p.User == store.LocalUser || p.User == c.user.ID {
+		apiError(w, http.StatusConflict, "self")
+		return
+	}
+	params, _ := json.Marshal(p)
+	req := &wire.Request{Method: coord.MUserOffboard, CommandID: "offboard-" + p.User, Params: params}
+	if _, err := s.opt.Coord.HandlerFor(principal(c.user))(r.Context(), req); err != nil {
+		apiError(w, wireStatus(err), wire.Code(err))
+		return
+	}
+	off := true
+	if err := s.team().SetUser(p.User, nil, &off); err != nil {
+		apiError(w, http.StatusNotFound, "not_found")
+		return
+	}
+	if err := s.team().RevokeAll(p.User); err != nil {
+		apiError(w, http.StatusInternalServerError, "internal")
+		return
+	}
+	s.audit(r, c.user.ID, "offboard", p.User+" "+p.To)
+	s.sweep()
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// wireStatus is the HTTP status for a coordinator error.
+func wireStatus(err error) int {
+	switch wire.Code(err) {
+	case wire.CodeNotFound:
+		return http.StatusNotFound
+	case wire.CodeUnauthorized:
+		return http.StatusForbidden
+	case wire.CodeBadRequest:
+		return http.StatusBadRequest
+	case wire.CodeConflict:
+		return http.StatusConflict
+	}
+	return http.StatusInternalServerError
 }

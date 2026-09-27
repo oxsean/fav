@@ -1,0 +1,181 @@
+package coord
+
+import (
+	"encoding/json"
+	"slices"
+	"sort"
+	"time"
+
+	"github.com/oxsean/fav/internal/journal"
+	"github.com/oxsean/fav/internal/task"
+)
+
+// Task notify events.
+const (
+	NotifyTaskWaiting = "task.needs_you" // a task came to wait for someone
+	NotifyTaskDone    = "task.done"
+)
+
+// Notice is a task that came to need someone, for the people it concerns.
+type Notice struct {
+	Seq     int64     `json:"seq"`
+	Event   string    `json:"event"`
+	Task    string    `json:"task"`
+	Title   string    `json:"title"`
+	Project string    `json:"project,omitempty"`
+	Reason  string    `json:"reason,omitempty"`
+	Run     string    `json:"run,omitempty"`
+	To      []string  `json:"to"` // user ids
+	At      time.Time `json:"at"`
+}
+
+// InboxItem is a task waiting for the caller.
+type InboxItem struct {
+	Task    string    `json:"task"`
+	Title   string    `json:"title"`
+	Project string    `json:"project,omitempty"`
+	Reason  string    `json:"reason"`
+	Run     string    `json:"run,omitempty"`
+	Since   time.Time `json:"since"`
+}
+
+type Inbox struct {
+	Items []InboxItem `json:"items"`
+}
+
+// concerns are the people task t's situation sit is for: its owner, its approver when it is to be accepted, and
+// whoever dispatched the run it is about.
+func concerns(st *task.State, t *task.Task, sit task.Situation) []string {
+	var out []string
+	add := func(u string) {
+		if u != "" && !slices.Contains(out, u) {
+			out = append(out, u)
+		}
+	}
+	add(t.Owner)
+	if sit.Reason == task.WhyAccept {
+		add(t.Approver)
+	}
+	if r := st.Runs[sit.Run]; r != nil {
+		add(r.Dispatcher)
+	}
+	if len(out) == 0 {
+		add(Owner.User)
+	}
+	return out
+}
+
+// touched are the tasks events are about; the caller holds mu.
+func (c *Coord) touched(events []journal.Event) []string {
+	var ids []string
+	add := func(id string) {
+		if id != "" && !slices.Contains(ids, id) {
+			ids = append(ids, id)
+		}
+	}
+	for _, e := range events {
+		var s subject
+		json.Unmarshal(e.Data, &s)
+		switch {
+		case e.Type == task.ETaskStarted:
+			var d task.TaskStart
+			json.Unmarshal(e.Data, &d)
+			for _, id := range d.IDs {
+				add(id)
+			}
+		case s.Task != "":
+			add(s.Task)
+		case c.st.Runs[s.ID] != nil:
+			add(c.st.Runs[s.ID].Task)
+		case c.st.Tasks[s.ID] != nil || e.Type == task.ETaskCreated:
+			add(s.ID)
+		}
+		if t := c.st.Tasks[s.ID]; t != nil { // a subtask's end moves its parent
+			add(t.Parent)
+		}
+	}
+	return ids
+}
+
+// situations are how the tasks ids stand now; the caller holds mu.
+func (c *Coord) situations(ids []string) map[string]task.Situation {
+	out := map[string]task.Situation{}
+	for _, id := range ids {
+		if t := c.st.Tasks[id]; t != nil {
+			out[id] = c.st.Situation(t)
+		}
+	}
+	return out
+}
+
+// notices are the tasks among before's that came to wait for someone, or got done, in env; the caller holds mu.
+func (c *Coord) notices(env journal.Envelope, before map[string]task.Situation) []Notice {
+	var out []Notice
+	ids := make([]string, 0, len(before))
+	for id := range before {
+		ids = append(ids, id)
+	}
+	for _, e := range env.Events { // tasks made in env
+		if e.Type == task.ETaskCreated {
+			var s subject
+			json.Unmarshal(e.Data, &s)
+			if _, ok := before[s.ID]; !ok {
+				ids = append(ids, s.ID)
+			}
+		}
+	}
+	sort.Strings(ids)
+	for _, id := range ids {
+		t := c.st.Tasks[id]
+		if t == nil {
+			continue
+		}
+		was, now := before[id], c.st.Situation(t)
+		ev := ""
+		switch {
+		case now.Kind == task.SitWaiting && now.Reason != task.WhyDispatch && (was.Kind != now.Kind || was.Reason != now.Reason):
+			ev = NotifyTaskWaiting
+		case now.Kind == task.SitDone && was.Kind != task.SitDone && was.Kind != "":
+			ev = NotifyTaskDone
+		}
+		if ev != "" {
+			out = append(out, Notice{Seq: env.Seq, Event: ev, Task: id, Title: t.Title, Project: t.Project, Reason: now.Reason,
+				Run: now.Run, To: concerns(c.st, t, now), At: env.At})
+		}
+	}
+	return out
+}
+
+// deliver hands the notices on: to the server's delivery (Options.Notice) and to the notify command.
+func (c *Coord) deliver(ns []Notice) {
+	for _, n := range ns {
+		if c.opt.Notice != nil {
+			c.opt.Notice(n)
+		}
+		if len(c.opt.Config.NotifyCommand) > 0 && c.notifies(n.Event) {
+			c.runNotifyEvent(NotifyEvent{Event: n.Event, Task: n.Task, Title: clip(n.Title, 300), Reason: n.Reason, Run: n.Run, At: n.At},
+				"TEND_TASK="+n.Task)
+		}
+	}
+}
+
+// inbox is what waits for p: the tasks waiting for someone (not merely for a dispatch nobody asked for) that concern p
+// and that p may act on, longest waiting first.
+func (c *Coord) inbox(p Principal) Inbox {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	out := Inbox{Items: []InboxItem{}}
+	for _, t := range c.st.Tasks {
+		sit := c.st.Situation(t)
+		if sit.Kind != task.SitWaiting || sit.Reason == task.WhyDispatch || !canWrite(c.st, p, t) || !slices.Contains(concerns(c.st, t, sit), p.User) {
+			continue
+		}
+		since := t.UpdatedAt
+		if r := c.st.Runs[sit.Run]; r != nil {
+			since = r.Since()
+		}
+		out.Items = append(out.Items, InboxItem{Task: t.ID, Title: t.Title, Project: t.Project, Reason: sit.Reason, Run: sit.Run, Since: since})
+	}
+	sort.Slice(out.Items, func(i, j int) bool { return out.Items[i].Since.Before(out.Items[j].Since) })
+	return out
+}

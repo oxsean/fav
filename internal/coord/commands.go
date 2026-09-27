@@ -18,12 +18,19 @@ import (
 )
 
 type TaskCreate struct {
-	Title   string `json:"title"`
-	Brief   string `json:"brief,omitempty"`
-	Dir     string `json:"dir,omitempty"` // in the form of the task's machine
-	Machine string `json:"machine,omitempty"`
-	Agent   string `json:"agent,omitempty"`
-	Project string `json:"project,omitempty"`
+	Title    string   `json:"title"`
+	Brief    string   `json:"brief,omitempty"`
+	Dir      string   `json:"dir,omitempty"` // in the form of the task's machine
+	Machine  string   `json:"machine,omitempty"`
+	Agent    string   `json:"agent,omitempty"`
+	Project  string   `json:"project,omitempty"` // default: its parent's
+	Parent   string   `json:"parent,omitempty"`
+	After    []string `json:"after,omitempty"`
+	Kind     string   `json:"kind,omitempty"`
+	Accept   []string `json:"acceptance,omitempty"`
+	Tags     []string `json:"tags,omitempty"`
+	Approver string   `json:"approver,omitempty"`
+	Status   string   `json:"status,omitempty"` // todo (default) | backlog
 }
 
 type Dispatch struct {
@@ -100,7 +107,8 @@ var readMethods = []string{remote.MHello, remote.MList, remote.MMessages, remote
 // Methods are the client methods.
 var Methods = []string{MStateGet, MTaskGet, MTaskCreate, MTaskEdit, MTaskStatus, MRunDispatch, MRunStop, MRunAbandon, MRunTail,
 	MAgentList, MMachineList, MSubscribe, MNodeCall, MRunPreview, MRunContinue, MRunAnswer, MRunSend, MRunMessages,
-	MProjectCreate, MProjectEdit, MProjectMember, MMachineShare}
+	MProjectCreate, MProjectEdit, MProjectMember, MMachineShare, MTaskStart, MTaskMove,
+	MAgentDefList, MAgentDefGet, MAgentDefSave, MAgentDefRemove, MAgentDefShare, MInboxList, MUserOffboard}
 
 // Handler answers this machine's user.
 func (c *Coord) Handler() wire.Handler { return c.HandlerFor(Owner) }
@@ -134,7 +142,25 @@ func (c *Coord) HandlerFor(p Principal) wire.Handler {
 			}
 			return nil, notFound(rp.ID)
 		case MAgentList:
-			return Agents{Agents: c.Profiles()}, nil
+			return Agents{Agents: c.usableProfiles(p)}, nil
+		case MAgentDefList:
+			return c.agentDefList(p), nil
+		case MInboxList:
+			return c.inbox(p), nil
+		case MUserOffboard:
+			return c.command(p, r, c.userOffboard, func(*task.State, string) any { return nil })
+		case MAgentDefGet:
+			var ref task.AgentDefRef
+			if err := r.Decode(&ref); err != nil {
+				return nil, err
+			}
+			return c.agentDefGet(p, ref.Name)
+		case MAgentDefSave:
+			return c.command(p, r, c.agentDefSave, c.defAnswer(p))
+		case MAgentDefRemove:
+			return c.command(p, r, c.agentDefRemove, func(*task.State, string) any { return nil })
+		case MAgentDefShare:
+			return c.command(p, r, c.agentDefShare, c.defAnswer(p))
 		case MMachineList:
 			var mp MachinesParams
 			if err := r.Decode(&mp); err != nil {
@@ -184,6 +210,10 @@ func (c *Coord) HandlerFor(p Principal) wire.Handler {
 			return c.command(p, r, c.taskEdit, taskView)
 		case MTaskStatus:
 			return c.command(p, r, c.taskStatus, taskView)
+		case MTaskStart:
+			return c.command(p, r, c.taskStart, taskView)
+		case MTaskMove:
+			return c.command(p, r, c.taskMove, taskView)
 		case MRunDispatch:
 			return c.command(p, r, c.runDispatch, runView)
 		case MRunContinue:
@@ -270,6 +300,10 @@ func (c *Coord) command(p Principal, r *wire.Request, do func(Principal, *wire.R
 			cp.Members = maps.Clone(pr.Members)
 			st.Projects[id] = &cp
 		}
+		if d := c.st.AgentDefs[id]; d != nil {
+			cp := *d
+			st.AgentDefs[id] = &cp
+		}
 		if st.Apply(env) != nil {
 			return nil
 		}
@@ -310,7 +344,7 @@ func (c *Coord) checkMachine(name string) error {
 }
 
 func (c *Coord) checkAgent(name string) error {
-	if _, ok := c.profile(name); name != "" && !ok {
+	if _, ok := c.profile(name); name != "" && !ok && c.agentDefs()[name] == nil {
 		return notFound("agent " + name)
 	}
 	return nil
@@ -335,11 +369,28 @@ func (c *Coord) taskCreate(who Principal, r *wire.Request) (string, []journal.Ev
 		return "", nil, err
 	}
 	p.Project = strings.TrimSpace(p.Project)
+	if parent := c.st.Tasks[p.Parent]; parent != nil && p.Project == "" {
+		p.Project = parent.Project
+	}
 	if err := c.checkProject(who, p.Project); err != nil {
 		return "", nil, err
 	}
+	switch p.Status {
+	case "":
+		p.Status = task.StatusTodo
+	case task.StatusTodo, task.StatusBacklog:
+	default:
+		return "", nil, bad("status " + p.Status)
+	}
+	if err := c.checkFields(who, p.Project, p.Kind, p.Approver, p.Accept, p.Tags); err != nil {
+		return "", nil, err
+	}
 	t := task.Task{ID: newID("t_"), Title: p.Title, Brief: p.Brief, Dir: p.Dir, Machine: p.Machine, Agent: p.Agent,
-		Project: p.Project, Owner: who.User, Status: task.StatusTodo}
+		Project: p.Project, Owner: who.User, Approver: p.Approver, Kind: p.Kind, Accept: p.Accept, Tags: p.Tags, Status: p.Status}
+	if err := c.checkPlace(who, &t, p.Parent, p.After); err != nil {
+		return "", nil, err
+	}
+	t.Parent, t.After = p.Parent, p.After
 	return t.ID, []journal.Event{journal.NewEvent(task.ETaskCreated, t)}, nil
 }
 
@@ -375,14 +426,29 @@ func (c *Coord) taskEdit(who Principal, r *wire.Request) (string, []journal.Even
 			if err := c.checkProject(who, *p.Project); err != nil {
 				return "", nil, err
 			}
+			if t.Parent != "" || len(c.st.Children(t.ID)) > 0 {
+				return "", nil, conflict("a task in a tree moves with its tree")
+			}
 		}
 	}
-	changed := false
+	project := t.Project
+	if p.Project != nil {
+		project = *p.Project
+	}
+	if err := c.checkFields(who, project, deref(p.Kind), deref(p.Approver), derefs(p.Accept), derefs(p.Tags)); err != nil {
+		return "", nil, err
+	}
+	if p.Owner != nil || p.Approver != nil {
+		if err := c.checkHandOver(who, t, p.Owner); err != nil {
+			return "", nil, err
+		}
+	}
+	changed := p.Accept != nil && !slices.Equal(*p.Accept, t.Accept) || p.Tags != nil && !slices.Equal(*p.Tags, t.Tags)
 	for _, f := range []struct {
 		v   *string
 		now string
-	}{{p.Title, t.Title}, {p.Brief, t.Brief}, {p.Dir, t.Dir},
-		{p.Machine, t.Machine}, {p.Agent, t.Agent}, {p.Project, t.Project}} {
+	}{{p.Title, t.Title}, {p.Brief, t.Brief}, {p.Dir, t.Dir}, {p.Machine, t.Machine}, {p.Agent, t.Agent},
+		{p.Project, t.Project}, {p.Owner, t.Owner}, {p.Approver, t.Approver}, {p.Kind, t.Kind}} {
 		changed = changed || f.v != nil && *f.v != f.now
 	}
 	if !changed {
@@ -400,11 +466,14 @@ func (c *Coord) taskStatus(who Principal, r *wire.Request) (string, []journal.Ev
 	if err != nil {
 		return "", nil, err
 	}
-	if !slices.Contains([]string{task.StatusTodo, task.StatusDone, task.StatusCanceled}, p.Status) {
+	if !slices.Contains([]string{task.StatusBacklog, task.StatusTodo, task.StatusDone, task.StatusCanceled}, p.Status) {
 		return "", nil, bad("status " + p.Status)
 	}
 	if t.Status == p.Status {
 		return t.ID, nil, nil
+	}
+	if p.Status == task.StatusCanceled {
+		return t.ID, c.cancelTree(t), nil
 	}
 	return t.ID, []journal.Event{journal.NewEvent(task.ETaskStatus, p)}, nil
 }
@@ -436,18 +505,23 @@ func (c *Coord) plan(who Principal, p Dispatch) (task.Run, error) {
 	if open := c.st.OpenRun(t.ID); open != nil {
 		return task.Run{}, conflict("open run " + open.ID)
 	}
-	if t.Dir == "" {
-		return task.Run{}, bad("dir")
+	if slices.ContainsFunc(c.st.Children(t.ID), func(k *task.Task) bool { return !task.Finished(k.Status) }) {
+		return task.Run{}, conflict("subtasks")
 	}
 	if !slices.Contains([]string{"", node.RunnerBackground, node.RunnerHerdr}, p.Runner) {
 		return task.Run{}, bad("runner " + p.Runner)
 	}
-	name := firstOf(p.Agent, t.Agent, tend.ProviderClaude)
-	prof, ok := c.profile(name)
-	if !ok {
-		return task.Run{}, notFound("agent " + name)
+	pr := c.st.Projects[t.Project]
+	name := firstOf(p.Agent, t.Agent, pr.Agent(), tend.ProviderClaude)
+	prof, def, err := c.agentFor(who, name, t.Project)
+	if err != nil {
+		return task.Run{}, err
 	}
-	machine := firstOf(p.Machine, prof.Machine, t.Machine)
+	var defaultMachine string
+	if pr != nil {
+		defaultMachine = pr.Defaults.Machine
+	}
+	machine := firstOf(p.Machine, prof.Machine, t.Machine, defaultMachine, c.preferred(def))
 	if machine == "" && c.opt.Remote {
 		return task.Run{}, bad("machine")
 	}
@@ -458,6 +532,9 @@ func (c *Coord) plan(who Principal, p Dispatch) (task.Run, error) {
 	if prof.Machine != "" && machine != prof.Machine {
 		return task.Run{}, bad("agent " + name + " runs on " + prof.Machine)
 	}
+	if def != nil && len(def.Machines.Require) > 0 && !slices.Contains(def.Machines.Require, machine) {
+		return task.Run{}, bad("agent " + name + " runs on " + strings.Join(def.Machines.Require, ", "))
+	}
 	if err := c.checkMachine(machine); err != nil {
 		return task.Run{}, err
 	}
@@ -465,11 +542,24 @@ func (c *Coord) plan(who Principal, p Dispatch) (task.Run, error) {
 	if strings.TrimSpace(brief) == "" {
 		brief = t.Title
 	}
-	from := t.Machine
+	if def != nil && strings.TrimSpace(def.Body) != "" {
+		brief = def.Body + "\n\n---\n\n" + brief
+	}
+	if pr != nil && strings.TrimSpace(pr.Context) != "" {
+		brief = "# " + pr.Name + "\n\n" + pr.Context + "\n\n---\n\n" + brief
+	}
+	dir, from := t.Dir, t.Machine
 	if from == "" && !c.opt.Remote {
 		from = Local
 	}
-	return task.Run{ID: node.NewRunID(), Task: t.ID, Machine: machine, Agent: name, Profile: prof, Dir: t.Dir, From: from,
+	if dir == "" {
+		d, ok := pr.DirOn(machine)
+		if !ok {
+			return task.Run{}, bad("dir")
+		}
+		dir, from = d, machine
+	}
+	return task.Run{ID: node.NewRunID(), Task: t.ID, Machine: machine, Agent: name, Profile: prof, Dir: dir, From: from,
 		Brief: brief, Title: t.Title, Runner: p.Runner, Project: t.Project, Dispatcher: who.User}, nil
 }
 

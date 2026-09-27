@@ -22,10 +22,14 @@ const ReasonNodeOutdated = "node_outdated"
 
 // runFeatures are the node features run needs: a field of run.start an older node would ignore.
 var runFeatures = func(run *task.Run) []string {
+	var out []string
 	if run.Dispatcher != "" && run.Dispatcher != Owner.User {
-		return []string{node.FeatureDispatcher}
+		out = append(out, node.FeatureDispatcher)
 	}
-	return nil
+	if run.Profile.Effort != "" || len(run.Profile.Deny) > 0 {
+		out = append(out, node.FeatureAgentDef)
+	}
+	return out
 }
 
 // missingFeatures are those of need the node that said h lacks.
@@ -51,6 +55,7 @@ const (
 	WhyAuthMissing  = agent.ReasonAuthMissing // blocks: the CLI is not logged in there
 	WhyOutdated     = ReasonNodeOutdated      // blocks: the machine's tend cannot do it
 	WhyNoAccess     = "no_access"             // blocks: the machine is not open to the caller or the task's project
+	WhyDefPending   = "def_pending"           // the definition's skills, MCP servers or hooks are not applied yet
 	WhyOffline      = "offline"               // it queues until the machine answers
 	WhyConnecting   = "connecting"
 	WhySlots        = "slots"    // it queues until a slot frees (Detail: active/slots)
@@ -64,16 +69,17 @@ const (
 
 // Preview is how a dispatch would go, asked before it is made.
 type Preview struct {
-	Machine  string       `json:"machine"`
-	Agent    string       `json:"agent"`
-	Provider string       `json:"provider"`
-	Model    string       `json:"model,omitempty"`
-	Dir      string       `json:"dir"`
-	State    string       `json:"state"` // the machine's
-	Version  string       `json:"version,omitempty"`
-	Check    *agent.Check `json:"check,omitempty"`
-	Blockers []Why        `json:"blockers,omitempty"` // the run would fail at once
-	Notes    []Why        `json:"notes,omitempty"`    // how it will go
+	Machine  string            `json:"machine"`
+	Agent    string            `json:"agent"`
+	Provider string            `json:"provider"`
+	Model    string            `json:"model,omitempty"`
+	Dir      string            `json:"dir"`
+	State    string            `json:"state"` // the machine's
+	Version  string            `json:"version,omitempty"`
+	Check    *agent.Check      `json:"check,omitempty"`
+	Profile  tend.AgentProfile `json:"profile"`            // what the run is frozen with
+	Blockers []Why             `json:"blockers,omitempty"` // the run would fail at once
+	Notes    []Why             `json:"notes,omitempty"`    // how it will go
 }
 
 // Preview says how dispatching p would go: where, with what, and anything that would hold it back or fail it. It
@@ -87,11 +93,24 @@ func (c *Coord) PreviewFor(ctx context.Context, who Principal, p Dispatch) (Prev
 	c.mu.Lock()
 	run, err := c.plan(who, p)
 	open := err == nil && c.canUse(who, run.Machine, run.Project)
+	var pending []string
+	if d := c.agentDefs()[run.Agent]; err == nil && d != nil {
+		for name, n := range map[string]int{"skills": len(d.Skills), "mcp": len(d.MCP), "hooks": len(d.Hooks)} {
+			if n > 0 {
+				pending = append(pending, name)
+			}
+		}
+		slices.Sort(pending)
+	}
 	c.mu.Unlock()
 	if err != nil {
 		return Preview{}, err
 	}
 	pv := c.preview(ctx, run)
+	pv.Profile = run.Profile
+	if len(pending) > 0 {
+		pv.Notes = append(pv.Notes, Why{WhyDefPending, strings.Join(pending, ", ")})
+	}
 	if !open {
 		pv.Blockers = append([]Why{{WhyNoAccess, run.Machine}}, pv.Blockers...)
 	}

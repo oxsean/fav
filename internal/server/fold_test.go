@@ -32,6 +32,8 @@ func foldScenario() []journal.Envelope {
 		ev(task.EMemberSet, task.MemberSet{Project: "p1", User: "u_c", Role: task.RoleReader}))
 	add(ev(task.EMemberSet, task.MemberSet{Project: "p1", User: "u_c"}))
 	add(ev(task.EProjectEdited, task.ProjectEdit{ID: "p1", Name: ptr("Uno")}))
+	add(ev(task.EProjectEdited, task.ProjectEdit{ID: "p1", Context: ptr("ctx"), Repos: &[]task.Repo{{Name: "app", Dirs: map[string]string{"mba": "/w"}}},
+		Defaults: &task.Defaults{Machine: "mba", Roles: map[string]string{"implement": "fake"}}, Hooks: &map[string][]string{"check": {"gate"}}}))
 	add(ev(task.EMachineShared, task.Share{Machine: "mba", Projects: []string{"p1"}, Approve: true}))
 	add(ev(task.EMachineShared, task.Share{Machine: "old", Users: []string{"u_b"}}))
 	add(ev(task.EMachineShared, task.Share{Machine: "old"}))
@@ -58,6 +60,18 @@ func foldScenario() []journal.Envelope {
 	add(ev(task.ERunObserved, task.Observation{ID: "r3", State: task.Running, NodeRev: 1})) // abandoned: only an end counts
 	add(ev(task.ERunObserved, task.Observation{ID: "r3", State: task.Failed, NodeRev: 2, Reason: "quota", Detail: "limit"}))
 	add(ev(task.ETaskStatus, task.TaskStatus{ID: "t1", Status: task.StatusDone}))
+	add(ev(task.ETaskCreated, task.Task{ID: "t2", Title: "tree", Status: task.StatusBacklog, Owner: "u_a"}),
+		ev(task.ETaskCreated, task.Task{ID: "t3", Title: "leaf 1", Parent: "t2", Status: task.StatusBacklog}),
+		ev(task.ETaskCreated, task.Task{ID: "t4", Title: "leaf 2", Parent: "t2", After: []string{"t3"}, Status: task.StatusBacklog}),
+		ev(task.ETaskCreated, task.Task{ID: "t5", Title: "by hand", Status: task.StatusTodo}))
+	add(ev(task.ETaskStarted, task.TaskStart{IDs: []string{"t2", "t3", "t4"}}))
+	add(ev(task.ETaskHeld, task.TaskHold{ID: "t3", Reason: "no_agent", Detail: "quick"}))
+	add(ev(task.ETaskEdited, task.TaskEdit{ID: "t3", Owner: ptr("u_b"), Approver: ptr("u_a"), Kind: ptr("requirement"),
+		Accept: ptr([]string{"works"}), Tags: ptr([]string{"api"})}))
+	add(ev(task.ERunQueued, task.Run{ID: "r4", Task: "t3", Machine: "mba", Agent: "fake", Dir: "/w"}))
+	add(ev(task.ERunStarting, task.RunStarting{ID: "r4"}))
+	add(ev(task.ERunObserved, task.Observation{ID: "r4", State: task.Exited, NodeRev: 1, ExitCode: &exit0}))
+	add(ev(task.ETaskMoved, task.TaskMove{ID: "t4", After: ptr([]string{})}))
 	add(ev("some_future_event", map[string]string{"id": "t1"}))
 	return envs
 }
@@ -126,17 +140,28 @@ func TestThePageFoldsEnvelopesAsTheCoordinatorDoes(t *testing.T) {
 	fold, _ := filepath.Abs(filepath.Join("web", "fold.js"))
 	script := `const fs=require('fs'),vm=require('vm');vm.runInThisContext(fs.readFileSync(process.argv[1],'utf8'));
 let s={seq:0,tasks:{},runs:{},projects:{},shares:{}};for(const e of JSON.parse(fs.readFileSync(process.argv[2],'utf8')))s=Fold.apply(s,e);
-process.stdout.write(JSON.stringify(s));`
+const sits={};for(const t of Object.values(s.tasks))sits[t.id]=Fold.situation(s,t);
+process.stdout.write(JSON.stringify({state:s,sits}));`
 	out, err := exec.Command(nodeBin, "-e", script, fold, filepath.Join(dir, "envs.json")).Output()
 	if err != nil {
 		t.Fatalf("node: %v", err)
 	}
-	var page, goState any
-	json.Unmarshal(out, &page)
+	var both struct {
+		State any
+		Sits  map[string]task.Situation
+	}
+	json.Unmarshal(out, &both)
+	page := both.State
+	var goState any
 	gb, _ := json.Marshal(st)
 	json.Unmarshal(gb, &goState)
-	if runs, _ := page.(map[string]any)["runs"].(map[string]any); len(runs) != 3 || len(st.Runs) != 3 {
+	if runs, _ := page.(map[string]any)["runs"].(map[string]any); len(runs) != 4 || len(st.Runs) != 4 {
 		t.Fatalf("the page folded %d runs: %s", len(runs), out)
+	}
+	for id, x := range st.Tasks {
+		if want := st.Situation(x); both.Sits[id] != want {
+			t.Errorf("%s stands %+v on the page, %+v in Go", id, both.Sits[id], want)
+		}
 	}
 	if !reflect.DeepEqual(normalized(page), normalized(goState)) {
 		p, _ := json.MarshalIndent(normalized(page), "", " ")

@@ -287,6 +287,7 @@ func (c *Coord) Pass(ctx context.Context) {
 	}
 	now := time.Now()
 	c.mu.Lock()
+	c.flow()
 	work := map[string]bool{}
 	for _, r := range c.st.Runs {
 		if task.Open(r.State) || r.State == task.Abandoned && !c.ackDone[r.ID] { // until the node says it ended

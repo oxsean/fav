@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/oxsean/fav/internal/journal"
@@ -24,12 +25,12 @@ const (
 // NotifyEvent is what config's notify_command reads on stdin, one JSON object.
 type NotifyEvent struct {
 	Event    string    `json:"event"`
-	Run      string    `json:"run"`
+	Run      string    `json:"run,omitempty"`
 	Task     string    `json:"task"`
 	Title    string    `json:"title,omitempty"`
-	Machine  string    `json:"machine"`
-	Agent    string    `json:"agent"`
-	State    string    `json:"state"`
+	Machine  string    `json:"machine,omitempty"`
+	Agent    string    `json:"agent,omitempty"`
+	State    string    `json:"state,omitempty"`
 	ExitCode *int      `json:"exit_code,omitempty"`
 	Reason   string    `json:"reason,omitempty"`
 	Detail   string    `json:"detail,omitempty"`
@@ -97,15 +98,25 @@ func notifyEvent(was, now *task.Run) string {
 	return ""
 }
 
+// notifies: the notify command hears ev: every run event unless notify_events narrows them; task events only when
+// notify_events names them.
 func (c *Coord) notifies(ev string) bool {
-	return len(c.opt.Config.NotifyEvents) == 0 || slices.Contains(c.opt.Config.NotifyEvents, ev)
+	if len(c.opt.Config.NotifyEvents) == 0 {
+		return strings.HasPrefix(ev, "run.")
+	}
+	return slices.Contains(c.opt.Config.NotifyEvents, ev)
 }
 
-// runNotify starts the notify command with ev on stdin and lets it go: it outlives a one-shot coordinator.
+// runNotify starts the notify command for run event ev.
 func (c *Coord) runNotify(ev string, r *task.Run) {
-	e := NotifyEvent{Event: ev, Run: r.ID, Task: r.Task, Title: clip(r.Title, 300), Machine: r.Machine, Agent: r.Agent, State: r.State,
-		ExitCode: r.ExitCode, Reason: r.Reason, Detail: clip(r.Detail, 500), Ask: clip(r.Ask, 1500), Session: r.Session, Dir: r.Dir,
-		At: time.Now()}
+	c.runNotifyEvent(NotifyEvent{Event: ev, Run: r.ID, Task: r.Task, Title: clip(r.Title, 300), Machine: r.Machine, Agent: r.Agent,
+		State: r.State, ExitCode: r.ExitCode, Reason: r.Reason, Detail: clip(r.Detail, 500), Ask: clip(r.Ask, 1500), Session: r.Session,
+		Dir: r.Dir, At: time.Now()}, "TEND_RUN="+r.ID, "TEND_TASK="+r.Task)
+}
+
+// runNotifyEvent starts the notify command with e on stdin and lets it go: it outlives a one-shot coordinator.
+func (c *Coord) runNotifyEvent(e NotifyEvent, env ...string) {
+	ev := e.Event
 	b, err := json.Marshal(e)
 	if err != nil || len(b) > maxNotify {
 		e.Ask, e.Detail, e.Title = clip(e.Ask, 300), clip(e.Detail, 200), clip(e.Title, 100)
@@ -123,7 +134,7 @@ func (c *Coord) runNotify(ev string, r *task.Run) {
 	argv := c.opt.Config.NotifyCommand
 	cmd := exec.Command(argv[0], argv[1:]...)
 	cmd.Stdin = pr
-	cmd.Env = append(os.Environ(), "TEND_EVENT="+ev, "TEND_RUN="+r.ID, "TEND_TASK="+r.Task)
+	cmd.Env = append(append(os.Environ(), "TEND_EVENT="+ev), env...)
 	if proc.StartDetached(cmd) == nil {
 		cmd.Process.Release()
 	}

@@ -29,32 +29,41 @@ const Local = "local"
 
 // Client methods.
 const (
-	MStateGet      = "state.get"
-	MTaskCreate    = "task.create"
-	MTaskEdit      = "task.edit"
-	MTaskStatus    = "task.set_status"
-	MRunDispatch   = "run.dispatch"
-	MRunStop       = "run.stop"
-	MRunAbandon    = "run.abandon"
-	MRunTail       = "run.tail"
-	MAgentList     = "agent.list"
-	MMachineList   = "machine.list"
-	MSubscribe     = "subscribe"
-	MNodeCall      = "node.call"
-	MTaskGet       = "task.get"
-	MRunPreview    = "run.preview"
-	MRunContinue   = "run.continue"
-	MRunAnswer     = "run.answer"
-	MRunSend       = "run.send"
-	MRunMessages   = "run.messages"
-	MProjectCreate = "project.create"
-	MProjectEdit   = "project.edit"
-	MProjectMember = "project.member"
-	MMachineShare  = "machine.share"
-	PushJournal    = "journal"
-	PushRefetch    = "refetch" // what the subscriber may see changed: fetch the state again
-	defaultSlots   = 2
-	subscribeQueue = 256
+	MStateGet       = "state.get"
+	MTaskCreate     = "task.create"
+	MTaskEdit       = "task.edit"
+	MTaskStatus     = "task.set_status"
+	MRunDispatch    = "run.dispatch"
+	MRunStop        = "run.stop"
+	MRunAbandon     = "run.abandon"
+	MRunTail        = "run.tail"
+	MAgentList      = "agent.list"
+	MMachineList    = "machine.list"
+	MSubscribe      = "subscribe"
+	MNodeCall       = "node.call"
+	MTaskGet        = "task.get"
+	MRunPreview     = "run.preview"
+	MRunContinue    = "run.continue"
+	MRunAnswer      = "run.answer"
+	MRunSend        = "run.send"
+	MRunMessages    = "run.messages"
+	MProjectCreate  = "project.create"
+	MProjectEdit    = "project.edit"
+	MProjectMember  = "project.member"
+	MMachineShare   = "machine.share"
+	MTaskStart      = "task.start"
+	MTaskMove       = "task.move"
+	MAgentDefList   = "agentdef.list"
+	MAgentDefGet    = "agentdef.get"
+	MAgentDefSave   = "agentdef.save"
+	MAgentDefRemove = "agentdef.remove"
+	MAgentDefShare  = "agentdef.share"
+	MInboxList      = "inbox.list"
+	MUserOffboard   = "user.offboard"
+	PushJournal     = "journal"
+	PushRefetch     = "refetch" // what the subscriber may see changed: fetch the state again
+	defaultSlots    = 2
+	subscribeQueue  = 256
 )
 
 // ErrLocked: another process is the coordinator.
@@ -78,6 +87,9 @@ type Options struct {
 	MachineOwner func(machine string) string
 	// Users finds a user of the team (mode 2).
 	Users func(id string) (User, bool)
+	// Notice receives each task that came to need someone or got done (mode 2 delivers them); it runs under the
+	// coordinator's lock and must not block.
+	Notice func(Notice)
 	// OpenLog opens the event log in dir, folding every envelope in order; nil is the JSONL journal.
 	OpenLog func(dir string, fold func(journal.Envelope) error) (EventLog, error)
 }
@@ -235,10 +247,17 @@ func (c *Coord) commit(actor journal.Actor, cmd *journal.Receipt, events ...jour
 		c.receipts[receiptKey(actor.ID, cmd.ID)] = *cmd
 	}
 	before := c.observed(events)
+	var sits map[string]task.Situation
+	if c.opt.Notice != nil || len(c.opt.Config.NotifyCommand) > 0 {
+		sits = c.situations(c.touched(events))
+	}
 	if err := c.st.Apply(env); err != nil {
 		return err
 	}
 	c.notify(before)
+	if sits != nil {
+		c.deliver(c.notices(env, sits))
+	}
 	c.publish(env)
 	return nil
 }

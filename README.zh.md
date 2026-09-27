@@ -363,6 +363,11 @@ TUI 里第 `5` 页是任务：`w` 新建，`e` 编辑，`x` 标完成 / 重新�
 `X` 停止当前 run，`Space` 到会话页看这次 run 的对话。右栏是任务书、最近几次 run 和最近一次 run 的输出。
 接手就是打开这次 run 会话的恢复框；run 还在驱动它时，恢复框会提示先停掉 run。
 
+**任务树。** 任务可以挂在另一个任务下面（`--parent`，最多三层），也可以排在别的任务之后（`--after t1,t2`）；`--backlog` 先放进待办，
+开始之前不动它。`tend task start <id>` 开始一个任务和它下面的全部任务：前置任务完成后立刻派发，run 成功就标完成；父任务自己从不跑，
+子任务都完成后等人验收。每个未完成的任务都写明现在的处境：运行中、排队（在等什么：前置任务、子任务、机器空位）或等人（为什么）。
+派不出去的任务写明原因并停下，再开始一次就是重试。`tend task move <id> --parent … --after …` 调整位置。
+
 **档案。** 内置 `claude`（无界面的 `claude -p`，stream-json 双向收发；目录在某个 Herdr workspace 里时，改在新 Herdr tab 里开交互式
 Claude）、`codex`（`codex app-server`）、`fake`（测试用）。更多的写进 `config.json`：
 
@@ -375,6 +380,27 @@ Claude）、`codex`（`codex app-server`）、`fake`（测试用）。更多的�
 
 `command` 可以跑任意命令行：`{prompt_file}`、`{model}`、`{dir}` 会被填上，任务书从不出现在命令行上（`"stdin": true` 改成从标准输入给）；
 `machine` 表示这个档案只在那台机器上跑。`machines.<名>.slots`（默认 2）限制一台机器同时跑几个 run；同一目录的 run 排队等前一个结束。
+
+**agent 定义。** 定义是一个带 YAML frontmatter 的 Markdown 文件，格式照 Claude Code 的 subagent：
+
+```markdown
+---
+name: careful
+description: 慢一点，仔细一点
+role: implement
+profile: quick          # 或 provider: claude / codex，model: …
+effort: high
+permission: acceptEdits
+tools: {deny: [WebFetch]}
+machines: {prefer: [mba]}
+---
+所有东西读两遍。停下之前跑一遍测试。
+```
+
+`tend agent import careful.md` 保存它（里面写 `import: ~/.claude/agents/foo.md` 可以复用 Claude Code 的 subagent），之后按名字像档案一样用：
+effort 和禁用的工具进 agent 的命令行，正文放在任务书前面。`tend agent defs | export | check | rm | share` 管理它们。没有 server 时它们是
+`~/.agent/tend/defs/agents/` 里的文件；有 server 时定义归主人（或某个项目），分享给人、项目或所有人之后别人才能用（`--view` 让他们也能看正文）。
+`skills`、`mcp`、`hooks`、`output`、`budget` 会保存，但还不生效；派发预检会提示。
 
 **跑之前。** `tend run start` 先说明 run 会怎么跑：那台机器上 agent 命令行的版本、是否登录，以及要不要等机器、槽位或目录。
 命令行没装或没登录时 run 会直接失败，所以不派发（`--force` 强制派发；节点那边也会以同样的原因拒绝）。TUI 和网页的派发框显示同样的内容；
@@ -395,7 +421,7 @@ Claude）、`codex`（`codex app-server`）、`fake`（测试用）。更多的�
 
 想收到通知就配一个命令：`"notify_command": ["my-notifier"]` 会在 run 需要人的时候运行，标准输入是一个 JSON 对象（`event` 为
 `run.waiting`、`run.asked`、`run.permission`、`run.failed` 或 `run.stalled`，还有 run、task、title、machine、agent、state、reason、detail、ask）；
-`notify_events` 可以只选其中几种。
+`notify_events` 可以只选其中几种。任务事件 `task.needs_you` 和 `task.done` 只有在 `notify_events` 里点名才发。
 
 **谁在协调。** 同一时刻只有一个进程记任务日志、派发 run：谁拿到 `~/.agent/tend/coord/` 里的锁就是谁——打开任务页的 TUI、
 执行期间的 `tend task|run …` 命令，或你常驻的 `tend service`。其它进程经本机 socket 找它。run 不依赖它：
@@ -445,10 +471,15 @@ tend task list   # 命令行和 TUI 的任务页都改为和 server 说话
 机器上的 run 用的是主人的 claude / codex 登录、git 身份和文件，所以要分享的机器请专门准备（单独的系统用户或容器），
 不要分享自己的笔记本。run 的权限请求由机器主人和派发人批准；分享时可以让被分享的人也能批。
 
+项目负责人还设定项目的任务怎么跑：放在每份任务书前面的项目说明、仓库和它在每台机器上的路径（没写目录的任务就用它）、
+默认 agent 和机器，以及 hooks。任务有负责人和验收人；任务停下来等人时，会通知它的负责人、要验收时的验收人，以及相关 run 的派发人：
+出现在网页的**等你**列表里，网页开着时弹浏览器通知，也会发到个人 webhook（账号页设置；POST 一段带 `text` 字段的 JSON，
+适配 ntfy、Slack 等，配了 `public_url` 时带任务链接）。管理员在管理页用**交接并停用**把离开的成员的项目、任务和定义交给别人，并让他的凭据全部失效。
+
 **Web UI。** server 在自己的地址上还提供一个网页（`http://100.101.8.10:7788/`）。用登录服务或 token 登录；
 浏览器会话保持 30 天，退出登录或吊销即失效。网页列出任务和它们的 run；新建、编辑、派发任务；派发前预检；
 跟看 run 的输出和对话；显示 run 为什么结束、问了什么并接受回复；停止或放弃 run；把任务标为完成、重开或取消；
-查看机器、它们的主人和分享对象；管理项目和成员；在账号页为 CLI 和 TUI 生成个人 token；管理员还能管理用户、
+显示任务树并开始它们；列出等你处理的事；编辑和分享 agent 定义与项目设置；查看机器、它们的主人和分享对象；管理项目和成员；在账号页为 CLI 和 TUI 生成个人 token；管理员还能管理用户、
 准入规则、邀请和审计日志。它实时跟随任务日志，断线后自动重连。
 
 **server 的数据库。** `tend-server import` 把模式一的日志（`coord/events.jsonl`）搬进数据库，要先停掉 server；

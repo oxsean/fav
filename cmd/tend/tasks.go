@@ -141,6 +141,7 @@ var runStates = map[string]string{
 
 var taskStatuses = map[string]string{
 	task.StatusTodo: "cli.task.status_todo", task.StatusDone: "cli.task.status_done", task.StatusCanceled: "cli.task.status_canceled",
+	task.StatusBacklog: "cli.task.status_backlog",
 }
 
 func runState(r *task.Run) string {
@@ -204,6 +205,10 @@ func cmdTask(args []string) error {
 		return cmdTaskEdit(args[1:])
 	case "done", "reopen", "cancel":
 		return cmdTaskStatus(args[0], args[1:])
+	case "start":
+		return cmdTaskStart(args[1:])
+	case "move":
+		return cmdTaskMove(args[1:])
 	}
 	return i18n.E("cli.unknown_subcommand", "task "+args[0], usage())
 }
@@ -215,6 +220,10 @@ func cmdTaskAdd(args []string) error {
 	dir := fs.String("dir", "", i18n.T("cli.task.flag_dir"))
 	machine := fs.String("machine", "", i18n.T("cli.task.flag_machine"))
 	agentName := fs.String("agent", "", i18n.T("cli.task.flag_agent"))
+	parent := fs.String("parent", "", i18n.T("cli.task.flag_parent"))
+	after := fs.String("after", "", i18n.T("cli.task.flag_after"))
+	project := fs.String("project", "", i18n.T("cli.task.flag_project"))
+	backlog := fs.Bool("backlog", false, i18n.T("cli.task.flag_backlog"))
 	title, err := parseWithArgs(fs, args, 1)
 	if err != nil {
 		return err
@@ -224,14 +233,31 @@ func cmdTaskAdd(args []string) error {
 		return err
 	}
 	d := *dir
-	if *machine == "" || *machine == coord.Local {
+	if (*machine == "" || *machine == coord.Local) && (d != "" || *project == "" && *parent == "") {
 		if d, err = absDir(d); err != nil {
 			return err
 		}
 	}
+	status := task.StatusTodo
+	if *backlog {
+		status = task.StatusBacklog
+	}
 	return withCoord(wire.Options{}, func(cl *coord.Client) error {
+		st, err := readState(cl)
+		if err != nil {
+			return err
+		}
+		p := coord.TaskCreate{Title: title[0], Brief: b, Dir: d, Machine: *machine, Agent: *agentName, Project: *project, Status: status}
+		if *parent != "" {
+			if p.Parent, err = taskID(st, *parent); err != nil {
+				return err
+			}
+		}
+		if p.After, err = taskIDs(st, *after); err != nil {
+			return err
+		}
 		var t task.Task
-		if err := write(cl, coord.MTaskCreate, coord.TaskCreate{Title: title[0], Brief: b, Dir: d, Machine: *machine, Agent: *agentName}, &t); err != nil {
+		if err := write(cl, coord.MTaskCreate, p, &t); err != nil {
 			return err
 		}
 		fmt.Print(i18n.F("cli.task.added", t.ID, t.Title))
@@ -726,6 +752,20 @@ func cmdRunLogs(args []string) error {
 }
 
 func cmdAgent(args []string) error {
+	switch first(args) {
+	case "import":
+		return cmdAgentImport(args[1:])
+	case "export":
+		return cmdAgentExport(args[1:])
+	case "check":
+		return cmdAgentCheck(args[1:])
+	case "rm", "remove":
+		return cmdAgentRemove(args[1:])
+	case "share":
+		return cmdAgentShare(args[1:])
+	case "defs":
+		return cmdAgentDefs(args[1:])
+	}
 	fs := newFlags("agent")
 	asJSON := fs.Bool("json", false, i18n.T("cli.flag_json"))
 	if first(args) == "list" || first(args) == "ls" {
@@ -820,4 +860,94 @@ func cmdService(args []string) error {
 	case err := <-serveErr:
 		return err
 	}
+}
+
+// taskIDs are the tasks a comma-separated list names.
+func taskIDs(st *task.State, list string) ([]string, error) {
+	var out []string
+	for _, x := range strings.Split(list, ",") {
+		if x = strings.TrimSpace(x); x == "" {
+			continue
+		}
+		id, err := taskID(st, x)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, id)
+	}
+	return out, nil
+}
+
+// cmdTaskStart starts a task and its subtree: each is dispatched once what it comes after is done.
+func cmdTaskStart(args []string) error {
+	fs := newFlags("task")
+	pos, err := parseWithArgs(fs, args, 1)
+	if err != nil {
+		return err
+	}
+	return withCoord(wire.Options{}, func(cl *coord.Client) error {
+		st, err := readState(cl)
+		if err != nil {
+			return err
+		}
+		id, err := taskID(st, pos[0])
+		if err != nil {
+			return err
+		}
+		var t task.Task
+		if err := write(cl, coord.MTaskStart, coord.TaskRef{ID: id}, &t); err != nil {
+			return err
+		}
+		fmt.Print(i18n.F("cli.task.started", t.ID, len(st.Subtree(t.ID))))
+		return nil
+	})
+}
+
+// cmdTaskMove puts a task under another parent (--parent "" makes it a root) or after other tasks.
+func cmdTaskMove(args []string) error {
+	fs := newFlags("task")
+	parent := fs.String("parent", "", i18n.T("cli.task.flag_parent"))
+	after := fs.String("after", "", i18n.T("cli.task.flag_after"))
+	pos, err := parseWithArgs(fs, args, 1)
+	if err != nil {
+		return err
+	}
+	set := map[string]bool{}
+	fs.Visit(func(f *flag.Flag) { set[f.Name] = true })
+	return withCoord(wire.Options{}, func(cl *coord.Client) error {
+		st, err := readState(cl)
+		if err != nil {
+			return err
+		}
+		id, err := taskID(st, pos[0])
+		if err != nil {
+			return err
+		}
+		m := task.TaskMove{ID: id}
+		if set["parent"] {
+			p := ""
+			if *parent != "" {
+				if p, err = taskID(st, *parent); err != nil {
+					return err
+				}
+			}
+			m.Parent = &p
+		}
+		if set["after"] {
+			a, err := taskIDs(st, *after)
+			if err != nil {
+				return err
+			}
+			if a == nil {
+				a = []string{}
+			}
+			m.After = &a
+		}
+		var t task.Task
+		if err := write(cl, coord.MTaskMove, m, &t); err != nil {
+			return err
+		}
+		fmt.Print(i18n.F("cli.task.moved", t.ID))
+		return nil
+	})
 }

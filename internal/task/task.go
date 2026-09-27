@@ -17,6 +17,7 @@ import (
 
 // Task statuses.
 const (
+	StatusBacklog  = "backlog" // written down, not started: nothing dispatches it
 	StatusTodo     = "todo"
 	StatusDone     = "done"
 	StatusCanceled = "canceled"
@@ -60,8 +61,17 @@ type Task struct {
 	Machine   string    `json:"machine,omitempty"`
 	Agent     string    `json:"agent,omitempty"`
 	Project   string    `json:"project,omitempty"`
-	Owner     string    `json:"owner,omitempty"` // who created it; a task outside any project is theirs
+	Owner     string    `json:"owner,omitempty"`    // who answers for it (its creator unless handed on); a task outside any project is theirs
+	Approver  string    `json:"approver,omitempty"` // who accepts its work; "": its owner
+	Parent    string    `json:"parent,omitempty"`
+	After     []string  `json:"after,omitempty"` // the tasks that must be done before it starts
+	Kind      string    `json:"kind,omitempty"`  // requirement | "" (work)
+	Accept    []string  `json:"acceptance,omitempty"`
+	Tags      []string  `json:"tags,omitempty"`
 	Status    string    `json:"status"`
+	Auto      bool      `json:"auto,omitempty"`      // started: the coordinator dispatches it once what it comes after is done
+	StartSeq  int64     `json:"start_seq,omitempty"` // the seq of its last start; runs queued before it are earlier tries
+	Held      string    `json:"held,omitempty"`      // why the coordinator could not dispatch it; cleared by an edit or a start
 	Rev       int       `json:"rev,omitzero"`
 	CreatedAt time.Time `json:"created_at,omitzero"`
 	UpdatedAt time.Time `json:"updated_at,omitzero"`
@@ -83,6 +93,7 @@ type Run struct {
 	Project    string            `json:"project,omitempty"`    // its task's when it was queued
 	Dispatcher string            `json:"dispatcher,omitempty"` // the user who queued it
 	Want       string            `json:"want,omitempty"`       // run | stop
+	Seq        int64             `json:"seq,omitempty"`        // the seq that queued it
 	State      string            `json:"state,omitempty"`
 	ExitCode   *int              `json:"exit_code,omitempty"`
 	Reason     string            `json:"reason,omitempty"`
@@ -133,13 +144,18 @@ type RunSend struct {
 }
 
 type TaskEdit struct {
-	ID      string  `json:"id"`
-	Title   *string `json:"title,omitempty"`
-	Brief   *string `json:"brief,omitempty"`
-	Dir     *string `json:"dir,omitempty"`
-	Machine *string `json:"machine,omitempty"`
-	Agent   *string `json:"agent,omitempty"`
-	Project *string `json:"project,omitempty"`
+	ID       string    `json:"id"`
+	Title    *string   `json:"title,omitempty"`
+	Brief    *string   `json:"brief,omitempty"`
+	Dir      *string   `json:"dir,omitempty"`
+	Machine  *string   `json:"machine,omitempty"`
+	Agent    *string   `json:"agent,omitempty"`
+	Project  *string   `json:"project,omitempty"`
+	Owner    *string   `json:"owner,omitempty"`
+	Approver *string   `json:"approver,omitempty"`
+	Kind     *string   `json:"kind,omitempty"`
+	Accept   *[]string `json:"acceptance,omitempty"`
+	Tags     *[]string `json:"tags,omitempty"`
 }
 
 type TaskStatus struct {
@@ -183,15 +199,17 @@ type Observation struct {
 
 // State is everything the journal says.
 type State struct {
-	Seq      int64               `json:"seq"`
-	Tasks    map[string]*Task    `json:"tasks"`
-	Runs     map[string]*Run     `json:"runs"`
-	Projects map[string]*Project `json:"projects"`
-	Shares   map[string]*Share   `json:"shares"` // by machine
+	Seq       int64                `json:"seq"`
+	Tasks     map[string]*Task     `json:"tasks"`
+	Runs      map[string]*Run      `json:"runs"`
+	Projects  map[string]*Project  `json:"projects"`
+	Shares    map[string]*Share    `json:"shares"`               // by machine
+	AgentDefs map[string]*AgentDef `json:"agent_defs,omitempty"` // mode 2; mode 1 keeps them in files
 }
 
 func New() *State {
-	return &State{Tasks: map[string]*Task{}, Runs: map[string]*Run{}, Projects: map[string]*Project{}, Shares: map[string]*Share{}}
+	return &State{Tasks: map[string]*Task{}, Runs: map[string]*Run{}, Projects: map[string]*Project{}, Shares: map[string]*Share{},
+		AgentDefs: map[string]*AgentDef{}}
 }
 
 // Apply folds one envelope in.
@@ -202,8 +220,11 @@ func (s *State) Apply(env journal.Envelope) error {
 	if s.Shares == nil {
 		s.Shares = map[string]*Share{}
 	}
+	if s.AgentDefs == nil {
+		s.AgentDefs = map[string]*AgentDef{}
+	}
 	for _, e := range env.Events {
-		if err := s.apply(e, env.At); err != nil {
+		if err := s.apply(e, env.Seq, env.At); err != nil {
 			return fmt.Errorf("%s: %w", e.Type, err)
 		}
 	}
@@ -211,7 +232,7 @@ func (s *State) Apply(env journal.Envelope) error {
 	return nil
 }
 
-func (s *State) apply(e journal.Event, at time.Time) error {
+func (s *State) apply(e journal.Event, seq int64, at time.Time) error {
 	switch e.Type {
 	case ETaskCreated:
 		var t Task
@@ -232,11 +253,19 @@ func (s *State) apply(e journal.Event, at time.Time) error {
 		for _, f := range []struct {
 			v   *string
 			dst *string
-		}{{d.Title, &t.Title}, {d.Brief, &t.Brief}, {d.Dir, &t.Dir}, {d.Machine, &t.Machine}, {d.Agent, &t.Agent}, {d.Project, &t.Project}} {
+		}{{d.Title, &t.Title}, {d.Brief, &t.Brief}, {d.Dir, &t.Dir}, {d.Machine, &t.Machine}, {d.Agent, &t.Agent},
+			{d.Project, &t.Project}, {d.Owner, &t.Owner}, {d.Approver, &t.Approver}, {d.Kind, &t.Kind}} {
 			if f.v != nil {
 				*f.dst = *f.v
 			}
 		}
+		if d.Accept != nil {
+			t.Accept = *d.Accept
+		}
+		if d.Tags != nil {
+			t.Tags = *d.Tags
+		}
+		t.Held = ""
 		t.Rev++
 		t.UpdatedAt = at
 	case ETaskStatus:
@@ -255,7 +284,7 @@ func (s *State) apply(e journal.Event, at time.Time) error {
 		if err := json.Unmarshal(e.Data, &r); err != nil {
 			return err
 		}
-		r.State, r.Want, r.QueuedAt = Queued, "run", at
+		r.State, r.Want, r.QueuedAt, r.Seq = Queued, "run", at, seq
 		s.Runs[r.ID] = &r
 	case ERunStarting:
 		var d RunStarting
@@ -322,7 +351,13 @@ func (s *State) apply(e journal.Event, at time.Time) error {
 			}
 		})
 	default:
+		if ok, err := s.applyTree(e, seq, at); ok {
+			return err
+		}
 		if ok, err := s.applyTeam(e, at); ok {
+			return err
+		}
+		if ok, err := s.applyDefs(e, at); ok {
 			return err
 		}
 		return fmt.Errorf("unknown event")

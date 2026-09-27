@@ -38,7 +38,7 @@ globalThis.Fold = (() => {
     }
   }
 
-  function applyEvent(s, e, at) {
+  function applyEvent(s, e, at, seq) {
     const d = e.data;
     switch (e.type) {
       case 'task_created':
@@ -46,8 +46,8 @@ globalThis.Fold = (() => {
         break;
       case 'task_edited': {
         const t = need(s.tasks, d.id, 'task');
-        for (const k of ['title', 'brief', 'dir', 'machine', 'agent', 'project']) if (d[k] !== undefined) t[k] = d[k];
-        t.rev = (t.rev || 0) + 1; t.updated_at = at;
+        for (const k of ['title', 'brief', 'dir', 'machine', 'agent', 'project', 'owner', 'approver', 'kind', 'acceptance', 'tags']) if (d[k] !== undefined) t[k] = d[k];
+        t.held = undefined; t.rev = (t.rev || 0) + 1; t.updated_at = at;
         break;
       }
       case 'task_status_set': {
@@ -56,7 +56,7 @@ globalThis.Fold = (() => {
         break;
       }
       case 'run_queued':
-        s.runs[d.id] = {...d, state: 'queued', want: 'run', queued_at: at};
+        s.runs[d.id] = {...d, state: 'queued', want: 'run', queued_at: at, seq};
         break;
       case 'run_starting': {
         const r = need(s.runs, d.id, 'run');
@@ -89,13 +89,31 @@ globalThis.Fold = (() => {
         if (!(r.sends || []).some(m => m.id === d.send.id)) r.sends = [...(r.sends || []), d.send];
         break;
       }
+      case 'task_moved': {
+        const t = need(s.tasks, d.id, 'task');
+        if (d.parent !== undefined) t.parent = d.parent;
+        if (d.after !== undefined) t.after = d.after;
+        t.held = undefined; t.rev = (t.rev || 0) + 1; t.updated_at = at;
+        break;
+      }
+      case 'task_started':
+        for (const id of d.ids || []) {
+          const t = need(s.tasks, id, 'task');
+          if (t.status === 'backlog') t.status = 'todo';
+          t.auto = true; t.start_seq = seq; t.held = undefined; t.rev = (t.rev || 0) + 1; t.updated_at = at;
+        }
+        break;
+      case 'task_held': {
+        const t = need(s.tasks, d.id, 'task');
+        t.held = d.reason + (d.detail ? ': ' + d.detail : ''); t.updated_at = at;
+        break;
+      }
       case 'project_created':
         s.projects[d.id] = {...d, rev: 1, created_at: at, updated_at: at};
         break;
       case 'project_edited': {
         const p = need(s.projects, d.id, 'project');
-        if (d.name !== undefined) p.name = d.name;
-        if (d.owner !== undefined) p.owner = d.owner;
+        for (const k of ['name', 'owner', 'repos', 'links', 'context', 'defaults', 'hooks', 'fetch']) if (d[k] !== undefined) p[k] = d[k];
         p.rev = (p.rev || 0) + 1; p.updated_at = at;
         break;
       }
@@ -104,6 +122,20 @@ globalThis.Fold = (() => {
         p.members = {...(p.members || {})};
         if (d.role) p.members[d.user] = d.role; else delete p.members[d.user];
         p.rev = (p.rev || 0) + 1; p.updated_at = at;
+        break;
+      }
+      case 'agentdef_saved': {
+        const old = s.agent_defs[d.name];
+        s.agent_defs[d.name] = {...d, rev: (old ? old.rev || 0 : 0) + 1, updated_at: at};
+        break;
+      }
+      case 'agentdef_removed':
+        need(s.agent_defs, d.name, 'agent');
+        delete s.agent_defs[d.name];
+        break;
+      case 'agentdef_shared': {
+        const x = need(s.agent_defs, d.name, 'agent');
+        x.share = d.share; x.updated_at = at; x.rev = (x.rev || 0) + 1;
         break;
       }
       case 'machine_shared':
@@ -116,11 +148,49 @@ globalThis.Fold = (() => {
 
   // apply folds env into s (which it changes) and returns s.
   function apply(s, env) {
-    s.tasks ||= {}; s.runs ||= {}; s.projects ||= {}; s.shares ||= {};
-    for (const e of env.events || []) applyEvent(s, e, env.at);
+    s.tasks ||= {}; s.runs ||= {}; s.projects ||= {}; s.shares ||= {}; s.agent_defs ||= {};
+    for (const e of env.events || []) applyEvent(s, e, env.at, env.seq);
     s.seq = env.seq;
     return s;
   }
 
-  return {apply};
+  // situation says how task t stands, as task.State.Situation does: {kind, reason, run}.
+  function situation(s, t) {
+    if (t.status === 'backlog' || t.status === 'done' || t.status === 'canceled') return {kind: t.status};
+    const runs = Object.values(s.runs).filter(r => r.task === t.id);
+    const open = runs.find(r => openStates.has(r.state));
+    if (open) {
+      if (open.state === 'queued') return {kind: 'queued', reason: 'slot', run: open.id};
+      if (open.attention === 'asked' || open.attention === 'permission') return {kind: 'waiting', reason: open.attention, run: open.id};
+      if (open.state === 'unknown') return {kind: 'waiting', reason: 'unknown', run: open.id};
+      return {kind: 'running', reason: open.state, run: open.id};
+    }
+    const kids = Object.values(s.tasks).filter(k => k.parent === t.id);
+    if (kids.some(k => k.status !== 'canceled')) {
+      if (kids.some(k => k.status !== 'done' && k.status !== 'canceled')) return {kind: 'queued', reason: 'children'};
+      return {kind: 'waiting', reason: 'accept'};
+    }
+    let last = null;
+    for (const r of runs) if (!last || (r.seq || 0) > (last.seq || 0) || (r.seq || 0) === (last.seq || 0) && r.queued_at > last.queued_at) last = r;
+    if (last && (!t.auto || (last.seq || 0) > (t.start_seq || 0))) {
+      const waiting = !openStates.has(last.state) && (last.attention === 'asked' || last.attention === 'permission');
+      if (waiting) return {kind: 'waiting', reason: last.attention, run: last.id};
+      if (last.state === 'exited' && last.exit_code === 0 && !last.attention) {
+        return t.auto ? {kind: 'queued', reason: 'completing', run: last.id} : {kind: 'waiting', reason: 'ended', run: last.id};
+      }
+      if (last.reason && last.state !== 'exited') return {kind: 'waiting', reason: last.reason, run: last.id};
+      return {kind: 'waiting', reason: last.state, run: last.id};
+    }
+    if (!t.auto) return {kind: 'waiting', reason: 'dispatch'};
+    if (t.held) return {kind: 'waiting', reason: 'held'};
+    for (const a of t.after || []) {
+      const d = s.tasks[a];
+      if (!d) continue;
+      if (d.status === 'canceled') return {kind: 'waiting', reason: 'after_canceled'};
+      if (d.status !== 'done') return {kind: 'queued', reason: 'after'};
+    }
+    return {kind: 'queued', reason: 'ready'};
+  }
+
+  return {apply, situation};
 })();

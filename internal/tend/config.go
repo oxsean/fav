@@ -33,7 +33,8 @@ type Config struct {
 	Node        NodeConfig               `json:"node,omitempty"`
 	Coordinator *CoordinatorConfig       `json:"coordinator,omitempty"` // mode 2: the server this machine's clients use
 	// NotifyCommand runs when a run wants someone (waiting, asked, failed, stalled) with the event as JSON on stdin;
-	// NotifyEvents narrows which (run.waiting, run.asked, run.failed, run.stalled).
+	// NotifyEvents narrows which (run.waiting, run.asked, run.failed, run.stalled, run.permission), or adds the
+	// task events (task.needs_you, task.done), which are heard only when named.
 	NotifyCommand []string `json:"notify_command,omitempty"`
 	NotifyEvents  []string `json:"notify_events,omitempty"`
 	// Server is tend-server's own settings (its home's config.json).
@@ -66,6 +67,8 @@ type AgentProfile struct {
 	Provider   string   `json:"provider"`
 	Model      string   `json:"model,omitempty"`
 	Permission string   `json:"permission,omitempty"` // claude: --permission-mode; codex: --sandbox
+	Effort     string   `json:"effort,omitempty"`     // low | medium | high | xhigh | max
+	Deny       []string `json:"deny,omitempty"`       // tools it may not use (claude)
 	Args       []string `json:"args,omitempty"`       // added to every launch
 	Command    []string `json:"command,omitempty"`    // provider "command": the argv template
 	Stdin      bool     `json:"stdin,omitempty"`      // provider "command": the task brief goes to stdin

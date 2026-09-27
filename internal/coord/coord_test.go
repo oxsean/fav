@@ -64,6 +64,7 @@ type env struct {
 	probe  func(provider string) agent.Check
 	owner  func(machine string) string // team mode
 	users  map[string]User
+	notice func(Notice)
 }
 
 func newEnv(t *testing.T, cfg tend.Config) *env {
@@ -96,7 +97,8 @@ func (e *env) start() {
 	e.t.Helper()
 	n := node.New(e.home)
 	n.Probe = e.probe
-	opt := Options{Home: e.home, Version: "test", Config: e.cfg, Node: n, Sessions: remote.NewLocal("test"), Dial: e.dial, MachineOwner: e.owner}
+	opt := Options{Home: e.home, Version: "test", Config: e.cfg, Node: n, Sessions: remote.NewLocal("test"), Dial: e.dial, MachineOwner: e.owner,
+		Notice: e.notice}
 	if e.users != nil {
 		opt.Users = func(id string) (User, bool) { u, ok := e.users[id]; return u, ok }
 	}

@@ -100,7 +100,8 @@ func cmdServe(args []string) error {
 	}
 	cfg := tend.LoadConfig()
 	var dir *server.Directory
-	c, err := coord.Open(coord.Options{Home: home, Version: version, Config: cfg, Remote: true, OpenLog: openLog,
+	notifier := server.NewNotifier()
+	c, err := coord.Open(coord.Options{Home: home, Version: version, Config: cfg, Remote: true, OpenLog: openLog, Notice: notifier.Send,
 		MachineOwner: func(m string) string {
 			if dir == nil {
 				return ""
@@ -144,6 +145,7 @@ func cmdServe(args []string) error {
 	defer cancel()
 	go c.Serve(ctx)
 	go c.Run(ctx)
+	go notifier.Run(ctx, team, sc.PublicURL)
 	fmt.Fprint(os.Stderr, i18n.F("cli.server.started", c.ID(), *listen))
 	return server.New(server.Options{Home: home, Coord: c, Dir: dir, Config: sc, Listen: *listen, TLSCert: *cert, TLSKey: *key}).Serve(ctx)
 }

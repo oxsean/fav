@@ -99,7 +99,7 @@ const Team = (() => {
   async function enter(page) {
     const loads = [rest('GET', '/api/users').then(v => data.users = v)];
     if (page === 'machines') loads.push(rest('GET', '/api/machines').then(v => data.creds = v));
-    if (page === 'account') loads.push(rest('GET', '/api/tokens').then(v => data.tokens = v), rest('GET', '/api/identities').then(v => data.identities = v), loadLogins());
+    if (page === 'account') loads.push(rest('GET', '/api/tokens').then(v => data.tokens = v), rest('GET', '/api/identities').then(v => data.identities = v), loadLogins(), Tree.loadWebhook());
     if (page === 'admin' && isAdmin()) loads.push(rest('GET', '/api/admits').then(v => data.admits = v), rest('GET', '/api/audit').then(v => data.audit = v));
     try { await Promise.all(loads); } catch (error) { toast(errorText(error)); }
     if (ui.page === page) renderPage();
@@ -120,7 +120,7 @@ const Team = (() => {
           : `<span>${t('role.' + role)}</span>`}</div>`)];
       return `<article class="machine-card stack"><div class="flex between"><div><h2>${esc(p.name)}</h2><span class="mono muted">${esc(p.id)}</span></div>${badgeText(t('role.' + (p.owner === ui.me?.id ? 'owner' : myRole(p) || 'reader')))}</div>
         <div class="stack"><span class="meta-label">${t('members')}</span>${rows(memberRows, '')}</div>
-        ${manages(p) ? `<div class="flex">${button('team-add-member', t('addMember'), `data-project="${esc(p.id)}"`)}${button('team-edit-project', t('editProject'), `data-project="${esc(p.id)}"`, 'quiet')}</div>` : ''}</article>`;
+        ${manages(p) ? `<div class="flex">${button('team-add-member', t('addMember'), `data-project="${esc(p.id)}"`)}${button('team-edit-project', t('editProject'), `data-project="${esc(p.id)}"`, 'quiet')}${button('tree-project', t('projectSettings'), `data-project="${esc(p.id)}"`, 'quiet')}</div>` : ''}</article>`;
     });
     return `<header class="page-heading"><div><h1>${t('projects')}</h1><p class="page-subtitle">${t('projectsSubtitle')}</p></div>${isAdmin() ? button('team-new-project', `${icon('plus')}${t('newProject')}`, ui.online ? '' : 'disabled', 'primary') : ''}</header>
       <div class="machine-page">${list.length ? `<div class="machine-grid">${cards.join('')}</div>` : statePanel('tasks', t('noProjects'), t('noProjectsHelp'))}</div>`;
@@ -136,14 +136,14 @@ const Team = (() => {
     const tokens = rows(data.tokens.map(c => `<div class="agent-row"><strong>${esc(c.kind === 'web' ? t('kind.web') : c.name)}</strong><span>${t('kind.' + c.kind)}</span><span>${t('created')} ${when(c.created)}</span><span>${t('lastUsed')} ${when(c.last_used)}</span>${c.current ? `<span>${t('thisBrowser')}</span>` : button('team-revoke', t('revoke'), `data-id="${esc(c.id)}" data-kind="tokens"`, 'quiet danger')}</div>`), t('nobody'));
     return `<header class="page-heading"><div><h1>${t('account')}</h1><p class="page-subtitle">${esc(me.name || '')}</p></div></header>
       <div class="machine-page stack">${section(t('profile'), '', profile)}${section(t('identities'), t('linkHelp'), ids + (link ? `<div class="flex mt-12">${link}</div>` : ''))}
-      ${section(t('tokensTitle'), t('tokensHelp'), tokens, button('team-new-token', `${icon('plus')}${t('newToken')}`))}</div>`;
+      ${section(t('tokensTitle'), t('tokensHelp'), tokens, button('team-new-token', `${icon('plus')}${t('newToken')}`))}${Tree.account()}</div>`;
   }
 
   function adminPage() {
     if (!isAdmin()) return statePanel('error', t('forbidden'), '');
     const users = rows(data.users.map(u => `<div class="agent-row"><strong>${esc(u.name)}</strong><span class="mono">${esc(u.username || u.email || u.id)}</span>${u.id === ui.me?.id || u.id === 'local'
       ? `<span>${t('role.' + u.role)}</span>`
-      : `<select data-team-user-role="${esc(u.id)}" aria-label="${t('role')}">${['member', 'admin'].map(r => `<option value="${r}" ${u.role === r ? 'selected' : ''}>${t('role.' + r)}</option>`).join('')}</select>${button('team-disable', t(u.disabled ? 'enable' : 'disable'), `data-id="${esc(u.id)}" data-disabled="${u.disabled ? '' : '1'}"`, u.disabled ? 'quiet' : 'quiet danger')}`}${u.disabled ? `<span>${t('disabled')}</span>` : ''}</div>`), t('nobody'));
+      : `<select data-team-user-role="${esc(u.id)}" aria-label="${t('role')}">${['member', 'admin'].map(r => `<option value="${r}" ${u.role === r ? 'selected' : ''}>${t('role.' + r)}</option>`).join('')}</select>${button('team-disable', t(u.disabled ? 'enable' : 'disable'), `data-id="${esc(u.id)}" data-disabled="${u.disabled ? '' : '1'}"`, u.disabled ? 'quiet' : 'quiet danger')}${u.disabled ? '' : button('tree-offboard', t('offboard'), `data-id="${esc(u.id)}"`, 'quiet danger')}`}${u.disabled ? `<span>${t('disabled')}</span>` : ''}</div>`), t('nobody'));
     const admits = rows(data.admits.map(a => `<div class="agent-row"><strong>${t('admit.' + a.kind)}</strong><span class="mono">${esc(a.value)}</span><span>${t('role.' + a.role)}</span>${button('team-remove-admit', t('removeMember'), `data-kind="${esc(a.kind)}" data-value="${esc(a.value)}"`, 'quiet danger')}</div>`), t('nobody'));
     const addAdmit = `<form id="team-admit-form" class="form-grid mt-12"><select name="kind" aria-label="${t('value')}">${['email', 'domain', 'login'].map(k => `<option value="${k}">${t('admit.' + k)}</option>`).join('')}</select><input name="value" required placeholder="corp.example" aria-label="${t('value')}"><select name="role" aria-label="${t('role')}"><option value="member">${t('role.member')}</option><option value="admin">${t('role.admin')}</option></select><button type="submit">${t('addAdmit')}</button></form>`;
     const invite = `<form id="team-invite-form" class="flex"><select name="role" aria-label="${t('role')}"><option value="member">${t('role.member')}</option><option value="admin">${t('role.admin')}</option></select><button type="submit">${t('makeInvite')}</button></form>`;
@@ -279,5 +279,5 @@ const Team = (() => {
     return `<label>${t('project')}<select name="project"><option value="">${t('noProject')}</option>${mine.map(p => `<option value="${esc(p.id)}" ${p.id === value ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}</select></label>`;
   }
 
-  return {pages, loadLogins, loginExtras, afterSignIn, nav, enter, render, machineHeader, machineCard, machineCreds, click, change, submit, projectField};
+  return {pages, rest, name: userName, users: () => data.users, loadLogins, loginExtras, afterSignIn, nav, enter, render, machineHeader, machineCard, machineCreds, click, change, submit, projectField};
 })();
