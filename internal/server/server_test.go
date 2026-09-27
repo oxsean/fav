@@ -5,7 +5,6 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
@@ -13,6 +12,7 @@ import (
 	"github.com/oxsean/fav/internal/dial"
 	"github.com/oxsean/fav/internal/node"
 	"github.com/oxsean/fav/internal/remote"
+	"github.com/oxsean/fav/internal/store"
 	"github.com/oxsean/fav/internal/task"
 	"github.com/oxsean/fav/internal/tend"
 	"github.com/oxsean/fav/internal/testkit"
@@ -35,30 +35,32 @@ func TestListenNeedsLoopbackTailnetOrTLS(t *testing.T) {
 	}
 }
 
-func TestTokensAreShownOnceAndKeptHashed(t *testing.T) {
+func TestTokensJSONMovesIntoTheDatabase(t *testing.T) {
 	home := t.TempDir()
-	tok, err := AddToken(home, RoleNode, "mba")
+	os.MkdirAll(filepath.Join(home, "server"), 0o700)
+	legacy := `{"tokens":[{"name":"mba","role":"node","sum":"` + store.Sum("tend_old-node") + `","bound":"n_1","bound_host":"mba.local"},` +
+		`{"name":"laptop","role":"client","sum":"` + store.Sum("tend_old-client") + `"}]}`
+	os.WriteFile(filepath.Join(home, "server", "tokens.json"), []byte(legacy), 0o600)
+	team, err := store.OpenTeam(filepath.Join(home, "coord", store.File))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := AddToken(home, RoleClient, "mba"); err != ErrExists {
-		t.Fatalf("a name is one token: %v", err)
+	defer team.Close()
+	if n, err := ImportTokens(home, team); err != nil || n != 2 {
+		t.Fatalf("%d %v", n, err)
 	}
-	if _, err := AddToken(home, RoleNode, "local"); err == nil {
-		t.Fatal("local names this machine, not a node")
+	if _, err := os.Stat(filepath.Join(home, "server", "tokens.json")); !os.IsNotExist(err) {
+		t.Fatal("tokens.json is kept aside once moved")
 	}
-	b, _ := os.ReadFile(tokensPath(home))
-	if len(tok) < 40 || strings.Contains(string(b), tok) {
-		t.Fatalf("the token is not stored: %s", b)
+	d, _ := NewDirectory(team)
+	if c, u, ok := d.find("tend_old-node", store.KindNode); !ok || c.Name != "mba" || c.NodeID != "n_1" || u.ID != store.LocalUser {
+		t.Fatalf("the node token still works and stays bound: %+v %+v", c, u)
 	}
-	if fi, _ := os.Stat(tokensPath(home)); fi.Mode().Perm() != 0o600 && os.PathSeparator == '/' {
-		t.Fatalf("tokens.json is %v", fi.Mode())
+	if _, u, ok := d.find("tend_old-client", store.KindToken); !ok || principal(u) != coord.Owner {
+		t.Fatalf("a client token of the host is the coordinator's owner: %+v", u)
 	}
-	if got := NodeNames(home); len(got) != 1 || got[0] != "mba" {
-		t.Fatalf("%v", got)
-	}
-	if RemoveToken(home, "mba") != nil || RemoveToken(home, "mba") != os.ErrNotExist {
-		t.Fatal("remove once")
+	if n, err := ImportTokens(home, team); err != nil || n != 0 {
+		t.Fatalf("nothing left to move: %d %v", n, err)
 	}
 }
 
@@ -68,28 +70,40 @@ type rig struct {
 	url    string
 	c      *coord.Coord
 	srv    *Server
+	team   *store.Team
 	nodeT  string
+	nodeID string // the node token's credential id
 	client string
 	nodeAt string // the node's home: one machine unless a test names another
 }
 
-func newRig(t *testing.T) *rig {
+func newRig(t *testing.T, logins ...tend.Login) *rig {
 	r := &rig{t: t, home: t.TempDir(), nodeAt: t.TempDir()}
 	var err error
-	if r.nodeT, err = AddToken(r.home, RoleNode, "n1"); err != nil {
+	if r.team, err = store.OpenTeam(filepath.Join(r.home, "coord", store.File)); err != nil {
 		t.Fatal(err)
 	}
-	if r.client, err = AddToken(r.home, RoleClient, "me"); err != nil {
+	var c store.Credential
+	if r.nodeT, c, err = r.team.NewCredential(store.KindNode, "n1", store.LocalUser, 0); err != nil {
 		t.Fatal(err)
 	}
-	r.c, err = coord.Open(coord.Options{Home: r.home, Version: "test", Remote: true, Nodes: NodeNames(r.home),
+	r.nodeID = c.ID
+	if r.client, _, err = r.team.NewCredential(store.KindToken, "me", store.LocalUser, 0); err != nil {
+		t.Fatal(err)
+	}
+	dir, err := NewDirectory(r.team)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.c, err = coord.Open(coord.Options{Home: r.home, Version: "test", Remote: true, MachineOwner: dir.MachineOwner, Users: dir.User,
 		Config: tend.Config{Agents: []tend.AgentProfile{{Name: "fake", Provider: "fake"}}}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	go r.c.Run(ctx)
-	srv := New(Options{Home: r.home, Coord: r.c})
+	srv := New(Options{Home: r.home, Coord: r.c, Dir: dir, Config: tend.ServerConfig{Logins: logins}})
+	srv.sweep()
 	r.srv = srv
 	hs := httptest.NewServer(srv.Handler())
 	go func() {
@@ -100,12 +114,12 @@ func newRig(t *testing.T) *rig {
 			case <-ctx.Done():
 				return
 			case <-tick.C:
-				srv.tokens()
+				srv.sweep()
 			}
 		}
 	}()
 	r.url = hs.URL
-	t.Cleanup(func() { cancel(); hs.CloseClientConnections(); hs.Close(); r.c.Close() })
+	t.Cleanup(func() { cancel(); hs.CloseClientConnections(); hs.Close(); r.c.Close(); r.team.Close() })
 	return r
 }
 
@@ -225,7 +239,7 @@ func TestTheLaterNodeConnectionWinsAndRevokingDropsIt(t *testing.T) {
 		t.Fatal("the earlier connection of the same node stays open")
 	}
 	r.waitMachine("n1", coord.MachineConnected)
-	if err := RemoveToken(r.home, "n1"); err != nil {
+	if err := r.team.Revoke(r.nodeID); err != nil {
 		t.Fatal(err)
 	}
 	select {
@@ -239,10 +253,10 @@ func TestATokenReplacedUnderTheSameNameDropsTheOldConnection(t *testing.T) {
 	r := newRig(t)
 	old := r.node(r.nodeT)
 	r.waitMachine("n1", coord.MachineConnected)
-	if err := RemoveToken(r.home, "n1"); err != nil {
+	if err := r.team.Revoke(r.nodeID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := AddToken(r.home, RoleNode, "n1"); err != nil {
+	if _, _, err := r.team.NewCredential(store.KindNode, "n1", store.LocalUser, 0); err != nil {
 		t.Fatal(err)
 	}
 	select {
@@ -256,9 +270,8 @@ func TestANodeTokenStaysWithTheMachineThatFirstUsedIt(t *testing.T) {
 	r := newRig(t)
 	first := r.node(r.nodeT)
 	r.waitMachine("n1", coord.MachineConnected)
-	ts, _ := Tokens(r.home)
-	if ts[0].Bound == "" {
-		t.Fatalf("the first connection binds the token: %+v", ts[0])
+	if c, err := r.team.NodeCredential("n1"); err != nil || c.NodeID == "" {
+		t.Fatalf("the first connection binds the token: %+v %v", c, err)
 	}
 	first.Close()
 	r.waitMachine("n1", coord.MachineOffline)
@@ -273,7 +286,7 @@ func TestANodeTokenStaysWithTheMachineThatFirstUsedIt(t *testing.T) {
 	if r.machine("n1").State == coord.MachineConnected {
 		t.Fatal("the other machine never became n1")
 	}
-	if err := RebindToken(r.home, "n1"); err != nil {
+	if err := r.team.Rebind(r.nodeID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := r.dialNode(t.TempDir(), r.nodeT); err != nil {

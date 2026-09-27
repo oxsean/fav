@@ -59,6 +59,11 @@ func newFeed() *feed { return &feed{ch: make(chan journal.Envelope, 512)} }
 func (f *feed) options() wire.Options {
 	return wire.Options{OnPush: func(method string, params json.RawMessage) {
 		var env journal.Envelope
+		if method == coord.PushRefetch {
+			tracef("tasks: refetch pushed")
+			f.lost.Store(true)
+			return
+		}
 		if method != coord.PushJournal || json.Unmarshal(params, &env) != nil {
 			return
 		}
@@ -203,6 +208,7 @@ func (m *Model) pollTasks() tea.Cmd {
 			return tasksMachinesMsg{machines: ms.Machines, err: err}
 		})...)
 	}
+	tracef("tasks: full read (subscribed=%v lost=%v)", t.subscribed, t.feed.lost.Load())
 	t.polling = true
 	t.feed.lost.Store(false)
 	t.machinesAt = time.Now()
@@ -323,7 +329,9 @@ func (msg tasksPushMsg) apply(m *Model) tea.Cmd {
 		switch {
 		case t.st == nil || env.Seq <= t.st.Seq:
 		case env.Seq == t.st.Seq+1 && t.st.Apply(env) == nil:
+			tracef("tasks: push %d (%d events)", env.Seq, len(env.Events))
 		default:
+			tracef("tasks: gap at push %d after %d", env.Seq, t.st.Seq)
 			msg.f.lost.Store(true)
 		}
 	}

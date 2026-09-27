@@ -1,0 +1,360 @@
+package server
+
+import (
+	"encoding/json"
+	"errors"
+	"net/http"
+	"slices"
+	"strings"
+	"time"
+
+	"github.com/oxsean/fav/internal/store"
+)
+
+// inviteAge is how long an invitation link works.
+const inviteAge = 72 * time.Hour
+
+// caller is who makes an /api request.
+type caller struct {
+	cred store.Credential
+	user store.User
+}
+
+func (c caller) admin() bool { return c.user.Role == store.RoleAdmin }
+
+// apiError answers a stable code the page words itself.
+func apiError(w http.ResponseWriter, status int, code string) {
+	writeJSON(w, status, map[string]string{"error": code})
+}
+
+// api signs the request in as a client and, for a change, requires the page's own header and origin: another site
+// can neither send the header nor read the answer.
+func (s *Server) api(h func(http.ResponseWriter, *http.Request, caller)) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		cred, u, ok := s.credential(r, RoleClient)
+		if !ok {
+			apiError(w, http.StatusUnauthorized, "unauthorized")
+			return
+		}
+		if r.Method != http.MethodGet && (r.Header.Get("X-Tend") != "1" || !sameOrigin(r)) {
+			apiError(w, http.StatusForbidden, "csrf")
+			return
+		}
+		r.Body = http.MaxBytesReader(w, r.Body, 64<<10)
+		h(w, r, caller{cred, u})
+	}
+}
+
+func (s *Server) adminOnly(h func(http.ResponseWriter, *http.Request, caller)) func(http.ResponseWriter, *http.Request, caller) {
+	return func(w http.ResponseWriter, r *http.Request, c caller) {
+		if !c.admin() {
+			s.audit(r, c.user.ID, "denied", r.Method+" "+r.URL.Path)
+			apiError(w, http.StatusForbidden, "unauthorized")
+			return
+		}
+		h(w, r, c)
+	}
+}
+
+func decode(w http.ResponseWriter, r *http.Request, v any) bool {
+	if err := json.NewDecoder(r.Body).Decode(v); err != nil {
+		apiError(w, http.StatusBadRequest, "bad_request")
+		return false
+	}
+	return true
+}
+
+func (s *Server) apiRoutes(mux *http.ServeMux) {
+	mux.HandleFunc("GET /api/users", s.api(s.listUsers))
+	mux.HandleFunc("POST /api/users", s.api(s.adminOnly(s.setUser)))
+	mux.HandleFunc("GET /api/admits", s.api(s.adminOnly(s.listAdmits)))
+	mux.HandleFunc("POST /api/admits", s.api(s.adminOnly(s.addAdmit)))
+	mux.HandleFunc("DELETE /api/admits", s.api(s.adminOnly(s.removeAdmit)))
+	mux.HandleFunc("POST /api/invites", s.api(s.adminOnly(s.invite)))
+	mux.HandleFunc("GET /api/tokens", s.api(s.listTokens))
+	mux.HandleFunc("POST /api/tokens", s.api(s.addToken))
+	mux.HandleFunc("DELETE /api/tokens", s.api(s.revokeToken))
+	mux.HandleFunc("GET /api/machines", s.api(s.listMachines))
+	mux.HandleFunc("POST /api/machines", s.api(s.addMachine))
+	mux.HandleFunc("DELETE /api/machines", s.api(s.revokeMachine))
+	mux.HandleFunc("POST /api/machines/rebind", s.api(s.rebindMachine))
+	mux.HandleFunc("GET /api/identities", s.api(s.listIdentities))
+	mux.HandleFunc("GET /api/audit", s.api(s.adminOnly(s.listAudit)))
+}
+
+// PublicUser is a user as other members see them.
+type PublicUser struct {
+	ID       string `json:"id"`
+	Name     string `json:"name"`
+	Username string `json:"username,omitempty"`
+	Email    string `json:"email,omitempty"` // admins only
+	Role     string `json:"role"`
+	Disabled bool   `json:"disabled,omitempty"`
+}
+
+func (s *Server) listUsers(w http.ResponseWriter, r *http.Request, c caller) {
+	us, err := s.team().Users()
+	if err != nil {
+		apiError(w, http.StatusInternalServerError, "internal")
+		return
+	}
+	out := []PublicUser{}
+	for _, u := range us {
+		p := PublicUser{ID: u.ID, Name: displayName(u), Username: u.Username, Role: u.Role, Disabled: u.Disabled}
+		if c.admin() {
+			p.Email = u.Email
+		}
+		out = append(out, p)
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (s *Server) setUser(w http.ResponseWriter, r *http.Request, c caller) {
+	var p struct {
+		ID       string  `json:"id"`
+		Role     *string `json:"role,omitempty"`
+		Disabled *bool   `json:"disabled,omitempty"`
+	}
+	if !decode(w, r, &p) {
+		return
+	}
+	if p.ID == store.LocalUser || p.ID == c.user.ID && (p.Disabled != nil || p.Role != nil) {
+		apiError(w, http.StatusConflict, "self")
+		return
+	}
+	if err := s.team().SetUser(p.ID, p.Role, p.Disabled); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			apiError(w, http.StatusNotFound, "not_found")
+			return
+		}
+		apiError(w, http.StatusBadRequest, "bad_request")
+		return
+	}
+	s.audit(r, c.user.ID, "user", subjectOf(mustJSON(p)))
+	s.sweep()
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func mustJSON(v any) json.RawMessage {
+	b, _ := json.Marshal(v)
+	return b
+}
+
+func (s *Server) listAdmits(w http.ResponseWriter, r *http.Request, c caller) {
+	as, err := s.team().Admits()
+	if err != nil {
+		apiError(w, http.StatusInternalServerError, "internal")
+		return
+	}
+	if as == nil {
+		as = []store.Admit{}
+	}
+	writeJSON(w, http.StatusOK, as)
+}
+
+func (s *Server) addAdmit(w http.ResponseWriter, r *http.Request, c caller) {
+	var a store.Admit
+	if !decode(w, r, &a) {
+		return
+	}
+	a.AddedBy = c.user.ID
+	if err := s.team().AddAdmit(a); err != nil {
+		apiError(w, http.StatusBadRequest, "bad_request")
+		return
+	}
+	s.audit(r, c.user.ID, "admit", a.Kind+" "+a.Value+" "+a.Role)
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) removeAdmit(w http.ResponseWriter, r *http.Request, c caller) {
+	var a store.Admit
+	if !decode(w, r, &a) {
+		return
+	}
+	if err := s.team().RemoveAdmit(a.Kind, a.Value); err != nil {
+		apiError(w, http.StatusNotFound, "not_found")
+		return
+	}
+	s.audit(r, c.user.ID, "admit_removed", a.Kind+" "+a.Value)
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// invite makes a one-time link: whoever signs in through it joins with the role.
+func (s *Server) invite(w http.ResponseWriter, r *http.Request, c caller) {
+	var p struct {
+		Role string `json:"role"`
+	}
+	if !decode(w, r, &p) {
+		return
+	}
+	secret, err := s.team().NewInvite(p.Role, c.user.ID, inviteAge)
+	if err != nil {
+		apiError(w, http.StatusBadRequest, "bad_request")
+		return
+	}
+	s.audit(r, c.user.ID, "invite", p.Role)
+	writeJSON(w, http.StatusOK, map[string]any{"url": s.base(r) + "/#invite-" + secret, "expires": time.Now().Add(inviteAge)})
+}
+
+// Credentials of the caller's (all, for an admin's machines), newest first.
+func (s *Server) creds(keep func(store.Credential) bool) []store.Credential {
+	s.opt.Dir.mu.RLock()
+	defer s.opt.Dir.mu.RUnlock()
+	out := []store.Credential{}
+	for _, c := range s.opt.Dir.creds {
+		if keep(c) {
+			out = append(out, c)
+		}
+	}
+	slices.SortFunc(out, func(a, b store.Credential) int { return b.Created.Compare(a.Created) })
+	return out
+}
+
+type credView struct {
+	store.Credential
+	Current bool `json:"current,omitempty"`
+}
+
+func (s *Server) listTokens(w http.ResponseWriter, r *http.Request, c caller) {
+	out := []credView{}
+	for _, x := range s.creds(func(x store.Credential) bool {
+		return x.Owner == c.user.ID && (x.Kind == store.KindToken || x.Kind == store.KindWeb)
+	}) {
+		out = append(out, credView{x, x.ID == c.cred.ID})
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (s *Server) addToken(w http.ResponseWriter, r *http.Request, c caller) {
+	var p struct {
+		Name string `json:"name"`
+	}
+	if !decode(w, r, &p) {
+		return
+	}
+	if p.Name = strings.TrimSpace(p.Name); p.Name == "" || len(p.Name) > 64 || strings.HasPrefix(p.Name, viaToken) {
+		apiError(w, http.StatusBadRequest, "name")
+		return
+	}
+	secret, cr, err := s.team().NewCredential(store.KindToken, p.Name, c.user.ID, 0)
+	if err != nil {
+		apiError(w, http.StatusInternalServerError, "internal")
+		return
+	}
+	s.opt.Dir.Reload()
+	s.audit(r, c.user.ID, "token", cr.ID)
+	writeJSON(w, http.StatusOK, map[string]string{"id": cr.ID, "token": secret})
+}
+
+// revoke ends credential id of kinds when it is the caller's, or an admin's to end.
+func (s *Server) revoke(w http.ResponseWriter, r *http.Request, c caller, kinds ...string) {
+	var p struct {
+		ID string `json:"id"`
+	}
+	if !decode(w, r, &p) {
+		return
+	}
+	found := s.creds(func(x store.Credential) bool {
+		return x.ID == p.ID && slices.Contains(kinds, x.Kind) && (x.Owner == c.user.ID || c.admin())
+	})
+	if len(found) == 0 {
+		apiError(w, http.StatusNotFound, "not_found")
+		return
+	}
+	if err := s.team().Revoke(p.ID); err != nil {
+		apiError(w, http.StatusInternalServerError, "internal")
+		return
+	}
+	s.audit(r, c.user.ID, "revoke", found[0].Kind+" "+p.ID)
+	s.sweep()
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) revokeToken(w http.ResponseWriter, r *http.Request, c caller) {
+	s.revoke(w, r, c, store.KindToken, store.KindWeb)
+}
+
+func (s *Server) listMachines(w http.ResponseWriter, r *http.Request, c caller) {
+	writeJSON(w, http.StatusOK, s.creds(func(x store.Credential) bool {
+		return x.Kind == store.KindNode && (x.Owner == c.user.ID || c.admin())
+	}))
+}
+
+// addMachine gives the caller a node token for a new machine of theirs: they own it, and only they dispatch to it
+// until they share it.
+func (s *Server) addMachine(w http.ResponseWriter, r *http.Request, c caller) {
+	var p struct {
+		Name string `json:"name"`
+	}
+	if !decode(w, r, &p) {
+		return
+	}
+	if CheckMachine(p.Name) != nil {
+		apiError(w, http.StatusBadRequest, "name")
+		return
+	}
+	secret, cr, err := s.team().NewCredential(store.KindNode, p.Name, c.user.ID, 0)
+	if errors.Is(err, store.ErrExists) {
+		apiError(w, http.StatusConflict, "exists")
+		return
+	}
+	if err != nil {
+		apiError(w, http.StatusInternalServerError, "internal")
+		return
+	}
+	s.opt.Dir.Reload()
+	s.opt.Coord.Expect(p.Name)
+	s.audit(r, c.user.ID, "machine", cr.ID+" "+p.Name)
+	writeJSON(w, http.StatusOK, map[string]string{"id": cr.ID, "token": secret,
+		"command": "tend node install-service --connect " + s.base(r) + " --token-file ~/.config/tend/node-token"})
+}
+
+func (s *Server) revokeMachine(w http.ResponseWriter, r *http.Request, c caller) {
+	s.revoke(w, r, c, store.KindNode)
+}
+
+func (s *Server) rebindMachine(w http.ResponseWriter, r *http.Request, c caller) {
+	var p struct {
+		ID string `json:"id"`
+	}
+	if !decode(w, r, &p) {
+		return
+	}
+	if len(s.creds(func(x store.Credential) bool {
+		return x.ID == p.ID && x.Kind == store.KindNode && (x.Owner == c.user.ID || c.admin())
+	})) == 0 {
+		apiError(w, http.StatusNotFound, "not_found")
+		return
+	}
+	if err := s.team().Rebind(p.ID); err != nil {
+		apiError(w, http.StatusInternalServerError, "internal")
+		return
+	}
+	s.audit(r, c.user.ID, "rebind", p.ID)
+	s.opt.Dir.Reload()
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) listIdentities(w http.ResponseWriter, r *http.Request, c caller) {
+	ids, err := s.team().Identities(c.user.ID)
+	if err != nil {
+		apiError(w, http.StatusInternalServerError, "internal")
+		return
+	}
+	if ids == nil {
+		ids = []store.Identity{}
+	}
+	writeJSON(w, http.StatusOK, ids)
+}
+
+func (s *Server) listAudit(w http.ResponseWriter, r *http.Request, c caller) {
+	es, err := s.team().AuditLog(200)
+	if err != nil {
+		apiError(w, http.StatusInternalServerError, "internal")
+		return
+	}
+	if es == nil {
+		es = []store.AuditEntry{}
+	}
+	writeJSON(w, http.StatusOK, es)
+}

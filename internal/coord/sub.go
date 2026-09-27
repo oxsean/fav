@@ -16,29 +16,30 @@ type Subscribed struct {
 }
 
 type sub struct {
+	p  Principal
 	ch chan journal.Envelope
 }
 
 // subscribe registers the live feed under mu, then replays (after, end] from the file outside it and moves on to the
 // live envelopes past end. A client too slow to keep subscribeQueue envelopes is disconnected; it subscribes again
 // from the last seq it has.
-func (c *Coord) subscribe(r *wire.Request) (any, error) {
-	var p SubscribeParams
-	if err := r.Decode(&p); err != nil {
+func (c *Coord) subscribe(p Principal, r *wire.Request) (any, error) {
+	var sp SubscribeParams
+	if err := r.Decode(&sp); err != nil {
 		return nil, err
 	}
 	conn := r.Conn
-	p.AfterSeq = max(p.AfterSeq, 0)
+	sp.AfterSeq = max(sp.AfterSeq, 0)
 	c.mu.Lock()
 	if _, ok := c.subs[conn]; ok {
 		c.mu.Unlock()
 		return nil, conflict("subscribed")
 	}
-	s := &sub{ch: make(chan journal.Envelope, subscribeQueue)}
+	s := &sub{p: p, ch: make(chan journal.Envelope, subscribeQueue)}
 	c.subs[conn] = s
 	end := c.log.Seq()
 	c.mu.Unlock()
-	go c.feed(conn, s, p.AfterSeq, end)
+	go c.feed(conn, s, sp.AfterSeq, end)
 	return Subscribed{Seq: end}, nil
 }
 
@@ -53,7 +54,7 @@ func (c *Coord) feed(conn *wire.Conn, s *sub, after, end int64) {
 	if after < end {
 		var perr error
 		if err := c.log.ReadAfter(after, end, func(env journal.Envelope) bool {
-			perr = conn.Push(PushJournal, pushed(env))
+			perr = c.push(conn, s.p, env)
 			return perr == nil
 		}); err != nil || perr != nil {
 			conn.Close()
@@ -72,19 +73,25 @@ func (c *Coord) feed(conn *wire.Conn, s *sub, after, end int64) {
 			if env.Seq <= end {
 				continue
 			}
-			if conn.Push(PushJournal, pushed(env)) != nil {
+			if c.push(conn, s.p, env) != nil {
 				return
 			}
 		}
 	}
 }
 
-// pushed is env as a subscriber gets it: a command's result and digest stay with its caller.
-func pushed(env journal.Envelope) journal.Envelope {
-	if env.Command != nil {
-		env.Command = &journal.Receipt{ID: env.Command.ID, Method: env.Command.Method}
+// push sends p their part of env, and asks them to fetch the state again when env changed what they may see.
+func (c *Coord) push(conn *wire.Conn, p Principal, env journal.Envelope) error {
+	c.mu.Lock()
+	v := c.visibleEnv(p, env)
+	c.mu.Unlock()
+	if err := conn.Push(PushJournal, v); err != nil {
+		return err
 	}
-	return env
+	if reshapes(env) {
+		return conn.Push(PushRefetch, nil)
+	}
+	return nil
 }
 
 // publish hands env to every subscriber; the caller holds mu.

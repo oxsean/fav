@@ -404,7 +404,7 @@ Claude）、`codex`（`codex app-server`）、`fake`（测试用）。更多的�
 **机器，模式一（ssh）。** 本机加上配置里的每台主机（上面的 `tend hosts add`）。协调器用 `ssh <别名> tend node --stdio` 连过去；
 连接断了 run 照常跑。
 
-**机器，模式二（server）。** 常驻的 `tend-server` 保存任务日志，各台机器连上来。它是单独的程序，每次发布和 `tend` 一起出，也可以用 `tend hosts install <机器> --server` 装：
+**机器，模式二（server）。** 常驻的 `tend-server` 把任务日志存在 SQLite 数据库（`coord/tend.db`）里，各台机器连上来。它是单独的程序，每次发布和 `tend` 一起出，也可以用 `tend hosts install <机器> --server` 装：
 
 ```bash
 # server 上（回环或 tailnet 地址；其它地址要 --tls-cert/--tls-key，或在转发之后用 --plain）
@@ -426,12 +426,38 @@ tend task list   # 命令行和 TUI 的任务页都改为和 server 说话
 带已知绕过参数的命令行拒绝。设了 `node.allow_profiles` 时只跑这些名字，且都按节点自己的定义（要在节点上定义好，带上需要的权限）。
 `tend-server token rm <名>` 吊销 token 并断开它的连接。节点 token 绑定第一台用它连上的机器，换机器会被拒绝，要先 `tend-server token rebind <名>`。
 
-**Web UI。** server 在自己的地址上还提供一个网页（`http://100.101.8.10:7788/`）。用 client token 登录
-（`tend-server token add --client web`）；浏览器把它存在 HttpOnly cookie 里 30 天，退出登录或 `tend-server token rm web` 即失效。
-网页列出任务和它们的 run；新建、编辑、派发任务；派发前预检；跟看 run 的输出和对话；显示 run 为什么结束、问了什么并接受回复；停止或放弃 run；把任务标为完成、重开或取消；
-查看机器和 agent 档案。它实时跟随任务日志，断线后自动重连。
+**成员。** server 给一个团队用。成员用 GitHub，或 server 的 `config.json` 里列出的任意 OIDC 服务（Gitea、GitLab、Keycloak、Google）登录：
 
-client token 在上述限制内等同于每个节点上的 shell：服务器只部署在 tailnet 内；用 `--plain` 时只让绑定在 tailnet 地址上的转发器连到它。
+```json
+{"server": {"public_url": "https://tend.example", "logins": [
+  {"name": "gitea", "kind": "oidc", "display": "Gitea", "issuer": "https://git.example", "client_id": "…", "client_secret_file": "/etc/tend/gitea-secret"},
+  {"name": "github", "kind": "github", "client_id": "…", "client_secret_file": "/etc/tend/github-secret"}]}}
+```
+
+回调地址是 `<public_url>/auth/<name>/callback`。不开放注册：`tend-server admin add ann@corp.example --role admin`
+建第一个管理员；之后由管理员在管理页加人，或用 `tend-server admin add <邮箱 | 域名 | provider:用户名>`（已验证的邮箱、
+某个域名下任何已验证的邮箱、某个账号），也可以发一次性邀请链接（`tend-server admin invite` 或管理页，3 天有效）。
+`tend-server admin disable <用户>` 让这个人在所有地方立即下线。
+
+任务归属于项目。管理员建项目，项目负责人把成员加为「参与」（建任务、派发、回答、发消息）或「只读」（只能看）。
+不在项目里的人看不到这个项目的任何东西，连它是否存在都不知道；不属于任何项目的任务只归创建人。机器也默认私有：
+谁添加的机器（机器页给出节点 token 和要运行的命令）就归谁，分享给别人或项目之前，只有主人能往它派发。
+机器上的 run 用的是主人的 claude / codex 登录、git 身份和文件，所以要分享的机器请专门准备（单独的系统用户或容器），
+不要分享自己的笔记本。run 的权限请求由机器主人和派发人批准；分享时可以让被分享的人也能批。
+
+**Web UI。** server 在自己的地址上还提供一个网页（`http://100.101.8.10:7788/`）。用登录服务或 token 登录；
+浏览器会话保持 30 天，退出登录或吊销即失效。网页列出任务和它们的 run；新建、编辑、派发任务；派发前预检；
+跟看 run 的输出和对话；显示 run 为什么结束、问了什么并接受回复；停止或放弃 run；把任务标为完成、重开或取消；
+查看机器、它们的主人和分享对象；管理项目和成员；在账号页为 CLI 和 TUI 生成个人 token；管理员还能管理用户、
+准入规则、邀请和审计日志。它实时跟随任务日志，断线后自动重连。
+
+**server 的数据库。** `tend-server import` 把模式一的日志（`coord/events.jsonl`）搬进数据库，要先停掉 server；
+这份日志里有事件而数据库还不存在时，server 拒绝启动。server 运行时也可以用：`tend-server db check` 检查数据库，
+`tend-server export -o f` 把它写成 `tend journal verify` 能读的日志，`tend-server backup [目录]` 把它连同 `coord/id`
+和配置复制到一个新目录。成员、他们的登录账号、凭据（只存哈希）和审计日志都在同一个数据库里。
+
+client token 或已登录的浏览器可以在分享给这个用户的每台机器上运行 agent（受各节点的限制）：server 只部署在 tailnet 内，
+或放在 TLS 后面（`--tls-cert/--tls-key`，或在终止 TLS 的反代后面用 `--plain`）。
 
 ## 查询语法
 
@@ -472,7 +498,7 @@ tend 把这条链合成一个会话（轮数相加、用最新的 id 恢复、�
 | `~/.agent/tend/config.json` | 设置面板写的 |
 | `~/.agent/tend/coord/` | 协调器的任务日志（`events.jsonl`，每次变化一行，带校验和） |
 | `~/.agent/tend/node/runs/` | 本机每个 run 一个目录：冻结的命令、状态、输出日志；结束一周后删除 |
-| `~/.agent/tend/server/tokens.json` | 模式二：token 的名字、角色和哈希 |
+| `<server home>/coord/tend.db` | 只在 `tend-server`：任务日志、成员、登录账号、凭据哈希和审计日志（SQLite） |
 | `~/.agent/tend/hosts/` | 从每台其它机器最近取到的列表（只有列表字段：标题、摘要、标签、路径；没有消息）、ssh 连接复用的 socket |
 
 环境变量：`TEND_HOME`（或 `TEND_HOME`）改数据目录，`TEND_UI=fzf|tui` 改默认前端，`TEND_ICONS=nerd|ascii` 选图标，`TEND_TRACE=1` 把按键、滚轮和后台事件的时间线记到 `~/.agent/tend/trace.log`（报告界面卡顿时用）。

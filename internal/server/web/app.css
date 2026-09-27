@@ -274,3 +274,18 @@ button.metric:hover strong, button.metric:focus-visible strong { color: var(--ac
 .answer-form pre { white-space: pre-wrap; overflow-wrap: anywhere; margin: 0; }
 .answer-form .choice { display: flex; align-items: center; justify-content: flex-start; gap: 8px; font-weight: 400; }
 .answer-form .choice input { width: auto; height: auto; margin: 0; }
+
+.team-section { display: grid; gap: 8px; }
+.team-section h2 { font-size: 14px; }
+.team-machine { display: grid; grid-template-columns: 1fr 1fr auto; gap: 12px; align-items: end; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border); }
+.team-section .form-grid { grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); }
+.providers { gap: 10px; }
+a.button { display: inline-flex; gap: 6px; align-items: center; justify-content: center; min-height: 32px; padding: 5px 10px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); color: var(--text); text-decoration: none; }
+a.button:hover { background: var(--surface-hover); border-color: var(--muted); }
+a.button.primary { background: var(--accent); border-color: var(--accent); color: var(--surface); font-weight: 600; }
+.divider { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 12px; margin: 16px 0; }
+.divider::before, .divider::after { content: ""; flex: 1; border-top: 1px solid var(--border); }
+.secret-row { align-items: stretch; }
+code.secret { display: block; flex: 1; padding: 10px; background: var(--surface-alt); border: 1px solid var(--border); border-radius: var(--radius); font-size: 12px; user-select: all; }
+fieldset { border: 1px solid var(--border); border-radius: var(--radius); padding: 12px; margin: 0; }
+@media (max-width: 640px) { .team-machine { grid-template-columns: 1fr; } }

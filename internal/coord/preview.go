@@ -21,7 +21,12 @@ import (
 const ReasonNodeOutdated = "node_outdated"
 
 // runFeatures are the node features run needs: a field of run.start an older node would ignore.
-var runFeatures = func(run *task.Run) []string { return nil }
+var runFeatures = func(run *task.Run) []string {
+	if run.Dispatcher != "" && run.Dispatcher != Owner.User {
+		return []string{node.FeatureDispatcher}
+	}
+	return nil
+}
 
 // missingFeatures are those of need the node that said h lacks.
 func missingFeatures(h remote.Hello, need []string) []string {
@@ -45,6 +50,7 @@ const (
 	WhyCLIMissing   = agent.ReasonCLIMissing  // blocks: the agent's CLI is not on the machine
 	WhyAuthMissing  = agent.ReasonAuthMissing // blocks: the CLI is not logged in there
 	WhyOutdated     = ReasonNodeOutdated      // blocks: the machine's tend cannot do it
+	WhyNoAccess     = "no_access"             // blocks: the machine is not open to the caller or the task's project
 	WhyOffline      = "offline"               // it queues until the machine answers
 	WhyConnecting   = "connecting"
 	WhySlots        = "slots"    // it queues until a slot frees (Detail: active/slots)
@@ -73,13 +79,23 @@ type Preview struct {
 // Preview says how dispatching p would go: where, with what, and anything that would hold it back or fail it. It
 // checks the machine's agent CLI when the machine answers.
 func (c *Coord) Preview(ctx context.Context, p Dispatch) (Preview, error) {
+	return c.PreviewFor(ctx, Owner, p)
+}
+
+// PreviewFor is Preview for who's dispatch.
+func (c *Coord) PreviewFor(ctx context.Context, who Principal, p Dispatch) (Preview, error) {
 	c.mu.Lock()
-	run, err := c.plan(p)
+	run, err := c.plan(who, p)
+	open := err == nil && c.canUse(who, run.Machine, run.Project)
 	c.mu.Unlock()
 	if err != nil {
 		return Preview{}, err
 	}
-	return c.preview(ctx, run), nil
+	pv := c.preview(ctx, run)
+	if !open {
+		pv.Blockers = append([]Why{{WhyNoAccess, run.Machine}}, pv.Blockers...)
+	}
+	return pv, nil
 }
 
 func (c *Coord) preview(ctx context.Context, run task.Run) Preview {
@@ -231,16 +247,16 @@ func (c *Coord) runContinue(who Principal, r *wire.Request) (string, []journal.E
 	if err := r.Decode(&p); err != nil {
 		return "", nil, err
 	}
-	if p.Run == "" && !who.Admin { // any session of a machine, not one a run made
-		return "", nil, forbidden(MRunContinue)
-	}
 	if strings.TrimSpace(p.Text) == "" || len(p.Text) > maxBrief {
 		return "", nil, bad("text")
 	}
 	if p.Run != "" {
-		prev := c.st.Runs[p.Run]
-		if prev == nil {
-			return "", nil, notFound(p.Run)
+		prev, err := c.writableRun(who, p.Run)
+		if err != nil {
+			return "", nil, err
+		}
+		if !c.canUse(who, prev.Machine, prev.Project) {
+			return "", nil, forbidden("machine " + prev.Machine)
 		}
 		if prev.Session == "" {
 			return "", nil, bad("run " + prev.ID + " has no session")
@@ -263,7 +279,7 @@ func (c *Coord) runContinue(who Principal, r *wire.Request) (string, []journal.E
 		}
 		run := task.Run{ID: node.NewRunID(), Task: prev.Task, Machine: prev.Machine, Agent: firstOf(p.Agent, prev.Agent), Profile: prof,
 			Dir: prev.Dir, From: prev.Machine, Brief: p.Text, Title: prev.Title, Runner: node.RunnerBackground, Resume: prev.Session,
-			Parent: prev.ID}
+			Parent: prev.ID, Project: runTask(c.st, prev).Project, Dispatcher: who.User}
 		return run.ID, []journal.Event{journal.NewEvent(task.ERunQueued, run)}, nil
 	}
 	if p.Session == "" || p.Dir == "" || p.Provider == "" {
@@ -272,6 +288,9 @@ func (c *Coord) runContinue(who Principal, r *wire.Request) (string, []journal.E
 	machine := firstOf(p.Machine, Local)
 	if err := c.checkMachine(machine); err != nil {
 		return "", nil, err
+	}
+	if c.ownerOf(machine) != who.User { // any session of a machine, not one a run made: its owner's alone
+		return "", nil, forbidden(MRunContinue)
 	}
 	name := firstOf(p.Agent, p.Provider)
 	prof, ok := c.profile(name)
@@ -294,9 +313,9 @@ func (c *Coord) runContinue(who Principal, r *wire.Request) (string, []journal.E
 	if len(title) > maxTitle {
 		title = title[:maxTitle]
 	}
-	t := task.Task{ID: newID("t_"), Title: title, Dir: p.Dir, Machine: machine, Agent: name, Status: task.StatusTodo}
+	t := task.Task{ID: newID("t_"), Title: title, Dir: p.Dir, Machine: machine, Agent: name, Owner: who.User, Status: task.StatusTodo}
 	run := task.Run{ID: node.NewRunID(), Task: t.ID, Machine: machine, Agent: name, Profile: prof, Dir: p.Dir, From: machine,
-		Brief: p.Text, Title: title, Runner: node.RunnerBackground, Resume: p.Session}
+		Brief: p.Text, Title: title, Runner: node.RunnerBackground, Resume: p.Session, Dispatcher: who.User}
 	return run.ID, []journal.Event{journal.NewEvent(task.ETaskCreated, t), journal.NewEvent(task.ERunQueued, run)}, nil
 }
 

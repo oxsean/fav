@@ -110,7 +110,7 @@ func TestPushesLeaveACommandsResultWithItsCaller(t *testing.T) {
 		var env journal.Envelope
 		json.Unmarshal(params, &env)
 		got <- env
-	}}, wire.Options{Handler: e.c.HandlerFor(Principal{User: "bob"})})
+	}}, wire.Options{Handler: e.c.HandlerFor(Principal{User: "bob", Admin: true})})
 	defer cli.Close()
 	if err := callAs(cli, MSubscribe, "", SubscribeParams{}, nil); err != nil {
 		t.Fatal(err)

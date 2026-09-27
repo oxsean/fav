@@ -60,6 +60,7 @@ type Task struct {
 	Machine   string    `json:"machine,omitempty"`
 	Agent     string    `json:"agent,omitempty"`
 	Project   string    `json:"project,omitempty"`
+	Owner     string    `json:"owner,omitempty"` // who created it; a task outside any project is theirs
 	Status    string    `json:"status"`
 	Rev       int       `json:"rev,omitzero"`
 	CreatedAt time.Time `json:"created_at,omitzero"`
@@ -67,39 +68,41 @@ type Task struct {
 }
 
 type Run struct {
-	ID        string            `json:"id"`
-	Task      string            `json:"task"`
-	Machine   string            `json:"machine"`
-	Agent     string            `json:"agent"`
-	Profile   tend.AgentProfile `json:"profile"`
-	Dir       string            `json:"dir"`
-	From      string            `json:"from,omitempty"`  // the machine Dir was written for; "": the run's own
-	Brief     string            `json:"brief,omitempty"` // frozen at dispatch
-	Title     string            `json:"title,omitempty"`
-	Runner    string            `json:"runner,omitempty"` // "": the node picks
-	Resume    string            `json:"resume,omitempty"` // the session this run continues (Brief is the reply)
-	Parent    string            `json:"parent,omitempty"` // the run it answers
-	Want      string            `json:"want,omitempty"`   // run | stop
-	State     string            `json:"state,omitempty"`
-	ExitCode  *int              `json:"exit_code,omitempty"`
-	Reason    string            `json:"reason,omitempty"`
-	Detail    string            `json:"detail,omitempty"`
-	Attention string            `json:"attention,omitempty"` // asked | permission | stalled
-	Ask       string            `json:"ask,omitempty"`
-	Note      string            `json:"note,omitempty"`
-	Last      string            `json:"last,omitempty"`     // the newest thing its agent said
-	Usage     *agent.Usage      `json:"usage,omitempty"`    // what its agent spent
-	Stream    bool              `json:"stream,omitempty"`   // it takes answers and messages while it runs
-	Requests  []agent.Request   `json:"requests,omitempty"` // what it waits on, as its node last said
-	Answers   []agent.Answer    `json:"answers,omitempty"`  // given, not yet taken by the node
-	Sends     []agent.Send      `json:"sends,omitempty"`    // messages for it and how far they got
-	Provider  string            `json:"provider,omitempty"`
-	Session   string            `json:"session,omitempty"`
-	Pane      string            `json:"pane,omitempty"`
-	NodeRev   int               `json:"node_rev,omitempty"`
-	QueuedAt  time.Time         `json:"queued_at,omitzero"`
-	StartedAt *time.Time        `json:"started_at,omitzero"`
-	EndedAt   *time.Time        `json:"ended_at,omitzero"`
+	ID         string            `json:"id"`
+	Task       string            `json:"task"`
+	Machine    string            `json:"machine"`
+	Agent      string            `json:"agent"`
+	Profile    tend.AgentProfile `json:"profile"`
+	Dir        string            `json:"dir"`
+	From       string            `json:"from,omitempty"`  // the machine Dir was written for; "": the run's own
+	Brief      string            `json:"brief,omitempty"` // frozen at dispatch
+	Title      string            `json:"title,omitempty"`
+	Runner     string            `json:"runner,omitempty"`     // "": the node picks
+	Resume     string            `json:"resume,omitempty"`     // the session this run continues (Brief is the reply)
+	Parent     string            `json:"parent,omitempty"`     // the run it answers
+	Project    string            `json:"project,omitempty"`    // its task's when it was queued
+	Dispatcher string            `json:"dispatcher,omitempty"` // the user who queued it
+	Want       string            `json:"want,omitempty"`       // run | stop
+	State      string            `json:"state,omitempty"`
+	ExitCode   *int              `json:"exit_code,omitempty"`
+	Reason     string            `json:"reason,omitempty"`
+	Detail     string            `json:"detail,omitempty"`
+	Attention  string            `json:"attention,omitempty"` // asked | permission | stalled
+	Ask        string            `json:"ask,omitempty"`
+	Note       string            `json:"note,omitempty"`
+	Last       string            `json:"last,omitempty"`     // the newest thing its agent said
+	Usage      *agent.Usage      `json:"usage,omitempty"`    // what its agent spent
+	Stream     bool              `json:"stream,omitempty"`   // it takes answers and messages while it runs
+	Requests   []agent.Request   `json:"requests,omitempty"` // what it waits on, as its node last said
+	Answers    []agent.Answer    `json:"answers,omitempty"`  // given, not yet taken by the node
+	Sends      []agent.Send      `json:"sends,omitempty"`    // messages for it and how far they got
+	Provider   string            `json:"provider,omitempty"`
+	Session    string            `json:"session,omitempty"`
+	Pane       string            `json:"pane,omitempty"`
+	NodeRev    int               `json:"node_rev,omitempty"`
+	QueuedAt   time.Time         `json:"queued_at,omitzero"`
+	StartedAt  *time.Time        `json:"started_at,omitzero"`
+	EndedAt    *time.Time        `json:"ended_at,omitzero"`
 }
 
 // Event types and their payloads.
@@ -145,7 +148,8 @@ type TaskStatus struct {
 }
 
 type RunRef struct {
-	ID string `json:"id"`
+	ID     string `json:"id"`
+	Reason string `json:"reason,omitempty"` // run_canceled: why, when not the user
 }
 
 // RunStarting: run.start went out, for Dir as the machine names it.
@@ -179,15 +183,25 @@ type Observation struct {
 
 // State is everything the journal says.
 type State struct {
-	Seq   int64            `json:"seq"`
-	Tasks map[string]*Task `json:"tasks"`
-	Runs  map[string]*Run  `json:"runs"`
+	Seq      int64               `json:"seq"`
+	Tasks    map[string]*Task    `json:"tasks"`
+	Runs     map[string]*Run     `json:"runs"`
+	Projects map[string]*Project `json:"projects"`
+	Shares   map[string]*Share   `json:"shares"` // by machine
 }
 
-func New() *State { return &State{Tasks: map[string]*Task{}, Runs: map[string]*Run{}} }
+func New() *State {
+	return &State{Tasks: map[string]*Task{}, Runs: map[string]*Run{}, Projects: map[string]*Project{}, Shares: map[string]*Share{}}
+}
 
 // Apply folds one envelope in.
 func (s *State) Apply(env journal.Envelope) error {
+	if s.Projects == nil {
+		s.Projects = map[string]*Project{}
+	}
+	if s.Shares == nil {
+		s.Shares = map[string]*Share{}
+	}
 	for _, e := range env.Events {
 		if err := s.apply(e, env.At); err != nil {
 			return fmt.Errorf("%s: %w", e.Type, err)
@@ -271,9 +285,14 @@ func (s *State) apply(e journal.Event, at time.Time) error {
 	case ERunStopAsked:
 		return s.run(e, func(r *Run) { r.Want = "stop" })
 	case ERunCanceled:
+		var d RunRef
+		json.Unmarshal(e.Data, &d)
 		return s.run(e, func(r *Run) {
 			if r.State == Queued {
 				r.State, r.EndedAt = Canceled, &at
+				if d.Reason != "" {
+					r.Reason = d.Reason
+				}
 			}
 		})
 	case ERunAbandoned:
@@ -303,6 +322,9 @@ func (s *State) apply(e journal.Event, at time.Time) error {
 			}
 		})
 	default:
+		if ok, err := s.applyTeam(e, at); ok {
+			return err
+		}
 		return fmt.Errorf("unknown event")
 	}
 	return nil

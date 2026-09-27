@@ -27,6 +27,7 @@ const words = {
   'why.cli_missing': ['那台机器没装 {0}：运行会直接失败', '{0} is not installed there: the run would fail'],
   'why.auth_missing': ['那台机器上 {0} 没登录：运行会直接失败', '{0} is not logged in there: the run would fail'],
   'why.node_outdated': ['那台机器的 tend（{0}）太旧，不能续聊', 'tend there ({0}) is too old to continue a session'],
+  'why.no_access': ['机器 {0} 没有对你或这个任务的项目开放：可以请它的主人分享', 'Machine {0} is not open to you or to this task\'s project: its owner can share it'],
   'why.offline': ['机器离线（{0}）：运行先排队', 'The machine is offline ({0}): the run waits in the queue'],
   'why.connecting': ['正在连接机器：连上前运行先排队', 'Connecting to the machine: the run waits until it answers'],
   'why.slots': ['槽位已满（{0}）：运行等空出来', 'All slots are busy ({0}): the run waits for one'],
@@ -119,6 +120,7 @@ const words = {
   snapshot: ['运行快照', 'Run snapshot'], automatic: ['自动', 'Automatic'], cancelledQueue: ['已取消排队', 'Queued run canceled'],
   readonlyChat: ['仅查看已有对话，不在这里发送消息。', 'Read existing messages. Sending is not available here.']
 };
+Object.assign(words, teamWords);
 let lang = (navigator.language || 'zh').startsWith('zh') ? 'zh' : 'en';
 let theme = 'system';
 try { lang = localStorage.getItem('tend-lang') || lang; theme = localStorage.getItem('tend-theme') || theme; } catch (_) {}
@@ -135,7 +137,8 @@ const icon = name => `<svg class="icon" viewBox="0 0 24 24" aria-hidden="true">$
   offline:'<path d="m3 3 18 18M4 9a14 14 0 0 1 16 0M7 13a8 8 0 0 1 10 0m-7 4h4"/>',
   refresh:'<path d="M20 7v5h-5M4 17v-5h5M6 6a8 8 0 0 1 13 3M5 15a8 8 0 0 0 13 3"/>',
   chat:'<path d="M4 4h16v12H9l-5 4z"/>', error:'<path d="m12 3 10 18H2zM12 9v5m0 3h.01"/>',
-  pause:'<path d="M8 5v14M16 5v14"/>', logout:'<path d="M10 3H4v18h6M9 12h12m-5-5 5 5-5 5"/>'
+  pause:'<path d="M8 5v14M16 5v14"/>', user:'<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/>',
+  shield:'<path d="M12 3 4 6v6c0 5 3.5 8 8 9 4.5-1 8-4 8-9V6z"/>', logout:'<path d="M10 3H4v18h6M9 12h12m-5-5 5 5-5 5"/>'
 })[name] || '<circle cx="12" cy="12" r="8"/>'}</svg>`;
 const openStates = new Set(['queued', 'starting', 'running', 'unknown']);
 const statusSymbols = {queued:'◷', starting:'◌', running:'●', unknown:'?', exited:'✓', stopped:'■', failed:'!', canceled:'×', abandoned:'⊘', todo:'○', done:'✓', connected:'●', connecting:'◌', offline:'×', idle:'○', asked:'?', permission:'!', stalled:'…'};
@@ -245,8 +248,8 @@ function utilities(loggedIn=true) {
 function renderLogin() {
   app.innerHTML=`<div class="login-page"><header class="topbar"><div class="brand"><span class="brand-mark">&gt;_</span>tend</div>${utilities(false)}</header>
     <main id="main" class="login-main"><section class="login-card"><div class="eyebrow">TEND / PERSONAL OPERATIONS</div><h1>${t(ui.loggedOut?'loggedOut':'loginTitle')}</h1><p class="login-description">${t(ui.loggedOut?'logoutHelp':'loginDescription')}</p>
-    <form id="login-form" class="login-form"><div id="login-error" role="alert" hidden class="form-error"></div><label>${t('token')}<input type="password" name="token" id="token-input" autocomplete="off" spellcheck="false" placeholder="${t('tokenPlaceholder')}" required autofocus></label>
-    <div class="hint">${t('tokenHint')}<code>tend server token add --client web</code></div><button class="primary" type="submit">${t('signIn')}</button></form></section></main></div>`;
+    ${Team.loginExtras()}<form id="login-form" class="login-form"><div id="login-error" role="alert" hidden class="form-error"></div><label>${t('token')}<input type="password" name="token" id="token-input" autocomplete="off" spellcheck="false" placeholder="${t('tokenPlaceholder')}" required autofocus></label>
+    <div class="hint">${t('tokenHint')}<code>tend-server token add --client web</code></div><button class="primary" type="submit">${t('signIn')}</button></form></section></main></div>`;
 }
 function renderShell() {
   if(!ui.authenticated){renderLogin();return;}
@@ -254,7 +257,7 @@ function renderShell() {
     <div class="shell"><aside class="sidebar"><nav class="nav-section" aria-label="${t('workspace')}"><span class="nav-label">${t('operations')}</span>
       <button class="nav-item ${ui.page==='tasks'?'active':''}" data-action="page" data-page="tasks" ${ui.page==='tasks'?'aria-current="page"':''}>${icon('tasks')}${t('tasks')}<span class="count" id="count-tasks"></span></button>
       <button class="nav-item ${ui.page==='machines'?'active':''}" data-action="page" data-page="machines" ${ui.page==='machines'?'aria-current="page"':''}>${icon('machine')}${t('machines')}<span class="count" id="count-machines"></span></button>
-      <button class="nav-item future-nav" disabled title="${t('later')}">${icon('chat')}${t('sessions')}<small>${t('later')}</small></button></nav>
+      <button class="nav-item future-nav" disabled title="${t('later')}">${icon('chat')}${t('sessions')}<small>${t('later')}</small></button>${Team.nav()}</nav>
       <div class="sidebar-bottom">${button('keyboard',`${t('shortcuts')} <kbd>?</kbd>`,'','quiet')}<div class="sidebar-note">tend server · ${esc(ui.who)}</div></div></aside>
     <main id="main" class="main"><div id="connection-banner"></div><div id="page-content"></div></main></div>`;
   renderCounts();renderBanner();renderPage();
@@ -286,6 +289,7 @@ function statePanel(symbol,title,body,action,label) {return `<div class="state-p
 function renderPage() {
   const el=document.querySelector('#page-content');if(!el)return;
   if(ui.page==='machines'){renderMachines();return;}
+  if(Team.pages.includes(ui.page)){Team.render();return;}
   const runs=Object.values(ui.state.runs), unfinished=Object.values(ui.state.tasks).filter(task=>task.status==='todo').length;
   el.innerHTML=`<header class="page-heading"><div><h1>${t('tasks')}</h1><p class="page-subtitle">${t('taskSubtitle')}</p></div><div class="flex"><span class="heading-right">${date(new Date())}</span>${button('new',`${icon('plus')}${t('newTask')} <kbd>n</kbd>`,ui.online?'':'disabled','primary')}</div></header>
     <div class="metric-strip"><span class="metric"><strong>${unfinished}</strong>${t('todo')}</span><span class="metric">${badge('running')}<strong>${runs.filter(r=>['running','starting'].includes(r.state)).length}</strong></span><span class="metric">${badge('queued')}<strong>${runs.filter(r=>r.state==='queued').length}</strong></span><button type="button" class="metric" data-action="needs-you">${t('needsAttention')}<strong>${Object.values(ui.state.tasks).filter(needsYou).length}</strong></button></div>
@@ -370,7 +374,7 @@ function renderChatPanel(run) {
 }
 function renderMachines() {
   const el=document.querySelector('#page-content');if(!el)return;
-  el.innerHTML=`<header class="page-heading"><div><h1>${t('machines')}</h1><p class="page-subtitle">${t('machineSubtitle')}</p></div>${button('refresh-machines',`${icon('refresh')}${t('refresh')}`,ui.online?'':'disabled')}</header><div class="machine-page"><p class="hint mb-16">${t('pollNote')} · ${t('lastSync')} ${time(ui.machineSync)}</p><div class="machine-grid">${ui.machines.map(m=>`<article class="machine-card"><div class="flex between"><h2>${esc(m.name)}</h2>${badge(m.state)}</div><div class="machine-specs"><div><span class="meta-label">${t('slots')}</span><span class="mono">${m.active} / ${m.slots}</span><div class="load"><span data-fill="${Math.min(m.active/m.slots*100,100)}"></span></div></div><div><span class="meta-label">${t('queueCount')}</span><span class="mono">${m.queued}</span></div><div><span class="meta-label">${t('os')}</span><span class="mono">${esc(m.os||'—')}</span></div><div><span class="meta-label">${t('version')}</span><span class="mono">${esc(m.version||'—')}</span></div><div><span class="meta-label">${t('hostname')}</span><span class="mono">${esc(m.hostname||'—')}</span></div><div><span class="meta-label">${t('nextRetry')}</span><span class="hint">${m.retry_at?time(m.retry_at):m.state==='connected'?'—':t('noRetry')}</span></div></div>${m.error?`<div class="machine-error"><strong>${esc(m.error)}</strong> · ${esc(m.detail)}</div>`:''}<div class="mt-12">${button('machine-tasks',t('viewTasks'),`data-machine="${m.name}"`,'quiet')}</div></article>`).join('')||statePanel('machine',t('noMachines'),t('noMachinesHelp'))}</div><section class="agent-section"><div class="flex between"><h2>${t('agentsTitle')}</h2><small class="muted">${t('readonly')}</small></div><p class="hint">${t('configNote')}</p><div class="agent-list">${ui.agents.map(a=>`<div class="agent-row"><strong class="mono">${esc(a.name)}</strong><span>${esc(a.provider)} · ${esc(a.model||'—')}</span><span>${t('permissions')}: ${esc(a.permission||'—')}</span><span>${a.machine?esc(a.machine):t('allHosts')}</span></div>`).join('')}</div></section></div>`;
+  el.innerHTML=`<header class="page-heading"><div><h1>${t('machines')}</h1><p class="page-subtitle">${t('machineSubtitle')}</p></div><div class="flex">${button('refresh-machines',`${icon('refresh')}${t('refresh')}`,ui.online?'':'disabled')}${Team.machineHeader()}</div></header><div class="machine-page"><p class="hint mb-16">${t('pollNote')} · ${t('lastSync')} ${time(ui.machineSync)}</p><div class="machine-grid">${ui.machines.map(m=>`<article class="machine-card"><div class="flex between"><h2>${esc(m.name)}</h2>${badge(m.state)}</div><div class="machine-specs"><div><span class="meta-label">${t('slots')}</span><span class="mono">${m.active} / ${m.slots}</span><div class="load"><span data-fill="${Math.min(m.active/m.slots*100,100)}"></span></div></div><div><span class="meta-label">${t('queueCount')}</span><span class="mono">${m.queued}</span></div><div><span class="meta-label">${t('os')}</span><span class="mono">${esc(m.os||'—')}</span></div><div><span class="meta-label">${t('version')}</span><span class="mono">${esc(m.version||'—')}</span></div><div><span class="meta-label">${t('hostname')}</span><span class="mono">${esc(m.hostname||'—')}</span></div><div><span class="meta-label">${t('nextRetry')}</span><span class="hint">${m.retry_at?time(m.retry_at):m.state==='connected'?'—':t('noRetry')}</span></div></div>${m.error?`<div class="machine-error"><strong>${esc(m.error)}</strong> · ${esc(m.detail)}</div>`:''}${Team.machineCard(m)}<div class="mt-12">${button('machine-tasks',t('viewTasks'),`data-machine="${m.name}"`,'quiet')}</div></article>`).join('')||statePanel('machine',t('noMachines'),t('noMachinesHelp'))}</div>${Team.machineCreds()}<section class="agent-section"><div class="flex between"><h2>${t('agentsTitle')}</h2><small class="muted">${t('readonly')}</small></div><p class="hint">${t('configNote')}</p><div class="agent-list">${ui.agents.map(a=>`<div class="agent-row"><strong class="mono">${esc(a.name)}</strong><span>${esc(a.provider)} · ${esc(a.model||'—')}</span><span>${t('permissions')}: ${esc(a.permission||'—')}</span><span>${a.machine?esc(a.machine):t('allHosts')}</span></div>`).join('')}</div></section></div>`;
   for(const bar of el.querySelectorAll('[data-fill]'))bar.style.width=`${bar.dataset.fill}%`; // CSP blocks style attributes
 }
 
@@ -404,7 +408,7 @@ function agentOptions(value,optional=false) {
 }
 async function openTaskForm(edit=false) {
   if(!ui.online)return toast(t('offline'));
-  let task=edit?currentTask():{title:'',brief:'',dir:'',machine:'',agent:''};
+  let task=edit?currentTask():{title:'',brief:'',dir:'',machine:'',agent:'',project:''};
   if(edit){try{task=await api.taskGet({id:task.id});ui.briefs.set(task.id,task.brief||'');}catch(error){toast(errorText(error));return;}}
   ui.modalTask=edit?task.id:'';
   showModal('task-form',t(edit?'editTask':'newTask'),`<form id="task-form" data-edit="${edit}" data-id="${edit?task.id:''}" data-command="${commandID()}"><div class="modal-body stack"><div class="form-error" role="alert" hidden></div>
@@ -412,7 +416,7 @@ async function openTaskForm(edit=false) {
     <label>${t('brief')}<textarea name="brief" id="task-brief" rows="8" placeholder="${t('briefPlaceholder')}">${esc(task.brief||'')}</textarea><small>${t('briefHint')} · <span id="brief-bytes">${new TextEncoder().encode(task.brief||'').length}</span> B</small></label>
     <details><summary class="pointer">${t('preview')}</summary><div id="brief-preview" class="preview brief">${markdown(task.brief||'')}</div><small class="muted">${t('safeMarkdown')}</small></details>
     <label>${t('directory')}<input name="dir" class="mono" value="${esc(task.dir)}" placeholder="/work/project"><small>${t('dirHint')}</small></label>
-    <div class="form-grid"><label>${t('defaultMachine')}<select name="machine">${machineOptions(task.machine,true)}</select></label><label>${t('defaultAgent')}<select name="agent">${agentOptions(task.agent,true)}</select></label></div></div>
+    ${Team.projectField(task.project||'')}<div class="form-grid"><label>${t('defaultMachine')}<select name="machine">${machineOptions(task.machine,true)}</select></label><label>${t('defaultAgent')}<select name="agent">${agentOptions(task.agent,true)}</select></label></div></div>
     <footer class="modal-footer">${button('close-modal',t('cancel'))}<button type="submit" class="primary">${t(edit?'save':'create')}</button></footer></form>`,'',true);
 }
 const hints = {cli_missing:'hint.cli_missing', auth_missing:'hint.auth', auth:'hint.auth', quota:'hint.quota', rate_limit:'hint.later',
@@ -551,7 +555,7 @@ async function login(token) {
 }
 // enter shows the workspace of the session the browser holds.
 async function enter() {
-  const who=await api.session();ui.who=who?.name||'';
+  const who=await api.session();ui.who=who?.name||'';ui.me=who;Team.afterSignIn();
   ui.authenticated=true;ui.online=true;ui.loggedOut=false;ui.loading=true;renderShell();await refreshData();
 }
 async function refreshData() {
@@ -561,25 +565,32 @@ async function refreshData() {
     if(!ui.authenticated)return;
     ui.state=state;ui.machines=machines.machines;ui.agents=agents.agents;ui.lastSync=new Date();ui.machineSync=new Date();ui.loading=false;
     if(!ui.state.tasks[ui.task])ui.task=Object.keys(ui.state.tasks)[0]||'';
-    ui.focusTask=ui.task;ui.unsubscribe?.();ui.unsubscribe=api.subscribe({after_seq:state.seq},receiveJournal);
+    ui.focusTask=ui.task;ui.unsubscribe?.();ui.unsubscribe=api.subscribe({after_seq:state.seq},receiveJournal,()=>{scheduleSync();refreshMachines();});
     renderShell();await loadDetail();
   } catch(error){ui.loading=false;ui.error=errorText(error);renderPage();}
 }
-let journalRenderTimer;
+let journalRenderTimer,syncTimer;
+// receiveJournal folds each pushed envelope into the state; a gap, an event about something the page does not hold, or
+// a refetch push reads the state again.
 function receiveJournal(envelope) {
   if(envelope.seq<=ui.state.seq)return;
+  if(envelope.seq!==ui.state.seq+1)return scheduleSync();
   for(const event of envelope.events)if(event.type==='task_edited'&&event.data.brief!==undefined)ui.briefs.delete(event.data.id);
   const edited=envelope.events.find(e=>e.type==='task_edited'&&e.data.id===ui.modalTask);
   if(edited&&modal.open&&ui.modalType==='task-form')modalError(t('pushed')+' · '+t('editHint'));
-  clearTimeout(journalRenderTimer);journalRenderTimer=setTimeout(syncState,100);
+  try{Fold.apply(ui.state,envelope);}catch(_){return scheduleSync();}
+  clearTimeout(journalRenderTimer);journalRenderTimer=setTimeout(stateChanged,50);
 }
-// syncState reads the state the coordinator folded (the page never folds events itself).
+function scheduleSync(){clearTimeout(syncTimer);syncTimer=setTimeout(syncState,100);}
 async function syncState() {
   try{
     const state=await api.stateGet({no_briefs:true});if(!ui.authenticated)return;
-    ui.state=state;ui.lastSync=new Date();refreshDispatchAdvice();preserveRender();
-    if(!ui.briefs.has(ui.task))await loadDetail();else if(ui.tab==='output')fetchOutput();
+    ui.state=state;await stateChanged();
   }catch(error){if(error.code!=='closed')toast(errorText(error));}
+}
+async function stateChanged() {
+  ui.lastSync=new Date();refreshDispatchAdvice();preserveRender();
+  if(!ui.briefs.has(ui.task))await loadDetail();else if(ui.tab==='output')fetchOutput();
 }
 function preserveRender() {
   const active=document.activeElement,id=active?.id,selection=active instanceof HTMLInputElement?[active.selectionStart,active.selectionEnd]:null;
@@ -633,7 +644,7 @@ async function fetchChat(older=false) {
   ui.busy.add(key);if(older)ui.busy.add('older-chat');
   const el=document.querySelector('#chat-list'),oldHeight=el?.scrollHeight||0,oldTop=el?.scrollTop||0;
   try{
-    const page=await api.nodeCall({machine:run.machine,method:'messages',params:{provider:run.provider,session_id:run.session,before:older?current?.before??-1:-1,n:40,file:current?.file}});
+    const page=await api.runMessages({run:run.id,before:older?current?.before??-1:-1,n:40,file:current?.file});
     if(!ui.authenticated)return;
     ui.chats.set(run.id,{...page,messages:older?[...page.messages,...(current?.messages||[])]:page.messages});
   }catch(error){ui.chats.set(run.id,{error:errorText(error)});}
@@ -678,7 +689,8 @@ document.addEventListener('submit',async event=>{
     else if(form.id==='reply-form')await submitReply(form);
     else if(form.id==='send-form')await submitSend(form);
     else if(form.classList.contains('answer-form'))await submitAnswer(form,submitter);
-  }catch(error){if(form.id==='reply-form'||form.id==='send-form'||form.classList.contains('answer-form')){const e=form.querySelector('.form-error');e.hidden=false;e.textContent=errorText(error);}else modalError(errorText(error));if(error.code==='conflict'){const state=await api.stateGet({no_briefs:true});ui.state=state;refreshDispatchAdvice();}}
+    else await Team.submit(form);
+  }catch(error){if(form.id==='reply-form'||form.id==='send-form'||form.classList.contains('answer-form')){const e=form.querySelector('.form-error');e.hidden=false;e.textContent=errorText(error);}else if(!modal.contains(form))toast(errorText(error));else modalError(errorText(error));if(error.code==='conflict'){const state=await api.stateGet({no_briefs:true});ui.state=state;refreshDispatchAdvice();}}
   finally{ui.modalSubmitting=false;if(submitter?.isConnected)submitter.disabled=false;if(form.id==='dispatch-form')refreshDispatchAdvice();}
 });
 document.addEventListener('click',async event=>{
@@ -688,7 +700,7 @@ document.addEventListener('click',async event=>{
     switch(action){
       case 'language':lang=lang==='zh'?'en':'zh';applyPreferences();renderShell();break;
       case 'logout':confirmAction('logout');break;
-      case 'page':ui.page=target.dataset.page;renderShell();if(ui.page==='tasks')await loadDetail();break;
+      case 'page':ui.page=target.dataset.page;renderShell();if(ui.page==='tasks')await loadDetail();else await Team.enter(ui.page);break;
       case 'new':await openTaskForm();break;
       case 'edit':await openTaskForm(true);break;
       case 'select-task':await selectTask(target.dataset.id);break;
@@ -716,6 +728,7 @@ document.addEventListener('click',async event=>{
       case 'machine-tasks':ui.page='tasks';ui.machine=target.dataset.machine;ui.status='';ui.runState='';ui.search='';ui.mobileDetail=false;renderShell();break;
       case 'reconnect':await reconnect();break;
       case 'keyboard':showKeyboard();break;
+      default:await Team.click(action,target);
     }
   }catch(error){toast(errorText(error));}
 });
@@ -738,6 +751,7 @@ document.addEventListener('change',async event=>{
   else if(el.id==='run-filter'){ui.runState=el.value;renderTaskList();}
   else if(el.id==='run-select'){ui.run=el.value;ui.follow=true;ui.pending=0;renderDetail();if(ui.tab==='conversation')await fetchChat();else await fetchOutput();}
   else if(el.id==='dispatch-machine'||el.id==='dispatch-agent')refreshDispatchAdvice();
+  else if(el.dataset.teamRole||el.dataset.teamUserRole){try{await Team.change(el);}catch(error){toast(errorText(error));}}
   if(modal.open&&ui.modalType==='task-form')ui.modalDirty=true;
 });
 modal.addEventListener('cancel',event=>{event.preventDefault();closeModal();});
@@ -765,4 +779,6 @@ setInterval(()=>{
 setInterval(()=>{if(ui.authenticated&&ui.online&&!document.hidden)refreshMachines();},5000);
 document.addEventListener('visibilitychange',()=>{if(!document.hidden&&ui.authenticated&&ui.online){refreshMachines();if(ui.tab==='output')fetchOutput();}});
 applyPreferences();renderShell();
+Team.loadLogins().then(()=>{if(!ui.authenticated)renderShell();});
+window.addEventListener('hashchange',()=>{if(!ui.authenticated)renderShell();});
 api.session().then(enter,()=>{});

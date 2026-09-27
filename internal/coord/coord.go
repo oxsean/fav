@@ -46,7 +46,13 @@ const (
 	MRunContinue   = "run.continue"
 	MRunAnswer     = "run.answer"
 	MRunSend       = "run.send"
+	MRunMessages   = "run.messages"
+	MProjectCreate = "project.create"
+	MProjectEdit   = "project.edit"
+	MProjectMember = "project.member"
+	MMachineShare  = "machine.share"
 	PushJournal    = "journal"
+	PushRefetch    = "refetch" // what the subscriber may see changed: fetch the state again
 	defaultSlots   = 2
 	subscribeQueue = 256
 )
@@ -67,6 +73,11 @@ type Options struct {
 	// node and no ssh.
 	Remote bool
 	Nodes  []string
+	// MachineOwner (mode 2 with a team) names the user who owns a machine; nil: Owner owns every machine and is the
+	// only user.
+	MachineOwner func(machine string) string
+	// Users finds a user of the team (mode 2).
+	Users func(id string) (User, bool)
 	// OpenLog opens the event log in dir, folding every envelope in order; nil is the JSONL journal.
 	OpenLog func(dir string, fold func(journal.Envelope) error) (EventLog, error)
 }
@@ -81,6 +92,9 @@ type EventLog interface {
 	ReadOnly() error
 	Close() error
 }
+
+// defaultLog opens the log when Options.OpenLog is nil; the coord tests run on SQLite with TEND_TEST_LOG=sqlite.
+var defaultLog = openJournal
 
 func openJournal(dir string, fold func(journal.Envelope) error) (EventLog, error) {
 	return journal.Open(filepath.Join(dir, "events.jsonl"), fold)
@@ -125,7 +139,7 @@ func Open(opt Options) (*Coord, error) {
 	}
 	open := opt.OpenLog
 	if open == nil {
-		open = openJournal
+		open = defaultLog
 	}
 	c.log, err = open(dir, func(env journal.Envelope) error {
 		if env.Command != nil {

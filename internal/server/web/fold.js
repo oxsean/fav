@@ -1,0 +1,126 @@
+'use strict';
+// Fold applies journal envelopes to the state the page holds, as task.State.Apply does in Go (fold_test.go runs both
+// on the same envelopes). An event about something the page does not hold throws: the page fetches the state again.
+globalThis.Fold = (() => {
+  const openStates = new Set(['queued', 'starting', 'running', 'unknown']);
+  const rank = {queued: 0, starting: 1, running: 2, unknown: 2, exited: 3, stopped: 3, failed: 3, canceled: 3, abandoned: 3};
+  const need = (map, id, what) => {
+    const x = map[id];
+    if (!x) throw new Error(`no ${what} ${id}`);
+    return x;
+  };
+
+  function observe(r, o) {
+    if (!openStates.has(r.state) && r.state !== 'abandoned') return;
+    if ((o.node_rev || 0) < (r.node_rev || 0)) return;
+    if (r.state === 'abandoned') {
+      if (rank[o.state] < 3) return;
+    } else if (rank[o.state] < rank[r.state]) return;
+    r.state = o.state;
+    r.node_rev = o.node_rev || 0;
+    if (o.exit_code !== undefined && o.exit_code !== null) r.exit_code = o.exit_code;
+    if (o.reason) r.reason = o.reason;
+    if (o.detail) r.detail = o.detail;
+    if ((o.node_rev || 0) > 0) {
+      r.attention = o.attention; r.ask = o.ask; r.note = o.note; r.last = o.last; r.usage = o.usage;
+      r.stream = o.stream; r.requests = o.requests;
+      const node = o.sends || [];
+      r.sends = [...node, ...(r.sends || []).filter(m => !node.some(x => x.id === m.id))];
+      r.answers = (r.answers || []).filter(a => (r.requests || []).some(q => q.id === a.request));
+    }
+    if (o.session) { r.provider = o.provider; r.session = o.session; }
+    if (o.pane) r.pane = o.pane;
+    if (o.started_at) r.started_at = o.started_at;
+    if (o.ended_at) r.ended_at = o.ended_at;
+    if (!openStates.has(r.state)) {
+      r.requests = undefined; r.answers = undefined;
+      r.sends = (r.sends || []).map(m => m.state === 'queued' ? {...m, state: 'failed'} : m);
+    }
+  }
+
+  function applyEvent(s, e, at) {
+    const d = e.data;
+    switch (e.type) {
+      case 'task_created':
+        s.tasks[d.id] = {...d, rev: 1, created_at: at, updated_at: at};
+        break;
+      case 'task_edited': {
+        const t = need(s.tasks, d.id, 'task');
+        for (const k of ['title', 'brief', 'dir', 'machine', 'agent', 'project']) if (d[k] !== undefined) t[k] = d[k];
+        t.rev = (t.rev || 0) + 1; t.updated_at = at;
+        break;
+      }
+      case 'task_status_set': {
+        const t = need(s.tasks, d.id, 'task');
+        t.status = d.status; t.updated_at = at; t.rev = (t.rev || 0) + 1;
+        break;
+      }
+      case 'run_queued':
+        s.runs[d.id] = {...d, state: 'queued', want: 'run', queued_at: at};
+        break;
+      case 'run_starting': {
+        const r = need(s.runs, d.id, 'run');
+        if (r.state === 'queued') { r.state = 'starting'; if (d.dir) r.dir = d.dir; }
+        break;
+      }
+      case 'run_observed':
+        observe(need(s.runs, d.id, 'run'), d);
+        break;
+      case 'run_stop_requested':
+        need(s.runs, d.id, 'run').want = 'stop';
+        break;
+      case 'run_canceled': {
+        const r = need(s.runs, d.id, 'run');
+        if (r.state === 'queued') { r.state = 'canceled'; r.ended_at = at; if (d.reason) r.reason = d.reason; }
+        break;
+      }
+      case 'run_abandoned': {
+        const r = need(s.runs, d.id, 'run');
+        if (openStates.has(r.state)) { r.state = 'abandoned'; r.want = 'stop'; r.ended_at = at; }
+        break;
+      }
+      case 'run_answered': {
+        const r = need(s.runs, d.id, 'run');
+        if (!(r.answers || []).some(a => a.request === d.answer.request)) r.answers = [...(r.answers || []), d.answer];
+        break;
+      }
+      case 'run_sent': {
+        const r = need(s.runs, d.id, 'run');
+        if (!(r.sends || []).some(m => m.id === d.send.id)) r.sends = [...(r.sends || []), d.send];
+        break;
+      }
+      case 'project_created':
+        s.projects[d.id] = {...d, rev: 1, created_at: at, updated_at: at};
+        break;
+      case 'project_edited': {
+        const p = need(s.projects, d.id, 'project');
+        if (d.name !== undefined) p.name = d.name;
+        if (d.owner !== undefined) p.owner = d.owner;
+        p.rev = (p.rev || 0) + 1; p.updated_at = at;
+        break;
+      }
+      case 'member_set': {
+        const p = need(s.projects, d.project, 'project');
+        p.members = {...(p.members || {})};
+        if (d.role) p.members[d.user] = d.role; else delete p.members[d.user];
+        p.rev = (p.rev || 0) + 1; p.updated_at = at;
+        break;
+      }
+      case 'machine_shared':
+        if (!(d.users || []).length && !(d.projects || []).length) delete s.shares[d.machine];
+        else s.shares[d.machine] = d;
+        break;
+      default: // an event this page does not know yet: only the seq moves on
+    }
+  }
+
+  // apply folds env into s (which it changes) and returns s.
+  function apply(s, env) {
+    s.tasks ||= {}; s.runs ||= {}; s.projects ||= {}; s.shares ||= {};
+    for (const e of env.events || []) applyEvent(s, e, env.at);
+    s.seq = env.seq;
+    return s;
+  }
+
+  return {apply};
+})();

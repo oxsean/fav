@@ -3,11 +3,14 @@ package coord
 import (
 	"context"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/oxsean/fav/internal/journal"
+	"github.com/oxsean/fav/internal/store"
 	"github.com/oxsean/fav/internal/task"
 	"github.com/oxsean/fav/internal/tend"
 )
@@ -99,5 +102,22 @@ func TestAServerWithoutNodesListsNoMachinesAsAnEmptyList(t *testing.T) {
 	b, _ := json.Marshal(c.Machines(context.Background(), false))
 	if string(b) != `{"machines":[]}` {
 		t.Fatalf("the web UI maps over this list: %s", b)
+	}
+}
+
+func sqliteLog(dir string, fold func(journal.Envelope) error) (EventLog, error) {
+	l, err := store.Open(filepath.Join(dir, store.File), fold)
+	if err != nil {
+		return nil, err
+	}
+	return l, nil
+}
+
+func TestTheSuiteRunsOnTheLogItNames(t *testing.T) {
+	e := newEnv(t, tend.Config{})
+	e.start()
+	_, onSQLite := e.c.log.(*store.Log)
+	if want := os.Getenv("TEND_TEST_LOG") == "sqlite"; onSQLite != want {
+		t.Fatalf("TEND_TEST_LOG=%q but the log is %T", os.Getenv("TEND_TEST_LOG"), e.c.log)
 	}
 }

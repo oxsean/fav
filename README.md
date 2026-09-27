@@ -418,7 +418,7 @@ process on its machine, which records how the run ends; the next coordinator rea
 **Machines, mode 1 (ssh).** This machine plus every configured host (`tend hosts add`, above). The coordinator reaches each
 host with `ssh <alias> tend node --stdio`; runs keep going when the connection drops.
 
-**Machines, mode 2 (a server).** A long-running `tend-server` — a program of its own, next to `tend` in each release, or `tend hosts install <host> --server` — holds the journal; machines dial in:
+**Machines, mode 2 (a server).** A long-running `tend-server` — a program of its own, next to `tend` in each release, or `tend hosts install <host> --server` — holds the journal in a SQLite database (`coord/tend.db`); machines dial in:
 
 ```bash
 # on the server (a loopback or tailnet address; any other needs --tls-cert/--tls-key, or --plain behind a forwarder)
@@ -441,15 +441,45 @@ A node only runs in `allow_dirs`. Unless `node.allow_bypass` is set, it runs `co
 known bypass flag. With `node.allow_profiles` it runs just those names, each as its own config defines it (define them
 there, with the permission they need). `tend-server token rm <name>` revokes a token and drops its connections. A node token is bound to the first machine that connects with it; another machine is refused until `tend-server token rebind <name>`.
 
-**Web UI.** The server also serves a page at its own address (`http://100.101.8.10:7788/`). Sign in with a client
-token (`tend-server token add --client web`); the browser keeps it in an HttpOnly cookie for 30 days, and signing out or
-`tend-server token rm web` ends the session. The page lists tasks and their runs; creates, edits and dispatches tasks;
-previews a dispatch; follows a run's output and conversation; shows why a run ended or what it asks and takes a reply;
-stops or abandons runs; marks tasks done, reopens or cancels them; and shows the
-machines and agent profiles. It follows the journal live and reconnects on its own.
+**People.** The server is for a team. People sign in with GitHub or any OIDC provider (Gitea, GitLab, Keycloak, Google)
+listed in the server's `config.json`:
 
-A client token is as good as a shell on every node within those limits: run the server only inside a tailnet, and
-with `--plain` let only a forwarder bound to the tailnet address reach it.
+```json
+{"server": {"public_url": "https://tend.example", "logins": [
+  {"name": "gitea", "kind": "oidc", "display": "Gitea", "issuer": "https://git.example", "client_id": "…", "client_secret_file": "/etc/tend/gitea-secret"},
+  {"name": "github", "kind": "github", "client_id": "…", "client_secret_file": "/etc/tend/github-secret"}]}}
+```
+
+The provider's callback is `<public_url>/auth/<name>/callback`. Nobody joins on their own: `tend-server admin add
+ann@corp.example --role admin` makes the first admin, and after that admins add people on the Admin page or with
+`tend-server admin add <email | domain | provider:username>` (a verified email, any verified email of a domain, or an
+account), or send a one-time invitation link (`tend-server admin invite`, or the Admin page; it lasts 3 days).
+`tend-server admin disable <user>` signs someone out everywhere at once.
+
+Tasks belong to projects. An admin creates a project; its owner adds members as participants (create, dispatch, answer,
+send) or readers (look only). Someone outside a project sees nothing of it, not even that it exists; a task outside any
+project is its creator's. Machines are private too: whoever adds a machine (the Machines page gives a node token and the
+command to run) owns it, and only they dispatch to it until they share it with people or projects. Runs on a machine use
+its owner's claude / codex login, git identity and files — share a machine set up for that (its own OS user or a
+container), not your laptop. A run's permission requests are for the machine's owner and whoever dispatched it; a share
+can let everyone it opens to approve them too.
+
+**Web UI.** The server also serves a page at its own address (`http://100.101.8.10:7788/`). Sign in with a provider, or
+with a token; the browser session lasts 30 days, and signing out or revoking it ends it. The page lists tasks and their
+runs; creates, edits and dispatches tasks; previews a dispatch; follows a run's output and conversation; shows why a run
+ended or what it asks and takes a reply; stops or abandons runs; marks tasks done, reopens or cancels them; shows the
+machines, who owns them and whom they are shared with; manages projects and members; makes personal tokens for the CLI
+and TUI on the Account page; and, for admins, users, admission rules, invitations and the audit log. It follows the
+journal live and reconnects on its own.
+
+**The server's database.** `tend-server import` moves a mode 1 journal (`coord/events.jsonl`) into the database, with
+the server stopped; the server refuses to start while that journal holds events and no database exists. Beside a
+running server, `tend-server db check` checks the database, `tend-server export -o f` writes it as a journal that
+`tend journal verify` reads, and `tend-server backup [dir]` copies it with `coord/id` and the config into a new
+directory. People, their sign-in accounts and credentials (only hashes) and the audit log are in the same database.
+
+A client token or a signed-in browser can run agents on every machine shared with its user, within that node's limits:
+keep the server inside a tailnet, or put it behind TLS (`--tls-cert/--tls-key`, or `--plain` behind a TLS proxy).
 
 ## Query syntax
 
@@ -494,7 +524,7 @@ the favorite follows) and does not count the parked process as running.
 | `~/.agent/tend/config.json` | written by the settings panel |
 | `~/.agent/tend/coord/` | the coordinator's journal of tasks and runs (`events.jsonl`, one checksummed line per change) |
 | `~/.agent/tend/node/runs/` | one directory per run on this machine: its frozen command, state, output log; removed a week after it ended |
-| `~/.agent/tend/server/tokens.json` | mode 2: token names, roles and hashes |
+| `<server home>/coord/tend.db` | `tend-server` only: the journal, people, sign-in accounts, credential hashes and the audit log (SQLite) |
 | `~/.agent/tend/hosts/` | the last list fetched from each other machine (list fields: titles, summaries, tags, paths; no messages), ssh connection sockets |
 
 Environment: `TEND_HOME` (or `TEND_HOME`) moves the data directory, `TEND_UI=fzf|tui` sets the default front-end, `TEND_ICONS=nerd|ascii` picks icons, `TEND_TRACE=1` logs a timeline of keys, wheel and background events to `~/.agent/tend/trace.log` (for reporting a slow or stuck UI).

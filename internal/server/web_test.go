@@ -13,6 +13,7 @@ import (
 	"github.com/coder/websocket"
 
 	"github.com/oxsean/fav/internal/coord"
+	"github.com/oxsean/fav/internal/store"
 	"github.com/oxsean/fav/internal/task"
 	"github.com/oxsean/fav/internal/wire"
 )
@@ -74,7 +75,7 @@ func TestABrowserLogsInWithAClientToken(t *testing.T) {
 	}
 	b, _ := io.ReadAll(resp.Body)
 	resp.Body.Close()
-	if !strings.Contains(string(b), `"name":"me"`) {
+	if !strings.Contains(string(b), `"id":"local"`) || ck[0].Value == r.client {
 		t.Fatalf("%s", b)
 	}
 
@@ -108,10 +109,11 @@ func TestARevokedTokenEndsTheBrowserSession(t *testing.T) {
 	r := newRig(t)
 	c := browser(t)
 	login(t, c, r.url, r.client)
-	if err := RemoveToken(r.home, "me"); err != nil {
+	cred, _, _ := r.srv.opt.Dir.find(r.client, store.KindToken)
+	if err := r.team.Revoke(cred.ID); err != nil {
 		t.Fatal(err)
 	}
-	r.srv.tokens()
+	r.srv.sweep()
 	if resp, _ := c.Get(r.url + "/session"); resp.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("%d", resp.StatusCode)
 	}

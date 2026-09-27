@@ -182,6 +182,15 @@ func (c *Coord) Attach(name string, conn Conn, check func(remote.Hello) error) e
 	return nil
 }
 
+// Expect makes name a machine of mode 2 before its node first dials in: it is listed offline and can be shared.
+func (c *Coord) Expect(name string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.ms[name] == nil {
+		c.ms[name] = &machine{name: name, attached: true}
+	}
+}
+
 // local is this machine's node, served in this process.
 func (c *Coord) local() Conn {
 	handle := c.opt.Node.Handler(c.opt.Sessions)
@@ -461,6 +470,10 @@ func (c *Coord) converge(ctx context.Context, m *machine) {
 		if r.State != task.Queued || r.Want != "run" {
 			continue
 		}
+		if !c.stillAllowed(r) {
+			starting = append(starting, journal.NewEvent(task.ERunCanceled, task.RunRef{ID: r.ID, Reason: ReasonAccessRevoked}))
+			continue
+		}
 		if used >= c.slots(m.name) {
 			break
 		}
@@ -482,6 +495,9 @@ func (c *Coord) converge(ctx context.Context, m *machine) {
 	}
 	if err == nil {
 		for _, e := range starting {
+			if e.Type != task.ERunStarting {
+				continue
+			}
 			var d task.RunStarting
 			json.Unmarshal(e.Data, &d)
 			starts = append(starts, c.st.Runs[d.ID])
@@ -494,7 +510,7 @@ func (c *Coord) converge(ctx context.Context, m *machine) {
 	for i, r := range starts {
 		c.sent[r.ID] = time.Now()
 		params[i] = node.StartParams{Run: r.ID, Task: r.Task, Coordinator: c.id, Profile: r.Profile, Dir: r.Dir,
-			Brief: r.Brief, Title: r.Title, Runner: r.Runner, Resume: r.Resume}
+			Brief: r.Brief, Title: r.Title, Runner: r.Runner, Resume: r.Resume, Project: r.Project, Dispatcher: c.person(r.Dispatcher)}
 	}
 	canResume := slices.Contains(m.hello.Methods, node.MRunResume)
 	var inputs []input

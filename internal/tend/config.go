@@ -36,6 +36,28 @@ type Config struct {
 	// NotifyEvents narrows which (run.waiting, run.asked, run.failed, run.stalled).
 	NotifyCommand []string `json:"notify_command,omitempty"`
 	NotifyEvents  []string `json:"notify_events,omitempty"`
+	// Server is tend-server's own settings (its home's config.json).
+	Server *ServerConfig `json:"server,omitempty"`
+}
+
+// ServerConfig is how tend-server lets people sign in.
+type ServerConfig struct {
+	// PublicURL is the address browsers use (https://… on a public deployment): OAuth callbacks go there, and https
+	// makes cookies Secure behind a proxy that ends TLS.
+	PublicURL string  `json:"public_url,omitempty"`
+	Logins    []Login `json:"logins,omitempty"`
+}
+
+// Login is one way to sign in: a GitHub OAuth App, or any OpenID Connect provider (GitLab, Gitea, Keycloak…).
+type Login struct {
+	Name     string `json:"name"`               // in its URLs: /auth/<name>/…
+	Kind     string `json:"kind"`               // github | oidc
+	Display  string `json:"display,omitempty"`  // on the sign-in page
+	Issuer   string `json:"issuer,omitempty"`   // oidc: its discovery document is <issuer>/.well-known/openid-configuration
+	BaseURL  string `json:"base_url,omitempty"` // github: another GitHub (Enterprise); default https://github.com
+	ClientID string `json:"client_id"`
+	// ClientSecretFile holds the client secret (mode 0600); the secret itself never goes in config.json.
+	ClientSecretFile string `json:"client_secret_file"`
 }
 
 // AgentProfile is one way to run an agent.
@@ -62,6 +84,15 @@ type NodeConfig struct {
 	AllowProfiles []string `json:"allow_profiles,omitempty"`
 	StallAfter    string   `json:"stall_after,omitempty"`
 	Slots         int      `json:"slots,omitempty"` // runs this node takes at once, whoever sends them; 0 no bound // a background run silent this long is marked stalled; default 15m, "off"
+	// ShareSessions is which of this machine's sessions the node answers: all | runs | none; a node that dials a
+	// server defaults to runs.
+	ShareSessions string `json:"share_sessions,omitempty"`
+	// Projects narrows where a project's runs may work on this machine, by project id.
+	Projects map[string]NodeProject `json:"projects,omitempty"`
+}
+
+type NodeProject struct {
+	Dirs []string `json:"dirs,omitempty"` // under allow_dirs: the only directories this project's runs use here
 }
 
 type CoordinatorConfig struct {

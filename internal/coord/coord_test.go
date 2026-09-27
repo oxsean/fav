@@ -27,6 +27,9 @@ import (
 
 // TestMain doubles as tend: the supervisor and the fake agent are this binary started with _run / _fake-agent.
 func TestMain(m *testing.M) {
+	if os.Getenv("TEND_TEST_LOG") == "sqlite" {
+		defaultLog = sqliteLog
+	}
 	if len(os.Args) > 2 && os.Args[1] == "_run" {
 		if err := node.Supervise(os.Args[2]); err != nil {
 			os.Exit(2)
@@ -59,6 +62,8 @@ type env struct {
 	cli    *wire.Conn
 	cmd    atomic.Int64
 	probe  func(provider string) agent.Check
+	owner  func(machine string) string // team mode
+	users  map[string]User
 }
 
 func newEnv(t *testing.T, cfg tend.Config) *env {
@@ -91,7 +96,11 @@ func (e *env) start() {
 	e.t.Helper()
 	n := node.New(e.home)
 	n.Probe = e.probe
-	c, err := Open(Options{Home: e.home, Version: "test", Config: e.cfg, Node: n, Sessions: remote.NewLocal("test"), Dial: e.dial})
+	opt := Options{Home: e.home, Version: "test", Config: e.cfg, Node: n, Sessions: remote.NewLocal("test"), Dial: e.dial, MachineOwner: e.owner}
+	if e.users != nil {
+		opt.Users = func(id string) (User, bool) { u, ok := e.users[id]; return u, ok }
+	}
+	c, err := Open(opt)
 	if err != nil {
 		e.t.Fatal(err)
 	}

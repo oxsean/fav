@@ -3,6 +3,7 @@ package coord
 import (
 	"context"
 	"encoding/json"
+	"maps"
 	"slices"
 	"strings"
 	"time"
@@ -55,7 +56,8 @@ type MachinesParams struct {
 
 type Machine struct {
 	Name     string                 `json:"name"`
-	State    string                 `json:"state"` // connected | connecting | offline | idle
+	Owner    string                 `json:"owner,omitempty"` // team mode: the user who added it
+	State    string                 `json:"state"`           // connected | connecting | offline | idle
 	Error    string                 `json:"error,omitempty"`
 	Detail   string                 `json:"detail,omitempty"`
 	RetryAt  *time.Time             `json:"retry_at,omitzero"`
@@ -97,12 +99,13 @@ var readMethods = []string{remote.MHello, remote.MList, remote.MMessages, remote
 
 // Methods are the client methods.
 var Methods = []string{MStateGet, MTaskGet, MTaskCreate, MTaskEdit, MTaskStatus, MRunDispatch, MRunStop, MRunAbandon, MRunTail,
-	MAgentList, MMachineList, MSubscribe, MNodeCall, MRunPreview, MRunContinue, MRunAnswer, MRunSend}
+	MAgentList, MMachineList, MSubscribe, MNodeCall, MRunPreview, MRunContinue, MRunAnswer, MRunSend, MRunMessages,
+	MProjectCreate, MProjectEdit, MProjectMember, MMachineShare}
 
 // Handler answers this machine's user.
 func (c *Coord) Handler() wire.Handler { return c.HandlerFor(Owner) }
 
-// HandlerFor answers p: each method first checks what p may do.
+// HandlerFor answers p: each method first checks what p may do, and answers only about what p may see.
 func (c *Coord) HandlerFor(p Principal) wire.Handler {
 	return func(ctx context.Context, r *wire.Request) (any, error) {
 		if err := p.may(r.Method); err != nil {
@@ -114,56 +117,66 @@ func (c *Coord) HandlerFor(p Principal) wire.Handler {
 		case remote.MHello:
 			return remote.Hello{Proto: wire.Proto, Version: c.opt.Version, Role: "coordinator", Methods: Methods}, nil
 		case MStateGet:
-			var p StateParams
-			if err := r.Decode(&p); err != nil {
+			var sp StateParams
+			if err := r.Decode(&sp); err != nil {
 				return nil, err
 			}
-			return c.state(!p.NoBriefs), nil
+			return c.visibleState(p, c.state(!sp.NoBriefs)), nil
 		case MTaskGet:
-			var p task.RunRef
-			if err := r.Decode(&p); err != nil {
+			var rp task.RunRef
+			if err := r.Decode(&rp); err != nil {
 				return nil, err
 			}
 			c.mu.Lock()
 			defer c.mu.Unlock()
-			if t := taskView(c.st, p.ID); t != nil {
-				return t, nil
+			if canRead(c.st, p, c.st.Tasks[rp.ID]) {
+				return taskView(c.st, rp.ID), nil
 			}
-			return nil, notFound(p.ID)
+			return nil, notFound(rp.ID)
 		case MAgentList:
 			return Agents{Agents: c.Profiles()}, nil
 		case MMachineList:
-			var p MachinesParams
-			if err := r.Decode(&p); err != nil {
+			var mp MachinesParams
+			if err := r.Decode(&mp); err != nil {
 				return nil, err
 			}
-			return c.Machines(ctx, p.Connect), nil
-		case MSubscribe:
-			return c.subscribe(r)
-		case MRunTail:
-			var p TailParams
-			if err := r.Decode(&p); err != nil {
-				return nil, err
-			}
+			ms := c.Machines(ctx, mp.Connect)
 			c.mu.Lock()
-			run := c.st.Runs[p.Run]
+			ms.Machines = slices.DeleteFunc(ms.Machines, func(m Machine) bool { return !c.canSee(p, m.Name) })
 			c.mu.Unlock()
-			if run == nil {
-				return nil, notFound(p.Run)
+			return ms, nil
+		case MSubscribe:
+			return c.subscribe(p, r)
+		case MRunTail:
+			var tp TailParams
+			if err := r.Decode(&tp); err != nil {
+				return nil, err
+			}
+			run, err := c.readableRun(p, tp.Run)
+			if err != nil {
+				return nil, err
 			}
 			var out node.Tail
-			err := c.call(ctx, run.Machine, node.MRunTail, node.TailParams{Run: p.Run, Before: p.Before, Max: p.Max, File: p.File}, &out)
+			err = c.call(ctx, run.Machine, node.MRunTail, node.TailParams{Run: tp.Run, Before: tp.Before, Max: tp.Max, File: tp.File}, &out)
 			return out, err
+		case MRunMessages:
+			return c.runMessages(ctx, p, r)
 		case MNodeCall:
-			var p NodeCall
-			if err := r.Decode(&p); err != nil {
+			var np NodeCall
+			if err := r.Decode(&np); err != nil {
 				return nil, err
 			}
-			if !slices.Contains(readMethods, p.Method) {
-				return nil, &wire.Error{Code: wire.CodeUnauthorized, Detail: p.Method}
+			if !slices.Contains(readMethods, np.Method) {
+				return nil, forbidden(np.Method)
+			}
+			c.mu.Lock()
+			mine := p.Admin || c.ownerOf(np.Machine) == p.User
+			c.mu.Unlock()
+			if !mine {
+				return nil, forbidden(MNodeCall)
 			}
 			var out json.RawMessage
-			err := c.call(ctx, p.Machine, p.Method, p.Params, &out)
+			err := c.call(ctx, np.Machine, np.Method, np.Params, &out)
 			return out, err
 		case MTaskCreate:
 			return c.command(p, r, c.taskCreate, taskView)
@@ -174,13 +187,13 @@ func (c *Coord) HandlerFor(p Principal) wire.Handler {
 		case MRunDispatch:
 			return c.command(p, r, c.runDispatch, runView)
 		case MRunContinue:
-			return c.command(p, r, func(r *wire.Request) (string, []journal.Event, error) { return c.runContinue(p, r) }, runView)
+			return c.command(p, r, c.runContinue, runView)
 		case MRunPreview:
-			var p Dispatch
-			if err := r.Decode(&p); err != nil {
+			var dp Dispatch
+			if err := r.Decode(&dp); err != nil {
 				return nil, err
 			}
-			return c.Preview(ctx, p)
+			return c.PreviewFor(ctx, p, dp)
 		case MRunStop:
 			return c.command(p, r, c.runStop, runView)
 		case MRunAbandon:
@@ -189,15 +202,34 @@ func (c *Coord) HandlerFor(p Principal) wire.Handler {
 			return c.command(p, r, c.runAnswer, runView)
 		case MRunSend:
 			return c.command(p, r, c.runSend, runView)
+		case MProjectCreate:
+			return c.command(p, r, c.projectCreate, projectView)
+		case MProjectEdit:
+			return c.command(p, r, c.projectEdit, projectView)
+		case MProjectMember:
+			return c.command(p, r, c.projectMember, projectView)
+		case MMachineShare:
+			return c.command(p, r, c.machineShare, shareView)
 		}
 		return nil, &wire.Error{Code: wire.CodeUnknownMethod, Detail: r.Method}
 	}
 }
 
+// readableRun is a copy of run id when p may read it.
+func (c *Coord) readableRun(p Principal, id string) (task.Run, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	run := c.st.Runs[id]
+	if !canRead(c.st, p, runTask(c.st, run)) {
+		return task.Run{}, notFound(id)
+	}
+	return *run, nil
+}
+
 // command runs p's write once per command id: a replay answers what the first run answered, the same id with other
 // params is a conflict. Command ids are p's own: another caller's id is another command. do runs under mu and returns
 // the id its answer is about.
-func (c *Coord) command(p Principal, r *wire.Request, do func(*wire.Request) (string, []journal.Event, error), view func(*task.State, string) any) (any, error) {
+func (c *Coord) command(p Principal, r *wire.Request, do func(Principal, *wire.Request) (string, []journal.Event, error), view func(*task.State, string) any) (any, error) {
 	if r.CommandID == "" {
 		return nil, errNoCommand
 	}
@@ -208,12 +240,15 @@ func (c *Coord) command(p Principal, r *wire.Request, do func(*wire.Request) (st
 		if rc.Method != r.Method || rc.Digest != digest {
 			return nil, conflict("command_id")
 		}
+		if !c.seesResult(p, rc.Result) {
+			return nil, notFound("command " + r.CommandID)
+		}
 		return rc.Result, nil
 	}
 	if err := c.log.ReadOnly(); err != nil {
 		return nil, &wire.Error{Code: wire.CodeInternal, Detail: err.Error()}
 	}
-	id, events, err := do(r)
+	id, events, err := do(p, r)
 	if err != nil {
 		return nil, err
 	}
@@ -229,6 +264,11 @@ func (c *Coord) command(p Principal, r *wire.Request, do func(*wire.Request) (st
 		if r := c.st.Runs[id]; r != nil {
 			cp := *r
 			st.Runs[id] = &cp
+		}
+		if pr := c.st.Projects[id]; pr != nil {
+			cp := *pr
+			cp.Members = maps.Clone(pr.Members)
+			st.Projects[id] = &cp
 		}
 		if st.Apply(env) != nil {
 			return nil
@@ -276,7 +316,7 @@ func (c *Coord) checkAgent(name string) error {
 	return nil
 }
 
-func (c *Coord) taskCreate(r *wire.Request) (string, []journal.Event, error) {
+func (c *Coord) taskCreate(who Principal, r *wire.Request) (string, []journal.Event, error) {
 	var p TaskCreate
 	if err := r.Decode(&p); err != nil {
 		return "", nil, err
@@ -294,22 +334,23 @@ func (c *Coord) taskCreate(r *wire.Request) (string, []journal.Event, error) {
 	if err := c.checkAgent(p.Agent); err != nil {
 		return "", nil, err
 	}
-	if len(p.Project) > maxProject {
-		return "", nil, bad("project")
+	p.Project = strings.TrimSpace(p.Project)
+	if err := c.checkProject(who, p.Project); err != nil {
+		return "", nil, err
 	}
 	t := task.Task{ID: newID("t_"), Title: p.Title, Brief: p.Brief, Dir: p.Dir, Machine: p.Machine, Agent: p.Agent,
-		Project: strings.TrimSpace(p.Project), Status: task.StatusTodo}
+		Project: p.Project, Owner: who.User, Status: task.StatusTodo}
 	return t.ID, []journal.Event{journal.NewEvent(task.ETaskCreated, t)}, nil
 }
 
-func (c *Coord) taskEdit(r *wire.Request) (string, []journal.Event, error) {
+func (c *Coord) taskEdit(who Principal, r *wire.Request) (string, []journal.Event, error) {
 	var p task.TaskEdit
 	if err := r.Decode(&p); err != nil {
 		return "", nil, err
 	}
-	t := c.st.Tasks[p.ID]
-	if t == nil {
-		return "", nil, notFound(p.ID)
+	t, err := c.writableTask(who, p.ID)
+	if err != nil {
+		return "", nil, err
 	}
 	if p.Title != nil {
 		if *p.Title = strings.TrimSpace(*p.Title); *p.Title == "" || len(*p.Title) > maxTitle {
@@ -330,8 +371,10 @@ func (c *Coord) taskEdit(r *wire.Request) (string, []journal.Event, error) {
 		}
 	}
 	if p.Project != nil {
-		if *p.Project = strings.TrimSpace(*p.Project); len(*p.Project) > maxProject {
-			return "", nil, bad("project")
+		if *p.Project = strings.TrimSpace(*p.Project); *p.Project != t.Project {
+			if err := c.checkProject(who, *p.Project); err != nil {
+				return "", nil, err
+			}
 		}
 	}
 	changed := false
@@ -348,14 +391,14 @@ func (c *Coord) taskEdit(r *wire.Request) (string, []journal.Event, error) {
 	return t.ID, []journal.Event{journal.NewEvent(task.ETaskEdited, p)}, nil
 }
 
-func (c *Coord) taskStatus(r *wire.Request) (string, []journal.Event, error) {
+func (c *Coord) taskStatus(who Principal, r *wire.Request) (string, []journal.Event, error) {
 	var p task.TaskStatus
 	if err := r.Decode(&p); err != nil {
 		return "", nil, err
 	}
-	t := c.st.Tasks[p.ID]
-	if t == nil {
-		return "", nil, notFound(p.ID)
+	t, err := c.writableTask(who, p.ID)
+	if err != nil {
+		return "", nil, err
 	}
 	if !slices.Contains([]string{task.StatusTodo, task.StatusDone, task.StatusCanceled}, p.Status) {
 		return "", nil, bad("status " + p.Status)
@@ -366,23 +409,26 @@ func (c *Coord) taskStatus(r *wire.Request) (string, []journal.Event, error) {
 	return t.ID, []journal.Event{journal.NewEvent(task.ETaskStatus, p)}, nil
 }
 
-func (c *Coord) runDispatch(r *wire.Request) (string, []journal.Event, error) {
+func (c *Coord) runDispatch(who Principal, r *wire.Request) (string, []journal.Event, error) {
 	var p Dispatch
 	if err := r.Decode(&p); err != nil {
 		return "", nil, err
 	}
-	run, err := c.plan(p)
+	run, err := c.plan(who, p)
 	if err != nil {
 		return "", nil, err
+	}
+	if !c.canUse(who, run.Machine, run.Project) {
+		return "", nil, forbidden("machine " + run.Machine)
 	}
 	return run.ID, []journal.Event{journal.NewEvent(task.ERunQueued, run)}, nil
 }
 
-// plan is the run a dispatch would queue; the caller holds mu.
-func (c *Coord) plan(p Dispatch) (task.Run, error) {
-	t := c.st.Tasks[p.Task]
-	if t == nil {
-		return task.Run{}, notFound(p.Task)
+// plan is the run who's dispatch would queue; the caller holds mu.
+func (c *Coord) plan(who Principal, p Dispatch) (task.Run, error) {
+	t, err := c.writableTask(who, p.Task)
+	if err != nil {
+		return task.Run{}, err
 	}
 	if t.Status != task.StatusTodo {
 		return task.Run{}, conflict("task " + t.Status)
@@ -424,23 +470,61 @@ func (c *Coord) plan(p Dispatch) (task.Run, error) {
 		from = Local
 	}
 	return task.Run{ID: node.NewRunID(), Task: t.ID, Machine: machine, Agent: name, Profile: prof, Dir: t.Dir, From: from,
-		Brief: brief, Title: t.Title, Runner: p.Runner}, nil
+		Brief: brief, Title: t.Title, Runner: p.Runner, Project: t.Project, Dispatcher: who.User}, nil
 }
 
-func (c *Coord) run(r *wire.Request) (*task.Run, error) {
-	var p task.RunRef
-	if err := r.Decode(&p); err != nil {
-		return nil, err
+// writableTask is task id when who may change it: not found when they may not even see it. The caller holds mu.
+func (c *Coord) writableTask(who Principal, id string) (*task.Task, error) {
+	t := c.st.Tasks[id]
+	switch {
+	case !canRead(c.st, who, t):
+		return nil, notFound(id)
+	case !canWrite(c.st, who, t):
+		return nil, forbidden(id)
 	}
-	run := c.st.Runs[p.ID]
-	if run == nil {
-		return nil, notFound(p.ID)
+	return t, nil
+}
+
+// writableRun is run id when who may act on it (its task's participants). The caller holds mu.
+func (c *Coord) writableRun(who Principal, id string) (*task.Run, error) {
+	run := c.st.Runs[id]
+	t := runTask(c.st, run)
+	switch {
+	case !canRead(c.st, who, t):
+		return nil, notFound(id)
+	case !canWrite(c.st, who, t):
+		return nil, forbidden(id)
 	}
 	return run, nil
 }
 
-func (c *Coord) runStop(r *wire.Request) (string, []journal.Event, error) {
-	run, err := c.run(r)
+// checkProject: who may put a task in project ("" is none: the task is theirs). The caller holds mu.
+func (c *Coord) checkProject(who Principal, project string) error {
+	switch {
+	case len(project) > maxProject:
+		return bad("project")
+	case project == "":
+		return nil
+	case c.st.Projects[project] == nil && c.team():
+		return notFound("project " + project)
+	case c.st.Projects[project] != nil && roleIn(c.st, who, project) != task.RoleParticipant:
+		return forbidden("project " + project)
+	case c.st.Projects[project] == nil && !who.Admin:
+		return forbidden("project " + project)
+	}
+	return nil
+}
+
+func (c *Coord) run(who Principal, r *wire.Request) (*task.Run, error) {
+	var p task.RunRef
+	if err := r.Decode(&p); err != nil {
+		return nil, err
+	}
+	return c.writableRun(who, p.ID)
+}
+
+func (c *Coord) runStop(who Principal, r *wire.Request) (string, []journal.Event, error) {
+	run, err := c.run(who, r)
 	if err != nil {
 		return "", nil, err
 	}
@@ -454,8 +538,8 @@ func (c *Coord) runStop(r *wire.Request) (string, []journal.Event, error) {
 	return run.ID, nil, nil
 }
 
-func (c *Coord) runAbandon(r *wire.Request) (string, []journal.Event, error) {
-	run, err := c.run(r)
+func (c *Coord) runAbandon(who Principal, r *wire.Request) (string, []journal.Event, error) {
+	run, err := c.run(who, r)
 	if err != nil {
 		return "", nil, err
 	}
@@ -503,6 +587,9 @@ func (c *Coord) Machines(ctx context.Context, connect bool) Machines {
 func (c *Coord) machineView(m *machine) Machine {
 	x := Machine{Name: m.name, Slots: c.slots(m.name), OS: m.hello.OS, Hostname: m.hello.Hostname, Version: m.hello.Version,
 		Agents: m.checks}
+	if c.team() {
+		x.Owner = c.ownerOf(m.name)
+	}
 	for _, r := range c.st.Runs {
 		if r.Machine == m.name && r.State == task.Queued {
 			x.Queued++

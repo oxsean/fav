@@ -62,7 +62,19 @@ type StartParams struct {
 	Title       string        `json:"title,omitempty"`
 	Runner      string        `json:"runner,omitempty"` // "" = herdr when it fits, else background
 	Resume      string        `json:"resume,omitempty"` // run.resume: the session the brief continues
+	Project     string        `json:"project,omitempty"`
+	Dispatcher  *Person       `json:"dispatcher,omitempty"` // who started it: the author of its commits (feature dispatcher)
 }
+
+// Person is a user of the coordinator's team, as a node needs them.
+type Person struct {
+	ID    string `json:"id"`
+	Name  string `json:"name,omitempty"`
+	Email string `json:"email,omitempty"`
+}
+
+// FeatureDispatcher: run.start's project and dispatcher are kept, checked and used.
+const FeatureDispatcher = "dispatcher"
 
 // Spec is a run frozen at its start.
 type Spec struct {
@@ -81,6 +93,17 @@ type Spec struct {
 	Title       string        `json:"title,omitempty"`
 	StallAfter  time.Duration `json:"stall_after,omitempty"` // no output this long marks it stalled; 0 never
 	Created     time.Time     `json:"created"`
+	Project     string        `json:"project,omitempty"`
+	Dispatcher  *Person       `json:"dispatcher,omitempty"`
+}
+
+// env is what the agent's environment gains: its commits are authored by the run's dispatcher, and committed by
+// this machine's user as usual.
+func (s Spec) env() []string {
+	if d := s.Dispatcher; d != nil && d.Email != "" {
+		return []string{"GIT_AUTHOR_NAME=" + cmp.Or(d.Name, d.ID), "GIT_AUTHOR_EMAIL=" + d.Email}
+	}
+	return nil
 }
 
 // State is what the supervisor writes.
@@ -319,6 +342,9 @@ func (n *Node) admit(p *StartParams) error {
 	if len(l.AllowDirs) > 0 && !underAny(p.Dir, l.AllowDirs) {
 		return &wire.Error{Code: wire.CodeUnauthorized, Detail: "dir " + p.Dir}
 	}
+	if pr, ok := l.Projects[p.Project]; ok && p.Project != "" && len(pr.Dirs) > 0 && !underAny(p.Dir, pr.Dirs) {
+		return &wire.Error{Code: wire.CodeUnauthorized, Detail: "dir " + p.Dir + " for project " + p.Project}
+	}
 	return nil
 }
 
@@ -403,7 +429,7 @@ func (n *Node) spec(p StartParams, dir string) (Spec, error) {
 	return Spec{Run: p.Run, Task: p.Task, Coordinator: p.Coordinator, Argv: cmd.Argv(), Dir: p.Dir, Runner: runner,
 		Stdin: stdin, Stream: stream, Thread: p.Profile.Provider == tend.ProviderCodex, Provider: agent.SessionProvider(p.Profile.Provider),
 		Agent: p.Profile.Provider, Session: cmp.Or(ls.SessionID, p.Resume), Title: p.Title, StallAfter: n.stallAfter(),
-		Created: time.Now()}, nil
+		Created: time.Now(), Project: p.Project, Dispatcher: p.Dispatcher}, nil
 }
 
 // defaultStall is how long a background run may say nothing before it is marked stalled.

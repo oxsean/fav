@@ -20,7 +20,7 @@ tend (the repository and Go module keep the name fav) is a Go CLI + bubbletea TU
 | When | Run |
 |---|---|
 | while changing code | `go test` on the affected packages |
-| before every commit | `mise run gate`; read its exit status, never through a pipe |
+| before every commit | `mise run gate` (it runs the coord tests twice, the second time on SQLite: `TEND_TEST_LOG=sqlite`); read its exit status, never through a pipe |
 | high-risk stages, or a full regression the user asks for | `scripts/test-hosts.sh` |
 | only when the user asks | multi-host end to end; propose it when `internal/remote`, `Proto` or `tend hosts` changed |
 
@@ -64,9 +64,9 @@ HERDR_LIVE=1 go test ./internal/herdr -run TestLiveCreateTabAndRun   # inside He
 | `internal/node` | runs on this machine: run directories, the `_run` supervisor, snapshots, `run.*` methods |
 | `internal/proc` | detached starts, process trees, liveness, per OS |
 | `internal/journal`, `internal/task` | the coordinator's event log and the task / run state folded from it |
-| `internal/coord` | the coordinator (whoever holds `coord/lock`): client commands with receipts, dispatch, reconcile, subscribe, socket |
+| `internal/coord` | the coordinator (whoever holds `coord/lock`): client commands with receipts, dispatch, reconcile, subscribe, socket; who sees and does what (`access.go`: principals, the method table, projects, machine owners and shares; pushes filtered per subscriber, `refetch` when that changes) |
 | `internal/dial` | the client side of mode 2: nodes, TUIs and CLIs dial a server with a token |
-| `internal/server` | mode 2, only in `cmd/tend-server` (`platformcheck` fails when `cmd/tend` depends on it): the coordinator over HTTP / WebSocket (`/node`, `/client`), hashed tokens, listen-address rule; the Web UI (`web/`, embedded: `api.js` speaks the wire protocol, `app.js` holds the page and its own `zh` / `en` strings; the CSP allows no inline script or `style` attribute) |
+| `internal/server` | mode 2, only in `cmd/tend-server` (`platformcheck` fails when `cmd/tend` depends on it): the coordinator over HTTP / WebSocket (`/node`, `/client`), sign-in (`/auth/*`, browser sessions), `/api/*` for people, credentials and machines, listen-address rule; the Web UI (`web/`, embedded: `api.js` speaks the wire protocol, `fold.js` folds pushed envelopes as `task.State.Apply` does (`fold_test.go` checks both on the same envelopes, with node), `team.js` holds the sign-in, project, account and admin pages, `app.js` the rest; each keeps its own `zh` / `en` strings; the CSP allows no inline script or `style` attribute) |
 | `internal/fulltext` | message search: text mirror, parallel scan, BM25 |
 | `internal/ui/tui` | bubbletea `Model`; key table `keys.go` |
 | `internal/ui/fzf` | fzf orchestration only, no business logic |
@@ -74,7 +74,9 @@ HERDR_LIVE=1 go test ./internal/herdr -run TestLiveCreateTabAndRun   # inside He
 | `internal/i18n` | `T` / `F` / `E`, `locales/en.json` + `zh.json` |
 | `internal/herdr` | exec + JSON wrapper over the `herdr` CLI |
 | `cmd/tend` | subcommands; `add` reads the `/tend` skill JSON defined in `skills/tend/SKILL.md` |
-| `cmd/tend-server` | mode 2: `--listen` serves the coordinator, `token` manages tokens |
+| `internal/store` | tend-server's SQLite database (modernc, pure Go, file mode 0600): the coordinator's `EventLog` (`coord/tend.db`), `Team` (users, sign-in identities, admission rules, invitations, hashed credentials, audit), numbered migrations in `migrations/sqlite/`, import / export / check / backup; SQL stays in this package |
+| `internal/auth` | tend-server's sign-in providers: GitHub OAuth and OIDC (discovery, PKCE, userinfo, `email_verified` from the ID token when userinfo lacks it) |
+| `cmd/tend-server` | mode 2: `--listen` serves the coordinator, `token` manages credentials, `admin` people and admission, `import` / `export` / `backup` / `db check` |
 
 Platform rules have one package each: `internal/paths` (this machine's paths), `internal/pathmap` (another machine's paths), `internal/shell` (quoting, the user's shell), `internal/filelock`, `internal/fileio` (atomic writes, `Lines`, file identity `ID`), `internal/testkit`. `internal/platformcheck` fails when one of these rules is repeated elsewhere.
 

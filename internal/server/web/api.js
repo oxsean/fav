@@ -5,7 +5,7 @@
 const api = (() => {
   const callWait = 30000;
   let ws = null, opening = null, nextID = 1, buffer = '';
-  const pending = new Map(), journal = new Set(), closeListeners = new Set();
+  const pending = new Map(), journal = new Set(), refetch = new Set(), closeListeners = new Set();
 
   const err = (code, detail = '') => Object.assign(new Error(detail || code), {code, detail});
 
@@ -26,6 +26,8 @@ const api = (() => {
         : {type: 'res', id: f.id, error: {code: 'unknown_method', detail: f.method}});
     } else if (f.type === 'push' && f.method === 'journal') {
       for (const fn of journal) fn(f.params);
+    } else if (f.type === 'push' && f.method === 'refetch') { // what this viewer may see changed
+      for (const fn of refetch) fn();
     }
   }
 
@@ -109,7 +111,7 @@ const api = (() => {
     async logout() {
       const s = ws;
       ws = null;
-      try { await http('/logout', ''); } finally { journal.clear(); s?.close(); }
+      try { await http('/logout', ''); } finally { journal.clear(); refetch.clear(); s?.close(); }
     },
     connect,
     onClose(fn) { closeListeners.add(fn); },
@@ -128,15 +130,18 @@ const api = (() => {
     runTail: params => call('run.tail', params),
     machineList: params => call('machine.list', params),
     agentList: () => call('agent.list'),
-    subscribe(params, listener) {
+    subscribe(params, listener, onRefetch) {
       journal.clear();
+      refetch.clear();
       journal.add(listener);
+      if (onRefetch) refetch.add(onRefetch);
       call('subscribe', params).catch(() => {});
-      return () => journal.delete(listener);
+      return () => { journal.delete(listener); refetch.delete(onRefetch); };
     },
-    async nodeCall({machine, method, params}) {
-      const r = await call('node.call', {machine, method, params});
-      return method === 'messages' ? page(r) : r;
-    },
+    runMessages: async params => page(await call('run.messages', params)),
+    projectCreate: write('project.create'),
+    projectEdit: write('project.edit'),
+    projectMember: write('project.member'),
+    machineShare: write('machine.share'),
   };
 })();

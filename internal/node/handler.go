@@ -107,7 +107,7 @@ func (n *Node) Handler(sessions remote.Handler) wire.Handler {
 			}
 			return n.Send(p)
 		}
-		res, err := sessions.Handle(ctx, r.Method, r.Params)
+		res, err := shareSessions(ctx, n.Limits.ShareSessions, sessions, r.Method, r.Params)
 		if h, ok := res.(remote.Hello); ok && err == nil {
 			h.Methods = append(append([]string(nil), h.Methods...), Methods...)
 			h.Features = append(append([]string(nil), h.Features...), Features...)
@@ -123,7 +123,7 @@ var Methods = []string{MRunStart, MRunStop, MRunList, MRunTail, MRunResume, MAge
 
 // Features lists what run.start and run.resume understand beyond their first shape; a coordinator that needs a feature
 // this node lacks fails the run as node_outdated instead of starting it without.
-var Features []string
+var Features = []string{FeatureDispatcher}
 
 // Tail reads a page of a run's output.log backwards from p.Before.
 func (n *Node) Tail(p TailParams) (Tail, error) {

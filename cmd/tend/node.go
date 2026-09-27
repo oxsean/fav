@@ -54,6 +54,9 @@ func connectNode(n *node.Node, url, tokenFile string) error {
 	if len(n.Limits.AllowDirs) == 0 {
 		return i18n.E("cli.node.need_allow_dirs", tend.ConfigPath())
 	}
+	if n.Limits.ShareSessions == "" {
+		n.Limits.ShareSessions = node.ShareRuns
+	}
 	token, err := dial.ReadToken(tokenFile)
 	if err != nil {
 		return err

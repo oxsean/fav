@@ -137,7 +137,7 @@ check "the web page is served" "$(curl -s -m 5 $web/ | grep -o '<title>tend</tit
 check "the web page forbids inline code" "$(curl -s -m 5 -D - -o /dev/null $web/ | grep -ci "content-security-policy: default-src 'self'")" 1
 check "a node token cannot sign in" "$(curl -s -m 5 -o /dev/null -w '%{http_code}' --data-urlencode "token=$tok_node" $web/login)" 401
 check "a client token signs in" "$(curl -s -m 5 -c "$jar" -o /dev/null -w '%{http_code}' --data-urlencode "token@$root/client-token" $web/login)" 204
-check "the session names the client" "$(curl -s -m 5 -b "$jar" $web/session | python3 -c 'import json,sys; print(json.load(sys.stdin)["name"])')" mac
+check "a legacy client token signs in as the host admin" "$(curl -s -m 5 -b "$jar" $web/session | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["id"], d["role"])')" "local admin"
 check "signing out ends the session" "$(curl -s -m 5 -b "$jar" -c "$jar" -o /dev/null -X POST $web/logout; curl -s -m 5 -b "$jar" -o /dev/null -w '%{http_code}' $web/session)" 401
 
 dir_of() { if [ "$1" = win ]; then printf '%s\\proj' "$w"; else printf '%s/%s/proj' "$r" "$1"; fi; }

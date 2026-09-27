@@ -201,15 +201,10 @@ func (l *Log) Append(actor Actor, cmd *Receipt, events []Event) (Envelope, error
 	if cmd != nil && cmd.Answer != nil {
 		cmd.Result = cmd.Answer(env)
 	}
-	body, err := json.Marshal(env)
+	line, err := Line(env)
 	if err != nil {
 		return Envelope{}, err
 	}
-	if len(body)+sumTail >= maxLine {
-		return Envelope{}, fmt.Errorf("envelope of %d bytes", len(body))
-	}
-	line := append(body[:len(body)-1:len(body)-1], sumKey...)
-	line = append(append(line, sum(body)...), '"', '}', '\n')
 	if _, err := l.f.WriteAt(line, l.size); err != nil {
 		l.f.Truncate(l.size)
 		return Envelope{}, err
@@ -222,6 +217,19 @@ func (l *Log) Append(actor Actor, cmd *Receipt, events []Event) (Envelope, error
 	l.size += int64(len(line))
 	l.seq = env.Seq
 	return env, nil
+}
+
+// Line is env as the log stores it: its JSON with the sum of those bytes, and a newline.
+func Line(env Envelope) ([]byte, error) {
+	body, err := json.Marshal(env)
+	if err != nil {
+		return nil, err
+	}
+	if len(body)+sumTail >= maxLine {
+		return nil, fmt.Errorf("envelope of %d bytes", len(body))
+	}
+	line := append(body[:len(body)-1:len(body)-1], sumKey...)
+	return append(append(line, sum(body)...), '"', '}', '\n'), nil
 }
 
 // ReadAfter calls fn for each envelope with seq in (after, upTo], in order, reading the file outside the append lock;

@@ -28,18 +28,21 @@ type SendMessage struct {
 
 const maxMessage = 64 << 10
 
-func (c *Coord) runAnswer(r *wire.Request) (string, []journal.Event, error) {
+func (c *Coord) runAnswer(who Principal, r *wire.Request) (string, []journal.Event, error) {
 	var p Answer
 	if err := r.Decode(&p); err != nil {
 		return "", nil, err
 	}
-	run := c.st.Runs[p.Run]
-	if run == nil {
-		return "", nil, notFound(p.Run)
+	run, err := c.writableRun(who, p.Run)
+	if err != nil {
+		return "", nil, err
 	}
 	i := slices.IndexFunc(run.Requests, func(q agent.Request) bool { return q.ID == p.Request })
 	if !task.Open(run.State) || i < 0 {
 		return "", nil, conflict("request_gone")
+	}
+	if run.Requests[i].Kind != agent.RequestQuestion && !c.canApprove(who, run) {
+		return "", nil, forbidden("permission")
 	}
 	if slices.ContainsFunc(run.Answers, func(a agent.Answer) bool { return a.Request == p.Request }) {
 		return "", nil, conflict("answered")
@@ -57,7 +60,7 @@ func (c *Coord) runAnswer(r *wire.Request) (string, []journal.Event, error) {
 	return run.ID, []journal.Event{journal.NewEvent(task.ERunAnswered, task.RunAnswer{ID: run.ID, Answer: p.Answer})}, nil
 }
 
-func (c *Coord) runSend(r *wire.Request) (string, []journal.Event, error) {
+func (c *Coord) runSend(who Principal, r *wire.Request) (string, []journal.Event, error) {
 	var p SendMessage
 	if err := r.Decode(&p); err != nil {
 		return "", nil, err
@@ -66,9 +69,12 @@ func (c *Coord) runSend(r *wire.Request) (string, []journal.Event, error) {
 	if p.Text == "" || len(p.Text) > maxMessage {
 		return "", nil, bad("text")
 	}
-	run := c.st.Runs[p.Run]
-	if run == nil {
-		return "", nil, notFound(p.Run)
+	run, err := c.writableRun(who, p.Run)
+	if err != nil {
+		return "", nil, err
+	}
+	if !c.canUse(who, run.Machine, run.Project) {
+		return "", nil, forbidden("machine " + run.Machine)
 	}
 	if run.State != task.Running || !run.Stream {
 		return "", nil, conflict("cannot_send")

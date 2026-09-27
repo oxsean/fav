@@ -8,7 +8,7 @@ run = "go run ./tools/test-host"
 
 # every commit passes the gate; CI runs this same task
 [tasks.gate]
-run = "go build ./... && go vet ./... && GOOS=windows go vet ./... && GOOS=linux go vet ./... && go test ./..."
+run = "go build ./... && go vet ./... && GOOS=windows go vet ./... && GOOS=linux go vet ./... && go test ./... && TEND_TEST_LOG=sqlite go test ./internal/coord"
 
 # this Mac's tend and tend-server, stamped with the checkout they were built from, after the gate
 [tasks.install]

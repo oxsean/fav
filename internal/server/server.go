@@ -1,13 +1,10 @@
 // Package server is mode 2: the coordinator behind HTTP. Nodes dial in on /node, clients on /client (WebSocket; the
-// wire protocol runs inside, one frame per line); each connection authenticates with a token in the upgrade request.
+// wire protocol runs inside, one frame per line); each connection authenticates with a credential of the team's
+// database in the upgrade request: a node token, a personal token, or a browser's session.
 package server
 
 import (
 	"context"
-	"crypto/rand"
-	"crypto/sha256"
-	"crypto/subtle"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -17,190 +14,31 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"slices"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/coder/websocket"
 
+	"github.com/oxsean/fav/internal/auth"
 	"github.com/oxsean/fav/internal/coord"
 	"github.com/oxsean/fav/internal/dial"
-	"github.com/oxsean/fav/internal/fileio"
-	"github.com/oxsean/fav/internal/filelock"
 	"github.com/oxsean/fav/internal/remote"
+	"github.com/oxsean/fav/internal/store"
+	"github.com/oxsean/fav/internal/tend"
 	"github.com/oxsean/fav/internal/wire"
 )
 
-// Roles a token grants.
+// Roles a connection comes in as.
 const (
 	RoleNode   = dial.RoleNode
 	RoleClient = dial.RoleClient
 )
 
-type Token struct {
-	Name    string    `json:"name"`
-	Role    string    `json:"role"`
-	Sum     string    `json:"sum"` // sha256 of the token: the token itself is shown once and never stored
-	Created time.Time `json:"created"`
-	// A node token is bound to the machine that first connects with it (its node id); another machine is refused
-	// until the binding is dropped (RebindToken).
-	Bound     string     `json:"bound,omitempty"`
-	BoundHost string     `json:"bound_host,omitempty"`
-	BoundAt   *time.Time `json:"bound_at,omitzero"`
-}
-
-type tokenFile struct {
-	Tokens []Token `json:"tokens"`
-}
-
-func tokensPath(home string) string { return filepath.Join(home, "server", "tokens.json") }
-
-// Tokens are home's tokens.
-func Tokens(home string) ([]Token, error) {
-	b, err := os.ReadFile(tokensPath(home))
-	if errors.Is(err, os.ErrNotExist) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	var f tokenFile
-	err = json.Unmarshal(b, &f)
-	return f.Tokens, err
-}
-
-func saveTokens(home string, ts []Token) error {
-	if err := os.MkdirAll(filepath.Dir(tokensPath(home)), 0o700); err != nil {
-		return err
-	}
-	b, _ := json.MarshalIndent(tokenFile{Tokens: ts}, "", "  ")
-	return fileio.WriteFile(tokensPath(home), append(b, '\n'), 0o600)
-}
-
-var validName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`)
-
-// ErrExists: a token of that name is there already.
-var ErrExists = errors.New("exists")
-
-// AddToken makes a token for name in role and returns it; only its hash is kept.
-func AddToken(home, role, name string) (string, error) {
-	if !validName.MatchString(name) || name == coord.Local {
-		return "", fmt.Errorf("name %q", name)
-	}
-	if role != RoleNode && role != RoleClient {
-		return "", fmt.Errorf("role %q", role)
-	}
-	unlock, err := lockTokens(home)
-	if err != nil {
-		return "", err
-	}
-	defer unlock()
-	ts, err := Tokens(home)
-	if err != nil {
-		return "", err
-	}
-	if slices.ContainsFunc(ts, func(t Token) bool { return t.Name == name }) {
-		return "", ErrExists
-	}
-	var b [24]byte
-	rand.Read(b[:])
-	token := "tend_" + hex.EncodeToString(b[:])
-	ts = append(ts, Token{Name: name, Role: role, Sum: sum(token), Created: time.Now().UTC()})
-	return token, saveTokens(home, ts)
-}
-
-// RemoveToken revokes name's token; a running server drops its connections.
-func RemoveToken(home, name string) error {
-	unlock, err := lockTokens(home)
-	if err != nil {
-		return err
-	}
-	defer unlock()
-	ts, err := Tokens(home)
-	if err != nil {
-		return err
-	}
-	n := len(ts)
-	ts = slices.DeleteFunc(ts, func(t Token) bool { return t.Name == name })
-	if len(ts) == n {
-		return os.ErrNotExist
-	}
-	return saveTokens(home, ts)
-}
-
-// ErrOtherMachine: the node token is bound to another machine.
-var ErrOtherMachine = errors.New("other machine")
-
-// BindToken binds node token name to the machine whose node id is id on its first connection; it answers
-// ErrOtherMachine when the token is bound to another id. A node without an id (an older tend) is let through unbound.
-func BindToken(home, name, id, host string) error {
-	if id == "" {
-		return nil
-	}
-	unlock, err := lockTokens(home)
-	if err != nil {
-		return err
-	}
-	defer unlock()
-	ts, err := Tokens(home)
-	if err != nil {
-		return err
-	}
-	i := slices.IndexFunc(ts, func(t Token) bool { return t.Name == name && t.Role == RoleNode })
-	switch {
-	case i < 0:
-		return os.ErrNotExist
-	case ts[i].Bound == id:
-		return nil
-	case ts[i].Bound != "":
-		return fmt.Errorf("%w: %s", ErrOtherMachine, ts[i].BoundHost)
-	}
-	now := time.Now().UTC()
-	ts[i].Bound, ts[i].BoundHost, ts[i].BoundAt = id, host, &now
-	return saveTokens(home, ts)
-}
-
-// RebindToken drops node token name's binding: the next machine to connect with it is bound.
-func RebindToken(home, name string) error {
-	unlock, err := lockTokens(home)
-	if err != nil {
-		return err
-	}
-	defer unlock()
-	ts, err := Tokens(home)
-	if err != nil {
-		return err
-	}
-	i := slices.IndexFunc(ts, func(t Token) bool { return t.Name == name && t.Role == RoleNode })
-	if i < 0 {
-		return os.ErrNotExist
-	}
-	ts[i].Bound, ts[i].BoundHost, ts[i].BoundAt = "", "", nil
-	return saveTokens(home, ts)
-}
-
-func sum(token string) string {
-	h := sha256.Sum256([]byte(token))
-	return hex.EncodeToString(h[:])
-}
-
-// NodeNames are the names of home's node tokens.
-func NodeNames(home string) []string {
-	ts, _ := Tokens(home)
-	var out []string
-	for _, t := range ts {
-		if t.Role == RoleNode {
-			out = append(out, t.Name)
-		}
-	}
-	return out
-}
-
 var tailnet4, tailnet6 = netip.MustParsePrefix("100.64.0.0/10"), netip.MustParsePrefix("fd7a:115c:a1e0::/48")
 
 // CheckListen: without TLS the server listens only on loopback or a tailnet address (Tailscale encrypts the rest),
-// unless plain is asked for (a container behind a forwarder).
+// unless plain is asked for (a container behind a forwarder, or a proxy that ends TLS).
 func CheckListen(addr string, tls, plain bool) error {
 	host, _, err := net.SplitHostPort(addr)
 	if err != nil {
@@ -216,9 +54,22 @@ func CheckListen(addr string, tls, plain bool) error {
 	return fmt.Errorf("%s is neither loopback nor a tailnet address", host)
 }
 
+// validMachine is a machine name a node token may take.
+var validMachine = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`)
+
+// CheckMachine: name can name a node ("local" is the coordinator's own word for no machine).
+func CheckMachine(name string) error {
+	if !validMachine.MatchString(name) || name == coord.Local {
+		return fmt.Errorf("machine name %q", name)
+	}
+	return nil
+}
+
 type Options struct {
 	Home    string
 	Coord   *coord.Coord
+	Dir     *Directory
+	Config  tend.ServerConfig
 	Listen  string
 	TLSCert string
 	TLSKey  string
@@ -226,78 +77,64 @@ type Options struct {
 
 // Server serves the coordinator over HTTP.
 type Server struct {
-	opt   Options
-	mu    sync.Mutex
-	stamp string // tokens.json identity when read
-	toks  []Token
-	conns map[*wire.Conn]Token // live connections by the token they came with
+	opt    Options
+	logins map[string]*auth.Provider
+	mu     sync.Mutex
+	conns  map[*wire.Conn]string // live connections by the credential they came with
+	flows  map[string]flow       // sign-ins in progress, by state
+	limit  *limiter
 }
 
-func New(opt Options) *Server { return &Server{opt: opt, conns: map[*wire.Conn]Token{}} }
+func New(opt Options) *Server {
+	s := &Server{opt: opt, logins: map[string]*auth.Provider{}, conns: map[*wire.Conn]string{}, flows: map[string]flow{}, limit: newLimiter()}
+	for _, l := range opt.Config.Logins {
+		p, err := auth.New(l)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "tend-server:", err)
+			continue
+		}
+		s.logins[p.Name()] = p
+	}
+	return s
+}
 
-// tokens reads tokens.json again when it changed and drops the connections of tokens no longer there.
-func (s *Server) tokens() []Token {
+func (s *Server) team() *store.Team { return s.opt.Dir.Team() }
+
+// sweep reads the team again and drops the connections whose credential no longer lets them in.
+func (s *Server) sweep() {
+	if err := s.opt.Dir.Reload(); err != nil {
+		return
+	}
+	for _, name := range s.opt.Dir.NodeNames() {
+		s.opt.Coord.Expect(name)
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if id := fileio.ID(tokensPath(s.opt.Home)) + fmt.Sprint(modTime(tokensPath(s.opt.Home))); id != s.stamp {
-		if ts, err := Tokens(s.opt.Home); err == nil {
-			s.toks, s.stamp = ts, id
-		}
-	}
-	for c, tok := range s.conns { // every time: a connection may have been tracked after its token went
-		if !slices.ContainsFunc(s.toks, func(t Token) bool { return t.Sum == tok.Sum && t.Name == tok.Name && t.Role == tok.Role }) {
+	for c, id := range s.conns {
+		if !s.opt.Dir.live(id) {
 			c.Close()
 		}
 	}
-	return s.toks
 }
 
-// lockTokens serializes changes to tokens.json across processes.
-func lockTokens(home string) (func(), error) {
-	if err := os.MkdirAll(filepath.Dir(tokensPath(home)), 0o700); err != nil {
-		return nil, err
+// credential is what r signs in with: a bearer header, or for a client the browser's session cookie.
+func (s *Server) credential(r *http.Request, role string) (store.Credential, store.User, bool) {
+	kinds := []string{store.KindNode}
+	if role == RoleClient {
+		kinds = []string{store.KindToken, store.KindWeb}
 	}
-	return filelock.Lock(tokensPath(home) + ".lock")
+	if bearer, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer "); ok {
+		return s.opt.Dir.find(strings.TrimSpace(bearer), kinds...)
+	}
+	if c, err := r.Cookie(sessionCookie); err == nil && role == RoleClient {
+		return s.opt.Dir.find(c.Value, store.KindWeb)
+	}
+	return store.Credential{}, store.User{}, false
 }
 
-func modTime(p string) int64 {
-	if fi, err := os.Stat(p); err == nil {
-		return fi.ModTime().UnixNano()
-	}
-	return 0
-}
-
-// auth is the token r comes with (a bearer header, or for a client the browser's session cookie), when it has role.
-func (s *Server) auth(r *http.Request, role string) (Token, bool) {
-	bearer, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
-	if !ok && role == RoleClient {
-		if c, err := r.Cookie(sessionCookie); err == nil {
-			bearer, ok = c.Value, true
-		}
-	}
-	if !ok {
-		return Token{}, false
-	}
-	return s.check(strings.TrimSpace(bearer), role)
-}
-
-// check is the token whose hash token has, when it has role.
-func (s *Server) check(token, role string) (Token, bool) {
-	if token == "" {
-		return Token{}, false
-	}
-	want := sum(token)
-	for _, t := range s.tokens() {
-		if subtle.ConstantTimeCompare([]byte(t.Sum), []byte(want)) == 1 && t.Role == role {
-			return t, true
-		}
-	}
-	return Token{}, false
-}
-
-func (s *Server) track(c *wire.Conn, t Token) {
+func (s *Server) track(c *wire.Conn, cred string) {
 	s.mu.Lock()
-	s.conns[c] = t
+	s.conns[c] = cred
 	s.mu.Unlock()
 }
 
@@ -309,9 +146,18 @@ func (s *Server) untrack(c *wire.Conn) {
 
 const keepalive = dial.Keepalive
 
+func (s *Server) audit(r *http.Request, actor, kind, detail string) {
+	ip := ""
+	if r != nil {
+		ip, _, _ = net.SplitHostPort(r.RemoteAddr)
+	}
+	s.team().Audit(store.AuditEntry{Actor: actor, Kind: kind, Detail: detail, IP: ip})
+}
+
 func (s *Server) handleNode(w http.ResponseWriter, r *http.Request) {
-	t, ok := s.auth(r, RoleNode)
+	cred, _, ok := s.credential(r, RoleNode)
 	if !ok {
+		s.audit(r, "", "refused", "node")
 		http.Error(w, wire.CodeUnauthorized, http.StatusUnauthorized)
 		return
 	}
@@ -323,11 +169,16 @@ func (s *Server) handleNode(w http.ResponseWriter, r *http.Request) {
 	opt := s.opt.Coord.NodeOptions()
 	opt.Keepalive = keepalive
 	c := wire.New(websocket.NetConn(r.Context(), ws, websocket.MessageText), opt)
-	s.track(c, t)
+	s.track(c, cred.ID)
 	defer s.untrack(c)
-	err = s.opt.Coord.Attach(t.Name, c, func(h remote.Hello) error {
-		if err := BindToken(s.opt.Home, t.Name, h.NodeID, h.Hostname); err != nil {
-			fmt.Fprintf(os.Stderr, "node %s refused: %v (tend-server token rebind %s)\n", t.Name, err, t.Name)
+	s.team().Touch(cred.ID)
+	err = s.opt.Coord.Attach(cred.Name, c, func(h remote.Hello) error {
+		if h.NodeID == "" {
+			return &wire.Error{Code: wire.CodeUnauthorized, Detail: "node identity"}
+		}
+		if err := s.team().Bind(cred.ID, h.NodeID, h.Hostname); err != nil {
+			fmt.Fprintf(os.Stderr, "node %s refused: %v (tend-server token rebind %s)\n", cred.Name, err, cred.Name)
+			s.audit(r, cred.Owner, "refused", "node "+cred.Name+": "+err.Error())
 			return &wire.Error{Code: wire.CodeUnauthorized, Detail: "node identity"}
 		}
 		return nil
@@ -339,7 +190,7 @@ func (s *Server) handleNode(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleClient(w http.ResponseWriter, r *http.Request) {
-	t, ok := s.auth(r, RoleClient)
+	cred, u, ok := s.credential(r, RoleClient)
 	if !ok {
 		http.Error(w, wire.CodeUnauthorized, http.StatusUnauthorized)
 		return
@@ -349,14 +200,50 @@ func (s *Server) handleClient(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ws.SetReadLimit(wire.MaxFrame + 1)
-	c := wire.New(websocket.NetConn(r.Context(), ws, websocket.MessageText), wire.Options{Handler: s.opt.Coord.HandlerFor(principal(t)), Keepalive: keepalive})
-	s.track(c, t)
+	s.team().Touch(cred.ID)
+	c := wire.New(websocket.NetConn(r.Context(), ws, websocket.MessageText), wire.Options{Handler: s.audited(r, u, s.opt.Coord.HandlerFor(principal(u))), Keepalive: keepalive})
+	s.track(c, cred.ID)
 	defer s.untrack(c)
 	<-c.Done()
 }
 
-// principal is who a client token stands for: until the server has users, each token is its owner.
-func principal(t Token) coord.Principal { return coord.Principal{User: t.Name, Admin: true} }
+// audited records what the security log keeps of a client's calls: refusals, shares and permission answers.
+func (s *Server) audited(r *http.Request, u store.User, h wire.Handler) wire.Handler {
+	return func(ctx context.Context, req *wire.Request) (any, error) {
+		res, err := h(ctx, req)
+		switch {
+		case wire.Code(err) == wire.CodeUnauthorized:
+			s.audit(r, u.ID, "denied", req.Method+" "+subjectOf(req.Params))
+		case err == nil && (req.Method == coord.MMachineShare || req.Method == coord.MRunAnswer || req.Method == coord.MProjectMember):
+			s.audit(r, u.ID, req.Method, subjectOf(req.Params))
+		}
+		return res, err
+	}
+}
+
+// subjectOf names what a call is about by its ids alone: the security log keeps no message or answer text.
+func subjectOf(params json.RawMessage) string {
+	var p struct {
+		ID, Task, Run, Project, Machine, User, Role, Request string
+		Allow                                                *bool
+		Users, Projects                                      []string
+	}
+	json.Unmarshal(params, &p)
+	var parts []string
+	for _, kv := range [][2]string{{"id", p.ID}, {"task", p.Task}, {"run", p.Run}, {"project", p.Project}, {"machine", p.Machine},
+		{"user", p.User}, {"role", p.Role}, {"request", p.Request}} {
+		if kv[1] != "" {
+			parts = append(parts, kv[0]+"="+kv[1])
+		}
+	}
+	if p.Allow != nil {
+		parts = append(parts, fmt.Sprintf("allow=%t", *p.Allow))
+	}
+	if len(p.Users)+len(p.Projects) > 0 {
+		parts = append(parts, "users="+strings.Join(p.Users, ","), "projects="+strings.Join(p.Projects, ","))
+	}
+	return strings.Join(parts, " ")
+}
 
 // Handler is the server's HTTP handler.
 func (s *Server) Handler() http.Handler {
@@ -364,14 +251,13 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/node", s.handleNode)
 	mux.HandleFunc("/client", s.handleClient)
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) { w.Write([]byte("ok\n")) })
-	mux.HandleFunc("/login", s.login)
-	mux.HandleFunc("/logout", s.logout)
-	mux.HandleFunc("/session", s.session)
+	s.webRoutes(mux)
+	s.apiRoutes(mux)
 	mux.Handle("/", page())
 	return mux
 }
 
-// Serve listens until ctx ends; tokens revoked meanwhile lose their connections within a few seconds.
+// Serve listens until ctx ends; credentials revoked meanwhile lose their connections within a few seconds.
 func (s *Server) Serve(ctx context.Context) error {
 	hs := &http.Server{Addr: s.opt.Listen, Handler: s.Handler(), ReadHeaderTimeout: 10 * time.Second}
 	l, err := net.Listen("tcp", s.opt.Listen)
@@ -394,7 +280,8 @@ func (s *Server) Serve(ctx context.Context) error {
 				s.mu.Unlock()
 				return
 			case <-t.C:
-				s.tokens()
+				s.sweep()
+				s.expireFlows()
 			}
 		}
 	}()
@@ -407,4 +294,47 @@ func (s *Server) Serve(ctx context.Context) error {
 		return nil
 	}
 	return err
+}
+
+// legacyToken is a token of tokens.json, kept by servers before the team's database.
+type legacyToken struct {
+	Name      string    `json:"name"`
+	Role      string    `json:"role"`
+	Sum       string    `json:"sum"`
+	Created   time.Time `json:"created"`
+	Bound     string    `json:"bound,omitempty"`
+	BoundHost string    `json:"bound_host,omitempty"`
+}
+
+// ImportTokens moves home's tokens.json into the team's database, owned by the server host, and keeps the file
+// renamed beside; nothing when there is none.
+func ImportTokens(home string, team *store.Team) (int, error) {
+	p := filepath.Join(home, "server", "tokens.json")
+	b, err := os.ReadFile(p)
+	if errors.Is(err, os.ErrNotExist) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, err
+	}
+	var f struct {
+		Tokens []legacyToken `json:"tokens"`
+	}
+	if err := json.Unmarshal(b, &f); err != nil {
+		return 0, err
+	}
+	n := 0
+	for _, t := range f.Tokens {
+		kind := store.KindToken
+		if t.Role == RoleNode {
+			kind = store.KindNode
+		}
+		_, err := team.ImportCredential(store.Credential{Kind: kind, Name: t.Name, Owner: store.LocalUser, Sum: t.Sum,
+			NodeID: t.Bound, Host: t.BoundHost, Created: t.Created}, 0)
+		if err != nil && !errors.Is(err, store.ErrExists) {
+			return n, err
+		}
+		n++
+	}
+	return n, os.Rename(p, fmt.Sprintf("%s.imported-%d", p, time.Now().Unix()))
 }
