@@ -70,3 +70,24 @@ type Send struct {
 	State string    `json:"state"`
 	At    time.Time `json:"at"`
 }
+
+// Verdicts a run reports on the work it was given to judge (tend run verdict).
+const (
+	VerdictPass    = "pass"
+	VerdictRework  = "rework"
+	VerdictBlocked = "blocked"
+)
+
+// Verdict is what a review or test run concluded.
+type Verdict struct {
+	Verdict string    `json:"verdict"`
+	Summary string    `json:"summary,omitempty"`
+	At      time.Time `json:"at"`
+}
+
+// CheckResult is how a stage's check hook went: it runs where the agent worked, after the agent exits well.
+type CheckResult struct {
+	Argv []string `json:"argv"`
+	Exit int      `json:"exit"`
+	Tail string   `json:"tail,omitempty"` // the end of what it printed
+}

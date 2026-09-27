@@ -10,20 +10,23 @@ import (
 	"strings"
 	"time"
 
+	"github.com/oxsean/fav/internal/agent"
 	"github.com/oxsean/fav/internal/wire"
 )
 
-// Report is a line an agent adds to its run with `tend run ask` or `tend run note`.
+// Report is a line an agent adds to its run with `tend run ask`, `note` or `verdict`.
 type Report struct {
-	At   time.Time `json:"at"`
-	Kind string    `json:"kind"` // ask | note
-	Text string    `json:"text"`
+	At      time.Time `json:"at"`
+	Kind    string    `json:"kind"` // ask | note | verdict
+	Text    string    `json:"text"`
+	Verdict string    `json:"verdict,omitempty"` // pass | rework | blocked
 }
 
 // Report kinds.
 const (
-	ReportAsk  = "ask"
-	ReportNote = "note"
+	ReportAsk     = "ask"
+	ReportNote    = "note"
+	ReportVerdict = "verdict"
 )
 
 // Env names the supervisor gives its agent.
@@ -51,9 +54,21 @@ func AddReport(dir, kind, text string) error {
 	return appendLine(filepath.Join(dir, reportsFile), Report{At: time.Now(), Kind: kind, Text: text})
 }
 
+// AddVerdict appends the run's verdict (pass | rework | blocked) with a summary to run directory dir.
+func AddVerdict(dir, verdict, summary string) error {
+	if verdict != agent.VerdictPass && verdict != agent.VerdictRework && verdict != agent.VerdictBlocked {
+		return &wire.Error{Code: wire.CodeBadRequest, Detail: "verdict " + verdict}
+	}
+	if _, err := os.Stat(filepath.Join(dir, "spec.json")); err != nil {
+		return err
+	}
+	return appendLine(filepath.Join(dir, reportsFile), Report{At: time.Now(), Kind: ReportVerdict, Verdict: verdict,
+		Text: clip(summary, maxReport)})
+}
+
 // reportsFrom reads the whole report lines after offset from; it answers them and where the next read starts.
 func reportsFrom(dir string, from int64) ([]Report, int64) {
-	return linesFrom(filepath.Join(dir, reportsFile), from, func(r Report) bool { return r.Text != "" })
+	return linesFrom(filepath.Join(dir, reportsFile), from, func(r Report) bool { return r.Text != "" || r.Verdict != "" })
 }
 
 // appendLine adds v to the JSON-lines file path as one line.

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -40,6 +41,15 @@ func TestMain(m *testing.M) {
 		if err := node.FakeAgent(os.Args[2:]); err != nil {
 			os.Exit(2)
 		}
+		os.Exit(0)
+	}
+	if len(os.Args) > 2 && os.Args[1] == "_check" { // a check hook: fails the first time, passes after
+		if _, err := os.Stat(os.Args[2]); err != nil {
+			os.WriteFile(os.Args[2], nil, 0o600)
+			fmt.Println("FAIL: TestExport (quotes)")
+			os.Exit(1)
+		}
+		fmt.Println("ok")
 		os.Exit(0)
 	}
 	if len(os.Args) > 2 && os.Args[1] == "_notify" { // a notify command: keeps what it read
@@ -97,6 +107,7 @@ func (e *env) start() {
 	e.t.Helper()
 	n := node.New(e.home)
 	n.Probe = e.probe
+	n.Limits.AllowHooks = e.cfg.Node.AllowHooks
 	opt := Options{Home: e.home, Version: "test", Config: e.cfg, Node: n, Sessions: remote.NewLocal("test"), Dial: e.dial, MachineOwner: e.owner,
 		Notice: e.notice}
 	if e.users != nil {

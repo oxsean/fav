@@ -63,6 +63,7 @@ HERDR_LIVE=1 go test ./internal/herdr -run TestLiveCreateTabAndRun   # inside He
 | `internal/agent` | provider adapters (claude, codex, fake, command): launch, resume, fork, capabilities |
 | `internal/tracker` | issue trackers (Gitea; GitLab and GitHub fit the same `Tracker` interface): issues, comments, close, label, webhook signatures; `giteatest` is a fake Gitea with faults for tests; tend-server only |
 | `internal/defs` | agent definitions: Markdown with a YAML front matter (`Parse`, `Format`, `Check`, `Import` on the client only, `Compile` into a profile) |
+| `internal/workflow` | workflows: Markdown definitions (`Parse`, `Check`, the embedded built-ins, `Resolve`), a stage's brief from its template, the task's workpad; the stage rules themselves are `task` (`flow.go`) and `coord` (`workflow.go`) |
 | `internal/node` | runs on this machine: run directories, the `_run` supervisor, snapshots, `run.*` methods |
 | `internal/proc` | detached starts, process trees, liveness, per OS |
 | `internal/journal`, `internal/task` | the coordinator's event log and the task / run state folded from it |

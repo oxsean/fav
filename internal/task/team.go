@@ -25,8 +25,9 @@ type Project struct {
 	Links     []Link              `json:"links,omitempty"`
 	Context   string              `json:"context,omitempty"` // what every run of the project is told about it
 	Defaults  Defaults            `json:"defaults,omitzero"`
-	Hooks     map[string][]string `json:"hooks,omitempty"` // setup | before_run | check | cleanup → argv
-	Fetch     []string            `json:"fetch,omitempty"` // argv that prints a requirement; {ref} is its link
+	Hooks     map[string][]string `json:"hooks,omitempty"`     // setup | before_run | check | cleanup → argv
+	Fetch     []string            `json:"fetch,omitempty"`     // argv that prints a requirement; {ref} is its link
+	Workflows map[string]string   `json:"workflows,omitempty"` // its own workflows: name → Markdown definition
 	Rev       int                 `json:"rev,omitzero"`
 	CreatedAt time.Time           `json:"created_at,omitzero"`
 	UpdatedAt time.Time           `json:"updated_at,omitzero"`
@@ -110,15 +111,16 @@ const (
 )
 
 type ProjectEdit struct {
-	ID       string               `json:"id"`
-	Name     *string              `json:"name,omitempty"`
-	Owner    *string              `json:"owner,omitempty"`
-	Repos    *[]Repo              `json:"repos,omitempty"`
-	Links    *[]Link              `json:"links,omitempty"`
-	Context  *string              `json:"context,omitempty"`
-	Defaults *Defaults            `json:"defaults,omitempty"`
-	Hooks    *map[string][]string `json:"hooks,omitempty"`
-	Fetch    *[]string            `json:"fetch,omitempty"`
+	ID        string               `json:"id"`
+	Name      *string              `json:"name,omitempty"`
+	Owner     *string              `json:"owner,omitempty"`
+	Repos     *[]Repo              `json:"repos,omitempty"`
+	Links     *[]Link              `json:"links,omitempty"`
+	Context   *string              `json:"context,omitempty"`
+	Defaults  *Defaults            `json:"defaults,omitempty"`
+	Hooks     *map[string][]string `json:"hooks,omitempty"`
+	Fetch     *[]string            `json:"fetch,omitempty"`
+	Workflows *map[string]string   `json:"workflows,omitempty"`
 }
 
 // MemberSet gives user a role in project; "" takes it away.
@@ -173,6 +175,9 @@ func (s *State) applyTeam(e journal.Event, at time.Time) (bool, error) {
 		}
 		if d.Fetch != nil {
 			p.Fetch = *d.Fetch
+		}
+		if d.Workflows != nil {
+			p.Workflows = *d.Workflows
 		}
 		p.Rev++
 		p.UpdatedAt = at

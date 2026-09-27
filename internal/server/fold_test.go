@@ -81,6 +81,25 @@ func foldScenario() []journal.Envelope {
 	add(ev(task.ETaskCreated, task.Task{ID: "t7", Title: "closed", Project: "p1", Kind: task.KindRequirement, Status: task.StatusTodo,
 		Source: &task.Source{Kind: "gitea", Number: 9, Rev: 1, Digest: "a", Seen: "a", SeenRev: 1}}))
 	add(ev(task.ETaskSourced, task.SourceUpdate{ID: "t7", Digest: "a", Closed: true}))
+	flow := &task.Flow{Name: "feature", MaxLoops: 1, Budget: &task.Budget{Minutes: 600}, Stages: []task.Stage{{Name: "implement", Role: "implement", Check: true},
+		{Name: "review", Role: "review", Output: task.OutputVerdict, OnRework: "implement"}, {Name: "accept", Gate: task.GateHuman}}}
+	add(ev(task.ETaskCreated, task.Task{ID: "t8", Title: "flow", Dir: "/w", Status: task.StatusTodo, Workflow: "feature", Flow: flow, Stage: "implement"}))
+	add(ev(task.ETaskStarted, task.TaskStart{IDs: []string{"t8"}}))
+	add(ev(task.ERunQueued, task.Run{ID: "r5", Task: "t8", Machine: "mba", Agent: "fake", Dir: "/w", Stage: "implement", Check: []string{"gate"}}))
+	add(ev(task.ERunStarting, task.RunStarting{ID: "r5"}))
+	add(ev(task.ERunObserved, task.Observation{ID: "r5", State: task.Exited, NodeRev: 1, ExitCode: &exit0, StartedAt: &started, EndedAt: &started,
+		Check: &agent.CheckResult{Argv: []string{"gate"}, Exit: 1, Tail: "FAIL"}}))
+	add(ev(task.ETaskNoted, task.TaskNote{ID: "t8", Note: task.Note{Stage: "implement", Kind: task.NoteRework, Text: "check failed"}}),
+		ev(task.ETaskStaged, task.TaskStage{ID: "t8", Stage: "implement", Loops: 1}))
+	add(ev(task.ERunQueued, task.Run{ID: "r6", Task: "t8", Machine: "mba", Agent: "fake", Dir: "/w", Stage: "implement"}))
+	add(ev(task.ERunObserved, task.Observation{ID: "r6", State: task.Exited, NodeRev: 1, ExitCode: &exit0}))
+	add(ev(task.ETaskStaged, task.TaskStage{ID: "t8", Stage: "review", Loops: 1}))
+	add(ev(task.ERunQueued, task.Run{ID: "r7", Task: "t8", Machine: "mba", Agent: "fake", Dir: "/w", Stage: "review", Judge: true}))
+	add(ev(task.ERunObserved, task.Observation{ID: "r7", State: task.Exited, NodeRev: 1, ExitCode: &exit0,
+		Verdict: &agent.Verdict{Verdict: agent.VerdictRework, Summary: "quote commas", At: started}}))
+	add(ev(task.ETaskCreated, task.Task{ID: "t9", Title: "flow 2", Dir: "/w", Status: task.StatusTodo, Workflow: "feature", Flow: flow, Stage: "implement"}))
+	add(ev(task.ETaskEdited, task.TaskEdit{ID: "t9", Workflow: ptr("")}))
+	add(ev(task.ETaskStaged, task.TaskStage{ID: "t8", Stage: "accept", Loops: 1}))
 	add(ev("some_future_event", map[string]string{"id": "t1"}))
 	return envs
 }
@@ -164,7 +183,7 @@ process.stdout.write(JSON.stringify({state:s,sits}));`
 	var goState any
 	gb, _ := json.Marshal(st)
 	json.Unmarshal(gb, &goState)
-	if runs, _ := page.(map[string]any)["runs"].(map[string]any); len(runs) != 4 || len(st.Runs) != 4 {
+	if runs, _ := page.(map[string]any)["runs"].(map[string]any); len(runs) != 7 || len(st.Runs) != 7 {
 		t.Fatalf("the page folded %d runs: %s", len(runs), out)
 	}
 	for id, x := range st.Tasks {

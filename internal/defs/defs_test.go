@@ -2,6 +2,7 @@ package defs
 
 import (
 	"errors"
+	"path/filepath"
 	"reflect"
 	"slices"
 	"strings"
@@ -60,7 +61,7 @@ func TestAClaudeCodeSubagentIsADefinition(t *testing.T) {
 	}
 	withImport := AgentDef{Name: "reviewer", Role: "review", Import: "~/.claude/agents/code-reviewer.md"}
 	got, err := Import(withImport, func(p string) ([]byte, error) {
-		if !strings.HasSuffix(p, "/.claude/agents/code-reviewer.md") || strings.HasPrefix(p, "~") {
+		if !strings.HasSuffix(filepath.ToSlash(p), "/.claude/agents/code-reviewer.md") || strings.HasPrefix(p, "~") {
 			return nil, errors.New("not found " + p)
 		}
 		return Format(d), nil

@@ -413,6 +413,19 @@ brief. `tend agent defs | export | check | rm | share` manage them. Without a se
 projects or everyone (`--view` lets them read it too). `skills`, `mcp`, `hooks`, `output` and `budget` are kept but not
 applied yet; the dispatch preview says so.
 
+**Workflows.** A task can go through stages instead of one run: `tend task add … --workflow feature` (or a project's
+default workflow). Built in: `feature` (implement → review → accept), `fix` (implement → test → accept) and `docs`
+(implement → accept). Each stage takes the project's agent for its role (`implement`, `review`, `test`); a review or test
+run ends with `tend run verdict pass|rework|blocked "…"`, and a rework sends the task back to implementing, which goes on
+in its own session with what the review said. A stage with `check: true` runs the project's `hooks.check` (say
+`mise run gate`) on the machine after the agent is done — a failure is a rework; the node takes such runs only with
+`node.allow_hooks`. After `max_loops` reworks, a blocked verdict or a spent budget the task waits for someone. The last
+stage is a human gate: its approver passes it (`tend task gate <id> --pass`), anyone on the task may send it back with
+notes (`--rework "…"`). `tend task message <id> "…"` goes into the implementing run, answers a run that waits, or is kept
+on the task's workpad for the next stage — what every stage's brief carries along. A project defines its own workflows
+as Markdown: the stages in the front matter, a `## <stage>` section per stage for its brief (`{{task.brief}}`,
+`{{task.acceptance}}`, `{{#rework}}…{{rework.notes}}…{{/rework}}`, `{{workpad}}`). A task keeps the workflow it was given.
+
 **Before a run starts.** `tend run start` first says where and how the run would go: the machine's agent CLI and
 version, whether it is logged in, and whether the run waits for the machine, a slot or a directory. A CLI that is missing
 or not logged in there would fail the run at once, so it is not dispatched (`--force` dispatches anyway; the node refuses

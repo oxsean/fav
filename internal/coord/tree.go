@@ -215,10 +215,14 @@ func (c *Coord) flow() {
 		for _, t := range c.st.Completing() {
 			events = append(events, journal.NewEvent(task.ETaskStatus, task.TaskStatus{ID: t.ID, Status: task.StatusDone}))
 		}
+		events = append(events, c.stageMoves()...)
 		for _, t := range c.st.Ready() {
 			who, ok := c.principal(t.Owner)
 			run, err := task.Run{}, error(forbidden("owner "+t.Owner))
-			if ok {
+			switch {
+			case ok && t.Flow != nil:
+				run, err = c.stagePlan(who, t)
+			case ok:
 				run, err = c.plan(who, Dispatch{Task: t.ID})
 			}
 			if err == nil && !c.canUse(who, run.Machine, run.Project) {

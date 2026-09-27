@@ -6,6 +6,8 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -33,6 +35,7 @@ func FakeAgent(args []string) error {
 	stream := fs.Bool("stream", false, "talk claude's stream-json both ways on stdin and stdout")
 	permission := fs.String("permission", "", "stream: after the first step, ask to use a tool (TOOL:WHAT)")
 	question := fs.String("question", "", "stream: after the first step, ask the user (QUESTION|OPTION|OPTION…)")
+	verdicts := fs.String("verdicts", "", "report these verdicts in turn, one per run in its directory (rework,pass)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -42,7 +45,8 @@ func FakeAgent(args []string) error {
 	}
 	if *stream {
 		return fakeStream(fakeOpts{sid: *sid, dir: *dir, steps: *steps, every: *every, exit: *exit, ask: *ask, final: *final,
-			stderr: *stderr, note: *note, askReport: *askReport, permission: *permission, question: *question, leave: *leave})
+			stderr: *stderr, note: *note, askReport: *askReport, permission: *permission, question: *question, leave: *leave,
+			verdicts: *verdicts})
 	}
 	brief := ""
 	if *promptFile != "" {
@@ -74,6 +78,9 @@ func FakeAgent(args []string) error {
 		if err := AddReport(os.Getenv(EnvRunDir), ReportAsk, *askReport); err != nil {
 			return err
 		}
+	}
+	if err := fakeVerdict(cwd, *verdicts); err != nil {
+		return err
 	}
 	for i := 1; i <= *steps; i++ {
 		time.Sleep(*every)
@@ -112,4 +119,19 @@ func FakeAgent(args []string) error {
 	}
 	os.Exit(*exit)
 	return nil
+}
+
+// fakeVerdict reports the next of verdicts (comma separated) to the run: the nth run in dir reports the nth, the last
+// one after they run out.
+func fakeVerdict(dir, verdicts string) error {
+	if verdicts == "" {
+		return nil
+	}
+	vs := strings.Split(verdicts, ",")
+	count := filepath.Join(dir, ".tend-fake-verdicts")
+	b, _ := os.ReadFile(count)
+	n := len(b)
+	os.WriteFile(count, append(b, '.'), 0o600)
+	v := vs[min(n, len(vs)-1)]
+	return AddVerdict(os.Getenv(EnvRunDir), v, "fake "+v+" "+strconv.Itoa(n+1))
 }

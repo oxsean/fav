@@ -121,9 +121,13 @@ func (c *Coord) projectEdit(who Principal, r *wire.Request) (string, []journal.E
 	if err := c.checkSettings(p); err != nil {
 		return "", nil, err
 	}
+	if err := c.checkWorkflows(pr, p); err != nil {
+		return "", nil, err
+	}
 	changed = changed || p.Repos != nil && !reflect.DeepEqual(*p.Repos, pr.Repos) || p.Links != nil && !reflect.DeepEqual(*p.Links, pr.Links) ||
 		p.Context != nil && *p.Context != pr.Context || p.Defaults != nil && !reflect.DeepEqual(*p.Defaults, pr.Defaults) ||
-		p.Hooks != nil && !reflect.DeepEqual(*p.Hooks, pr.Hooks) || p.Fetch != nil && !slices.Equal(*p.Fetch, pr.Fetch)
+		p.Hooks != nil && !reflect.DeepEqual(*p.Hooks, pr.Hooks) || p.Fetch != nil && !slices.Equal(*p.Fetch, pr.Fetch) ||
+		p.Workflows != nil && !reflect.DeepEqual(*p.Workflows, pr.Workflows)
 	if !changed {
 		return pr.ID, nil, nil
 	}

@@ -30,7 +30,8 @@ type TaskCreate struct {
 	Accept   []string `json:"acceptance,omitempty"`
 	Tags     []string `json:"tags,omitempty"`
 	Approver string   `json:"approver,omitempty"`
-	Status   string   `json:"status,omitempty"` // todo (default) | backlog
+	Status   string   `json:"status,omitempty"`   // todo (default) | backlog
+	Workflow string   `json:"workflow,omitempty"` // default: its project's; "none" for none
 }
 
 type Dispatch struct {
@@ -38,6 +39,7 @@ type Dispatch struct {
 	Machine string `json:"machine,omitempty"` // default: the task's, else this machine
 	Agent   string `json:"agent,omitempty"`   // default: the task's, else claude
 	Runner  string `json:"runner,omitempty"`
+	brief   string // a workflow stage's, in place of the task's
 }
 
 type TailParams struct {
@@ -108,7 +110,7 @@ var readMethods = []string{remote.MHello, remote.MList, remote.MMessages, remote
 var Methods = []string{MStateGet, MTaskGet, MTaskCreate, MTaskEdit, MTaskStatus, MRunDispatch, MRunStop, MRunAbandon, MRunTail,
 	MAgentList, MMachineList, MSubscribe, MNodeCall, MRunPreview, MRunContinue, MRunAnswer, MRunSend, MRunMessages,
 	MProjectCreate, MProjectEdit, MProjectMember, MMachineShare, MTaskStart, MTaskMove,
-	MAgentDefList, MAgentDefGet, MAgentDefSave, MAgentDefRemove, MAgentDefShare, MInboxList, MUserOffboard, MTaskSync, MTaskSourceAck}
+	MAgentDefList, MAgentDefGet, MAgentDefSave, MAgentDefRemove, MAgentDefShare, MInboxList, MUserOffboard, MTaskSync, MTaskSourceAck, MTaskGate, MTaskMessage}
 
 // Handler answers this machine's user.
 func (c *Coord) Handler() wire.Handler { return c.HandlerFor(Owner) }
@@ -218,6 +220,10 @@ func (c *Coord) HandlerFor(p Principal) wire.Handler {
 			return c.command(p, r, c.taskSync, taskView)
 		case MTaskSourceAck:
 			return c.command(p, r, c.taskSourceAck, taskView)
+		case MTaskGate:
+			return c.command(p, r, c.taskGate, taskView)
+		case MTaskMessage:
+			return c.command(p, r, c.taskMessage, messageView)
 		case MRunDispatch:
 			return c.command(p, r, c.runDispatch, runView)
 		case MRunContinue:
@@ -309,8 +315,8 @@ func (c *Coord) command(p Principal, r *wire.Request, do func(Principal, *wire.R
 			cp := *d
 			st.AgentDefs[id] = &cp
 		}
-		if st.Apply(env) != nil {
-			return nil
+		if st.Apply(env) != nil { // env touches what the copy lacks: views that need no state still answer
+			st = task.New()
 		}
 		b, _ := json.Marshal(view(st, id))
 		return b
@@ -391,8 +397,16 @@ func (c *Coord) taskCreate(who Principal, r *wire.Request) (string, []journal.Ev
 	if err := c.checkFields(who, p.Project, p.Kind, p.Approver, p.Accept, p.Tags); err != nil {
 		return "", nil, err
 	}
+	wf, flow, err := c.flowOf(p.Project, p.Workflow)
+	if err != nil {
+		return "", nil, err
+	}
 	t := task.Task{ID: newID("t_"), Title: p.Title, Brief: p.Brief, Dir: p.Dir, Machine: p.Machine, Agent: p.Agent,
-		Project: p.Project, Owner: who.User, Approver: p.Approver, Kind: p.Kind, Accept: p.Accept, Tags: p.Tags, Status: p.Status}
+		Project: p.Project, Owner: who.User, Approver: p.Approver, Kind: p.Kind, Accept: p.Accept, Tags: p.Tags, Status: p.Status,
+		Workflow: wf, Flow: flow}
+	if flow != nil {
+		t.Stage = flow.Stages[0].Name
+	}
 	if err := c.checkPlace(who, &t, p.Parent, p.After); err != nil {
 		return "", nil, err
 	}
@@ -449,7 +463,21 @@ func (c *Coord) taskEdit(who Principal, r *wire.Request) (string, []journal.Even
 			return "", nil, err
 		}
 	}
-	changed := p.Accept != nil && !slices.Equal(*p.Accept, t.Accept) || p.Tags != nil && !slices.Equal(*p.Tags, t.Tags)
+	if p.Workflow != nil {
+		if open := c.st.OpenRun(t.ID); open != nil {
+			return "", nil, conflict("open run " + open.ID)
+		}
+		wf, flow, err := c.flowOf(project, firstOf(*p.Workflow, NoWorkflow))
+		if err != nil {
+			return "", nil, err
+		}
+		if wf == t.Workflow {
+			p.Workflow = nil
+		} else {
+			p.Workflow, p.Flow = &wf, flow
+		}
+	}
+	changed := p.Accept != nil && !slices.Equal(*p.Accept, t.Accept) || p.Tags != nil && !slices.Equal(*p.Tags, t.Tags) || p.Workflow != nil
 	for _, f := range []struct {
 		v   *string
 		now string
@@ -480,6 +508,9 @@ func (c *Coord) taskStatus(who Principal, r *wire.Request) (string, []journal.Ev
 	}
 	if p.Status == task.StatusDone && task.SourceWaits(t) == task.WhySourceChanged {
 		return "", nil, conflict(task.WhySourceChanged)
+	}
+	if p.Status == task.StatusDone && t.Flow != nil {
+		return "", nil, conflict("workflow: its last stage finishes it")
 	}
 	if p.Status == task.StatusCanceled {
 		return t.ID, c.cancelTree(t), nil
@@ -547,7 +578,7 @@ func (c *Coord) plan(who Principal, p Dispatch) (task.Run, error) {
 	if err := c.checkMachine(machine); err != nil {
 		return task.Run{}, err
 	}
-	brief := t.Brief
+	brief := firstOf(p.brief, t.Brief)
 	if strings.TrimSpace(brief) == "" {
 		brief = t.Title
 	}

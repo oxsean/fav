@@ -34,7 +34,7 @@ type Config struct {
 	Coordinator *CoordinatorConfig       `json:"coordinator,omitempty"` // mode 2: the server this machine's clients use
 	// NotifyCommand runs when a run wants someone (waiting, asked, failed, stalled) with the event as JSON on stdin;
 	// NotifyEvents narrows which (run.waiting, run.asked, run.failed, run.stalled, run.permission), or adds the
-	// task events (task.needs_you, task.done), which are heard only when named.
+	// task events (task.needs_you, task.done, task.stage, task.rework), which are heard only when named.
 	NotifyCommand []string `json:"notify_command,omitempty"`
 	NotifyEvents  []string `json:"notify_events,omitempty"`
 	// Server is tend-server's own settings (its home's config.json).
@@ -85,6 +85,7 @@ type NodeConfig struct {
 	AllowDirs     []string `json:"allow_dirs,omitempty"`
 	AllowBypass   bool     `json:"allow_bypass,omitempty"`
 	AllowProfiles []string `json:"allow_profiles,omitempty"`
+	AllowHooks    bool     `json:"allow_hooks,omitempty"` // run a project's check hooks (allow_bypass does too)
 	StallAfter    string   `json:"stall_after,omitempty"`
 	Slots         int      `json:"slots,omitempty"` // runs this node takes at once, whoever sends them; 0 no bound // a background run silent this long is marked stalled; default 15m, "off"
 	// ShareSessions is which of this machine's sessions the node answers: all | runs | none; a node that dials a

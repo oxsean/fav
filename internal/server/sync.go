@@ -430,7 +430,7 @@ func snapshot(i tracker.Issue, comments []tracker.Comment) (title, text, digest 
 // progress is the comment x's issue carries for taskID, and whether the task is done; ok is false when the journal no
 // longer holds it.
 func (s *Syncer) progress(x store.Tracker, set TrackerSettings, taskID string) (body string, done, ok bool) {
-	var owner, approver, status string
+	var owner, approver, status, stages string
 	var kids []string
 	var total, finished int
 	s.coord.Read(func(st *task.State) {
@@ -441,6 +441,7 @@ func (s *Syncer) progress(x store.Tracker, set TrackerSettings, taskID string) (
 		ok, done = true, t.Status == task.StatusDone
 		owner, approver = t.Owner, t.Approver
 		status = statusLine(st.Situation(t))
+		stages = stageLine(t)
 		for _, k := range st.Subtree(t.ID)[1:] {
 			if len(st.Children(k.ID)) > 0 {
 				continue
@@ -464,6 +465,9 @@ func (s *Syncer) progress(x store.Tracker, set TrackerSettings, taskID string) (
 	var b strings.Builder
 	b.WriteString(marker(s.coord.ID(), taskID) + "\n")
 	fmt.Fprintf(&b, "**tend** · %s\n", status)
+	if stages != "" {
+		b.WriteString("\n" + stages + "\n")
+	}
 	if total > 0 {
 		fmt.Fprintf(&b, "\nProgress: %d/%d subtasks finished\n", finished, total)
 	}
@@ -494,6 +498,26 @@ func (s *Syncer) mentions(x store.Tracker, owner, approver string) string {
 		}
 	}
 	return strings.Join(parts, " · ")
+}
+
+// stageLine is where t stands in its workflow: its stages with the current one in bold, and the round.
+func stageLine(t *task.Task) string {
+	if t.Flow == nil {
+		return ""
+	}
+	var names []string
+	for _, st := range t.Flow.Stages {
+		if st.Name == t.Stage && !task.Finished(t.Status) {
+			names = append(names, "**"+st.Name+"**")
+		} else {
+			names = append(names, st.Name)
+		}
+	}
+	line := "Stages: " + strings.Join(names, " → ")
+	if t.Loops > 0 {
+		line += fmt.Sprintf(" (round %d)", t.Loops+1)
+	}
+	return line
 }
 
 func statusLine(sit task.Situation) string {

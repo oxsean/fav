@@ -37,6 +37,7 @@ type NotifyEvent struct {
 	Ask      string    `json:"ask,omitempty"`
 	Session  string    `json:"session,omitempty"`
 	Dir      string    `json:"dir,omitempty"`
+	Stage    string    `json:"stage,omitempty"`
 	At       time.Time `json:"at"`
 }
 

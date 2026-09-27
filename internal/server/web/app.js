@@ -318,7 +318,7 @@ function renderDetail() {
   const runs=taskRuns(task.id),run=selectedRun(),writeDisabled=ui.online?'':'disabled',typing=document.activeElement?.id==='reply-text';
   el.innerHTML=`${button('back-tasks',`${icon('back')}${t('backTasks')}`,'','mobile-back')}<div class="detail-eyebrow"><span class="mono">${task.id}</span><span>·</span>${badge(task.status)}<span>· rev ${task.rev}</span></div>
     <div class="detail-header"><h2>${esc(task.title)}</h2><div class="detail-actions">${button('edit',`${icon('edit')}${t('edit')}`,writeDisabled)}${button('dispatch',`${icon('play')}${t('dispatch')}`,writeDisabled,'primary')}</div></div>
-    <div class="task-actions">${button(openTask(task)?'done':'reopen',`${icon(openTask(task)?'check':'refresh')}${t(openTask(task)?'markDone':'reopen')}`,writeDisabled,'quiet')}${task.status!=='canceled'?button('cancel-task',t('cancelTask'),writeDisabled,'quiet'):''}</div>${Tree.detail(task)}
+    <div class="task-actions">${task.flow&&openTask(task)?'':button(openTask(task)?'done':'reopen',`${icon(openTask(task)?'check':'refresh')}${t(openTask(task)?'markDone':'reopen')}`,writeDisabled,'quiet')}${task.status!=='canceled'?button('cancel-task',t('cancelTask'),writeDisabled,'quiet'):''}</div>${Tree.detail(task)}
     <div class="metadata"><div><span class="meta-label">${t('directory')}</span><code class="meta-value">${esc(task.dir||'—')}</code></div><div><span class="meta-label">${t('defaultMachine')}</span><span class="meta-value mono">${esc(task.machine||t('unspecified'))}</span></div><div><span class="meta-label">${t('defaultAgent')}</span><span class="meta-value mono">${esc(task.agent||t('unspecified'))}</span></div></div>
     <div class="tabs" role="tablist" aria-label="${t('viewDetails')}">${['output','conversation','brief','history'].map(tab=>`<button class="tab ${ui.tab===tab?'active':''}" role="tab" id="tab-${tab}" aria-selected="${ui.tab===tab}" aria-controls="detail-body" tabindex="${ui.tab===tab?'0':'-1'}" data-action="tab" data-tab="${tab}">${t(tab)}${tab==='history'?`<span class="count">${runs.length}</span>`:''}</button>`).join('')}</div>
     <div id="detail-body" role="tabpanel" aria-labelledby="tab-${ui.tab}"></div>`;
@@ -744,6 +744,7 @@ document.addEventListener('input',event=>{
   if(el.id==='search-input'){ui.search=el.value;renderTaskList();}
   if(el.id==='reply-text')ui.drafts.set(el.closest('form').dataset.run,el.value);
   if(el.id==='send-text')ui.drafts.set('send:'+el.closest('form').dataset.run,el.value);
+  if(el.id==='task-message-text')ui.drafts.set('task:'+el.closest('form').dataset.id,el.value);
   if(el.dataset.choice)ui.choices.set(el.dataset.choice,el.value);
   if(modal.open&&ui.modalType==='task-form'){
     ui.modalDirty=true;

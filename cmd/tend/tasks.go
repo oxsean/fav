@@ -209,6 +209,10 @@ func cmdTask(args []string) error {
 		return cmdTaskStart(args[1:])
 	case "move":
 		return cmdTaskMove(args[1:])
+	case "gate":
+		return cmdTaskGate(args[1:])
+	case "message", "say":
+		return cmdTaskMessage(args[1:])
 	}
 	return i18n.E("cli.unknown_subcommand", "task "+args[0], usage())
 }
@@ -224,6 +228,7 @@ func cmdTaskAdd(args []string) error {
 	after := fs.String("after", "", i18n.T("cli.task.flag_after"))
 	project := fs.String("project", "", i18n.T("cli.task.flag_project"))
 	backlog := fs.Bool("backlog", false, i18n.T("cli.task.flag_backlog"))
+	wf := fs.String("workflow", "", i18n.T("cli.task.flag_workflow"))
 	title, err := parseWithArgs(fs, args, 1)
 	if err != nil {
 		return err
@@ -247,7 +252,8 @@ func cmdTaskAdd(args []string) error {
 		if err != nil {
 			return err
 		}
-		p := coord.TaskCreate{Title: title[0], Brief: b, Dir: d, Machine: *machine, Agent: *agentName, Project: *project, Status: status}
+		p := coord.TaskCreate{Title: title[0], Brief: b, Dir: d, Machine: *machine, Agent: *agentName, Project: *project, Status: status,
+			Workflow: *wf}
 		if *parent != "" {
 			if p.Parent, err = taskID(st, *parent); err != nil {
 				return err
@@ -479,6 +485,8 @@ func cmdRun(args []string) error {
 		return cmdRunSend(args[1:])
 	case "ask", "note":
 		return cmdRunReport(args[0], args[1:])
+	case "verdict":
+		return cmdRunVerdict(args[1:])
 	}
 	return i18n.E("cli.unknown_subcommand", "run "+args[0], usage())
 }
@@ -950,4 +958,74 @@ func cmdTaskMove(args []string) error {
 		fmt.Print(i18n.F("cli.task.moved", t.ID))
 		return nil
 	})
+}
+
+// cmdTaskGate decides a task's human gate: --pass moves it on (its approver), --rework sends it back with notes.
+func cmdTaskGate(args []string) error {
+	fs := newFlags("task")
+	pass := fs.Bool("pass", false, i18n.T("cli.task.flag_pass"))
+	rework := fs.String("rework", "", i18n.T("cli.task.flag_rework"))
+	pos, err := parseWithArgs(fs, args, 1)
+	if err != nil {
+		return err
+	}
+	if *pass == (*rework != "") {
+		return i18n.E("cli.task.gate_how")
+	}
+	return withCoord(wire.Options{}, func(cl *coord.Client) error {
+		st, err := readState(cl)
+		if err != nil {
+			return err
+		}
+		id, err := taskID(st, pos[0])
+		if err != nil {
+			return err
+		}
+		var t task.Task
+		if err := write(cl, coord.MTaskGate, coord.TaskGate{ID: id, Pass: *pass, Notes: *rework, ExpectedRev: st.Tasks[id].Rev}, &t); err != nil {
+			return err
+		}
+		fmt.Print(i18n.F("cli.task.gated", t.ID, cmpOr(t.Stage, t.Status)))
+		return nil
+	})
+}
+
+// cmdTaskMessage gives a task words: into its running implementer's turn, as a waiting run's reply, else to its
+// workpad for the next stage.
+func cmdTaskMessage(args []string) error {
+	fs := newFlags("task")
+	toRun := fs.Bool("to-run", false, i18n.T("cli.task.flag_to_run"))
+	pos, err := parseMixed(fs, args)
+	if err != nil {
+		return err
+	}
+	if len(pos) < 2 {
+		return i18n.E("cli.task.need_message")
+	}
+	return withCoord(wire.Options{}, func(cl *coord.Client) error {
+		st, err := readState(cl)
+		if err != nil {
+			return err
+		}
+		id, err := taskID(st, pos[0])
+		if err != nil {
+			return err
+		}
+		var res coord.MessageResult
+		if err := write(cl, coord.MTaskMessage, coord.TaskMessage{ID: id, Text: strings.Join(pos[1:], " "), ToRun: *toRun}, &res); err != nil {
+			return err
+		}
+		fmt.Print(i18n.F(messageKeys[res.To], id, res.Run))
+		return nil
+	})
+}
+
+var messageKeys = map[string]string{coord.MessageToRun: "cli.task.message_run", coord.MessageToReply: "cli.task.message_reply",
+	coord.MessageToWorkpad: "cli.task.message_workpad"}
+
+func cmpOr(a, b string) string {
+	if a != "" {
+		return a
+	}
+	return b
 }

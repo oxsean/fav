@@ -73,48 +73,59 @@ type Task struct {
 	StartSeq  int64     `json:"start_seq,omitempty"` // the seq of its last start; runs queued before it are earlier tries
 	Held      string    `json:"held,omitempty"`      // why the coordinator could not dispatch it; cleared by an edit or a start
 	Source    *Source   `json:"source,omitempty"`    // the issue a requirement comes from
+	Workflow  string    `json:"workflow,omitempty"`  // the workflow's name; "" runs as one run at a time
+	Flow      *Flow     `json:"flow,omitempty"`      // that workflow, frozen when it was given
+	Stage     string    `json:"stage,omitempty"`     // where in it the task is
+	Loops     int       `json:"loops,omitempty"`     // how often a stage sent it back
+	StageSeq  int64     `json:"stage_seq,omitempty"` // the seq it came to Stage at; runs before it were other stages'
+	Notes     []Note    `json:"notes,omitempty"`     // its workpad's own lines
 	Rev       int       `json:"rev,omitzero"`
 	CreatedAt time.Time `json:"created_at,omitzero"`
 	UpdatedAt time.Time `json:"updated_at,omitzero"`
 }
 
 type Run struct {
-	ID         string            `json:"id"`
-	Task       string            `json:"task"`
-	Machine    string            `json:"machine"`
-	Agent      string            `json:"agent"`
-	Profile    tend.AgentProfile `json:"profile"`
-	Dir        string            `json:"dir"`
-	From       string            `json:"from,omitempty"`  // the machine Dir was written for; "": the run's own
-	Brief      string            `json:"brief,omitempty"` // frozen at dispatch
-	Title      string            `json:"title,omitempty"`
-	Runner     string            `json:"runner,omitempty"`     // "": the node picks
-	Resume     string            `json:"resume,omitempty"`     // the session this run continues (Brief is the reply)
-	Parent     string            `json:"parent,omitempty"`     // the run it answers
-	Project    string            `json:"project,omitempty"`    // its task's when it was queued
-	Dispatcher string            `json:"dispatcher,omitempty"` // the user who queued it
-	Want       string            `json:"want,omitempty"`       // run | stop
-	Seq        int64             `json:"seq,omitempty"`        // the seq that queued it
-	State      string            `json:"state,omitempty"`
-	ExitCode   *int              `json:"exit_code,omitempty"`
-	Reason     string            `json:"reason,omitempty"`
-	Detail     string            `json:"detail,omitempty"`
-	Attention  string            `json:"attention,omitempty"` // asked | permission | stalled
-	Ask        string            `json:"ask,omitempty"`
-	Note       string            `json:"note,omitempty"`
-	Last       string            `json:"last,omitempty"`     // the newest thing its agent said
-	Usage      *agent.Usage      `json:"usage,omitempty"`    // what its agent spent
-	Stream     bool              `json:"stream,omitempty"`   // it takes answers and messages while it runs
-	Requests   []agent.Request   `json:"requests,omitempty"` // what it waits on, as its node last said
-	Answers    []agent.Answer    `json:"answers,omitempty"`  // given, not yet taken by the node
-	Sends      []agent.Send      `json:"sends,omitempty"`    // messages for it and how far they got
-	Provider   string            `json:"provider,omitempty"`
-	Session    string            `json:"session,omitempty"`
-	Pane       string            `json:"pane,omitempty"`
-	NodeRev    int               `json:"node_rev,omitempty"`
-	QueuedAt   time.Time         `json:"queued_at,omitzero"`
-	StartedAt  *time.Time        `json:"started_at,omitzero"`
-	EndedAt    *time.Time        `json:"ended_at,omitzero"`
+	ID         string             `json:"id"`
+	Task       string             `json:"task"`
+	Machine    string             `json:"machine"`
+	Agent      string             `json:"agent"`
+	Profile    tend.AgentProfile  `json:"profile"`
+	Dir        string             `json:"dir"`
+	From       string             `json:"from,omitempty"`  // the machine Dir was written for; "": the run's own
+	Brief      string             `json:"brief,omitempty"` // frozen at dispatch
+	Title      string             `json:"title,omitempty"`
+	Runner     string             `json:"runner,omitempty"`     // "": the node picks
+	Resume     string             `json:"resume,omitempty"`     // the session this run continues (Brief is the reply)
+	Parent     string             `json:"parent,omitempty"`     // the run it answers
+	Stage      string             `json:"stage,omitempty"`      // its task's workflow stage when it was queued
+	Judge      bool               `json:"judge,omitempty"`      // it is to end with a verdict
+	Check      []string           `json:"check,omitempty"`      // the hook its node runs after it
+	Verdict    *agent.Verdict     `json:"verdict,omitempty"`    // what it concluded
+	Checked    *agent.CheckResult `json:"checked,omitempty"`    // how the hook went
+	Project    string             `json:"project,omitempty"`    // its task's when it was queued
+	Dispatcher string             `json:"dispatcher,omitempty"` // the user who queued it
+	Want       string             `json:"want,omitempty"`       // run | stop
+	Seq        int64              `json:"seq,omitempty"`        // the seq that queued it
+	State      string             `json:"state,omitempty"`
+	ExitCode   *int               `json:"exit_code,omitempty"`
+	Reason     string             `json:"reason,omitempty"`
+	Detail     string             `json:"detail,omitempty"`
+	Attention  string             `json:"attention,omitempty"` // asked | permission | stalled
+	Ask        string             `json:"ask,omitempty"`
+	Note       string             `json:"note,omitempty"`
+	Last       string             `json:"last,omitempty"`     // the newest thing its agent said
+	Usage      *agent.Usage       `json:"usage,omitempty"`    // what its agent spent
+	Stream     bool               `json:"stream,omitempty"`   // it takes answers and messages while it runs
+	Requests   []agent.Request    `json:"requests,omitempty"` // what it waits on, as its node last said
+	Answers    []agent.Answer     `json:"answers,omitempty"`  // given, not yet taken by the node
+	Sends      []agent.Send       `json:"sends,omitempty"`    // messages for it and how far they got
+	Provider   string             `json:"provider,omitempty"`
+	Session    string             `json:"session,omitempty"`
+	Pane       string             `json:"pane,omitempty"`
+	NodeRev    int                `json:"node_rev,omitempty"`
+	QueuedAt   time.Time          `json:"queued_at,omitzero"`
+	StartedAt  *time.Time         `json:"started_at,omitzero"`
+	EndedAt    *time.Time         `json:"ended_at,omitzero"`
 }
 
 // Event types and their payloads.
@@ -157,6 +168,10 @@ type TaskEdit struct {
 	Kind     *string   `json:"kind,omitempty"`
 	Accept   *[]string `json:"acceptance,omitempty"`
 	Tags     *[]string `json:"tags,omitempty"`
+	// Workflow gives the task a workflow ("" takes it away); the coordinator fills Flow with its definition. The task
+	// starts over at its first stage.
+	Workflow *string `json:"workflow,omitempty"`
+	Flow     *Flow   `json:"flow,omitempty"`
 }
 
 type TaskStatus struct {
@@ -177,25 +192,27 @@ type RunStarting struct {
 
 // Observation is what a node reported about a run.
 type Observation struct {
-	ID        string          `json:"id"`
-	State     string          `json:"state"`
-	ExitCode  *int            `json:"exit_code,omitempty"`
-	Reason    string          `json:"reason,omitempty"`
-	Detail    string          `json:"detail,omitempty"`
-	Attention string          `json:"attention,omitempty"`
-	Ask       string          `json:"ask,omitempty"`
-	Note      string          `json:"note,omitempty"`
-	Last      string          `json:"last,omitempty"`
-	Usage     *agent.Usage    `json:"usage,omitempty"`
-	Stream    bool            `json:"stream,omitempty"`
-	Requests  []agent.Request `json:"requests,omitempty"`
-	Sends     []agent.Send    `json:"sends,omitempty"`
-	Provider  string          `json:"provider,omitempty"`
-	Session   string          `json:"session,omitempty"`
-	Pane      string          `json:"pane,omitempty"`
-	NodeRev   int             `json:"node_rev,omitzero"`
-	StartedAt *time.Time      `json:"started_at,omitzero"`
-	EndedAt   *time.Time      `json:"ended_at,omitzero"`
+	ID        string             `json:"id"`
+	State     string             `json:"state"`
+	ExitCode  *int               `json:"exit_code,omitempty"`
+	Reason    string             `json:"reason,omitempty"`
+	Detail    string             `json:"detail,omitempty"`
+	Attention string             `json:"attention,omitempty"`
+	Ask       string             `json:"ask,omitempty"`
+	Note      string             `json:"note,omitempty"`
+	Last      string             `json:"last,omitempty"`
+	Usage     *agent.Usage       `json:"usage,omitempty"`
+	Stream    bool               `json:"stream,omitempty"`
+	Requests  []agent.Request    `json:"requests,omitempty"`
+	Sends     []agent.Send       `json:"sends,omitempty"`
+	Verdict   *agent.Verdict     `json:"verdict,omitempty"`
+	Check     *agent.CheckResult `json:"check,omitempty"`
+	Provider  string             `json:"provider,omitempty"`
+	Session   string             `json:"session,omitempty"`
+	Pane      string             `json:"pane,omitempty"`
+	NodeRev   int                `json:"node_rev,omitzero"`
+	StartedAt *time.Time         `json:"started_at,omitzero"`
+	EndedAt   *time.Time         `json:"ended_at,omitzero"`
 }
 
 // State is everything the journal says.
@@ -241,6 +258,9 @@ func (s *State) apply(e journal.Event, seq int64, at time.Time) error {
 			return err
 		}
 		t.Rev, t.CreatedAt, t.UpdatedAt = 1, at, at
+		if t.Flow != nil {
+			t.StageSeq = seq
+		}
 		s.Tasks[t.ID] = &t
 	case ETaskEdited:
 		var d TaskEdit
@@ -265,6 +285,12 @@ func (s *State) apply(e journal.Event, seq int64, at time.Time) error {
 		}
 		if d.Tags != nil {
 			t.Tags = *d.Tags
+		}
+		if d.Workflow != nil {
+			t.Workflow, t.Flow, t.Stage, t.Loops, t.StageSeq = *d.Workflow, d.Flow, "", 0, seq
+			if d.Flow != nil && len(d.Flow.Stages) > 0 {
+				t.Stage = d.Flow.Stages[0].Name
+			}
 		}
 		t.Held = ""
 		t.Rev++
@@ -364,6 +390,9 @@ func (s *State) apply(e journal.Event, seq int64, at time.Time) error {
 		if ok, err := s.applySource(e, at); ok {
 			return err
 		}
+		if ok, err := s.applyFlow(e, seq, at); ok {
+			return err
+		}
 		return fmt.Errorf("unknown event")
 	}
 	return nil
@@ -412,6 +441,7 @@ func (r *Run) observe(o Observation) {
 	if o.NodeRev > 0 { // what the node says now; the coordinator's own observations carry none of it
 		r.Attention, r.Ask, r.Note, r.Last, r.Usage = o.Attention, o.Ask, o.Note, o.Last, o.Usage
 		r.Stream, r.Requests = o.Stream, o.Requests
+		r.Verdict, r.Checked = o.Verdict, o.Check
 		r.Sends = mergeSends(r.Sends, o.Sends)
 		r.Answers = slices.DeleteFunc(slices.Clone(r.Answers), func(a agent.Answer) bool { // taken, or no longer asked
 			return !slices.ContainsFunc(r.Requests, func(q agent.Request) bool { return q.ID == a.Request })

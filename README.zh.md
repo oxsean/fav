@@ -402,6 +402,16 @@ effort 和禁用的工具进 agent 的命令行，正文放在任务书前面。
 `~/.agent/tend/defs/agents/` 里的文件；有 server 时定义归主人（或某个项目），分享给人、项目或所有人之后别人才能用（`--view` 让他们也能看正文）。
 `skills`、`mcp`、`hooks`、`output`、`budget` 会保存，但还不生效；派发预检会提示。
 
+**工作流。** 任务可以分阶段走，而不是只跑一个 run：`tend task add … --workflow feature`（或者用项目的默认工作流）。内置
+`feature`（实现 → 评审 → 验收）、`fix`（实现 → 测试 → 验收）、`docs`（实现 → 验收）。每个阶段按角色（`implement`、`review`、`test`）
+用项目配置的 agent；评审或测试的 run 最后用 `tend run verdict pass|rework|blocked "…"` 给结论，要返工就退回实现阶段，实现者在自己原来的
+会话里接着改，任务书是评审意见。写了 `check: true` 的阶段在 agent 结束后在那台机器上跑项目的 `hooks.check`（比如 `mise run gate`），
+失败就算返工；节点要打开 `node.allow_hooks` 才接这种 run。退回超过 `max_loops` 次、结论是 blocked、或预算用完，任务停下等人。最后一关是
+人工验收：验收人放行（`tend task gate <id> --pass`），任务相关的人都能带着意见打回（`--rework "…"`）。`tend task message <id> "…"`
+会插进正在实现的 run、回复在等你的 run，否则记进任务的工作记录，每个阶段的任务书都会带上它。项目可以用 Markdown 定义自己的工作流：
+frontmatter 写阶段，每个 `## <阶段名>` 小节是那个阶段的任务书模板（`{{task.brief}}`、`{{task.acceptance}}`、
+`{{#rework}}…{{rework.notes}}…{{/rework}}`、`{{workpad}}`）。任务拿到工作流时就定下来，之后改定义不影响它。
+
 **跑之前。** `tend run start` 先说明 run 会怎么跑：那台机器上 agent 命令行的版本、是否登录，以及要不要等机器、槽位或目录。
 命令行没装或没登录时 run 会直接失败，所以不派发（`--force` 强制派发；节点那边也会以同样的原因拒绝）。TUI 和网页的派发框显示同样的内容；
 `tend machine list` 多了 AGENTS 一列。

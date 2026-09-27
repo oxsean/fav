@@ -64,6 +64,8 @@ type StartParams struct {
 	Resume      string        `json:"resume,omitempty"` // run.resume: the session the brief continues
 	Project     string        `json:"project,omitempty"`
 	Dispatcher  *Person       `json:"dispatcher,omitempty"` // who started it: the author of its commits (feature dispatcher)
+	Verdict     bool          `json:"verdict,omitempty"`    // it is to end with tend run verdict (feature verdict)
+	Check       []string      `json:"check,omitempty"`      // argv run where it worked once it exits well (feature check)
 }
 
 // Person is a user of the coordinator's team, as a node needs them.
@@ -78,6 +80,12 @@ const FeatureDispatcher = "dispatcher"
 
 // FeatureAgentDef: a profile's effort and denied tools are applied.
 const FeatureAgentDef = "agentdef"
+
+// FeatureVerdict: a run can be told to end with a verdict, and its verdict is reported.
+const FeatureVerdict = "verdict"
+
+// FeatureCheck: run.start's check hook runs after the agent, and how it went is reported.
+const FeatureCheck = "check"
 
 // Spec is a run frozen at its start.
 type Spec struct {
@@ -98,6 +106,8 @@ type Spec struct {
 	Created     time.Time     `json:"created"`
 	Project     string        `json:"project,omitempty"`
 	Dispatcher  *Person       `json:"dispatcher,omitempty"`
+	Verdict     bool          `json:"verdict,omitempty"`
+	Check       []string      `json:"check,omitempty"`
 }
 
 // env is what the agent's environment gains: its commits are authored by the run's dispatcher, and committed by
@@ -111,27 +121,29 @@ func (s Spec) env() []string {
 
 // State is what the supervisor writes.
 type State struct {
-	Rev       int             `json:"rev,omitzero"`
-	State     string          `json:"state"`
-	Pid       int             `json:"pid,omitempty"`        // the agent
-	PidStart  int64           `json:"pid_start,omitempty"`  // when the agent started (proc.StartTime): pid's identity
-	Sup       int             `json:"supervisor,omitempty"` // the supervisor
-	Pane      string          `json:"pane,omitempty"`
-	Provider  string          `json:"provider,omitempty"`
-	Session   string          `json:"session,omitempty"`
-	ExitCode  *int            `json:"exit_code,omitempty"`
-	Reason    string          `json:"reason,omitempty"`
-	Detail    string          `json:"detail,omitempty"`    // what the agent or its CLI said about how it ended
-	Attention string          `json:"attention,omitempty"` // asked | permission | stalled: someone should look
-	Ask       string          `json:"ask,omitempty"`       // the question it asked
-	Note      string          `json:"note,omitempty"`      // its latest progress note
-	Last      string          `json:"last,omitempty"`      // the newest thing it said
-	Usage     *agent.Usage    `json:"usage,omitempty"`
-	Stream    bool            `json:"stream,omitempty"`   // it takes answers and messages while it runs
-	Requests  []agent.Request `json:"requests,omitempty"` // what it waits on
-	Sends     []agent.Send    `json:"sends,omitempty"`    // messages for it and how far they got
-	StartedAt *time.Time      `json:"started_at,omitzero"`
-	EndedAt   *time.Time      `json:"ended_at,omitzero"`
+	Rev       int                `json:"rev,omitzero"`
+	State     string             `json:"state"`
+	Pid       int                `json:"pid,omitempty"`        // the agent
+	PidStart  int64              `json:"pid_start,omitempty"`  // when the agent started (proc.StartTime): pid's identity
+	Sup       int                `json:"supervisor,omitempty"` // the supervisor
+	Pane      string             `json:"pane,omitempty"`
+	Provider  string             `json:"provider,omitempty"`
+	Session   string             `json:"session,omitempty"`
+	ExitCode  *int               `json:"exit_code,omitempty"`
+	Reason    string             `json:"reason,omitempty"`
+	Detail    string             `json:"detail,omitempty"`    // what the agent or its CLI said about how it ended
+	Attention string             `json:"attention,omitempty"` // asked | permission | stalled: someone should look
+	Ask       string             `json:"ask,omitempty"`       // the question it asked
+	Verdict   *agent.Verdict     `json:"verdict,omitempty"`   // what it concluded (tend run verdict)
+	Check     *agent.CheckResult `json:"check,omitempty"`     // how the check hook went after it
+	Note      string             `json:"note,omitempty"`      // its latest progress note
+	Last      string             `json:"last,omitempty"`      // the newest thing it said
+	Usage     *agent.Usage       `json:"usage,omitempty"`
+	Stream    bool               `json:"stream,omitempty"`   // it takes answers and messages while it runs
+	Requests  []agent.Request    `json:"requests,omitempty"` // what it waits on
+	Sends     []agent.Send       `json:"sends,omitempty"`    // messages for it and how far they got
+	StartedAt *time.Time         `json:"started_at,omitzero"`
+	EndedAt   *time.Time         `json:"ended_at,omitzero"`
 }
 
 // Attentions.
@@ -345,6 +357,9 @@ func (n *Node) admit(p *StartParams) error {
 	if !contains(efforts, p.Profile.Effort) || slices.ContainsFunc(p.Profile.Deny, func(t string) bool { return !toolName.MatchString(t) }) {
 		return &wire.Error{Code: wire.CodeBadRequest, Detail: "profile " + p.Profile.Name}
 	}
+	if len(p.Check) > 0 && !l.AllowBypass && !l.AllowHooks {
+		return &wire.Error{Code: wire.CodeUnauthorized, Detail: "hooks (node.allow_hooks)"}
+	}
 	if len(l.AllowDirs) > 0 && !underAny(p.Dir, l.AllowDirs) {
 		return &wire.Error{Code: wire.CodeUnauthorized, Detail: "dir " + p.Dir}
 	}
@@ -441,7 +456,7 @@ func (n *Node) spec(p StartParams, dir string) (Spec, error) {
 	return Spec{Run: p.Run, Task: p.Task, Coordinator: p.Coordinator, Argv: cmd.Argv(), Dir: p.Dir, Runner: runner,
 		Stdin: stdin, Stream: stream, Thread: p.Profile.Provider == tend.ProviderCodex, Provider: agent.SessionProvider(p.Profile.Provider),
 		Agent: p.Profile.Provider, Session: cmp.Or(ls.SessionID, p.Resume), Title: p.Title, StallAfter: n.stallAfter(),
-		Created: time.Now(), Project: p.Project, Dispatcher: p.Dispatcher}, nil
+		Created: time.Now(), Project: p.Project, Dispatcher: p.Dispatcher, Verdict: p.Verdict, Check: p.Check}, nil
 }
 
 // defaultStall is how long a background run may say nothing before it is marked stalled.
@@ -475,7 +490,11 @@ func (n *Node) brief(p StartParams, spec Spec, dir string) string {
 	if spec.Stream {
 		c = streamConvention
 	}
-	return strings.TrimRight(p.Brief, "\n") + "\n\n" + fmt.Sprintf(c, p.Run, agent.AskMark, tendCmd, tendCmd)
+	out := strings.TrimRight(p.Brief, "\n") + "\n\n" + fmt.Sprintf(c, p.Run, agent.AskMark, tendCmd, tendCmd)
+	if spec.Verdict {
+		out += fmt.Sprintf(verdictConvention, tendCmd)
+	}
+	return out
 }
 
 // convention tells a background agent how to ask and report: nobody answers a prompt while it runs.
@@ -498,6 +517,14 @@ AskUserQuestion waits until the user answers it remotely, which may take a while
 `
 
 // readBrief is an interactive agent's first message; the brief itself stays in the file (argv shows in ps).
+// verdictConvention tells a run that judges work how to report its conclusion.
+const verdictConvention = `
+- You are judging this work. Before you stop, report your conclusion with exactly one of:
+  %[1]s verdict pass "<one line>"      (it meets the criteria)
+  %[1]s verdict rework "<what to change>"  (it must change; say what)
+  %[1]s verdict blocked "<why>"         (you cannot judge it)
+`
+
 const readBrief = "Read the task brief in %s and do the task it describes."
 
 // Stop asks run r.Run to stop; the supervisor ends it. Stopping a finished run changes nothing; stopping a run whose

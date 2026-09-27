@@ -4,8 +4,10 @@ import (
 	"bufio"
 	"bytes"
 	"cmp"
+	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -269,6 +271,8 @@ func (s *sup) reports() {
 			switch r.Kind {
 			case ReportAsk:
 				st.Attention, st.Ask = AttentionAsked, r.Text
+			case ReportVerdict:
+				st.Verdict = &agent.Verdict{Verdict: r.Verdict, Summary: r.Text, At: r.At}
 			case ReportNote:
 				st.Note = clip(r.Text, maxNote)
 				if st.Attention == AttentionStalled {
@@ -512,6 +516,9 @@ func (s *sup) run() error {
 			var ee *exec.ExitError
 			if err != nil && !errors.As(err, &ee) {
 				return s.end(StateFailed, err.Error(), nil)
+			}
+			if code == 0 && len(s.spec.Check) > 0 {
+				s.check()
 			}
 			return s.exited(code)
 		case sig := <-sigs:
@@ -793,4 +800,43 @@ func (l *rolling) Close() error {
 		return nil
 	}
 	return l.f.Close()
+}
+
+// checkTimeout bounds a check hook.
+const checkTimeout = 30 * time.Minute
+
+// check runs the run's check hook where the agent worked, its output going to output.log, and records how it went.
+func (s *sup) check() {
+	s.keep(func(st *State) { st.Note = clip("check: "+strings.Join(s.spec.Check, " "), maxNote) })
+	ctx, cancel := context.WithTimeout(context.Background(), checkTimeout)
+	defer cancel()
+	c := exec.CommandContext(ctx, s.spec.Check[0], s.spec.Check[1:]...)
+	c.Dir = s.spec.Dir
+	c.Env = append(os.Environ(), s.spec.env()...)
+	var out bytes.Buffer
+	log, err := os.OpenFile(filepath.Join(s.dir, "output.log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+	if err == nil {
+		defer log.Close()
+		c.Stdout, c.Stderr = io.MultiWriter(&out, log), io.MultiWriter(&out, log)
+	} else {
+		c.Stdout, c.Stderr = &out, &out
+	}
+	exit := 0
+	if err := c.Run(); err != nil {
+		exit = -1
+		var ee *exec.ExitError
+		if errors.As(err, &ee) {
+			exit = ee.ExitCode()
+		}
+		if exit == -1 {
+			fmt.Fprintln(&out, err)
+		}
+	}
+	tail := out.String()
+	if len(tail) > 4<<10 {
+		tail = tail[len(tail)-4<<10:]
+	}
+	s.keep(func(st *State) {
+		st.Check = &agent.CheckResult{Argv: s.spec.Check, Exit: exit, Tail: strings.ToValidUTF8(tail, "")}
+	})
 }

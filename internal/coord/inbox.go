@@ -14,6 +14,8 @@ import (
 const (
 	NotifyTaskWaiting = "task.needs_you" // a task came to wait for someone
 	NotifyTaskDone    = "task.done"
+	NotifyTaskStage   = "task.stage"  // a task in a workflow moved on to a stage; only the notify command hears it
+	NotifyTaskRework  = "task.rework" // a stage sent a task back; only the notify command hears it
 )
 
 // Notice is a task that came to need someone, for the people it concerns.
@@ -25,6 +27,7 @@ type Notice struct {
 	Project string    `json:"project,omitempty"`
 	Reason  string    `json:"reason,omitempty"`
 	Run     string    `json:"run,omitempty"`
+	Stage   string    `json:"stage,omitempty"`
 	To      []string  `json:"to"` // user ids
 	At      time.Time `json:"at"`
 }
@@ -115,12 +118,23 @@ func (c *Coord) notices(env journal.Envelope, before map[string]task.Situation) 
 	for id := range before {
 		ids = append(ids, id)
 	}
-	for _, e := range env.Events { // tasks made in env
-		if e.Type == task.ETaskCreated {
+	for _, e := range env.Events { // tasks made in env; workflow moves
+		switch e.Type {
+		case task.ETaskCreated:
 			var s subject
 			json.Unmarshal(e.Data, &s)
 			if _, ok := before[s.ID]; !ok {
 				ids = append(ids, s.ID)
+			}
+		case task.ETaskStaged:
+			var d task.TaskStage
+			json.Unmarshal(e.Data, &d)
+			if t := c.st.Tasks[d.ID]; t != nil {
+				ev := NotifyTaskStage
+				if d.Back {
+					ev = NotifyTaskRework
+				}
+				out = append(out, Notice{Seq: env.Seq, Event: ev, Task: t.ID, Title: t.Title, Project: t.Project, Stage: d.Stage, At: env.At})
 			}
 		}
 	}
@@ -149,11 +163,11 @@ func (c *Coord) notices(env journal.Envelope, before map[string]task.Situation) 
 // deliver hands the notices on: to the server's delivery (Options.Notice) and to the notify command.
 func (c *Coord) deliver(ns []Notice) {
 	for _, n := range ns {
-		if c.opt.Notice != nil {
+		if c.opt.Notice != nil && len(n.To) > 0 {
 			c.opt.Notice(n)
 		}
 		if len(c.opt.Config.NotifyCommand) > 0 && c.notifies(n.Event) {
-			c.runNotifyEvent(NotifyEvent{Event: n.Event, Task: n.Task, Title: clip(n.Title, 300), Reason: n.Reason, Run: n.Run, At: n.At},
+			c.runNotifyEvent(NotifyEvent{Event: n.Event, Task: n.Task, Title: clip(n.Title, 300), Reason: n.Reason, Run: n.Run, Stage: n.Stage, At: n.At},
 				"TEND_TASK="+n.Task)
 		}
 	}

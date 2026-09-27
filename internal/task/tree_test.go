@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/oxsean/fav/internal/agent"
 	"github.com/oxsean/fav/internal/journal"
 )
 
@@ -56,6 +57,16 @@ func (w *world) settle(hold func(*Task) bool) []string {
 		for _, t := range w.s.Completing() {
 			events = append(events, journal.NewEvent(ETaskStatus, TaskStatus{ID: t.ID, Status: StatusDone}))
 		}
+		for _, t := range w.s.Advancing() {
+			if next := t.Flow.Next(t.Stage); next != "" {
+				events = append(events, journal.NewEvent(ETaskStaged, TaskStage{ID: t.ID, Stage: next, Loops: t.Loops}))
+			} else {
+				events = append(events, journal.NewEvent(ETaskStatus, TaskStatus{ID: t.ID, Status: StatusDone}))
+			}
+		}
+		for _, t := range w.s.Reworking() {
+			events = append(events, journal.NewEvent(ETaskStaged, TaskStage{ID: t.ID, Stage: t.Flow.Back(t.Stage), Loops: t.Loops + 1}))
+		}
 		if len(events) == 0 {
 			return queued
 		}
@@ -66,7 +77,11 @@ func (w *world) settle(hold func(*Task) bool) []string {
 }
 
 func (w *world) end(run string, state string, code int, attention string) {
-	o := Observation{ID: run, State: state, NodeRev: 9, Attention: attention}
+	w.endWith(run, Observation{ID: run, State: state, NodeRev: 9, Attention: attention}, code)
+}
+
+func (w *world) endWith(run string, o Observation, code int) {
+	state := o.State
 	if state == Exited {
 		o.ExitCode = &code
 	}
@@ -171,7 +186,8 @@ func TestEveryUnfinishedTaskStandsOneWayWithAReason(t *testing.T) {
 		for _, k := range []string{SitRunning + "/running", SitQueued + "/" + WhyAfter, SitQueued + "/" + WhyChildren, SitQueued + "/" + WhySlot,
 			SitWaiting + "/" + WhyAccept, SitWaiting + "/" + WhyHeld, SitWaiting + "/" + WhyAfterCanceled, SitWaiting + "/" + WhyDispatch,
 			SitWaiting + "/" + AttentionAsked, SitWaiting + "/" + AttentionPermission, SitWaiting + "/access_revoked", SitDone + "/",
-			SitWaiting + "/" + WhySourceChanged, SitWaiting + "/" + WhySourceClosed} {
+			SitWaiting + "/" + WhySourceChanged, SitWaiting + "/" + WhySourceClosed,
+			SitWaiting + "/" + WhyMaxLoops, SitWaiting + "/" + WhyBlocked} {
 			if seen[k] == 0 {
 				t.Errorf("the histories never reach %s: %v", k, seen)
 			}
@@ -216,8 +232,15 @@ func TestEveryUnfinishedTaskStandsOneWayWithAReason(t *testing.T) {
 					after = []string{a.ID}
 				}
 				id := w.task(parent, after, []string{StatusBacklog, StatusTodo}[rng.IntN(2)])
-				if parent == "" && rng.IntN(2) == 0 { // a requirement from an issue
-					w.s.Tasks[id].Source = &Source{Kind: "gitea", Number: int64(w.ids), Rev: 1, Digest: "d0", Seen: "d0", SeenRev: 1}
+				switch rng.IntN(4) {
+				case 0:
+					if parent == "" { // a requirement from an issue
+						w.s.Tasks[id].Source = &Source{Kind: "gitea", Number: int64(w.ids), Rev: 1, Digest: "d0", Seen: "d0", SeenRev: 1}
+					}
+				case 1, 2: // in a workflow
+					x := w.s.Tasks[id]
+					x.Flow, x.Workflow, x.Stage, x.StageSeq = testFlow(), "feature", "implement", w.s.Seq
+					x.Flow.MaxLoops = []int{0, 0, 1}[rng.IntN(3)]
 				}
 			case 2: // started, with its subtree
 				if x := pick(func(x *Task) bool { return !Finished(x.Status) }); x != nil {
@@ -236,8 +259,11 @@ func TestEveryUnfinishedTaskStandsOneWayWithAReason(t *testing.T) {
 					case 7:
 						w.do(journal.NewEvent(ERunStarting, RunStarting{ID: r.ID}), journal.NewEvent(ERunObserved,
 							Observation{ID: r.ID, State: Running, NodeRev: 3}))
-					case 0, 1:
+					case 0:
 						w.end(r.ID, Exited, 0, "")
+					case 1:
+						w.endWith(r.ID, Observation{ID: r.ID, State: Exited, NodeRev: 9,
+							Verdict: &agent.Verdict{Verdict: []string{"pass", "rework", "rework", "blocked"}[rng.IntN(4)]}}, 0)
 					case 2:
 						w.end(r.ID, Exited, 1, "")
 					case 3:
@@ -284,7 +310,7 @@ func TestEveryUnfinishedTaskStandsOneWayWithAReason(t *testing.T) {
 					}
 				case !slices.Contains([]string{SitRunning, SitQueued, SitWaiting}, sit.Kind) || sit.Reason == "":
 					t.Fatalf("%s: %+v", where, sit)
-				case sit.Reason == WhyReady || sit.Reason == WhyCompleting:
+				case sit.Reason == WhyReady || sit.Reason == WhyCompleting || sit.Reason == WhyAdvance || sit.Reason == WhyRework:
 					t.Fatalf("%s: left for the coordinator: %+v", where, sit)
 				}
 				n := 0
@@ -350,4 +376,44 @@ func TestAnIssueThatChangesOrClosesWaitsForSomeone(t *testing.T) {
 	if sit := w.s.Situation(x); sit.Kind != SitDone {
 		t.Fatalf("a done task stays done: %+v", sit)
 	}
+}
+
+func testFlow() *Flow {
+	return &Flow{Name: "feature", MaxLoops: 1, Stages: []Stage{{Name: "implement", Role: "implement"},
+		{Name: "review", Role: "review", Output: OutputVerdict}, {Name: "accept", Gate: GateHuman}}}
+}
+
+func TestAWorkflowGoesStageByStageAndBackOnRework(t *testing.T) {
+	w := newWorld(t)
+	w.do(journal.NewEvent(ETaskCreated, Task{ID: "t_f", Title: "f", Status: StatusTodo, Workflow: "feature", Flow: testFlow(), Stage: "implement"}))
+	w.do(journal.NewEvent(ETaskStarted, TaskStart{IDs: []string{"t_f"}}))
+	x := w.s.Tasks["t_f"]
+	stage := func(want, reason string) {
+		t.Helper()
+		if sit := w.s.Situation(x); x.Stage != want || sit.Reason != reason {
+			t.Fatalf("stage %s %+v, want %s %s", x.Stage, sit, want, reason)
+		}
+	}
+	verdict := func(v string) *agent.Verdict { return &agent.Verdict{Verdict: v} }
+	runs := w.settle(nil)
+	w.end(runs[0], Exited, 0, "")
+	runs = w.settle(nil)
+	stage("review", WhySlot)
+	w.endWith(runs[0], Observation{ID: runs[0], State: Exited, NodeRev: 9}, 0)
+	stage("review", WhyBlocked)
+	w.do(journal.NewEvent(ETaskStarted, TaskStart{IDs: []string{"t_f"}}))
+	runs = w.settle(nil)
+	w.endWith(runs[0], Observation{ID: runs[0], State: Exited, NodeRev: 9, Verdict: verdict("rework")}, 0)
+	runs = w.settle(nil)
+	if x.Loops != 1 {
+		t.Fatalf("a rework counts: %+v", x)
+	}
+	stage("implement", WhySlot)
+	w.endWith(runs[0], Observation{ID: runs[0], State: Exited, NodeRev: 9, Check: &agent.CheckResult{Exit: 1}}, 0)
+	stage("implement", WhyMaxLoops)
+	w.do(journal.NewEvent(ETaskStaged, TaskStage{ID: "t_f", Stage: "review", Loops: 1}))
+	runs = w.settle(nil)
+	w.endWith(runs[0], Observation{ID: runs[0], State: Exited, NodeRev: 9, Verdict: verdict("pass")}, 0)
+	w.settle(nil)
+	stage("accept", WhyAccept)
 }

@@ -29,7 +29,7 @@ var runFeatures = func(run *task.Run) []string {
 	if run.Profile.Effort != "" || len(run.Profile.Deny) > 0 {
 		out = append(out, node.FeatureAgentDef)
 	}
-	return out
+	return append(out, stageFeatures(run)...)
 }
 
 // missingFeatures are those of need the node that said h lacks.
@@ -299,6 +299,9 @@ func (c *Coord) runContinue(who Principal, r *wire.Request) (string, []journal.E
 		run := task.Run{ID: node.NewRunID(), Task: prev.Task, Machine: prev.Machine, Agent: firstOf(p.Agent, prev.Agent), Profile: prof,
 			Dir: prev.Dir, From: prev.Machine, Brief: p.Text, Title: prev.Title, Runner: node.RunnerBackground, Resume: prev.Session,
 			Parent: prev.ID, Project: runTask(c.st, prev).Project, Dispatcher: who.User}
+		if t := runTask(c.st, prev); t.Flow != nil { // it goes on in the task's stage
+			run.Stage, run.Judge, run.Check = t.Stage, prev.Judge, prev.Check
+		}
 		return run.ID, []journal.Event{journal.NewEvent(task.ERunQueued, run)}, nil
 	}
 	if p.Session == "" || p.Dir == "" || p.Provider == "" {

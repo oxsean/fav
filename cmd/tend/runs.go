@@ -153,6 +153,23 @@ func cmdRunReport(kind string, args []string) error {
 	return node.AddReport(dir, kind, text)
 }
 
+// cmdRunVerdict is `tend run verdict pass|rework|blocked <summary>`, run by an agent that judges work.
+func cmdRunVerdict(args []string) error {
+	fs := newFlags("run")
+	pos, err := parseMixed(fs, args)
+	if err != nil {
+		return err
+	}
+	dir := os.Getenv(node.EnvRunDir)
+	if dir == "" {
+		return errors.New(i18n.T("cli.run.no_run_dir"))
+	}
+	if len(pos) == 0 {
+		return i18n.E("cli.run.need_verdict")
+	}
+	return node.AddVerdict(dir, pos[0], strings.Join(pos[1:], " "))
+}
+
 // cmdInbox lists the runs that need you on every machine, longest waiting first.
 func cmdInbox(args []string) error {
 	fs := newFlags("inbox")

@@ -57,6 +57,25 @@ const treeWords = {
   notifyBlocked: ['浏览器拒绝了通知', 'The browser blocks notifications'], offboard: ['交接并停用', 'Hand over and disable'],
   offboardHelp: ['他负责的项目和没有项目的任务交给下面这个人，项目里的任务交给项目负责人；他的机器不再对别人开放，他的所有凭据立即失效。', 'Their projects and tasks outside projects go to the person below, their project tasks to each project\'s owner; their machines close to everyone else and every credential of theirs ends now.'],
   handTo: ['交给', 'Hand to'], offboarded: ['已交接并停用', 'Handed over and disabled'],
+  'why.advance': ['本阶段完成，即将进入下一阶段', 'Its stage is done; it moves on next'], 'why.rework': ['被退回，即将返工', 'Sent back; it goes back next'],
+  'why.max_loops': ['退回次数到上限', 'Sent back as often as its workflow allows'], 'why.blocked': ['本阶段没有给出结论', 'Its stage reached no verdict'],
+  'why.budget': ['用完了预算', 'Its budget is spent'],
+  workflow: ['工作流', 'Workflow'], projectDefault: ['项目默认', "The project's default"], noWorkflow: ['不用工作流（一次一个 run）', 'None (one run at a time)'],
+  workflowHint: ['工作流把任务分成阶段：实现、评审或测试、验收；被退回时带着意见返工。', 'A workflow takes a task through stages: implement, review or test, accept; a stage that sends it back says why.'],
+  round: ['第 {0} 轮', 'Round {0}'], maxLoops: ['最多退回 {0} 次', 'Sent back at most {0} times'], gateHuman: ['人工验收', 'human gate'],
+  gateWaits: ['等 {0} 验收。', 'Waits for {0} to accept it.'], pass: ['通过', 'Pass'], sendBack: ['退回返工', 'Send back'],
+  sendBackTitle: ['退回返工', 'Send back'], reworkNotes: ['要改什么', 'What to change'], reworkHint: ['原话带给下一轮的 agent。', 'Passed word for word to the next round.'],
+  passed: ['已通过', 'Passed'], sentBack: ['已退回', 'Sent back'], workpad: ['工作记录', 'Workpad'], workpadEmpty: ['还没有记录', 'Nothing yet'],
+  'note.message': ['留言', 'message'], 'note.gate': ['验收', 'gate'], 'note.rework': ['退回', 'rework'],
+  'verdict.pass': ['通过', 'pass'], 'verdict.rework': ['要返工', 'rework'], 'verdict.blocked': ['无法判断', 'blocked'],
+  checkFailed: ['check 失败（exit {0}）', 'check failed (exit {0})'], runEnded: ['结束：{0}', 'ended: {0}'],
+  messageTask: ['给这个任务留言', 'Message this task'], send: ['发送', 'Send'], toRun: ['也发进正在评审/测试的 run', 'Into the reviewing or testing run too'],
+  'to.run': ['会发进正在运行的 run。', 'Goes into the running run.'], 'to.reply': ['会作为回复，接着运行等你的 run。', 'Goes as the reply that continues the run that waits.'],
+  'to.workpad': ['会记进工作记录，下一个阶段的 agent 会看到。', 'Goes on the workpad; the next stage sees it.'],
+  'sent.run': ['已发进 run', 'Sent into the run'], 'sent.reply': ['已回复，run 继续', 'Replied; the run goes on'], 'sent.workpad': ['已记进工作记录', 'Put on the workpad'],
+  defaultWorkflow: ['默认工作流', 'Default workflow'], customWorkflows: ['自定义工作流', 'Custom workflows'], newWorkflow: ['新建工作流', 'New workflow'],
+  editWorkflow: ['编辑工作流', 'Edit workflow'], workflowSaved: ['工作流已保存', 'Workflow saved'], noCustomWorkflows: ['没有自定义工作流；内置 feature、fix、docs。', 'None; feature, fix and docs are built in.'],
+  workflowNameMissing: ['frontmatter 里要有 name。', 'The front matter needs a name.'],
 };
 
 const Tree = (() => {
@@ -94,8 +113,62 @@ const Tree = (() => {
     const src = task.source ? sourceBlock(task) : '';
     const sub = kids.length ? `<div class="tree-block"><span class="meta-label">${t('subtasks')}</span>${kids.map(k => `<div class="flex">${link(k.id)}${badge(k.status)}${sitBadge(k)}</div>`).join('')}</div>` : '';
     const can = ui.online && !finished(task.status);
+    const flow = task.flow ? flowBlock(task) : '';
     const actions = can ? `<div class="task-actions">${button('tree-start', `${icon('play')}${t(task.auto ? 'startAgain' : 'start')}`, `data-id="${esc(task.id)}"`, task.status === 'backlog' ? 'primary' : 'quiet')}${button('tree-move', t('moveTask'), `data-id="${esc(task.id)}"`, 'quiet')}</div>` : '';
-    return `${rows.length ? `<div class="metadata">${rows.join('')}</div>` : ''}${src}${acc}${sub}${actions}`;
+    return `${rows.length ? `<div class="metadata">${rows.join('')}</div>` : ''}${src}${flow}${acc}${sub}${actions}`;
+  }
+
+  // flowBlock is a workflow task's stages with where it stands, its human gate, its workpad and a message box.
+  function flowBlock(task) {
+    const f = task.flow, at = f.stages.findIndex(s => s.name === task.stage), open = ui.online && !finished(task.status);
+    const stages = f.stages.map((s, i) => `<li class="${i === at && !finished(task.status) ? 'current' : i < at || task.status === 'done' ? 'past' : ''}"><span class="mono">${esc(s.name)}</span><small>${esc(s.gate ? t('gateHuman') : s.agent || s.role || '')}</small></li>`).join('');
+    const head = `<div class="flex"><span class="meta-label">${t('workflow')}</span><span class="mono">${esc(task.workflow)}</span><span class="muted">${t('round').replace('{0}', (task.loops || 0) + 1)} · ${t('maxLoops').replace('{0}', f.max_loops || 0)}</span></div><ol class="stages">${stages}</ol>`;
+    const stage = f.stages[at];
+    let gate = '';
+    if (open && stage?.gate === 'human') {
+      const approver = task.approver || task.owner, mayPass = !approver || approver === ui.me?.id || ui.me?.role === 'admin';
+      gate = `<div class="notice">${t('gateWaits').replace('{0}', esc(approver ? Team.name(approver) : t('taskOwner')))}</div><div class="flex">${mayPass ? button('tree-pass', t('pass'), `data-id="${esc(task.id)}"`, 'primary') : ''}${button('tree-rework', t('sendBack'), `data-id="${esc(task.id)}"`)}</div>`;
+    }
+    return `<div class="tree-block">${head}${gate}${workpad(task)}${open ? messageBox(task) : ''}</div>`;
+  }
+
+  // workpad lists what the stages said, oldest first: each stage run's verdict or end, failed checks, and the notes.
+  function workpad(task) {
+    const items = [];
+    for (const r of Object.values(ui.state.runs)) {
+      if (r.task !== task.id || !r.stage || openStates.has(r.state)) continue;
+      let what = r.verdict ? `<span class="status verdict-${esc(r.verdict.verdict)}">${t('verdict.' + r.verdict.verdict)}</span> ${esc(r.verdict.summary || '')}`
+        : r.state === 'exited' && r.exit_code === 0 ? esc(r.last || t('exited')) : esc(t('runEnded').replace('{0}', t(r.state) + (r.reason ? ' · ' + r.reason : '')));
+      if (r.checked && r.checked.exit !== 0) what += `<details><summary class="pointer">${t('checkFailed').replace('{0}', r.checked.exit)} <code>${esc(r.checked.argv.join(' '))}</code></summary><pre class="tail">${esc(r.checked.tail || '')}</pre></details>`;
+      items.push({at: r.queued_at, html: `<li><span class="mono">[${esc(r.stage)}]</span> <button type="button" class="link-button mono" data-action="select-run" data-id="${esc(r.id)}">${esc(r.id)}</button> ${what}</li>`});
+    }
+    for (const n of (task.notes || []).filter(n => n.kind !== 'rework')) items.push({at: n.at, html: `<li><span class="mono">[${esc(n.stage || '')}]</span> <strong>${t('note.' + n.kind)}</strong>${n.by ? ` · ${esc(Team.name(n.by))}` : ''} <span class="pre-line">${esc(n.text)}</span></li>`});
+    items.sort((a, b) => String(a.at).localeCompare(String(b.at)));
+    return `<details data-tool="workpad" ${items.length ? 'open' : ''}><summary class="pointer meta-label">${t('workpad')} (${items.length})</summary>${items.length ? `<ol class="plain workpad">${items.map(x => x.html).join('')}</ol>` : `<p class="muted">${t('workpadEmpty')}</p>`}</details>`;
+  }
+
+  // messageTo is where a task message goes now, as coord.taskMessage decides it.
+  function messageTo(task) {
+    const running = Object.values(ui.state.runs).find(r => r.task === task.id && r.state === 'running' && r.stream);
+    if (running) {
+      const st = task.flow?.stages.find(s => s.name === running.stage);
+      return {to: !st || st.role === 'implement' ? 'run' : 'workpad', toRun: !!st && st.role !== 'implement'};
+    }
+    const s = sit(task), last = ui.state.runs[s.run];
+    if (last && !openStates.has(last.state) && last.session && (s.reason === 'asked' || s.reason === 'permission')) return {to: 'reply'};
+    return {to: 'workpad'};
+  }
+
+  function messageBox(task) {
+    const where = messageTo(task);
+    return `<form id="tree-message-form" class="stack" data-id="${esc(task.id)}" data-command="${commandID()}"><div class="form-error" role="alert" hidden></div>
+      <label>${t('messageTask')}<textarea name="text" id="task-message-text" rows="2">${esc(ui.drafts.get('task:' + task.id) || '')}</textarea><small id="message-to">${t('to.' + where.to)}</small></label>
+      <div class="flex">${where.toRun ? `<label class="choice"><input type="checkbox" name="to_run" value="1">${t('toRun')}</label>` : ''}<button type="submit">${t('send')}</button></div></form>`;
+  }
+
+  function gateForm(task) {
+    showModal('tree-form', `${t('sendBackTitle')} · ${esc(task.title)}`, `<form id="tree-gate-form" data-id="${esc(task.id)}" data-rev="${task.rev}" data-command="${commandID()}"><div class="modal-body stack"><div class="form-error" role="alert" hidden></div>
+      <label>${t('reworkNotes')}<textarea name="notes" rows="6" required autofocus></textarea><small>${t('reworkHint')}</small></label></div>${footer(t('sendBack'))}</form>`, '');
   }
 
   // sourceBlock is where a requirement comes from, and what its issue asks of someone now.
@@ -120,7 +193,15 @@ const Tree = (() => {
     const tree = edit ? '' : `<div class="form-grid"><label>${t('parent')}<select name="parent"><option value="">${t('noParent')}</option>${others.map(x => `<option value="${esc(x.id)}">${label(x)}</option>`).join('')}</select></label>
       <label class="choice"><input type="checkbox" name="backlog" value="1">${t('keepBacklog')}</label></div>
       ${others.length ? `<fieldset class="stack"><legend>${t('after')}</legend>${others.map(x => `<label class="choice"><input type="checkbox" name="after" value="${esc(x.id)}">${label(x)}</label>`).join('')}</fieldset>` : ''}`;
-    return `${tree}<label>${t('acceptance')}<textarea name="acceptance" rows="3">${esc((task.acceptance || []).join('\n'))}</textarea><small>${t('acceptanceHint')}</small></label>`;
+    return `${tree}${workflowField(task, edit)}<label>${t('acceptance')}<textarea name="acceptance" rows="3">${esc((task.acceptance || []).join('\n'))}</textarea><small>${t('acceptanceHint')}</small></label>`;
+  }
+
+  // builtinFlows mirrors internal/workflow/builtin.
+  const builtinFlows = ['docs', 'feature', 'fix'];
+  const flowNames = () => [...new Set([...builtinFlows, ...Object.values(ui.state.projects || {}).flatMap(p => Object.keys(p.workflows || {}))])].sort();
+  function workflowField(task, edit) {
+    const cur = edit ? task.workflow || 'none' : '';
+    return `<label>${t('workflow')}<select name="workflow">${edit ? '' : `<option value="">${t('projectDefault')}</option>`}<option value="none" ${cur === 'none' ? 'selected' : ''}>${t('noWorkflow')}</option>${flowNames().map(n => `<option value="${esc(n)}" ${n === cur ? 'selected' : ''}>${esc(n)}</option>`).join('')}</select><small>${t('workflowHint')}</small></label>`;
   }
 
   // formData turns the tree fields of form into task.create / task.edit params in data.
@@ -128,6 +209,7 @@ const Tree = (() => {
     const fd = new FormData(form);
     data.acceptance = String(fd.get('acceptance') || '').split('\n').map(x => x.trim()).filter(Boolean);
     delete data.backlog;
+    if (!data.workflow || edit && data.workflow === (ui.state.tasks[form.dataset.id]?.workflow || 'none')) delete data.workflow;
     if (edit) { delete data.parent; delete data.after; return; }
     data.after = fd.getAll('after');
     if (!data.parent) delete data.parent;
@@ -242,9 +324,23 @@ const Tree = (() => {
       <label>${t('repos')}<textarea name="repos" rows="3" class="mono" spellcheck="false">${esc((p.repos || []).map(repoLine).join('\n'))}</textarea><small>${t('reposHint')}</small></label>
       <div class="form-grid"><label>${t('implementAgent')}<select name="implement">${agentOpts(roles.implement || p.defaults?.agent)}</select></label><label>${t('defaultMachine')}<select name="machine">${machineOptions(p.defaults?.machine || '', true)}</select></label>
       <label>${t('reviewAgent')}<select name="review">${agentOpts(roles.review)}</select></label><label>${t('testAgent')}<select name="test">${agentOpts(roles.test)}</select></label>
-      <label>${t('plannerAgent')}<select name="planner">${agentOpts(roles.planner)}</select></label></div>
+      <label>${t('plannerAgent')}<select name="planner">${agentOpts(roles.planner)}</select></label>
+      <label>${t('defaultWorkflow')}<select name="workflow"><option value="">${t('noWorkflow')}</option>${[...new Set([...builtinFlows, ...Object.keys(p.workflows || {})])].sort().map(n => `<option value="${esc(n)}" ${n === p.defaults?.workflow ? 'selected' : ''}>${esc(n)}</option>`).join('')}</select></label></div>
+      <fieldset class="stack"><legend>${t('customWorkflows')}</legend>${Object.keys(p.workflows || {}).sort().map(n => `<div class="flex"><span class="mono grow">${esc(n)}</span>${button('tree-edit-flow', t('edit'), `data-project="${esc(id)}" data-name="${esc(n)}"`, 'quiet')}${button('tree-remove-flow', t('removeMember'), `data-project="${esc(id)}" data-name="${esc(n)}"`, 'quiet danger')}</div>`).join('') || `<span class="muted">${t('noCustomWorkflows')}</span>`}
+      <div>${button('tree-edit-flow', `${icon('plus')}${t('newWorkflow')}`, `data-project="${esc(id)}"`, 'quiet')}</div></fieldset>
       <label>${t('setupHook')}<input name="setup" class="mono" value="${esc((hooks.setup || []).join(' '))}"></label>
       <label>${t('checkHook')}<input name="check" class="mono" value="${esc((hooks.check || []).join(' '))}"></label></div>${footer(t('save'))}</form>`, '', true);
+  }
+
+  const flowTemplate = `---\nname: my-flow\ndescription: what it is for\nmax_loops: 2\nstages:\n  - {name: implement, role: implement, check: true}\n  - {name: review, role: review, output: verdict, on_rework: implement}\n  - {name: accept, gate: human}\n---\n## implement\n\n{{task.brief}}\n\n{{#rework}}Round {{loops}}: fix this first:\n\n{{rework.notes}}\n{{/rework}}\n`;
+  function flowForm(project, name) {
+    const text = name ? ui.state.projects[project]?.workflows?.[name] : flowTemplate;
+    showModal('tree-form', t(name ? 'editWorkflow' : 'newWorkflow'), `<form id="tree-flow-form" data-project="${esc(project)}" data-name="${esc(name || '')}" data-command="${commandID()}"><div class="modal-body stack"><div class="form-error" role="alert" hidden></div>
+      <label>${t('definition')}<textarea name="text" rows="20" class="mono" spellcheck="false" autofocus>${esc(text || '')}</textarea></label></div>${footer(t('save'))}</form>`, '', true);
+  }
+  async function setFlows(project, workflows, command) {
+    const p = await api.projectEdit({id: project, workflows}, command);
+    if (p) ui.state.projects[p.id] = p;
   }
 
   async function click(action, el) {
@@ -265,6 +361,13 @@ const Tree = (() => {
       case 'tree-token': tokenForm(d.id, d.project); break;
       case 'tree-notify': askNotify(); break;
       case 'tree-offboard': offboard(d.id); break;
+      case 'tree-pass': { const task = ui.state.tasks[d.id]; await api.taskGate({id: d.id, pass: true, expected_rev: task.rev}, {command_id: commandID()}); toast(t('passed')); break; }
+      case 'tree-rework': gateForm(ui.state.tasks[d.id]); break;
+      case 'tree-edit-flow': flowForm(d.project, d.name); break;
+      case 'tree-remove-flow': {
+        const flows = {...ui.state.projects[d.project]?.workflows}; delete flows[d.name];
+        await setFlows(d.project, flows, {command_id: commandID()}); projectSettings(d.project); break;
+      }
       default: return false;
     }
     return true;
@@ -288,9 +391,29 @@ const Tree = (() => {
         const old = ui.state.projects[form.dataset.id] || {}, hooks = {...old.hooks};
         for (const h of ['setup', 'check']) { const a = String(fd.get(h) || '').trim().split(/\s+/).filter(Boolean); if (a.length) hooks[h] = a; else delete hooks[h]; }
         const p = await api.projectEdit({id: form.dataset.id, context: fd.get('context') || '', repos: parseRepos(String(fd.get('repos') || '')),
-          defaults: {workflow: old.defaults?.workflow, roles, machine: fd.get('machine') || undefined}, hooks}, command);
+          defaults: {workflow: fd.get('workflow') || undefined, roles, machine: fd.get('machine') || undefined}, hooks}, command);
         if (p) ui.state.projects[p.id] = p;
         closeModal(true); renderPage(); toast(t('settingsSaved')); break;
+      }
+      case 'tree-gate-form':
+        await api.taskGate({id: form.dataset.id, pass: false, notes: fd.get('notes'), expected_rev: Number(form.dataset.rev)}, command);
+        closeModal(true); toast(t('sentBack')); break;
+      case 'tree-message-form': {
+        const text = String(fd.get('text') || '').trim();
+        if (!text) { const e = form.querySelector('.form-error'); e.hidden = false; e.textContent = t('replyEmpty'); break; }
+        const r = await api.taskMessage({id: form.dataset.id, text, to_run: fd.has('to_run')}, command);
+        ui.drafts.delete('task:' + form.dataset.id); form.reset(); form.dataset.command = commandID(); toast(t('sent.' + r.to));
+        if (r.run) ui.run = r.run;
+        break;
+      }
+      case 'tree-flow-form': {
+        const text = String(fd.get('text') || ''), name = (text.match(/^name:\s*["']?([^"'\s]+)/m) || [])[1];
+        if (!name) { const e = form.querySelector('.form-error'); e.hidden = false; e.textContent = t('workflowNameMissing'); break; }
+        const flows = {...ui.state.projects[form.dataset.project]?.workflows};
+        if (form.dataset.name && form.dataset.name !== name) delete flows[form.dataset.name];
+        flows[name] = text;
+        await setFlows(form.dataset.project, flows, command);
+        toast(t('workflowSaved')); projectSettings(form.dataset.project); break;
       }
       case 'tree-offboard-form':
         await Team.rest('POST', '/api/users/offboard', {user: form.dataset.id, to: fd.get('to')});

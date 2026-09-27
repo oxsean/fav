@@ -301,3 +301,6 @@ func Compile(d AgentDef, base func(string) (tend.AgentProfile, bool)) (tend.Agen
 	}
 	return p, nil
 }
+
+// Split cuts a definition file into its YAML front matter and its Markdown body.
+func Split(text []byte) (head, body []byte, err error) { return split(text) }

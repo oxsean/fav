@@ -239,7 +239,15 @@ func (s *State) Situation(t *Task) Situation {
 		if slices.ContainsFunc(kids, func(k *Task) bool { return !Finished(k.Status) }) {
 			return Situation{Kind: SitQueued, Reason: WhyChildren}
 		}
-		return Situation{Kind: SitWaiting, Reason: WhyAccept}
+		if t.Flow == nil {
+			return Situation{Kind: SitWaiting, Reason: WhyAccept}
+		}
+	}
+	if t.Flow != nil && t.Auto { // a workflow goes stage by stage once started
+		if sit, ok := s.held(t); ok {
+			return sit
+		}
+		return s.stageSituation(t)
 	}
 	last := s.Latest(t.ID)
 	if last != nil && (!t.Auto || last.Seq > t.StartSeq) { // what came of its latest try
@@ -259,19 +267,27 @@ func (s *State) Situation(t *Task) Situation {
 	if !t.Auto {
 		return Situation{Kind: SitWaiting, Reason: WhyDispatch}
 	}
+	if sit, ok := s.held(t); ok {
+		return sit
+	}
+	return Situation{Kind: SitQueued, Reason: WhyReady}
+}
+
+// held is what keeps started task t from going on before its own work: a failed dispatch, or tasks it comes after.
+func (s *State) held(t *Task) (Situation, bool) {
 	if t.Held != "" {
-		return Situation{Kind: SitWaiting, Reason: WhyHeld}
+		return Situation{Kind: SitWaiting, Reason: WhyHeld}, true
 	}
 	for _, a := range t.After {
 		switch d := s.Tasks[a]; {
 		case d == nil:
 		case d.Status == StatusCanceled:
-			return Situation{Kind: SitWaiting, Reason: WhyAfterCanceled}
+			return Situation{Kind: SitWaiting, Reason: WhyAfterCanceled}, true
 		case d.Status != StatusDone:
-			return Situation{Kind: SitQueued, Reason: WhyAfter}
+			return Situation{Kind: SitQueued, Reason: WhyAfter}, true
 		}
 	}
-	return Situation{Kind: SitQueued, Reason: WhyReady}
+	return Situation{}, false
 }
 
 // Ready are the started tasks the coordinator dispatches now, oldest first.

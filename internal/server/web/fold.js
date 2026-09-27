@@ -23,7 +23,7 @@ globalThis.Fold = (() => {
     if (o.detail) r.detail = o.detail;
     if ((o.node_rev || 0) > 0) {
       r.attention = o.attention; r.ask = o.ask; r.note = o.note; r.last = o.last; r.usage = o.usage;
-      r.stream = o.stream; r.requests = o.requests;
+      r.stream = o.stream; r.requests = o.requests; r.verdict = o.verdict; r.checked = o.check;
       const node = o.sends || [];
       r.sends = [...node, ...(r.sends || []).filter(m => !node.some(x => x.id === m.id))];
       r.answers = (r.answers || []).filter(a => (r.requests || []).some(q => q.id === a.request));
@@ -43,11 +43,28 @@ globalThis.Fold = (() => {
     switch (e.type) {
       case 'task_created':
         s.tasks[d.id] = {...d, rev: 1, created_at: at, updated_at: at};
+        if (d.flow) s.tasks[d.id].stage_seq = seq;
         break;
       case 'task_edited': {
         const t = need(s.tasks, d.id, 'task');
         for (const k of ['title', 'brief', 'dir', 'machine', 'agent', 'project', 'owner', 'approver', 'kind', 'acceptance', 'tags']) if (d[k] !== undefined) t[k] = d[k];
+        if (d.workflow !== undefined) {
+          t.workflow = d.workflow || undefined; t.flow = d.flow; t.loops = undefined; t.stage_seq = seq;
+          t.stage = d.flow && d.flow.stages && d.flow.stages.length ? d.flow.stages[0].name : undefined;
+        }
         t.held = undefined; t.rev = (t.rev || 0) + 1; t.updated_at = at;
+        break;
+      }
+      case 'task_staged': {
+        const t = need(s.tasks, d.id, 'task');
+        if (!stageOf(t.flow, d.stage)) throw new Error(`no stage ${d.stage} of task ${d.id}`);
+        t.stage = d.stage; t.loops = d.loops || undefined; t.stage_seq = seq; t.rev = (t.rev || 0) + 1; t.updated_at = at;
+        break;
+      }
+      case 'task_noted': {
+        const t = need(s.tasks, d.id, 'task');
+        t.notes = [...(t.notes || []), {...d.note, at}].slice(-200);
+        t.rev = (t.rev || 0) + 1; t.updated_at = at;
         break;
       }
       case 'task_sourced': {
@@ -136,7 +153,7 @@ globalThis.Fold = (() => {
         break;
       case 'project_edited': {
         const p = need(s.projects, d.id, 'project');
-        for (const k of ['name', 'owner', 'repos', 'links', 'context', 'defaults', 'hooks', 'fetch']) if (d[k] !== undefined) p[k] = d[k];
+        for (const k of ['name', 'owner', 'repos', 'links', 'context', 'defaults', 'hooks', 'fetch', 'workflows']) if (d[k] !== undefined) p[k] = d[k];
         p.rev = (p.rev || 0) + 1; p.updated_at = at;
         break;
       }
@@ -177,6 +194,60 @@ globalThis.Fold = (() => {
     return s;
   }
 
+  const stageOf = (flow, name) => (flow?.stages || []).find(x => x.name === name);
+  const nextStage = (flow, name) => { const i = (flow?.stages || []).findIndex(x => x.name === name); return i >= 0 && i + 1 < flow.stages.length ? flow.stages[i + 1].name : ''; };
+
+  // spent is what t's runs used: cost estimates, and the minutes of those that ended (task.State.Spent).
+  function spent(s, t) {
+    let usd = 0, minutes = 0;
+    for (const r of Object.values(s.runs)) {
+      if (r.task !== t.id) continue;
+      usd += r.usage?.cost_usd || 0;
+      if (r.started_at && r.ended_at) minutes += (Date.parse(r.ended_at) - Date.parse(r.started_at)) / 60000;
+    }
+    return {usd, minutes};
+  }
+  function overBudget(s, t) {
+    const b = t.flow.budget;
+    if (!b) return false;
+    const x = spent(s, t);
+    return b.usd > 0 && x.usd >= b.usd || b.minutes > 0 && x.minutes >= b.minutes;
+  }
+  function verdictOf(st, r) {
+    if (r.checked && r.checked.exit !== 0) return 'rework';
+    if (st.output !== 'verdict') return 'pass';
+    return r.verdict ? r.verdict.verdict : 'blocked';
+  }
+  // stageSituation is where a started task in a workflow stands (task.State.stageSituation).
+  function stageSituation(s, t, last) {
+    const st = stageOf(t.flow, t.stage);
+    if (!st) return {kind: 'waiting', reason: 'blocked'};
+    if (st.gate === 'human') return {kind: 'waiting', reason: 'accept'};
+    const since = Math.max(t.stage_seq || 0, t.start_seq || 0);
+    if (!last || (last.seq || 0) <= since) return overBudget(s, t) ? {kind: 'waiting', reason: 'budget'} : {kind: 'queued', reason: 'ready'};
+    const waiting = !openStates.has(last.state) && (last.attention === 'asked' || last.attention === 'permission');
+    if (waiting) return {kind: 'waiting', reason: last.attention, run: last.id};
+    if (last.state === 'exited' && last.exit_code === 0 && !last.attention) {
+      const v = verdictOf(st, last);
+      if (v === 'pass') return {kind: 'queued', reason: 'advance', run: last.id};
+      if (v === 'rework') return (t.loops || 0) >= (t.flow.max_loops || 0) ? {kind: 'waiting', reason: 'max_loops', run: last.id} : {kind: 'queued', reason: 'rework', run: last.id};
+      return {kind: 'waiting', reason: 'blocked', run: last.id};
+    }
+    if (last.reason && last.state !== 'exited') return {kind: 'waiting', reason: last.reason, run: last.id};
+    return {kind: 'waiting', reason: last.state, run: last.id};
+  }
+  // held is what keeps a started task from its own work (task.State.held).
+  function held(s, t) {
+    if (t.held) return {kind: 'waiting', reason: 'held'};
+    for (const a of t.after || []) {
+      const d = s.tasks[a];
+      if (!d) continue;
+      if (d.status === 'canceled') return {kind: 'waiting', reason: 'after_canceled'};
+      if (d.status !== 'done') return {kind: 'queued', reason: 'after'};
+    }
+    return null;
+  }
+
   // sourceWaits is why t's issue keeps it waiting, as task.SourceWaits says.
   function sourceWaits(t) {
     const src = t.source;
@@ -202,10 +273,11 @@ globalThis.Fold = (() => {
     const kids = Object.values(s.tasks).filter(k => k.parent === t.id);
     if (kids.some(k => k.status !== 'canceled')) {
       if (kids.some(k => k.status !== 'done' && k.status !== 'canceled')) return {kind: 'queued', reason: 'children'};
-      return {kind: 'waiting', reason: 'accept'};
+      if (!t.flow) return {kind: 'waiting', reason: 'accept'};
     }
     let last = null;
     for (const r of runs) if (!last || (r.seq || 0) > (last.seq || 0) || (r.seq || 0) === (last.seq || 0) && r.queued_at > last.queued_at) last = r;
+    if (t.flow && t.auto) return held(s, t) || stageSituation(s, t, last);
     if (last && (!t.auto || (last.seq || 0) > (t.start_seq || 0))) {
       const waiting = !openStates.has(last.state) && (last.attention === 'asked' || last.attention === 'permission');
       if (waiting) return {kind: 'waiting', reason: last.attention, run: last.id};
@@ -216,15 +288,8 @@ globalThis.Fold = (() => {
       return {kind: 'waiting', reason: last.state, run: last.id};
     }
     if (!t.auto) return {kind: 'waiting', reason: 'dispatch'};
-    if (t.held) return {kind: 'waiting', reason: 'held'};
-    for (const a of t.after || []) {
-      const d = s.tasks[a];
-      if (!d) continue;
-      if (d.status === 'canceled') return {kind: 'waiting', reason: 'after_canceled'};
-      if (d.status !== 'done') return {kind: 'queued', reason: 'after'};
-    }
-    return {kind: 'queued', reason: 'ready'};
+    return held(s, t) || {kind: 'queued', reason: 'ready'};
   }
 
-  return {apply, situation};
+  return {apply, situation, stageOf, nextStage};
 })();

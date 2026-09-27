@@ -79,6 +79,8 @@ var methodAccess = map[string]access{
 	MUserOffboard:   admin,
 	MTaskSync:       internal,
 	MTaskSourceAck:  writer,
+	MTaskGate:       writer,
+	MTaskMessage:    writer,
 	MRunDispatch:    writer,
 	MRunStop:        writer,
 	MRunAbandon:     writer,
@@ -290,7 +292,7 @@ func (c *Coord) sees(p Principal, e journal.Event) bool {
 		return p.Admin || c.st.Projects[s.Project].Role(p.User) != ""
 	case task.EMachineShared:
 		return c.canSee(p, s.Machine)
-	case task.ETaskMoved, task.ETaskHeld, task.ETaskSourced, task.ETaskSourceAcked:
+	case task.ETaskMoved, task.ETaskHeld, task.ETaskSourced, task.ETaskSourceAcked, task.ETaskStaged, task.ETaskNoted:
 		return canRead(c.st, p, c.st.Tasks[s.ID])
 	case task.ETaskStarted:
 		var d task.TaskStart

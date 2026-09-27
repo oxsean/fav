@@ -54,6 +54,8 @@ const (
 	MTaskStart      = "task.start"
 	MTaskSync       = "task.sync"
 	MTaskSourceAck  = "task.source_ack"
+	MTaskGate       = "task.gate"
+	MTaskMessage    = "task.message"
 	MTaskMove       = "task.move"
 	MAgentDefList   = "agentdef.list"
 	MAgentDefGet    = "agentdef.get"
