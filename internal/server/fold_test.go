@@ -72,6 +72,15 @@ func foldScenario() []journal.Envelope {
 	add(ev(task.ERunStarting, task.RunStarting{ID: "r4"}))
 	add(ev(task.ERunObserved, task.Observation{ID: "r4", State: task.Exited, NodeRev: 1, ExitCode: &exit0}))
 	add(ev(task.ETaskMoved, task.TaskMove{ID: "t4", After: ptr([]string{})}))
+	add(ev(task.ETaskCreated, task.Task{ID: "t6", Title: "issue", Brief: "v1", Project: "p1", Kind: task.KindRequirement, Status: task.StatusTodo,
+		Source: &task.Source{Kind: "gitea", Tracker: "tr", Base: "http://git", Repo: "o/r", RepoID: 3, Number: 8, Rev: 1, Digest: "a", Seen: "a", SeenRev: 1}}))
+	add(ev(task.ETaskSourced, task.SourceUpdate{ID: "t6", Digest: "b", Title: "issue 2", Text: "v2", URL: "http://git/o/r/issues/8"}))
+	add(ev(task.ETaskSourceAcked, task.SourceAck{ID: "t6", Accept: true}))
+	add(ev(task.ETaskSourced, task.SourceUpdate{ID: "t6", Digest: "c", Title: "issue 3", Text: "v3", Closed: true}))
+	add(ev(task.ETaskSourceAcked, task.SourceAck{ID: "t6"}))
+	add(ev(task.ETaskCreated, task.Task{ID: "t7", Title: "closed", Project: "p1", Kind: task.KindRequirement, Status: task.StatusTodo,
+		Source: &task.Source{Kind: "gitea", Number: 9, Rev: 1, Digest: "a", Seen: "a", SeenRev: 1}}))
+	add(ev(task.ETaskSourced, task.SourceUpdate{ID: "t7", Digest: "a", Closed: true}))
 	add(ev("some_future_event", map[string]string{"id": "t1"}))
 	return envs
 }

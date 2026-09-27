@@ -170,7 +170,8 @@ func TestEveryUnfinishedTaskStandsOneWayWithAReason(t *testing.T) {
 	defer func() {
 		for _, k := range []string{SitRunning + "/running", SitQueued + "/" + WhyAfter, SitQueued + "/" + WhyChildren, SitQueued + "/" + WhySlot,
 			SitWaiting + "/" + WhyAccept, SitWaiting + "/" + WhyHeld, SitWaiting + "/" + WhyAfterCanceled, SitWaiting + "/" + WhyDispatch,
-			SitWaiting + "/" + AttentionAsked, SitWaiting + "/" + AttentionPermission, SitWaiting + "/access_revoked", SitDone + "/"} {
+			SitWaiting + "/" + AttentionAsked, SitWaiting + "/" + AttentionPermission, SitWaiting + "/access_revoked", SitDone + "/",
+			SitWaiting + "/" + WhySourceChanged, SitWaiting + "/" + WhySourceClosed} {
 			if seen[k] == 0 {
 				t.Errorf("the histories never reach %s: %v", k, seen)
 			}
@@ -202,7 +203,7 @@ func TestEveryUnfinishedTaskStandsOneWayWithAReason(t *testing.T) {
 			return out
 		}
 		for step := range 60 {
-			switch rng.IntN(8) {
+			switch rng.IntN(10) {
 			case 0, 1: // a task, maybe under another, maybe after others
 				parent := ""
 				if p := pick(func(x *Task) bool {
@@ -214,7 +215,10 @@ func TestEveryUnfinishedTaskStandsOneWayWithAReason(t *testing.T) {
 				if a := pick(func(*Task) bool { return rng.IntN(3) == 0 }); a != nil {
 					after = []string{a.ID}
 				}
-				w.task(parent, after, []string{StatusBacklog, StatusTodo}[rng.IntN(2)])
+				id := w.task(parent, after, []string{StatusBacklog, StatusTodo}[rng.IntN(2)])
+				if parent == "" && rng.IntN(2) == 0 { // a requirement from an issue
+					w.s.Tasks[id].Source = &Source{Kind: "gitea", Number: int64(w.ids), Rev: 1, Digest: "d0", Seen: "d0", SeenRev: 1}
+				}
 			case 2: // started, with its subtree
 				if x := pick(func(x *Task) bool { return !Finished(x.Status) }); x != nil {
 					var ids []string
@@ -250,6 +254,15 @@ func TestEveryUnfinishedTaskStandsOneWayWithAReason(t *testing.T) {
 			case 6: // someone sets a status by hand
 				if x := pick(func(x *Task) bool { return !Finished(x.Status) && w.s.OpenRun(x.ID) == nil }); x != nil {
 					w.do(journal.NewEvent(ETaskStatus, TaskStatus{ID: x.ID, Status: []string{StatusDone, StatusCanceled, StatusTodo}[rng.IntN(3)]}))
+				}
+			case 8: // the sync worker reads an issue: changed, closed or reopened
+				if x := pick(func(x *Task) bool { return x.Source != nil }); x != nil {
+					w.do(journal.NewEvent(ETaskSourced, SourceUpdate{ID: x.ID, Digest: fmt.Sprintf("d%d", rng.IntN(3)), Title: "t",
+						Closed: rng.IntN(4) == 0}))
+				}
+			case 9: // someone takes or declines what changed
+				if x := pick(func(x *Task) bool { return SourceWaits(x) != "" }); x != nil {
+					w.do(journal.NewEvent(ETaskSourceAcked, SourceAck{ID: x.ID, Accept: rng.IntN(2) == 0}))
 				}
 			case 7: // moved after another task, without a cycle
 				x, y := pick(func(*Task) bool { return true }), pick(func(*Task) bool { return true })
@@ -298,4 +311,43 @@ func sortedIDs(s *State) []string {
 	}
 	slices.Sort(ids)
 	return ids
+}
+
+func TestAnIssueThatChangesOrClosesWaitsForSomeone(t *testing.T) {
+	w := newWorld(t)
+	w.do(journal.NewEvent(ETaskCreated, Task{ID: "t_r", Title: "v1", Brief: "one", Kind: KindRequirement, Status: StatusTodo,
+		Source: &Source{Kind: "gitea", Number: 7, Rev: 1, Digest: "a", Seen: "a", SeenRev: 1}}))
+	w.do(journal.NewEvent(ETaskStarted, TaskStart{IDs: []string{"t_r"}}))
+	if sit := w.s.Situation(w.s.Tasks["t_r"]); sit.Reason != WhyReady {
+		t.Fatalf("an issue read again unchanged changes nothing: %+v", sit)
+	}
+	w.do(journal.NewEvent(ETaskSourced, SourceUpdate{ID: "t_r", Digest: "b", Title: "v2", Text: "two"}))
+	x := w.s.Tasks["t_r"]
+	if sit := w.s.Situation(x); sit.Reason != WhySourceChanged || x.Title != "v1" || x.Source.Pending.Rev != 2 {
+		t.Fatalf("a change waits, the scope stays: %+v %+v", sit, x.Source)
+	}
+	w.do(journal.NewEvent(ETaskSourceAcked, SourceAck{ID: "t_r"}))
+	w.do(journal.NewEvent(ETaskSourced, SourceUpdate{ID: "t_r", Digest: "b", Title: "v2", Text: "two"}))
+	if sit := w.s.Situation(x); sit.Reason != WhyReady || x.Title != "v1" || x.Source.Rev != 1 {
+		t.Fatalf("a declined revision is not raised again: %+v %+v", sit, x.Source)
+	}
+	w.do(journal.NewEvent(ETaskSourced, SourceUpdate{ID: "t_r", Digest: "c", Title: "v3", Text: "three"}))
+	w.do(journal.NewEvent(ETaskSourceAcked, SourceAck{ID: "t_r", Accept: true}))
+	if x.Title != "v3" || x.Brief != "three" || x.Source.Rev != 3 || x.Source.Digest != "c" {
+		t.Fatalf("a taken revision becomes the scope: %+v %+v", x, x.Source)
+	}
+	w.do(journal.NewEvent(ETaskSourced, SourceUpdate{ID: "t_r", Digest: "c", Closed: true}))
+	if sit := w.s.Situation(x); sit.Reason != WhySourceClosed {
+		t.Fatalf("closed outside tend: %+v", sit)
+	}
+	w.do(journal.NewEvent(ETaskSourceAcked, SourceAck{ID: "t_r"}))
+	if sit := w.s.Situation(x); sit.Reason != WhyReady {
+		t.Fatalf("kept going: %+v", sit)
+	}
+	w.do(journal.NewEvent(ETaskStatus, TaskStatus{ID: "t_r", Status: StatusDone}))
+	w.do(journal.NewEvent(ETaskSourced, SourceUpdate{ID: "t_r", Digest: "c", Closed: false}))
+	w.do(journal.NewEvent(ETaskSourced, SourceUpdate{ID: "t_r", Digest: "c", Closed: true}))
+	if sit := w.s.Situation(x); sit.Kind != SitDone {
+		t.Fatalf("a done task stays done: %+v", sit)
+	}
 }

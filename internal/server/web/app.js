@@ -286,7 +286,7 @@ function renderRows() {
   if(ui.loading)return `<div aria-busy="true" aria-label="${t('loading')}">${Array.from({length:5},()=>'<div class="skeleton-row"><div class="skeleton"></div><div class="skeleton"></div><div class="skeleton"></div></div>').join('')}</div>`;
   if(ui.error)return statePanel('error',t('loadError'),t('loadErrorHelp'),'retry-data',t('retry'));
   const none=!Object.keys(ui.state.tasks).length,tasks=filteredTasks();if(!tasks.length)return statePanel('tasks',t(none?'empty':'noMatches'),t(none?'emptyHelp':'noMatchesHelp'),none?'new':'clear-filters',t(none?'newTask':'clearFilters'));
-  return Tree.order(tasks).map(({task,depth})=>{const run=latestRun(task.id);return `<button class="task-row depth-${Math.min(depth,3)} ${ui.task===task.id?'selected':''}" id="row-${task.id}" data-action="select-task" data-id="${task.id}" aria-current="${ui.task===task.id?'true':'false'}" tabindex="${ui.focusTask===task.id?'0':'-1'}"><div class="row-top"><span class="row-id">${task.id}</span>${badge(task.status)}</div><div class="row-title">${esc(task.title)}</div><div class="row-meta"><span class="machine-agent">${esc(run?.machine||task.machine||'—')} / ${esc(run?.agent||task.agent||'—')}</span><span>${elapsed(run)}</span></div><div class="mt-5 flex">${run?badge(run.state)+(attention(run)?' '+badge(attention(run)):''):`<span class="muted fs-11">${t('noRun')}</span>`}${Tree.sitBadge(task)}</div></button>`;}).join('');
+  return Tree.order(tasks).map(({task,depth})=>{const run=latestRun(task.id);return `<button class="task-row depth-${Math.min(depth,3)} ${ui.task===task.id?'selected':''}" id="row-${task.id}" data-action="select-task" data-id="${task.id}" aria-current="${ui.task===task.id?'true':'false'}" tabindex="${ui.focusTask===task.id?'0':'-1'}"><div class="row-top"><span class="row-id">${task.id}${task.kind==='requirement'?` · ${t('requirement')}`:''}</span>${badge(task.status)}</div><div class="row-title">${esc(task.title)}</div><div class="row-meta"><span class="machine-agent">${esc(run?.machine||task.machine||'—')} / ${esc(run?.agent||task.agent||'—')}</span><span>${elapsed(run)}</span></div><div class="mt-5 flex">${run?badge(run.state)+(attention(run)?' '+badge(attention(run)):''):`<span class="muted fs-11">${t('noRun')}</span>`}${Tree.sitBadge(task)}</div></button>`;}).join('');
 }
 function statePanel(symbol,title,body,action,label) {return `<div class="state-panel">${icon(symbol)}<h3>${title}</h3><p>${body}</p>${action?button(action,label):''}</div>`;}
 function renderPage() {
@@ -582,7 +582,7 @@ let journalRenderTimer,syncTimer;
 function receiveJournal(envelope) {
   if(envelope.seq<=ui.state.seq)return;
   if(envelope.seq!==ui.state.seq+1)return scheduleSync();
-  for(const event of envelope.events)if(event.type==='task_edited'&&event.data.brief!==undefined)ui.briefs.delete(event.data.id);
+  for(const event of envelope.events)if(event.type==='task_edited'&&event.data.brief!==undefined||event.type==='task_source_acked')ui.briefs.delete(event.data.id);
   const edited=envelope.events.find(e=>e.type==='task_edited'&&e.data.id===ui.modalTask);
   if(edited&&modal.open&&ui.modalType==='task-form')modalError(t('pushed')+' · '+t('editHint'));
   try{Fold.apply(ui.state,envelope);}catch(_){return scheduleSync();}

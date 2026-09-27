@@ -145,6 +145,7 @@ const api = (() => {
     machineShare: write('machine.share'),
     taskStart: write('task.start'),
     taskMove: write('task.move'),
+    taskSourceAck: write('task.source_ack'),
     inboxList: () => call('inbox.list'),
     agentDefList: () => call('agentdef.list'),
     agentDefGet: params => call('agentdef.get', params),

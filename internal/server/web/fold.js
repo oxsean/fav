@@ -50,6 +50,29 @@ globalThis.Fold = (() => {
         t.held = undefined; t.rev = (t.rev || 0) + 1; t.updated_at = at;
         break;
       }
+      case 'task_sourced': {
+        const t = need(s.tasks, d.id, 'task'), src = t.source;
+        if (!src) throw new Error(`no sourced task ${d.id}`);
+        if (d.digest && d.digest !== src.seen) {
+          src.seen_rev = (src.seen_rev || 0) + 1; src.seen = d.digest;
+          src.pending = d.digest === src.digest ? undefined : {rev: src.seen_rev, digest: d.digest, title: d.title || '', text: d.text || ''};
+        }
+        if (!!d.closed !== !!src.closed) { src.closed = !!d.closed; src.closed_acked = false; }
+        if (d.repo) src.repo = d.repo;
+        if (d.url) src.url = d.url;
+        src.fetched_at = at; t.rev = (t.rev || 0) + 1; t.updated_at = at;
+        break;
+      }
+      case 'task_source_acked': {
+        const t = need(s.tasks, d.id, 'task'), src = t.source;
+        if (!sourceWaits(t)) throw new Error(`nothing to acknowledge on ${d.id}`);
+        if (src.pending) {
+          if (d.accept) { t.title = src.pending.title; t.brief = src.pending.text; src.rev = src.pending.rev; src.digest = src.pending.digest; }
+          src.pending = undefined;
+        } else src.closed_acked = true;
+        t.rev = (t.rev || 0) + 1; t.updated_at = at;
+        break;
+      }
       case 'task_status_set': {
         const t = need(s.tasks, d.id, 'task');
         t.status = d.status; t.updated_at = at; t.rev = (t.rev || 0) + 1;
@@ -154,6 +177,15 @@ globalThis.Fold = (() => {
     return s;
   }
 
+  // sourceWaits is why t's issue keeps it waiting, as task.SourceWaits says.
+  function sourceWaits(t) {
+    const src = t.source;
+    if (!src) return '';
+    if (src.pending) return 'source_changed';
+    if (src.closed && !src.closed_acked) return 'source_closed';
+    return '';
+  }
+
   // situation says how task t stands, as task.State.Situation does: {kind, reason, run}.
   function situation(s, t) {
     if (t.status === 'backlog' || t.status === 'done' || t.status === 'canceled') return {kind: t.status};
@@ -165,6 +197,8 @@ globalThis.Fold = (() => {
       if (open.state === 'unknown') return {kind: 'waiting', reason: 'unknown', run: open.id};
       return {kind: 'running', reason: open.state, run: open.id};
     }
+    const why = sourceWaits(t);
+    if (why) return {kind: 'waiting', reason: why};
     const kids = Object.values(s.tasks).filter(k => k.parent === t.id);
     if (kids.some(k => k.status !== 'canceled')) {
       if (kids.some(k => k.status !== 'done' && k.status !== 'canceled')) return {kind: 'queued', reason: 'children'};

@@ -67,12 +67,14 @@ func (n *Notifier) deliver(ctx context.Context, team *store.Team, base string, x
 	if err != nil || hook == "" {
 		return
 	}
-	if first, err := team.Claim(x.Seq, user, x.Event); err != nil || !first {
-		return
+	if x.Seq > 0 { // a notice of the journal goes once; the server's own (a tracker that stopped) each time
+		if first, err := team.Claim(x.Seq, user, x.Event); err != nil || !first {
+			return
+		}
 	}
 	p := WebhookPayload{Event: x.Event, Task: x.Task, Title: x.Title, Project: x.Project, Reason: x.Reason, Run: x.Run, At: x.At,
 		Text: x.Title + " · " + strings.TrimPrefix(x.Event, "task.") + " " + x.Reason}
-	if base != "" {
+	if base != "" && x.Task != "" {
 		p.URL = strings.TrimRight(base, "/") + "/#task-" + x.Task
 	}
 	b, _ := json.Marshal(p)
@@ -86,7 +88,9 @@ func (n *Notifier) deliver(ctx context.Context, team *store.Team, base string, x
 			status = strconv.Itoa(res.StatusCode)
 		}
 	}
-	team.Delivered(x.Seq, user, x.Event, status)
+	if x.Seq > 0 {
+		team.Delivered(x.Seq, user, x.Event, status)
+	}
 }
 
 // CheckWebhook: u is a webhook a user may set: http or https, at most 1024 bytes.

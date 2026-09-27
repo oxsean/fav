@@ -52,6 +52,8 @@ const (
 	MProjectMember  = "project.member"
 	MMachineShare   = "machine.share"
 	MTaskStart      = "task.start"
+	MTaskSync       = "task.sync"
+	MTaskSourceAck  = "task.source_ack"
 	MTaskMove       = "task.move"
 	MAgentDefList   = "agentdef.list"
 	MAgentDefGet    = "agentdef.get"

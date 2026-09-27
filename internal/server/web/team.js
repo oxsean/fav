@@ -120,7 +120,7 @@ const Team = (() => {
           : `<span>${t('role.' + role)}</span>`}</div>`)];
       return `<article class="machine-card stack"><div class="flex between"><div><h2>${esc(p.name)}</h2><span class="mono muted">${esc(p.id)}</span></div>${badgeText(t('role.' + (p.owner === ui.me?.id ? 'owner' : myRole(p) || 'reader')))}</div>
         <div class="stack"><span class="meta-label">${t('members')}</span>${rows(memberRows, '')}</div>
-        ${manages(p) ? `<div class="flex">${button('team-add-member', t('addMember'), `data-project="${esc(p.id)}"`)}${button('team-edit-project', t('editProject'), `data-project="${esc(p.id)}"`, 'quiet')}${button('tree-project', t('projectSettings'), `data-project="${esc(p.id)}"`, 'quiet')}</div>` : ''}</article>`;
+        ${manages(p) ? `<div class="flex">${button('team-add-member', t('addMember'), `data-project="${esc(p.id)}"`)}${button('team-edit-project', t('editProject'), `data-project="${esc(p.id)}"`, 'quiet')}${button('tree-project', t('projectSettings'), `data-project="${esc(p.id)}"`, 'quiet')}${button('tree-trackers', t('trackers'), `data-project="${esc(p.id)}"`, 'quiet')}</div>` : ''}</article>`;
     });
     return `<header class="page-heading"><div><h1>${t('projects')}</h1><p class="page-subtitle">${t('projectsSubtitle')}</p></div>${isAdmin() ? button('team-new-project', `${icon('plus')}${t('newProject')}`, ui.online ? '' : 'disabled', 'primary') : ''}</header>
       <div class="machine-page">${list.length ? `<div class="machine-grid">${cards.join('')}</div>` : statePanel('tasks', t('noProjects'), t('noProjectsHelp'))}</div>`;

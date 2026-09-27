@@ -232,6 +232,9 @@ func (s *State) Situation(t *Task) Situation {
 		}
 		return Situation{Kind: SitRunning, Reason: r.State, Run: r.ID}
 	}
+	if why := SourceWaits(t); why != "" {
+		return Situation{Kind: SitWaiting, Reason: why}
+	}
 	if kids := s.Children(t.ID); slices.ContainsFunc(kids, func(k *Task) bool { return k.Status != StatusCanceled }) {
 		if slices.ContainsFunc(kids, func(k *Task) bool { return !Finished(k.Status) }) {
 			return Situation{Kind: SitQueued, Reason: WhyChildren}

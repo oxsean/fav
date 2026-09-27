@@ -73,6 +73,7 @@ type Options struct {
 	Listen  string
 	TLSCert string
 	TLSKey  string
+	Syncer  *Syncer // nil: no tracker sync
 }
 
 // Server serves the coordinator over HTTP.
@@ -83,10 +84,11 @@ type Server struct {
 	conns  map[*wire.Conn]string // live connections by the credential they came with
 	flows  map[string]flow       // sign-ins in progress, by state
 	limit  *limiter
+	syncer *Syncer
 }
 
 func New(opt Options) *Server {
-	s := &Server{opt: opt, logins: map[string]*auth.Provider{}, conns: map[*wire.Conn]string{}, flows: map[string]flow{}, limit: newLimiter()}
+	s := &Server{opt: opt, logins: map[string]*auth.Provider{}, conns: map[*wire.Conn]string{}, flows: map[string]flow{}, limit: newLimiter(), syncer: opt.Syncer}
 	for _, l := range opt.Config.Logins {
 		p, err := auth.New(l)
 		if err != nil {
@@ -253,6 +255,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) { w.Write([]byte("ok\n")) })
 	s.webRoutes(mux)
 	s.apiRoutes(mux)
+	s.trackerRoutes(mux)
 	mux.Handle("/", page())
 	return mux
 }

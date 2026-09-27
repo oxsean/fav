@@ -13,8 +13,9 @@ import (
 
 // Principal is who calls the coordinator: every connection carries one, and every method checks it.
 type Principal struct {
-	User  string `json:"user"`
-	Admin bool   `json:"admin,omitempty"`
+	User   string `json:"user"`
+	Admin  bool   `json:"admin,omitempty"`
+	system bool
 }
 
 // Owner is this machine's user: the socket, a process that became the coordinator, and mode 1. It owns every machine
@@ -33,16 +34,22 @@ type User struct {
 // ReasonAccessRevoked: a queued run's dispatcher may no longer run it there (run_canceled).
 const ReasonAccessRevoked = "access_revoked"
 
-func (p Principal) actor() journal.Actor { return journal.Actor{Kind: journal.ActorUser, ID: p.User} }
+func (p Principal) actor() journal.Actor {
+	if p.system {
+		return journal.System
+	}
+	return journal.Actor{Kind: journal.ActorUser, ID: p.User}
+}
 
 // access is what a method needs from its caller before the method's own checks.
 type access int
 
 const (
-	anyone access = iota + 1 // the handshake
-	reader                   // reads what it may see
-	writer                   // changes what it may change
-	admin                    // an instance administrator
+	anyone   access = iota + 1 // the handshake
+	reader                     // reads what it may see
+	writer                     // changes what it may change
+	admin                      // an instance administrator
+	internal                   // tend-server's own work (System)
 )
 
 // methodAccess covers every method a client may call; one missing here is refused.
@@ -70,6 +77,8 @@ var methodAccess = map[string]access{
 	MAgentDefShare:  writer,
 	MInboxList:      reader,
 	MUserOffboard:   admin,
+	MTaskSync:       internal,
+	MTaskSourceAck:  writer,
 	MRunDispatch:    writer,
 	MRunStop:        writer,
 	MRunAbandon:     writer,
@@ -94,7 +103,7 @@ func (p Principal) may(method string) error {
 		return nil
 	case p.User == "":
 		return forbidden(method)
-	case a == admin && !p.Admin:
+	case a == admin && !p.Admin, a == internal && !p.system:
 		return forbidden(method)
 	}
 	return nil
@@ -281,7 +290,7 @@ func (c *Coord) sees(p Principal, e journal.Event) bool {
 		return p.Admin || c.st.Projects[s.Project].Role(p.User) != ""
 	case task.EMachineShared:
 		return c.canSee(p, s.Machine)
-	case task.ETaskMoved, task.ETaskHeld:
+	case task.ETaskMoved, task.ETaskHeld, task.ETaskSourced, task.ETaskSourceAcked:
 		return canRead(c.st, p, c.st.Tasks[s.ID])
 	case task.ETaskStarted:
 		var d task.TaskStart

@@ -108,7 +108,7 @@ var readMethods = []string{remote.MHello, remote.MList, remote.MMessages, remote
 var Methods = []string{MStateGet, MTaskGet, MTaskCreate, MTaskEdit, MTaskStatus, MRunDispatch, MRunStop, MRunAbandon, MRunTail,
 	MAgentList, MMachineList, MSubscribe, MNodeCall, MRunPreview, MRunContinue, MRunAnswer, MRunSend, MRunMessages,
 	MProjectCreate, MProjectEdit, MProjectMember, MMachineShare, MTaskStart, MTaskMove,
-	MAgentDefList, MAgentDefGet, MAgentDefSave, MAgentDefRemove, MAgentDefShare, MInboxList, MUserOffboard}
+	MAgentDefList, MAgentDefGet, MAgentDefSave, MAgentDefRemove, MAgentDefShare, MInboxList, MUserOffboard, MTaskSync, MTaskSourceAck}
 
 // Handler answers this machine's user.
 func (c *Coord) Handler() wire.Handler { return c.HandlerFor(Owner) }
@@ -214,6 +214,10 @@ func (c *Coord) HandlerFor(p Principal) wire.Handler {
 			return c.command(p, r, c.taskStart, taskView)
 		case MTaskMove:
 			return c.command(p, r, c.taskMove, taskView)
+		case MTaskSync:
+			return c.command(p, r, c.taskSync, taskView)
+		case MTaskSourceAck:
+			return c.command(p, r, c.taskSourceAck, taskView)
 		case MRunDispatch:
 			return c.command(p, r, c.runDispatch, runView)
 		case MRunContinue:
@@ -289,6 +293,7 @@ func (c *Coord) command(p Principal, r *wire.Request, do func(Principal, *wire.R
 		st := task.New() // what id is once env applies: its copy with env applied
 		if t := c.st.Tasks[id]; t != nil {
 			cp := *t
+			cp.Source = t.Source.Clone()
 			st.Tasks[id] = &cp
 		}
 		if r := c.st.Runs[id]; r != nil {
@@ -323,6 +328,7 @@ func receiptKey(user, commandID string) string { return user + "\x00" + commandI
 func taskView(st *task.State, id string) any {
 	if t := st.Tasks[id]; t != nil {
 		cp := *t
+		cp.Source = t.Source.Clone()
 		return &cp
 	}
 	return nil
@@ -471,6 +477,9 @@ func (c *Coord) taskStatus(who Principal, r *wire.Request) (string, []journal.Ev
 	}
 	if t.Status == p.Status {
 		return t.ID, nil, nil
+	}
+	if p.Status == task.StatusDone && task.SourceWaits(t) == task.WhySourceChanged {
+		return "", nil, conflict(task.WhySourceChanged)
 	}
 	if p.Status == task.StatusCanceled {
 		return t.ID, c.cancelTree(t), nil

@@ -72,6 +72,7 @@ type Task struct {
 	Auto      bool      `json:"auto,omitempty"`      // started: the coordinator dispatches it once what it comes after is done
 	StartSeq  int64     `json:"start_seq,omitempty"` // the seq of its last start; runs queued before it are earlier tries
 	Held      string    `json:"held,omitempty"`      // why the coordinator could not dispatch it; cleared by an edit or a start
+	Source    *Source   `json:"source,omitempty"`    // the issue a requirement comes from
 	Rev       int       `json:"rev,omitzero"`
 	CreatedAt time.Time `json:"created_at,omitzero"`
 	UpdatedAt time.Time `json:"updated_at,omitzero"`
@@ -358,6 +359,9 @@ func (s *State) apply(e journal.Event, seq int64, at time.Time) error {
 			return err
 		}
 		if ok, err := s.applyDefs(e, at); ok {
+			return err
+		}
+		if ok, err := s.applySource(e, at); ok {
 			return err
 		}
 		return fmt.Errorf("unknown event")
