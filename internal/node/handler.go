@@ -110,6 +110,7 @@ func (n *Node) Handler(sessions remote.Handler) wire.Handler {
 		res, err := sessions.Handle(ctx, r.Method, r.Params)
 		if h, ok := res.(remote.Hello); ok && err == nil {
 			h.Methods = append(append([]string(nil), h.Methods...), Methods...)
+			h.Features = append(append([]string(nil), h.Features...), Features...)
 			h.NodeID = n.ID()
 			return h, nil
 		}
@@ -119,6 +120,10 @@ func (n *Node) Handler(sessions remote.Handler) wire.Handler {
 
 // Methods lists what Handler answers.
 var Methods = []string{MRunStart, MRunStop, MRunList, MRunTail, MRunResume, MAgents, MRunAnswer, MRunSend}
+
+// Features lists what run.start and run.resume understand beyond their first shape; a coordinator that needs a feature
+// this node lacks fails the run as node_outdated instead of starting it without.
+var Features []string
 
 // Tail reads a page of a run's output.log backwards from p.Before.
 func (n *Node) Tail(p TailParams) (Tail, error) {

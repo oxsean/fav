@@ -11,6 +11,7 @@ import (
 	"github.com/oxsean/fav/internal/agent"
 	"github.com/oxsean/fav/internal/journal"
 	"github.com/oxsean/fav/internal/node"
+	"github.com/oxsean/fav/internal/remote"
 	"github.com/oxsean/fav/internal/task"
 	"github.com/oxsean/fav/internal/tend"
 	"github.com/oxsean/fav/internal/wire"
@@ -18,6 +19,20 @@ import (
 
 // ReasonNodeOutdated: the machine's tend is older than what the run needs (`tend hosts install` updates it).
 const ReasonNodeOutdated = "node_outdated"
+
+// runFeatures are the node features run needs: a field of run.start an older node would ignore.
+var runFeatures = func(run *task.Run) []string { return nil }
+
+// missingFeatures are those of need the node that said h lacks.
+func missingFeatures(h remote.Hello, need []string) []string {
+	var lack []string
+	for _, f := range need {
+		if !slices.Contains(h.Features, f) {
+			lack = append(lack, f)
+		}
+	}
+	return lack
+}
 
 // Why is one reason a run cannot start, or will start late or differently; Code is stable, clients word it.
 type Why struct {
@@ -103,7 +118,12 @@ func (c *Coord) preview(ctx context.Context, run task.Run) Preview {
 	}
 	resumes := slices.Contains(m.hello.Methods, node.MRunResume)
 	connected := m.conn != nil
+	lack := missingFeatures(m.hello, runFeatures(&run))
 	c.mu.Unlock()
+
+	if connected && len(lack) > 0 {
+		pv.Blockers = append(pv.Blockers, Why{WhyOutdated, pv.Version})
+	}
 
 	if run.Resume != "" {
 		pv.Notes = append(pv.Notes, Why{WhyContinuation, run.Resume})
@@ -206,10 +226,13 @@ type Continue struct {
 	Agent    string `json:"agent,omitempty"` // default: the run's profile, else the provider's
 }
 
-func (c *Coord) runContinue(r *wire.Request) (string, []journal.Event, error) {
+func (c *Coord) runContinue(who Principal, r *wire.Request) (string, []journal.Event, error) {
 	var p Continue
 	if err := r.Decode(&p); err != nil {
 		return "", nil, err
+	}
+	if p.Run == "" && !who.Admin { // any session of a machine, not one a run made
+		return "", nil, forbidden(MRunContinue)
 	}
 	if strings.TrimSpace(p.Text) == "" || len(p.Text) > maxBrief {
 		return "", nil, bad("text")

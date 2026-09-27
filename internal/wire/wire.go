@@ -10,26 +10,25 @@ import (
 
 // Proto changes whenever a frame changes shape; both ends must agree. Methods are not versioned by it: hello lists
 // them, and a method's params or result only gain fields an older end ignores.
-const Proto = 2
+const Proto = 1
 
-// Frame kinds.
+// Frame types. A res carries result, or error when the call failed.
 const (
-	KindReq    = "req"
-	KindRes    = "res"
-	KindPush   = "push"
-	KindCancel = "cancel"
+	TypeReq    = "req"
+	TypeRes    = "res"
+	TypePush   = "push"
+	TypeCancel = "cancel"
 )
 
 // MaxFrame is the longest line a Conn reads; a longer one ends the connection.
 const MaxFrame = 16 << 20
 
 type Frame struct {
-	Kind      string          `json:"kind"`
+	Type      string          `json:"type"`
 	ID        int64           `json:"id,omitempty"`
 	Method    string          `json:"method,omitempty"`
 	CommandID string          `json:"command_id,omitempty"` // a write's idempotency key: replaying it returns the first result
 	Params    json.RawMessage `json:"params,omitempty"`
-	OK        bool            `json:"ok,omitempty"`
 	Result    json.RawMessage `json:"result,omitempty"`
 	Error     *Error          `json:"error,omitempty"`
 }

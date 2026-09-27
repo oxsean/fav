@@ -26,24 +26,29 @@ type HelloParams struct {
 	Proto int    `json:"proto"`
 	Role  string `json:"role,omitempty"` // client | coordinator | node
 	Lang  string `json:"lang,omitempty"` // the caller's language: check texts come back in it
+	// Features: what the caller understands beyond the methods it calls (events, fields), as the other end's Features.
+	Features []string `json:"features,omitempty"`
 }
 
 type Hello struct {
 	Proto    int             `json:"proto"`
 	Version  string          `json:"version"`
-	OS       string          `json:"os"` // GOOS
-	Arch     string          `json:"arch"`
-	Endpoint string          `json:"endpoint"` // stable id of this machine + OS + WSL distro + config dirs
-	Hostname string          `json:"hostname"`
+	OS       string          `json:"os,omitempty"` // GOOS
+	Arch     string          `json:"arch,omitempty"`
+	Endpoint string          `json:"endpoint,omitempty"` // stable id of this machine + OS + WSL distro + config dirs
+	Hostname string          `json:"hostname,omitempty"`
 	WSL      string          `json:"wsl,omitempty"` // WSL distro name
-	Home     string          `json:"home"`
-	Sep      string          `json:"sep"`
-	Claude   string          `json:"claude_home"`
-	Codex    string          `json:"codex_home"`
-	CLIs     map[string]bool `json:"clis"` // claude / codex found on PATH
+	Home     string          `json:"home,omitempty"`
+	Sep      string          `json:"sep,omitempty"`
+	Claude   string          `json:"claude_home,omitempty"`
+	Codex    string          `json:"codex_home,omitempty"`
+	CLIs     map[string]bool `json:"clis,omitempty"` // claude / codex found on PATH
 	Methods  []string        `json:"methods"`
-	NodeID   string          `json:"node_id,omitempty"` // a node's lasting identity (node.ID), which a server binds its token to
-	Role     string          `json:"role,omitempty"`
+	// Features: what this end understands beyond its method names, such as a field of run.start; an end that needs one
+	// the other lacks refuses rather than lets it be ignored.
+	Features []string `json:"features,omitempty"`
+	NodeID   string   `json:"node_id,omitempty"` // a node's lasting identity (node.ID), which a server binds its token to
+	Role     string   `json:"role,omitempty"`
 }
 
 // Ref names a session on the machine that answers.
@@ -75,11 +80,11 @@ type Session struct {
 	Repo          string         `json:"repo,omitempty"`
 	Transcript    string         `json:"transcript,omitempty"`
 	Pinned        string         `json:"pinned,omitempty"`
-	StartedAt     *time.Time     `json:"started_at,omitempty"`
-	FavoritedAt   *time.Time     `json:"favorited_at,omitempty"`
-	ArchivedAt    *time.Time     `json:"archived_at,omitempty"`
+	StartedAt     *time.Time     `json:"started_at,omitzero"`
+	FavoritedAt   *time.Time     `json:"favorited_at,omitzero"`
+	ArchivedAt    *time.Time     `json:"archived_at,omitzero"`
 	UpdatedAt     time.Time      `json:"updated_at"`
-	ResumedAt     *time.Time     `json:"resumed_at,omitempty"`
+	ResumedAt     *time.Time     `json:"resumed_at,omitzero"`
 	Resumes       int            `json:"resumes,omitempty"`
 	LastAt        time.Time      `json:"last_at"`
 	Turns         int            `json:"turns"`

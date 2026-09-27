@@ -18,20 +18,48 @@ import (
 	"github.com/oxsean/fav/internal/fileio"
 )
 
-// Envelope is one committed change: the events of one command, applied together.
+// Envelope is one committed change: the events of one command, applied together. Version 2 added Actor.
 type Envelope struct {
 	V       int       `json:"v"`
 	Seq     int64     `json:"seq"`
 	At      time.Time `json:"at"`
+	Actor   *Actor    `json:"actor,omitempty"`
 	Command *Receipt  `json:"command,omitempty"`
 	Events  []Event   `json:"events"`
+}
+
+// Version is what Append writes.
+const Version = 2
+
+// Actor is who a change came from: a user's command, a node's report, or the coordinator's own rule.
+type Actor struct {
+	Kind string `json:"kind"`
+	ID   string `json:"id,omitempty"` // the user, or the machine
+}
+
+// Actor kinds.
+const (
+	ActorUser   = "user"
+	ActorNode   = "node"
+	ActorSystem = "system"
+)
+
+// System is the coordinator acting on its own rules.
+var System = Actor{Kind: ActorSystem}
+
+// Who is env's actor; an envelope written before version 2 names none and counts as the system.
+func (env Envelope) Who() Actor {
+	if env.Actor != nil {
+		return *env.Actor
+	}
+	return System
 }
 
 // Receipt makes a command idempotent: replaying its id returns Result.
 type Receipt struct {
 	ID     string          `json:"id"`
 	Method string          `json:"method"`
-	Digest string          `json:"digest"` // sha256 of the params: the same id with other params is a conflict
+	Digest string          `json:"digest,omitempty"` // sha256 of the params: the same id with other params is a conflict
 	Result json.RawMessage `json:"result,omitempty"`
 	// Answer, when set, makes Result from the envelope being appended (its seq and time are known only then).
 	Answer func(Envelope) json.RawMessage `json:"-"`
@@ -162,14 +190,14 @@ func (l *Log) Seq() int64 {
 	return l.seq
 }
 
-// Append commits events (and cmd's receipt) as the next envelope; it is on disk when Append returns.
-func (l *Log) Append(cmd *Receipt, events []Event) (Envelope, error) {
+// Append commits events (and cmd's receipt) from actor as the next envelope; it is on disk when Append returns.
+func (l *Log) Append(actor Actor, cmd *Receipt, events []Event) (Envelope, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if l.readOnly != nil {
 		return Envelope{}, l.readOnly
 	}
-	env := Envelope{V: 1, Seq: l.seq + 1, At: time.Now().UTC(), Command: cmd, Events: events}
+	env := Envelope{V: Version, Seq: l.seq + 1, At: time.Now().UTC(), Actor: &actor, Command: cmd, Events: events}
 	if cmd != nil && cmd.Answer != nil {
 		cmd.Result = cmd.Answer(env)
 	}

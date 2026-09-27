@@ -59,10 +59,11 @@ type Task struct {
 	Dir       string    `json:"dir,omitempty"`
 	Machine   string    `json:"machine,omitempty"`
 	Agent     string    `json:"agent,omitempty"`
+	Project   string    `json:"project,omitempty"`
 	Status    string    `json:"status"`
-	Rev       int       `json:"rev"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	Rev       int       `json:"rev,omitzero"`
+	CreatedAt time.Time `json:"created_at,omitzero"`
+	UpdatedAt time.Time `json:"updated_at,omitzero"`
 }
 
 type Run struct {
@@ -78,8 +79,8 @@ type Run struct {
 	Runner    string            `json:"runner,omitempty"` // "": the node picks
 	Resume    string            `json:"resume,omitempty"` // the session this run continues (Brief is the reply)
 	Parent    string            `json:"parent,omitempty"` // the run it answers
-	Want      string            `json:"want"`             // run | stop
-	State     string            `json:"state"`
+	Want      string            `json:"want,omitempty"`   // run | stop
+	State     string            `json:"state,omitempty"`
 	ExitCode  *int              `json:"exit_code,omitempty"`
 	Reason    string            `json:"reason,omitempty"`
 	Detail    string            `json:"detail,omitempty"`
@@ -96,9 +97,9 @@ type Run struct {
 	Session   string            `json:"session,omitempty"`
 	Pane      string            `json:"pane,omitempty"`
 	NodeRev   int               `json:"node_rev,omitempty"`
-	QueuedAt  time.Time         `json:"queued_at"`
-	StartedAt *time.Time        `json:"started_at,omitempty"`
-	EndedAt   *time.Time        `json:"ended_at,omitempty"`
+	QueuedAt  time.Time         `json:"queued_at,omitzero"`
+	StartedAt *time.Time        `json:"started_at,omitzero"`
+	EndedAt   *time.Time        `json:"ended_at,omitzero"`
 }
 
 // Event types and their payloads.
@@ -135,6 +136,7 @@ type TaskEdit struct {
 	Dir     *string `json:"dir,omitempty"`
 	Machine *string `json:"machine,omitempty"`
 	Agent   *string `json:"agent,omitempty"`
+	Project *string `json:"project,omitempty"`
 }
 
 type TaskStatus struct {
@@ -170,9 +172,9 @@ type Observation struct {
 	Provider  string          `json:"provider,omitempty"`
 	Session   string          `json:"session,omitempty"`
 	Pane      string          `json:"pane,omitempty"`
-	NodeRev   int             `json:"node_rev"`
-	StartedAt *time.Time      `json:"started_at,omitempty"`
-	EndedAt   *time.Time      `json:"ended_at,omitempty"`
+	NodeRev   int             `json:"node_rev,omitzero"`
+	StartedAt *time.Time      `json:"started_at,omitzero"`
+	EndedAt   *time.Time      `json:"ended_at,omitzero"`
 }
 
 // State is everything the journal says.
@@ -216,7 +218,7 @@ func (s *State) apply(e journal.Event, at time.Time) error {
 		for _, f := range []struct {
 			v   *string
 			dst *string
-		}{{d.Title, &t.Title}, {d.Brief, &t.Brief}, {d.Dir, &t.Dir}, {d.Machine, &t.Machine}, {d.Agent, &t.Agent}} {
+		}{{d.Title, &t.Title}, {d.Brief, &t.Brief}, {d.Dir, &t.Dir}, {d.Machine, &t.Machine}, {d.Agent, &t.Agent}, {d.Project, &t.Project}} {
 			if f.v != nil {
 				*f.dst = *f.v
 			}

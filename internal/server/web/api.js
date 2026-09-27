@@ -14,17 +14,17 @@ const api = (() => {
   function receive(line) {
     let f;
     try { f = JSON.parse(line); } catch (_) { return; }
-    if (f.kind === 'res') {
+    if (f.type === 'res') {
       const p = pending.get(f.id);
       if (!p) return;
       pending.delete(f.id);
       clearTimeout(p.timer);
       if (f.error) p.reject(err(f.error.code, f.error.detail || ''));
       else p.resolve(f.result === undefined ? null : f.result);
-    } else if (f.kind === 'req') { // the server's keepalive; nothing else is served here
-      send(f.method === 'ping' ? {kind: 'res', id: f.id, ok: true}
-        : {kind: 'res', id: f.id, error: {code: 'unknown_method', detail: f.method}});
-    } else if (f.kind === 'push' && f.method === 'journal') {
+    } else if (f.type === 'req') { // the server's keepalive; nothing else is served here
+      send(f.method === 'ping' ? {type: 'res', id: f.id}
+        : {type: 'res', id: f.id, error: {code: 'unknown_method', detail: f.method}});
+    } else if (f.type === 'push' && f.method === 'journal') {
       for (const fn of journal) fn(f.params);
     }
   }
@@ -64,11 +64,11 @@ const api = (() => {
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         pending.delete(id);
-        try { send({kind: 'cancel', id}); } catch (_) {}
+        try { send({type: 'cancel', id}); } catch (_) {}
         reject(err('timeout', method));
       }, callWait);
       pending.set(id, {resolve, reject, timer});
-      const frame = {kind: 'req', id, method, params: params ?? {}};
+      const frame = {type: 'req', id, method, params: params ?? {}};
       if (commandID) frame.command_id = commandID;
       try { send(frame); } catch (e) { clearTimeout(timer); pending.delete(id); reject(err('closed', String(e))); }
     });

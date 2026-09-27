@@ -4,7 +4,7 @@ Guidance for coding agents (Claude Code, Codex) working in this repository.
 
 ## What this is
 
-tend (the repository and Go module keep the name fav) is a Go CLI + bubbletea TUI that indexes every Claude Code / Codex session on this machine and on configured remote hosts, lets the user favorite them (the `/tend` skill), filter and search them, and resume them in the right directory / Herdr workspace. It also runs tasks: agents started for a written brief on this machine or others, followed to their end, over ssh (mode 1) or through `tend server` (mode 2).
+tend (the repository and Go module keep the name fav) is a Go CLI + bubbletea TUI that indexes every Claude Code / Codex session on this machine and on configured remote hosts, lets the user favorite them (the `/tend` skill), filter and search them, and resume them in the right directory / Herdr workspace. It also runs tasks: agents started for a written brief on this machine or others, followed to their end, over ssh (mode 1) or through `tend-server`, a second program in the same module (mode 2).
 
 - Design of record: the owner's local notes 「tend 会话技术方案」 (sessions: data model, query syntax, keys, resume orchestration, config, the remote protocol, each module's mechanics) and 「tend 架构设计」 (tasks and runs: coordinator, journal, nodes, run directories, mode 2, security), found with `rg -l 'tend 会话技术方案|tend 架构设计' ~/Documents/notes`. Read the relevant section before changing behaviour; update it in the same task.
 - `README.md` is the user-facing summary, `README.zh.md` its translation; keep both in step.
@@ -46,7 +46,7 @@ HERDR_LIVE=1 go test ./internal/herdr -run TestLiveCreateTabAndRun   # inside He
 - Other platforms: `scripts/test-hosts.sh [target…]` (targets `local`, `ssh:HOST`, `docker:HOST:CTR`, `wsl:HOST:DISTRO`, `win:HOST`; default: the gitignored `.test-hosts`) tars the working tree to each target, which runs `mise run test-host` natively (`tools/test-host`: vet, test, fixture dataset, `tend sessions` / `doctor`, a hosts smoke over `tend rpc`). It prints one `RESULT` per target and fails unless all are `vet=ok test=ok smoke=ok`. Never cross-compile for it; logs in `~/.cache/tend-test/logs`.
 - Versions live only in `mise.toml`: `[tools]` go for everyone; the `test-host` task pins claude, codex and fzf for test targets only (never top-level, or they shadow the developer's own CLIs).
 - Runs end to end over ssh: `scripts/tend-e2e.sh [host…]` (default mba linux wsl win) makes this Mac the coordinator in a throwaway home, points each remote's installed tend at throwaway homes, runs a fake agent on each, stops one, and checks outputs and listed sessions; remotes need the current build (`tend hosts install`).
-- Mode 2 end to end: `scripts/tend-e2e-server.sh [host…]` (default mba linux win) runs `tend server` in the mba container behind a forwarder on mba's tailnet address, nodes dialing in with tokens, this Mac as the client; it checks runs, output, a refused token and a server restart.
+- Mode 2 end to end: `scripts/tend-e2e-server.sh [host…]` (default mba linux win) runs `tend-server` in the mba container behind a forwarder on mba's tailnet address, nodes dialing in with tokens, this Mac as the client; it checks runs, output, a refused token and a server restart.
 - Multi-host end to end: after `test-hosts.sh`, run a fixture launcher on this Mac whose `config.json` lists each target's fixture launcher as that host's `tend` (the container via `docker exec -i`, WSL via `wsl -d <distro> -e`), then `tend hosts check`, `tend sessions host:all` and the TUI.
 
 ## Architecture
@@ -58,14 +58,15 @@ HERDR_LIVE=1 go test ./internal/herdr -run TestLiveCreateTabAndRun   # inside He
 | `internal/tend` | `Rec`, `Store` (append-only JSONL, last line per id wins), `Query`, the trash manifest |
 | `internal/index` | the session index, `Rows`, trash / restore, `PlanMove` / `Apply` for moving a project directory |
 | `internal/capture` | current-session detection, resume commands (`CommandSpec`), paged transcript reading (`Messages`), who is running (`live.go`) |
-| `internal/wire` | protocol v2: JSON frames over any two-way stream, either end may call, answers out of order, cancel, keepalive |
+| `internal/wire` | the protocol: JSON frames over any two-way stream, either end may call, answers out of order, cancel, keepalive |
 | `internal/remote` | other machines' sessions over `wire`: methods and types (`proto.go`), answering side (`local.go`), ssh `Client`, `Hosts` cache, `Source` |
 | `internal/agent` | provider adapters (claude, codex, fake, command): launch, resume, fork, capabilities |
 | `internal/node` | runs on this machine: run directories, the `_run` supervisor, snapshots, `run.*` methods |
 | `internal/proc` | detached starts, process trees, liveness, per OS |
 | `internal/journal`, `internal/task` | the coordinator's event log and the task / run state folded from it |
 | `internal/coord` | the coordinator (whoever holds `coord/lock`): client commands with receipts, dispatch, reconcile, subscribe, socket |
-| `internal/server` | mode 2: the coordinator over HTTP / WebSocket (`/node`, `/client`), hashed tokens, listen-address rule, dialing; the Web UI (`web/`, embedded: `api.js` speaks the wire protocol, `app.js` holds the page and its own `zh` / `en` strings; the CSP allows no inline script or `style` attribute) |
+| `internal/dial` | the client side of mode 2: nodes, TUIs and CLIs dial a server with a token |
+| `internal/server` | mode 2, only in `cmd/tend-server` (`platformcheck` fails when `cmd/tend` depends on it): the coordinator over HTTP / WebSocket (`/node`, `/client`), hashed tokens, listen-address rule; the Web UI (`web/`, embedded: `api.js` speaks the wire protocol, `app.js` holds the page and its own `zh` / `en` strings; the CSP allows no inline script or `style` attribute) |
 | `internal/fulltext` | message search: text mirror, parallel scan, BM25 |
 | `internal/ui/tui` | bubbletea `Model`; key table `keys.go` |
 | `internal/ui/fzf` | fzf orchestration only, no business logic |
@@ -73,6 +74,7 @@ HERDR_LIVE=1 go test ./internal/herdr -run TestLiveCreateTabAndRun   # inside He
 | `internal/i18n` | `T` / `F` / `E`, `locales/en.json` + `zh.json` |
 | `internal/herdr` | exec + JSON wrapper over the `herdr` CLI |
 | `cmd/tend` | subcommands; `add` reads the `/tend` skill JSON defined in `skills/tend/SKILL.md` |
+| `cmd/tend-server` | mode 2: `--listen` serves the coordinator, `token` manages tokens |
 
 Platform rules have one package each: `internal/paths` (this machine's paths), `internal/pathmap` (another machine's paths), `internal/shell` (quoting, the user's shell), `internal/filelock`, `internal/fileio` (atomic writes, `Lines`, file identity `ID`), `internal/testkit`. `internal/platformcheck` fails when one of these rules is repeated elsewhere.
 

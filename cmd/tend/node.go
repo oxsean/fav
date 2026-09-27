@@ -9,10 +9,10 @@ import (
 	"time"
 
 	"github.com/oxsean/fav/internal/agent"
+	"github.com/oxsean/fav/internal/dial"
 	"github.com/oxsean/fav/internal/i18n"
 	"github.com/oxsean/fav/internal/node"
 	"github.com/oxsean/fav/internal/remote"
-	"github.com/oxsean/fav/internal/server"
 	"github.com/oxsean/fav/internal/tend"
 	"github.com/oxsean/fav/internal/wire"
 )
@@ -54,7 +54,7 @@ func connectNode(n *node.Node, url, tokenFile string) error {
 	if len(n.Limits.AllowDirs) == 0 {
 		return i18n.E("cli.node.need_allow_dirs", tend.ConfigPath())
 	}
-	token, err := server.ReadToken(tokenFile)
+	token, err := dial.ReadToken(tokenFile)
 	if err != nil {
 		return err
 	}
@@ -64,7 +64,7 @@ func connectNode(n *node.Node, url, tokenFile string) error {
 	wait := time.Second
 	for ctx.Err() == nil {
 		dctx, cancel := context.WithTimeout(ctx, 15*time.Second)
-		c, err := server.Dial(dctx, url, server.RoleNode, token, wire.Options{Handler: n.Handler(sessions), Keepalive: nodeKeepalive})
+		c, err := dial.Dial(dctx, url, dial.RoleNode, token, wire.Options{Handler: n.Handler(sessions), Keepalive: nodeKeepalive})
 		cancel()
 		if wire.Code(err) == wire.CodeUnauthorized {
 			return i18n.E("cli.node.unauthorized", url)

@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -348,23 +347,4 @@ func TestACallWaitingForAnotherDialKeepsItsDeadline(t *testing.T) {
 	if err := h.Call(ctx, "a", MEcho, nil, nil); code(err) != wire.CodeTimeout || time.Since(start) > time.Second {
 		t.Fatalf("%v after %v", err, time.Since(start))
 	}
-}
-
-func TestAnOlderCallerLearnsItIsOutdated(t *testing.T) {
-	reqR, reqW := io.Pipe()
-	resR, resW := io.Pipe()
-	go Serve(struct {
-		io.Reader
-		io.WriteCloser
-	}{reqR, resW}, helloHandler{})
-	go reqW.Write([]byte(`{"proto":1,"id":1,"method":"hello","params":{"lang":"en"}}` + "\n"))
-	var v1 struct {
-		ID     int64 `json:"id"`
-		OK     bool  `json:"ok"`
-		Result Hello `json:"result"`
-	}
-	if err := json.NewDecoder(resR).Decode(&v1); err != nil || v1.ID != 1 || !v1.OK || v1.Result.Proto != wire.Proto {
-		t.Fatalf("a proto 1 hello is answered in a shape proto 1 reads: %+v %v", v1, err)
-	}
-	reqW.Close()
 }

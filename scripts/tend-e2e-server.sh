@@ -1,11 +1,12 @@
 #!/bin/sh
-# End to end in mode 2: `tend server` in the tend-linux container on mba (a forwarder on mba carries mba's tailnet
+# End to end in mode 2: `tend-server` in the tend-linux container on mba (a forwarder on mba carries mba's tailnet
 # address to it), nodes on mba, the container itself and win dialing in with tokens, and this Mac as a client.
 # ⚠️ The tailnet ACL lets lg-win open no connection to mba: win dials through `ssh -R` from here to its loopback. WSL
 # (NAT) cannot reach that loopback, so it is left out unless named (`wsl` needs lg-win to reach mba:$port directly).
 # Every home is a throwaway directory; every process is an ssh session from here or is killed at the end.
 # Checks: each node runs a fake agent to exit 0 and its output reaches the client; a wrong token gets 401; after the
 # server restarts, every node is back and another run goes through.
+# Needs the current tend and tend-server in the container: tend hosts install linux --server.
 set -u
 cd "$(git rev-parse --show-toplevel)" || exit 1
 id=tend-e2e-srv-$(date +%Y%m%d-%H%M%S)
@@ -32,7 +33,7 @@ server_home=$r/server
 cexec mkdir -p "$server_home"
 printf '{"agents": [{"name": "gated", "provider": "fake", "args": ["--steps", "8", "--every", "1s", "--permission", "Bash:srv e2e deploy"]}]}' |
 	cexec tee "$server_home/config.json" >/dev/null
-token() { cexec env TEND_HOME=$server_home /root/.local/bin/tend server token add "$@" 2>/dev/null; }
+token() { cexec env TEND_HOME=$server_home /root/.local/bin/tend-server token add "$@" 2>/dev/null; }
 [ $# -gt 0 ] || set -- mba linux win
 nodes=$#
 for h in "$@"; do eval "tok_$h=\$(token --node $h)"; done
@@ -45,7 +46,7 @@ ckill() { # the first character in brackets keeps the pattern from matching this
 	ssh mba "$docker exec tend-linux sh -c 'for p in /proc/[0-9]*; do tr \"\\000\" \" \" <\$p/cmdline 2>/dev/null | grep -q -- \"$pat\" && kill \${p#/proc/}; done; true'"
 }
 # the server records its pid in its throwaway home: only this test's server is ever stopped
-start_server() { bg ssh mba "$docker exec -i tend-linux sh -c 'echo \$\$ >$server_home/pid; exec env TEND_HOME=$server_home /root/.local/bin/tend server --listen 0.0.0.0:$port --plain'"; }
+start_server() { bg ssh mba "$docker exec -i tend-linux sh -c 'echo \$\$ >$server_home/pid; exec env TEND_HOME=$server_home /root/.local/bin/tend-server --listen 0.0.0.0:$port --plain'"; }
 stop_server() { ssh mba "$docker exec tend-linux sh -c 'kill \$(cat $server_home/pid)'"; }
 start_server
 ctr_ip=$(ssh mba "$docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' tend-linux")

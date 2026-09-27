@@ -13,7 +13,7 @@ func threeLines(t *testing.T) (string, []byte) {
 	path := filepath.Join(t.TempDir(), "events.jsonl")
 	l, _ := open(t, path)
 	for i := 0; i < 3; i++ {
-		if _, err := l.Append(nil, []Event{NewEvent("a", i)}); err != nil {
+		if _, err := l.Append(System, nil, []Event{NewEvent("a", i)}); err != nil {
 			t.Fatal(err)
 		}
 	}

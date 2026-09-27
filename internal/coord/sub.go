@@ -53,7 +53,7 @@ func (c *Coord) feed(conn *wire.Conn, s *sub, after, end int64) {
 	if after < end {
 		var perr error
 		if err := c.log.ReadAfter(after, end, func(env journal.Envelope) bool {
-			perr = conn.Push(PushJournal, env)
+			perr = conn.Push(PushJournal, pushed(env))
 			return perr == nil
 		}); err != nil || perr != nil {
 			conn.Close()
@@ -72,11 +72,19 @@ func (c *Coord) feed(conn *wire.Conn, s *sub, after, end int64) {
 			if env.Seq <= end {
 				continue
 			}
-			if conn.Push(PushJournal, env) != nil {
+			if conn.Push(PushJournal, pushed(env)) != nil {
 				return
 			}
 		}
 	}
+}
+
+// pushed is env as a subscriber gets it: a command's result and digest stay with its caller.
+func pushed(env journal.Envelope) journal.Envelope {
+	if env.Command != nil {
+		env.Command = &journal.Receipt{ID: env.Command.ID, Method: env.Command.Method}
+	}
+	return env
 }
 
 // publish hands env to every subscriber; the caller holds mu.

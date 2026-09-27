@@ -57,9 +57,9 @@ func rpcLines(t *testing.T, in string, args ...string) []string {
 func TestRpcAnswersOnStdoutOnly(t *testing.T) {
 	d := fixtureMachine(t)
 	oauth := d.Get("oauth")
-	msgs, _ := json.Marshal(wire.Frame{Kind: wire.KindReq, ID: 2, Method: remote.MMessages,
+	msgs, _ := json.Marshal(wire.Frame{Type: wire.TypeReq, ID: 2, Method: remote.MMessages,
 		Params: json.RawMessage(`{"provider":"` + oauth.Provider + `","session_id":"` + oauth.ID + `","before":-1,"n":3}`)})
-	list := `{"kind":"req","id":1,"method":"list"}` + "\n"
+	list := `{"type":"req","id":1,"method":"list"}` + "\n"
 
 	all := rpcLines(t, list+"not json\n"+string(msgs)+"\n", "rpc", "--stdio")
 	if len(all) != 2 {
@@ -68,7 +68,7 @@ func TestRpcAnswersOnStdoutOnly(t *testing.T) {
 	got := map[int64]wire.Frame{}
 	for _, line := range all {
 		var f wire.Frame
-		if json.Unmarshal([]byte(line), &f) != nil || f.Kind != wire.KindRes || !f.OK {
+		if json.Unmarshal([]byte(line), &f) != nil || f.Type != wire.TypeRes || f.Error != nil {
 			t.Fatalf("%.300s", line)
 		}
 		got[f.ID] = f

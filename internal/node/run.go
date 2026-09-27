@@ -85,7 +85,7 @@ type Spec struct {
 
 // State is what the supervisor writes.
 type State struct {
-	Rev       int             `json:"rev"`
+	Rev       int             `json:"rev,omitzero"`
 	State     string          `json:"state"`
 	Pid       int             `json:"pid,omitempty"`        // the agent
 	PidStart  int64           `json:"pid_start,omitempty"`  // when the agent started (proc.StartTime): pid's identity
@@ -104,8 +104,8 @@ type State struct {
 	Stream    bool            `json:"stream,omitempty"`   // it takes answers and messages while it runs
 	Requests  []agent.Request `json:"requests,omitempty"` // what it waits on
 	Sends     []agent.Send    `json:"sends,omitempty"`    // messages for it and how far they got
-	StartedAt *time.Time      `json:"started_at,omitempty"`
-	EndedAt   *time.Time      `json:"ended_at,omitempty"`
+	StartedAt *time.Time      `json:"started_at,omitzero"`
+	EndedAt   *time.Time      `json:"ended_at,omitzero"`
 }
 
 // Attentions.

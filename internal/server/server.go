@@ -25,6 +25,7 @@ import (
 	"github.com/coder/websocket"
 
 	"github.com/oxsean/fav/internal/coord"
+	"github.com/oxsean/fav/internal/dial"
 	"github.com/oxsean/fav/internal/fileio"
 	"github.com/oxsean/fav/internal/filelock"
 	"github.com/oxsean/fav/internal/remote"
@@ -33,8 +34,8 @@ import (
 
 // Roles a token grants.
 const (
-	RoleNode   = "node"
-	RoleClient = "client"
+	RoleNode   = dial.RoleNode
+	RoleClient = dial.RoleClient
 )
 
 type Token struct {
@@ -46,7 +47,7 @@ type Token struct {
 	// until the binding is dropped (RebindToken).
 	Bound     string     `json:"bound,omitempty"`
 	BoundHost string     `json:"bound_host,omitempty"`
-	BoundAt   *time.Time `json:"bound_at,omitempty"`
+	BoundAt   *time.Time `json:"bound_at,omitzero"`
 }
 
 type tokenFile struct {
@@ -306,8 +307,7 @@ func (s *Server) untrack(c *wire.Conn) {
 	s.mu.Unlock()
 }
 
-// keepalive on both kinds of connection: a node or client that went away is noticed within two of these.
-const keepalive = 30 * time.Second
+const keepalive = dial.Keepalive
 
 func (s *Server) handleNode(w http.ResponseWriter, r *http.Request) {
 	t, ok := s.auth(r, RoleNode)
@@ -315,7 +315,7 @@ func (s *Server) handleNode(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, wire.CodeUnauthorized, http.StatusUnauthorized)
 		return
 	}
-	ws, err := websocket.Accept(w, r, nil)
+	ws, err := websocket.Accept(w, r, &websocket.AcceptOptions{CompressionMode: dial.Compression})
 	if err != nil {
 		return
 	}
@@ -327,7 +327,7 @@ func (s *Server) handleNode(w http.ResponseWriter, r *http.Request) {
 	defer s.untrack(c)
 	err = s.opt.Coord.Attach(t.Name, c, func(h remote.Hello) error {
 		if err := BindToken(s.opt.Home, t.Name, h.NodeID, h.Hostname); err != nil {
-			fmt.Fprintf(os.Stderr, "node %s refused: %v (tend server token rebind %s)\n", t.Name, err, t.Name)
+			fmt.Fprintf(os.Stderr, "node %s refused: %v (tend-server token rebind %s)\n", t.Name, err, t.Name)
 			return &wire.Error{Code: wire.CodeUnauthorized, Detail: "node identity"}
 		}
 		return nil
@@ -344,16 +344,19 @@ func (s *Server) handleClient(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, wire.CodeUnauthorized, http.StatusUnauthorized)
 		return
 	}
-	ws, err := websocket.Accept(w, r, nil)
+	ws, err := websocket.Accept(w, r, &websocket.AcceptOptions{CompressionMode: dial.Compression})
 	if err != nil {
 		return
 	}
 	ws.SetReadLimit(wire.MaxFrame + 1)
-	c := wire.New(websocket.NetConn(r.Context(), ws, websocket.MessageText), wire.Options{Handler: s.opt.Coord.Handler(), Keepalive: keepalive})
+	c := wire.New(websocket.NetConn(r.Context(), ws, websocket.MessageText), wire.Options{Handler: s.opt.Coord.HandlerFor(principal(t)), Keepalive: keepalive})
 	s.track(c, t)
 	defer s.untrack(c)
 	<-c.Done()
 }
+
+// principal is who a client token stands for: until the server has users, each token is its owner.
+func principal(t Token) coord.Principal { return coord.Principal{User: t.Name, Admin: true} }
 
 // Handler is the server's HTTP handler.
 func (s *Server) Handler() http.Handler {
@@ -404,53 +407,4 @@ func (s *Server) Serve(ctx context.Context) error {
 		return nil
 	}
 	return err
-}
-
-// Dial opens a connection to the server at url (http(s):// or ws(s)://) as role with token.
-func Dial(ctx context.Context, url, role, token string, opt wire.Options) (*wire.Conn, error) {
-	u := strings.TrimRight(url, "/")
-	u = strings.Replace(strings.Replace(u, "http://", "ws://", 1), "https://", "wss://", 1)
-	ws, resp, err := websocket.Dial(ctx, u+"/"+role, &websocket.DialOptions{
-		HTTPHeader: http.Header{"Authorization": {"Bearer " + token}},
-	})
-	if err != nil {
-		if resp != nil && resp.StatusCode == http.StatusUnauthorized {
-			return nil, &wire.Error{Code: wire.CodeUnauthorized, Detail: url}
-		}
-		return nil, &wire.Error{Code: wire.CodeOffline, Detail: err.Error()}
-	}
-	ws.SetReadLimit(wire.MaxFrame + 1)
-	if opt.Keepalive == 0 {
-		opt.Keepalive = keepalive
-	}
-	return wire.New(websocket.NetConn(context.Background(), ws, websocket.MessageText), opt), nil
-}
-
-// ReadToken reads a token file: the token is its first non-empty line.
-func ReadToken(path string) (string, error) {
-	b, err := os.ReadFile(path)
-	if err != nil {
-		return "", err
-	}
-	for l := range strings.Lines(string(b)) {
-		if t := strings.TrimSpace(l); t != "" {
-			return t, nil
-		}
-	}
-	return "", fmt.Errorf("%s holds no token", path)
-}
-
-// Connect is a client of the server that config.coordinator names.
-func Connect(url, tokenFile string, opt wire.Options) (*coord.Client, error) {
-	token, err := ReadToken(tokenFile)
-	if err != nil {
-		return nil, err
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
-	c, err := Dial(ctx, url, RoleClient, token, opt)
-	if err != nil {
-		return nil, err
-	}
-	return &coord.Client{Conn: c}, nil
 }

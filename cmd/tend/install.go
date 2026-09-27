@@ -32,6 +32,7 @@ func cmdHostsInstall(args []string) error {
 	goarch := fs.String("arch", "", i18n.T("cli.install.flag_arch"))
 	src := fs.String("src", "", i18n.T("cli.install.flag_src"))
 	dry := fs.Bool("dry-run", false, i18n.T("cli.install.flag_dry_run"))
+	withServer := fs.Bool("server", false, i18n.T("cli.install.flag_server"))
 	pos, err := parseMixed(fs, args)
 	if err != nil {
 		return err
@@ -85,7 +86,7 @@ func cmdHostsInstall(args []string) error {
 	defer os.RemoveAll(tmp)
 	out := filepath.Join(tmp, "tend")
 	ver := sourceVersion(root)
-	build := buildCmd(root, *goos, *goarch, ver, out)
+	build := buildCmd(root, *goos, *goarch, ver, out, "./cmd/tend")
 	steps, cleanup := t.steps(h, *goos, out)
 	fmt.Print(i18n.F("cli.install.build", *goos, *goarch, root, shell.User().Join(build.Args)))
 	var lines []string
@@ -113,6 +114,39 @@ func cmdHostsInstall(args []string) error {
 		return i18n.E("cli.install.other_tend", h.Name, hello.Version, hello.OS+"/"+hello.Arch, dest, ver)
 	}
 	fmt.Print(i18n.F("cli.install.done", h.Name, dest, hello.Version))
+	if *withServer {
+		return installServer(h, t, root, *goos, *goarch, ver, tmp)
+	}
+	return nil
+}
+
+// installServer puts tend-server next to the tend just installed and asks it for its version.
+func installServer(h tend.Host, t target, root, goos, goarch, ver, tmp string) error {
+	st := t
+	st.dest = path.Join(path.Dir(t.destFor(goos)), "tend-server")
+	if goos == "windows" {
+		st.dest += ".exe"
+	}
+	out := filepath.Join(tmp, "tend-server")
+	steps, cleanup := st.steps(h, goos, out)
+	if cleanup != nil {
+		defer cleanup.Run()
+	}
+	for _, c := range append([]*exec.Cmd{buildCmd(root, goos, goarch, ver, out, "./cmd/tend-server")}, steps...) {
+		c.Stdout, c.Stderr = os.Stderr, os.Stderr
+		if err := c.Run(); err != nil {
+			return i18n.E("cli.install.failed", c.Args[0], err)
+		}
+	}
+	argv := []string{st.dest}
+	if n := len(h.Tend); n > 0 {
+		argv = append(slices.Clone(h.Tend[:n-1]), st.dest)
+	}
+	got, err := sshCmd(h.SSH, remote.RemoteShell(h).Join(append(argv, "version"))).Output()
+	if v := strings.TrimSpace(string(got)); err != nil || v != "tend-server "+ver {
+		return i18n.E("cli.install.server_other", h.Name, st.dest, v, ver)
+	}
+	fmt.Print(i18n.F("cli.install.server_done", h.Name, st.dest, ver))
 	return nil
 }
 
@@ -357,8 +391,8 @@ func sourceVersion(root string) string {
 }
 
 // buildCmd builds like the release: static, trimmed paths, stripped, the version stamped in.
-func buildCmd(root, goos, goarch, ver, out string) *exec.Cmd {
-	c := exec.Command("go", "build", "-trimpath", "-ldflags", "-s -w -X main.version="+ver, "-o", out, "./cmd/tend")
+func buildCmd(root, goos, goarch, ver, out, pkg string) *exec.Cmd {
+	c := exec.Command("go", "build", "-trimpath", "-ldflags", "-s -w -X main.version="+ver, "-o", out, pkg)
 	c.Dir = root
 	c.Env = append(os.Environ(), "GOOS="+goos, "GOARCH="+goarch, "CGO_ENABLED=0")
 	return c

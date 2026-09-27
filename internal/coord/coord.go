@@ -67,13 +67,30 @@ type Options struct {
 	// node and no ssh.
 	Remote bool
 	Nodes  []string
+	// OpenLog opens the event log in dir, folding every envelope in order; nil is the JSONL journal.
+	OpenLog func(dir string, fold func(journal.Envelope) error) (EventLog, error)
+}
+
+// EventLog keeps the coordinator's envelopes: numbered without gaps, each on disk before Append returns.
+type EventLog interface {
+	Append(actor journal.Actor, cmd *journal.Receipt, events []journal.Event) (journal.Envelope, error)
+	// ReadAfter calls fn for each envelope with seq in (after, upTo], in order, until fn returns false.
+	ReadAfter(after, upTo int64, fn func(journal.Envelope) bool) error
+	Seq() int64
+	// ReadOnly is why the log takes no appends, nil when it does.
+	ReadOnly() error
+	Close() error
+}
+
+func openJournal(dir string, fold func(journal.Envelope) error) (EventLog, error) {
+	return journal.Open(filepath.Join(dir, "events.jsonl"), fold)
 }
 
 type Coord struct {
 	opt      Options
 	id       string
 	unlock   func()
-	log      *journal.Log
+	log      EventLog
 	mu       sync.Mutex
 	st       *task.State
 	receipts map[string]journal.Receipt
@@ -106,9 +123,13 @@ func Open(opt Options) (*Coord, error) {
 		unlock()
 		return nil, err
 	}
-	c.log, err = journal.Open(filepath.Join(dir, "events.jsonl"), func(env journal.Envelope) error {
+	open := opt.OpenLog
+	if open == nil {
+		open = openJournal
+	}
+	c.log, err = open(dir, func(env journal.Envelope) error {
 		if env.Command != nil {
-			c.receipts[env.Command.ID] = *env.Command
+			c.receipts[receiptKey(env.Who().ID, env.Command.ID)] = *env.Command
 		}
 		return c.st.Apply(env)
 	})
@@ -187,17 +208,17 @@ func (c *Coord) poke() {
 	}
 }
 
-// commit appends events (with cmd's receipt) and applies them; the caller holds mu.
-func (c *Coord) commit(cmd *journal.Receipt, events ...journal.Event) error {
+// commit appends events from actor (with cmd's receipt) and applies them; the caller holds mu.
+func (c *Coord) commit(actor journal.Actor, cmd *journal.Receipt, events ...journal.Event) error {
 	if len(events) == 0 {
 		return nil
 	}
-	env, err := c.log.Append(cmd, events)
+	env, err := c.log.Append(actor, cmd, events)
 	if err != nil {
 		return err
 	}
 	if cmd != nil {
-		c.receipts[cmd.ID] = *cmd
+		c.receipts[receiptKey(actor.ID, cmd.ID)] = *cmd
 	}
 	before := c.observed(events)
 	if err := c.st.Apply(env); err != nil {

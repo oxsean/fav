@@ -172,7 +172,7 @@ func TestDirectInstallSwapsByRename(t *testing.T) {
 }
 
 func TestPushBinCommands(t *testing.T) {
-	b := buildCmd("/src/tend", "windows", "amd64", "v1.2.3", "/tmp/x/tend")
+	b := buildCmd("/src/tend", "windows", "amd64", "v1.2.3", "/tmp/x/tend", "./cmd/tend")
 	if want := []string{"go", "build", "-trimpath", "-ldflags", "-s -w -X main.version=v1.2.3", "-o", "/tmp/x/tend", "./cmd/tend"}; !slices.Equal(b.Args, want) {
 		t.Errorf("build: %q", b.Args)
 	}

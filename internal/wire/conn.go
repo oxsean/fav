@@ -135,7 +135,7 @@ func (c *Conn) Call(ctx context.Context, method string, params, out any) error {
 
 // CallCommand is Call for a write with an idempotency key.
 func (c *Conn) CallCommand(ctx context.Context, method, commandID string, params, out any) error {
-	f := &Frame{Kind: KindReq, ID: c.next.Add(1), Method: method, CommandID: commandID}
+	f := &Frame{Type: TypeReq, ID: c.next.Add(1), Method: method, CommandID: commandID}
 	if params != nil {
 		b, err := json.Marshal(params)
 		if err != nil {
@@ -176,16 +176,13 @@ func (c *Conn) CallCommand(ctx context.Context, method, commandID string, params
 		}
 		return c.Err()
 	case <-ctx.Done():
-		c.sendQuiet(&Frame{Kind: KindCancel, ID: f.ID})
+		c.sendQuiet(&Frame{Type: TypeCancel, ID: f.ID})
 		return &Error{Code: CodeTimeout, Detail: method}
 	}
 }
 
 func decodeResult(res *Frame, out any) error {
-	if !res.OK {
-		if res.Error == nil {
-			return &Error{Code: CodeInternal}
-		}
+	if res.Error != nil {
 		return res.Error
 	}
 	if out == nil || len(res.Result) == 0 {
@@ -203,7 +200,7 @@ func (c *Conn) Push(method string, params any) error {
 	if err != nil {
 		return err
 	}
-	return c.send(context.Background(), &Frame{Kind: KindPush, Method: method, Params: b})
+	return c.send(context.Background(), &Frame{Type: TypePush, Method: method, Params: b})
 }
 
 // reply sends an answer that takes no handler slot; with MaxQueued of them already being written (the other end reads
@@ -233,10 +230,10 @@ func (c *Conn) send(ctx context.Context, f *Frame) error {
 		return err
 	}
 	if len(b) >= MaxFrame { // the other end would drop the connection
-		if f.Kind != KindRes {
+		if f.Type != TypeRes {
 			return &Error{Code: CodeBadRequest, Detail: fmt.Sprintf("frame of %d bytes", len(b))}
 		}
-		b, _ = json.Marshal(&Frame{Kind: KindRes, ID: f.ID, Error: &Error{Code: CodeInternal, Detail: fmt.Sprintf("answer of %d bytes", len(b))}})
+		b, _ = json.Marshal(&Frame{Type: TypeRes, ID: f.ID, Error: &Error{Code: CodeInternal, Detail: fmt.Sprintf("answer of %d bytes", len(b))}})
 	}
 	b = append(b, '\n')
 	select {
@@ -315,16 +312,8 @@ func (c *Conn) dispatch(line []byte) {
 	if json.Unmarshal(line, &f) != nil { // noise before or between frames: a login banner, a shell warning
 		return
 	}
-	if f.Kind == "" { // proto 1 had no kind: its hello still gets an answer, so the older end can tell it is outdated
-		switch {
-		case f.Method != "":
-			f.Kind = KindReq
-		case f.ID != 0:
-			f.Kind = KindRes
-		}
-	}
-	switch f.Kind {
-	case KindRes:
+	switch f.Type {
+	case TypeRes:
 		c.mu.Lock()
 		ch := c.wait[f.ID]
 		c.mu.Unlock()
@@ -334,13 +323,13 @@ func (c *Conn) dispatch(line []byte) {
 			default:
 			}
 		}
-	case KindReq:
+	case TypeReq:
 		c.handle(&f)
-	case KindPush:
+	case TypePush:
 		if c.opt.OnPush != nil {
 			c.opt.OnPush(f.Method, f.Params)
 		}
-	case KindCancel:
+	case TypeCancel:
 		c.mu.Lock()
 		cancel := c.serve[f.ID]
 		c.mu.Unlock()
@@ -366,12 +355,12 @@ func (c *Conn) drain() {
 
 func (c *Conn) handle(f *Frame) {
 	if f.Method == MPing { // answered even when every handler slot is taken: it proves the connection, not the handlers
-		c.reply(&Frame{Kind: KindRes, ID: f.ID, OK: true})
+		c.reply(&Frame{Type: TypeRes, ID: f.ID})
 		return
 	}
 	if int(c.queued.Add(1)) > c.opt.MaxQueued {
 		c.queued.Add(-1)
-		c.reply(&Frame{Kind: KindRes, ID: f.ID, Error: &Error{Code: CodeBusy}})
+		c.reply(&Frame{Type: TypeRes, ID: f.ID, Error: &Error{Code: CodeBusy}})
 		return
 	}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -410,10 +399,10 @@ func (c *Conn) handle(f *Frame) {
 }
 
 func (c *Conn) answer(ctx context.Context, f *Frame) (res *Frame) {
-	res = &Frame{Kind: KindRes, ID: f.ID}
+	res = &Frame{Type: TypeRes, ID: f.ID}
 	defer func() {
 		if p := recover(); p != nil {
-			res.OK, res.Result, res.Error = false, nil, &Error{Code: CodeInternal, Detail: fmt.Sprint(p)}
+			res.Result, res.Error = nil, &Error{Code: CodeInternal, Detail: fmt.Sprint(p)}
 		}
 	}()
 	if c.opt.Handler == nil {
@@ -437,7 +426,7 @@ func (c *Conn) answer(ctx context.Context, f *Frame) (res *Frame) {
 		res.Error = &Error{Code: CodeInternal, Detail: err.Error()}
 		return res
 	}
-	res.OK, res.Result = true, b
+	res.Result = b
 	return res
 }
 

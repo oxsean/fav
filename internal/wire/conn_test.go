@@ -236,7 +236,7 @@ type rw struct {
 func (rw) Close() error { return nil }
 
 func TestNoiseLinesAndNULsAreSkipped(t *testing.T) {
-	res := `{"kind":"res","id":1,"ok":true,"result":{"text":"x"}}`
+	res := `{"type":"res","id":1,"result":{"text":"x"}}`
 	in := "WARNING: post-quantum\n\x00" + strings.Join(strings.Split(res, ""), "\x00") + "\n"
 	c := New(rw{strings.NewReader(in), io.Discard}, Options{})
 	defer c.Close()
@@ -261,7 +261,7 @@ func TestAnAnswerJustBeforeTheEndIsKept(t *testing.T) {
 		go func() {
 			buf := make([]byte, 4096)
 			reqR.Read(buf)
-			resW.Write([]byte(`{"kind":"res","id":1,"ok":true,"result":{"text":"last"}}` + "\n"))
+			resW.Write([]byte(`{"type":"res","id":1,"result":{"text":"last"}}` + "\n"))
 			resW.Close()
 		}()
 		c := New(lastWords{resR, reqW}, Options{})

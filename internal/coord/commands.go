@@ -22,6 +22,7 @@ type TaskCreate struct {
 	Dir     string `json:"dir,omitempty"` // in the form of the task's machine
 	Machine string `json:"machine,omitempty"`
 	Agent   string `json:"agent,omitempty"`
+	Project string `json:"project,omitempty"`
 }
 
 type Dispatch struct {
@@ -57,7 +58,7 @@ type Machine struct {
 	State    string                 `json:"state"` // connected | connecting | offline | idle
 	Error    string                 `json:"error,omitempty"`
 	Detail   string                 `json:"detail,omitempty"`
-	RetryAt  *time.Time             `json:"retry_at,omitempty"`
+	RetryAt  *time.Time             `json:"retry_at,omitzero"`
 	Slots    int                    `json:"slots"`
 	Active   int                    `json:"active"` // starting, running or unknown runs
 	Queued   int                    `json:"queued"`
@@ -80,6 +81,8 @@ const maxBrief = 256 << 10
 
 const maxTitle = 1 << 10
 
+const maxProject = 64
+
 // Machine states.
 const (
 	MachineConnected  = "connected"
@@ -96,9 +99,15 @@ var readMethods = []string{remote.MHello, remote.MList, remote.MMessages, remote
 var Methods = []string{MStateGet, MTaskGet, MTaskCreate, MTaskEdit, MTaskStatus, MRunDispatch, MRunStop, MRunAbandon, MRunTail,
 	MAgentList, MMachineList, MSubscribe, MNodeCall, MRunPreview, MRunContinue, MRunAnswer, MRunSend}
 
-// Handler answers clients.
-func (c *Coord) Handler() wire.Handler {
+// Handler answers this machine's user.
+func (c *Coord) Handler() wire.Handler { return c.HandlerFor(Owner) }
+
+// HandlerFor answers p: each method first checks what p may do.
+func (c *Coord) HandlerFor(p Principal) wire.Handler {
 	return func(ctx context.Context, r *wire.Request) (any, error) {
+		if err := p.may(r.Method); err != nil {
+			return nil, err
+		}
 		switch r.Method {
 		case wire.MPing:
 			return nil, nil
@@ -157,15 +166,15 @@ func (c *Coord) Handler() wire.Handler {
 			err := c.call(ctx, p.Machine, p.Method, p.Params, &out)
 			return out, err
 		case MTaskCreate:
-			return c.command(r, c.taskCreate, taskView)
+			return c.command(p, r, c.taskCreate, taskView)
 		case MTaskEdit:
-			return c.command(r, c.taskEdit, taskView)
+			return c.command(p, r, c.taskEdit, taskView)
 		case MTaskStatus:
-			return c.command(r, c.taskStatus, taskView)
+			return c.command(p, r, c.taskStatus, taskView)
 		case MRunDispatch:
-			return c.command(r, c.runDispatch, runView)
+			return c.command(p, r, c.runDispatch, runView)
 		case MRunContinue:
-			return c.command(r, c.runContinue, runView)
+			return c.command(p, r, func(r *wire.Request) (string, []journal.Event, error) { return c.runContinue(p, r) }, runView)
 		case MRunPreview:
 			var p Dispatch
 			if err := r.Decode(&p); err != nil {
@@ -173,28 +182,29 @@ func (c *Coord) Handler() wire.Handler {
 			}
 			return c.Preview(ctx, p)
 		case MRunStop:
-			return c.command(r, c.runStop, runView)
+			return c.command(p, r, c.runStop, runView)
 		case MRunAbandon:
-			return c.command(r, c.runAbandon, runView)
+			return c.command(p, r, c.runAbandon, runView)
 		case MRunAnswer:
-			return c.command(r, c.runAnswer, runView)
+			return c.command(p, r, c.runAnswer, runView)
 		case MRunSend:
-			return c.command(r, c.runSend, runView)
+			return c.command(p, r, c.runSend, runView)
 		}
 		return nil, &wire.Error{Code: wire.CodeUnknownMethod, Detail: r.Method}
 	}
 }
 
-// command runs a write once per command id: a replay answers what the first run answered, the same id with other
-// params is a conflict. do runs under mu and returns the id its answer is about.
-func (c *Coord) command(r *wire.Request, do func(*wire.Request) (string, []journal.Event, error), view func(*task.State, string) any) (any, error) {
+// command runs p's write once per command id: a replay answers what the first run answered, the same id with other
+// params is a conflict. Command ids are p's own: another caller's id is another command. do runs under mu and returns
+// the id its answer is about.
+func (c *Coord) command(p Principal, r *wire.Request, do func(*wire.Request) (string, []journal.Event, error), view func(*task.State, string) any) (any, error) {
 	if r.CommandID == "" {
 		return nil, errNoCommand
 	}
 	digest := journal.Digest(r.Params)
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if rc, ok := c.receipts[r.CommandID]; ok {
+	if rc, ok := c.receipts[receiptKey(p.User, r.CommandID)]; ok {
 		if rc.Method != r.Method || rc.Digest != digest {
 			return nil, conflict("command_id")
 		}
@@ -226,12 +236,15 @@ func (c *Coord) command(r *wire.Request, do func(*wire.Request) (string, []journ
 		b, _ := json.Marshal(view(st, id))
 		return b
 	}}
-	if err := c.commit(rc, events...); err != nil {
+	if err := c.commit(p.actor(), rc, events...); err != nil {
 		return nil, err
 	}
 	c.poke()
 	return rc.Result, nil
 }
+
+// receiptKey is where a receipt is kept: per user, so one caller's command id never answers another's.
+func receiptKey(user, commandID string) string { return user + "\x00" + commandID }
 
 func taskView(st *task.State, id string) any {
 	if t := st.Tasks[id]; t != nil {
@@ -281,8 +294,11 @@ func (c *Coord) taskCreate(r *wire.Request) (string, []journal.Event, error) {
 	if err := c.checkAgent(p.Agent); err != nil {
 		return "", nil, err
 	}
+	if len(p.Project) > maxProject {
+		return "", nil, bad("project")
+	}
 	t := task.Task{ID: newID("t_"), Title: p.Title, Brief: p.Brief, Dir: p.Dir, Machine: p.Machine, Agent: p.Agent,
-		Status: task.StatusTodo}
+		Project: strings.TrimSpace(p.Project), Status: task.StatusTodo}
 	return t.ID, []journal.Event{journal.NewEvent(task.ETaskCreated, t)}, nil
 }
 
@@ -313,12 +329,17 @@ func (c *Coord) taskEdit(r *wire.Request) (string, []journal.Event, error) {
 			return "", nil, err
 		}
 	}
+	if p.Project != nil {
+		if *p.Project = strings.TrimSpace(*p.Project); len(*p.Project) > maxProject {
+			return "", nil, bad("project")
+		}
+	}
 	changed := false
 	for _, f := range []struct {
 		v   *string
 		now string
 	}{{p.Title, t.Title}, {p.Brief, t.Brief}, {p.Dir, t.Dir},
-		{p.Machine, t.Machine}, {p.Agent, t.Agent}} {
+		{p.Machine, t.Machine}, {p.Agent, t.Agent}, {p.Project, t.Project}} {
 		changed = changed || f.v != nil && *f.v != f.now
 	}
 	if !changed {
@@ -462,7 +483,7 @@ func (c *Coord) Machines(ctx context.Context, connect bool) Machines {
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	var out Machines
+	out := Machines{Machines: []Machine{}}
 	for _, m := range c.ms {
 		out.Machines = append(out.Machines, c.machineView(m))
 	}

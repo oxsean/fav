@@ -418,13 +418,13 @@ process on its machine, which records how the run ends; the next coordinator rea
 **Machines, mode 1 (ssh).** This machine plus every configured host (`tend hosts add`, above). The coordinator reaches each
 host with `ssh <alias> tend node --stdio`; runs keep going when the connection drops.
 
-**Machines, mode 2 (a server).** A long-running `tend server` holds the journal; machines dial in:
+**Machines, mode 2 (a server).** A long-running `tend-server` — a program of its own, next to `tend` in each release, or `tend hosts install <host> --server` — holds the journal; machines dial in:
 
 ```bash
 # on the server (a loopback or tailnet address; any other needs --tls-cert/--tls-key, or --plain behind a forwarder)
-tend server token add --node mba          # prints a token once; only its hash is kept
-tend server token add --client laptop
-tend server --listen 100.101.8.10:7788
+tend-server token add --node mba          # prints a token once; only its hash is kept
+tend-server token add --client laptop
+tend-server --listen 100.101.8.10:7788
 
 # on each machine that runs agents: config.json needs "node": {"allow_dirs": ["~/dev"]}
 tend node --connect ws://100.101.8.10:7788 --token-file ~/.config/tend/node-token
@@ -439,11 +439,11 @@ A node only runs in `allow_dirs`. Unless `node.allow_bypass` is set, it runs `co
 `config.json` defines them, takes claude / codex `args` only from its own profiles, allows the permission modes
 `default` / `manual` / `acceptEdits` / `plan` / `dontAsk` (claude; not `auto`) and `read-only` / `workspace-write` (codex), and refuses a command line with a
 known bypass flag. With `node.allow_profiles` it runs just those names, each as its own config defines it (define them
-there, with the permission they need). `tend server token rm <name>` revokes a token and drops its connections. A node token is bound to the first machine that connects with it; another machine is refused until `tend server token rebind <name>`.
+there, with the permission they need). `tend-server token rm <name>` revokes a token and drops its connections. A node token is bound to the first machine that connects with it; another machine is refused until `tend-server token rebind <name>`.
 
 **Web UI.** The server also serves a page at its own address (`http://100.101.8.10:7788/`). Sign in with a client
-token (`tend server token add --client web`); the browser keeps it in an HttpOnly cookie for 30 days, and signing out or
-`tend server token rm web` ends the session. The page lists tasks and their runs; creates, edits and dispatches tasks;
+token (`tend-server token add --client web`); the browser keeps it in an HttpOnly cookie for 30 days, and signing out or
+`tend-server token rm web` ends the session. The page lists tasks and their runs; creates, edits and dispatches tasks;
 previews a dispatch; follows a run's output and conversation; shows why a run ended or what it asks and takes a reply;
 stops or abandons runs; marks tasks done, reopens or cancels them; and shows the
 machines and agent profiles. It follows the journal live and reconnects on its own.

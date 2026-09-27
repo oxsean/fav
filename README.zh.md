@@ -404,13 +404,13 @@ Claude）、`codex`（`codex app-server`）、`fake`（测试用）。更多的�
 **机器，模式一（ssh）。** 本机加上配置里的每台主机（上面的 `tend hosts add`）。协调器用 `ssh <别名> tend node --stdio` 连过去；
 连接断了 run 照常跑。
 
-**机器，模式二（server）。** 常驻的 `tend server` 保存任务日志，各台机器连上来：
+**机器，模式二（server）。** 常驻的 `tend-server` 保存任务日志，各台机器连上来。它是单独的程序，每次发布和 `tend` 一起出，也可以用 `tend hosts install <机器> --server` 装：
 
 ```bash
 # server 上（回环或 tailnet 地址；其它地址要 --tls-cert/--tls-key，或在转发之后用 --plain）
-tend server token add --node mba          # token 只打印这一次，只存它的哈希
-tend server token add --client laptop
-tend server --listen 100.101.8.10:7788
+tend-server token add --node mba          # token 只打印这一次，只存它的哈希
+tend-server token add --client laptop
+tend-server --listen 100.101.8.10:7788
 
 # 每台跑 agent 的机器：config.json 里要有 "node": {"allow_dirs": ["~/dev"]}
 tend node --connect ws://100.101.8.10:7788 --token-file ~/.config/tend/node-token
@@ -424,10 +424,10 @@ tend task list   # 命令行和 TUI 的任务页都改为和 server 说话
 节点只在 `allow_dirs` 里跑。没设 `node.allow_bypass` 时：`command` 档案只按节点自己 `config.json` 里的定义运行；claude / codex 的
 `args` 只接受节点自己档案里的；权限模式只放行 `default` / `manual` / `acceptEdits` / `plan` / `dontAsk`（claude；不含 `auto`）和 `read-only` / `workspace-write`（codex）；
 带已知绕过参数的命令行拒绝。设了 `node.allow_profiles` 时只跑这些名字，且都按节点自己的定义（要在节点上定义好，带上需要的权限）。
-`tend server token rm <名>` 吊销 token 并断开它的连接。节点 token 绑定第一台用它连上的机器，换机器会被拒绝，要先 `tend server token rebind <名>`。
+`tend-server token rm <名>` 吊销 token 并断开它的连接。节点 token 绑定第一台用它连上的机器，换机器会被拒绝，要先 `tend-server token rebind <名>`。
 
 **Web UI。** server 在自己的地址上还提供一个网页（`http://100.101.8.10:7788/`）。用 client token 登录
-（`tend server token add --client web`）；浏览器把它存在 HttpOnly cookie 里 30 天，退出登录或 `tend server token rm web` 即失效。
+（`tend-server token add --client web`）；浏览器把它存在 HttpOnly cookie 里 30 天，退出登录或 `tend-server token rm web` 即失效。
 网页列出任务和它们的 run；新建、编辑、派发任务；派发前预检；跟看 run 的输出和对话；显示 run 为什么结束、问了什么并接受回复；停止或放弃 run；把任务标为完成、重开或取消；
 查看机器和 agent 档案。它实时跟随任务日志，断线后自动重连。
 

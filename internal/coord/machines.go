@@ -401,7 +401,7 @@ func (c *Coord) converge(ctx context.Context, m *machine) {
 			}
 		}
 	}
-	err := c.commit(nil, events...)
+	err := c.commit(nodeActor(m.name), nil, events...)
 	var stops []string
 	for _, s := range list.Runs {
 		r := c.st.Runs[s.Run]
@@ -464,6 +464,11 @@ func (c *Coord) converge(ctx context.Context, m *machine) {
 		if used >= c.slots(m.name) {
 			break
 		}
+		if lack := missingFeatures(m.hello, runFeatures(r)); len(lack) > 0 {
+			starting = append(starting, journal.NewEvent(task.ERunObserved,
+				task.Observation{ID: r.ID, State: task.Failed, Reason: ReasonNodeOutdated, Detail: strings.Join(lack, ", ")}))
+			continue
+		}
 		dir, ok := c.mapDir(r, m)
 		if !ok || dirs[dirKey(dir, m.hello.OS)] {
 			continue
@@ -473,7 +478,7 @@ func (c *Coord) converge(ctx context.Context, m *machine) {
 		starting = append(starting, journal.NewEvent(task.ERunStarting, task.RunStarting{ID: r.ID, Dir: dir}))
 	}
 	if err == nil {
-		err = c.commit(nil, starting...)
+		err = c.commit(journal.System, nil, starting...)
 	}
 	if err == nil {
 		for _, e := range starting {
@@ -516,7 +521,7 @@ func (c *Coord) converge(ctx context.Context, m *machine) {
 		o := observation(s)
 		c.mu.Lock()
 		if r := c.st.Runs[in.run]; r != nil && r.Would(o) {
-			c.commit(nil, journal.NewEvent(task.ERunObserved, o))
+			c.commit(nodeActor(m.name), nil, journal.NewEvent(task.ERunObserved, o))
 		}
 		c.mu.Unlock()
 	}
@@ -552,7 +557,7 @@ func (c *Coord) converge(ctx context.Context, m *machine) {
 		}
 		c.mu.Lock()
 		if r := c.st.Runs[p.Run]; r != nil && r.Would(o) {
-			c.commit(nil, journal.NewEvent(task.ERunObserved, o))
+			c.commit(nodeActor(m.name), nil, journal.NewEvent(task.ERunObserved, o))
 		}
 		c.mu.Unlock()
 	}
@@ -639,4 +644,8 @@ func (c *Coord) call(ctx context.Context, name, method string, params, out any) 
 		case <-time.After(50 * time.Millisecond):
 		}
 	}
+}
+
+func nodeActor(machine string) journal.Actor {
+	return journal.Actor{Kind: journal.ActorNode, ID: machine}
 }

@@ -27,7 +27,7 @@ func TestAppendReopenAndReadAfter(t *testing.T) {
 	}
 	for i := 0; i < 5; i++ {
 		cmd := &Receipt{ID: "c" + string(rune('a'+i)), Method: "task.create", Digest: Digest([]byte(`{"b":1, "a":"中文"}`))}
-		if _, err := l.Append(cmd, []Event{NewEvent("task_created", map[string]any{"id": i, "title": "中文 \"q\" \n"})}); err != nil {
+		if _, err := l.Append(Actor{Kind: ActorUser, ID: "me"}, cmd, []Event{NewEvent("task_created", map[string]any{"id": i, "title": "中文 \"q\" \n"})}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -44,12 +44,28 @@ func TestAppendReopenAndReadAfter(t *testing.T) {
 	if Digest([]byte(`{"a":"中文","b":1}`)) != got[0].Command.Digest {
 		t.Fatal("the digest ignores key order and spacing")
 	}
+	if got[0].V != Version || got[0].Who() != (Actor{Kind: ActorUser, ID: "me"}) {
+		t.Fatalf("v%d %+v", got[0].V, got[0].Who())
+	}
+}
+
+func TestAVersionOneEnvelopeCountsAsTheSystem(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "events.jsonl")
+	body := `{"v":1,"seq":1,"at":"2026-09-01T00:00:00Z","command":{"id":"c1","method":"task.create","digest":"d"},"events":[{"type":"a","data":1}]}`
+	line := body[:len(body)-1] + `,"sum":"` + sum([]byte(body)) + `"}` + "\n"
+	if err := os.WriteFile(path, []byte(line), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	l, got := open(t, path)
+	if l.ReadOnly() != nil || len(got) != 1 || got[0].Who() != System || got[0].Command.ID != "c1" {
+		t.Fatalf("%v %+v", l.ReadOnly(), got)
+	}
 }
 
 func TestATornLastLineIsCutAndKept(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "events.jsonl")
 	l, _ := open(t, path)
-	l.Append(nil, []Event{NewEvent("a", 1)})
+	l.Append(System, nil, []Event{NewEvent("a", 1)})
 	l.Close()
 	f, _ := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0)
 	f.WriteString(`{"v":1,"seq":2,"at`)
@@ -58,7 +74,7 @@ func TestATornLastLineIsCutAndKept(t *testing.T) {
 	if len(got) != 1 || l.ReadOnly() != nil {
 		t.Fatal(got, l.ReadOnly())
 	}
-	if _, err := l.Append(nil, []Event{NewEvent("b", 2)}); err != nil {
+	if _, err := l.Append(System, nil, []Event{NewEvent("b", 2)}); err != nil {
 		t.Fatal(err)
 	}
 	matches, _ := filepath.Glob(path + ".torn-*")
@@ -78,7 +94,7 @@ func TestATornTailThatCannotBeKeptIsNotCut(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "events.jsonl")
 	l, _ := open(t, path)
-	l.Append(nil, []Event{NewEvent("a", 1)})
+	l.Append(System, nil, []Event{NewEvent("a", 1)})
 	l.Close()
 	f, _ := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0)
 	f.WriteString(`{"v":1,"seq":2,"at`)
@@ -99,8 +115,8 @@ func TestATornTailThatCannotBeKeptIsNotCut(t *testing.T) {
 func TestADamagedLineOpensReadOnly(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "events.jsonl")
 	l, _ := open(t, path)
-	l.Append(nil, []Event{NewEvent("a", "x")})
-	l.Append(nil, []Event{NewEvent("a", "y")})
+	l.Append(System, nil, []Event{NewEvent("a", "x")})
+	l.Append(System, nil, []Event{NewEvent("a", "y")})
 	l.Close()
 	b, _ := os.ReadFile(path)
 	os.WriteFile(path, []byte(strings.Replace(string(b), `"y"`, `"z"`, 1)), 0o600)
@@ -108,7 +124,7 @@ func TestADamagedLineOpensReadOnly(t *testing.T) {
 	if len(got) != 1 || l.ReadOnly() == nil {
 		t.Fatal(got)
 	}
-	if _, err := l.Append(nil, nil); err == nil {
+	if _, err := l.Append(System, nil, nil); err == nil {
 		t.Fatal("a read-only log takes no appends")
 	}
 }

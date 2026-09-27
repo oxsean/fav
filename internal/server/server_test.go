@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/oxsean/fav/internal/coord"
+	"github.com/oxsean/fav/internal/dial"
 	"github.com/oxsean/fav/internal/node"
 	"github.com/oxsean/fav/internal/remote"
 	"github.com/oxsean/fav/internal/task"
@@ -125,7 +126,7 @@ func (r *rig) dialNode(home, token string) (*wire.Conn, error) {
 		os.WriteFile(filepath.Join(dir, "output.log"), []byte("done here\n"), 0o600)
 		return "", os.WriteFile(filepath.Join(dir, "state.json"), []byte(`{"rev":1,"state":"exited","exit_code":0,"session":"`+spec.Session+`"}`), 0o600)
 	}
-	c, err := Dial(context.Background(), r.url, RoleNode, token, wire.Options{Handler: n.Handler(remote.NewLocal("n1"))})
+	c, err := dial.Dial(context.Background(), r.url, RoleNode, token, wire.Options{Handler: n.Handler(remote.NewLocal("n1"))})
 	if err == nil {
 		r.t.Cleanup(func() { c.Close() })
 	}
@@ -158,7 +159,7 @@ func TestANodeAndAClientMeetAtTheServer(t *testing.T) {
 	r.node(r.nodeT)
 	r.waitMachine("n1", coord.MachineConnected)
 
-	cl, err := Connect(r.url, writeToken(t, r.client), wire.Options{})
+	cl, err := dial.Connect(r.url, writeToken(t, r.client), wire.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -202,13 +203,13 @@ func writeToken(t *testing.T, tok string) string {
 func TestWrongTokensAreRefused(t *testing.T) {
 	r := newRig(t)
 	ctx := context.Background()
-	if _, err := Dial(ctx, r.url, RoleNode, r.client, wire.Options{}); wire.Code(err) != wire.CodeUnauthorized {
+	if _, err := dial.Dial(ctx, r.url, RoleNode, r.client, wire.Options{}); wire.Code(err) != wire.CodeUnauthorized {
 		t.Fatalf("a client token cannot be a node: %v", err)
 	}
-	if _, err := Dial(ctx, r.url, RoleClient, r.nodeT, wire.Options{}); wire.Code(err) != wire.CodeUnauthorized {
+	if _, err := dial.Dial(ctx, r.url, RoleClient, r.nodeT, wire.Options{}); wire.Code(err) != wire.CodeUnauthorized {
 		t.Fatalf("a node token cannot be a client: %v", err)
 	}
-	if _, err := Dial(ctx, r.url, RoleClient, "tend_nope", wire.Options{}); wire.Code(err) != wire.CodeUnauthorized {
+	if _, err := dial.Dial(ctx, r.url, RoleClient, "tend_nope", wire.Options{}); wire.Code(err) != wire.CodeUnauthorized {
 		t.Fatalf("an unknown token: %v", err)
 	}
 }

@@ -512,7 +512,7 @@ func TestAStartThatNeverReachedTheNodeIsSentAgain(t *testing.T) {
 	run := task.Run{ID: node.NewRunID(), Task: tk.ID, Machine: Local, Agent: "quick", Profile: prof, Dir: tk.Dir, Brief: "x",
 		Runner: node.RunnerBackground}
 	c.mu.Lock()
-	err = c.commit(nil, journal.NewEvent(task.ERunQueued, run), journal.NewEvent(task.ERunStarting, task.RunStarting{ID: run.ID, Dir: run.Dir}))
+	err = c.commit(journal.System, nil, journal.NewEvent(task.ERunQueued, run), journal.NewEvent(task.ERunStarting, task.RunStarting{ID: run.ID, Dir: run.Dir}))
 	c.mu.Unlock()
 	c.Close()
 	if err != nil {
@@ -578,7 +578,7 @@ func TestAStopOfAStartThatNeverArrivedEndsTheRun(t *testing.T) {
 	run := task.Run{ID: node.NewRunID(), Task: tk.ID, Machine: Local, Agent: "quick", Profile: prof, Dir: tk.Dir, Brief: "x",
 		Runner: node.RunnerBackground}
 	c.mu.Lock()
-	err = c.commit(nil, journal.NewEvent(task.ERunQueued, run), journal.NewEvent(task.ERunStarting, task.RunStarting{ID: run.ID, Dir: run.Dir}),
+	err = c.commit(journal.System, nil, journal.NewEvent(task.ERunQueued, run), journal.NewEvent(task.ERunStarting, task.RunStarting{ID: run.ID, Dir: run.Dir}),
 		journal.NewEvent(task.ERunStopAsked, task.RunRef{ID: run.ID}))
 	c.mu.Unlock()
 	c.Close()
@@ -686,7 +686,7 @@ func TestAnAbandonedStartThatLandsLateIsStopped(t *testing.T) {
 	run := task.Run{ID: node.NewRunID(), Task: tk.ID, Machine: Local, Agent: "slow", Profile: prof, Dir: tk.Dir, Brief: "x",
 		Runner: node.RunnerBackground}
 	c.mu.Lock()
-	err = c.commit(nil, journal.NewEvent(task.ERunQueued, run), journal.NewEvent(task.ERunStarting, task.RunStarting{ID: run.ID, Dir: run.Dir}),
+	err = c.commit(journal.System, nil, journal.NewEvent(task.ERunQueued, run), journal.NewEvent(task.ERunStarting, task.RunStarting{ID: run.ID, Dir: run.Dir}),
 		journal.NewEvent(task.ERunAbandoned, task.RunRef{ID: run.ID}))
 	c.mu.Unlock()
 	if err != nil {
@@ -825,5 +825,24 @@ func TestTitlesAreCappedAndHerdrRunsClaudeOnly(t *testing.T) {
 	tk := e.task("x", "codex")
 	if err := e.call(MRunDispatch, Dispatch{Task: tk.ID, Runner: node.RunnerHerdr}, nil); wire.Code(err) != wire.CodeBadRequest {
 		t.Fatal(err)
+	}
+}
+
+func TestATaskKeepsItsProject(t *testing.T) {
+	e := newEnv(t, tend.Config{})
+	e.start()
+	var tk task.Task
+	e.must(MTaskCreate, TaskCreate{Title: "with a project", Dir: t.TempDir(), Project: " tend "}, &tk)
+	if tk.Project != "tend" {
+		t.Fatalf("created: %q", tk.Project)
+	}
+	other := "homelab"
+	e.must(MTaskEdit, task.TaskEdit{ID: tk.ID, Project: &other}, &tk)
+	if tk.Project != "homelab" || e.c.State().Tasks[tk.ID].Project != "homelab" {
+		t.Fatalf("edited: %q", tk.Project)
+	}
+	long := strings.Repeat("p", maxProject+1)
+	if err := e.call(MTaskEdit, task.TaskEdit{ID: tk.ID, Project: &long}, nil); wire.Code(err) != wire.CodeBadRequest {
+		t.Fatalf("a project name has a bound: %v", err)
 	}
 }

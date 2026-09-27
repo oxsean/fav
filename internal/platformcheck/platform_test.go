@@ -1,7 +1,7 @@
-// Package platformcheck fails when code outside the owning package repeats a platform rule: paths are compared and
+// Package platformcheck fails when code outside the owning package repeats a platform rule — paths are compared and
 // shortened in internal/paths, shell command lines are quoted in internal/shell, OS file locks live in internal/filelock,
 // file identity in internal/fileio, another machine's path shapes in internal/pathmap, starting and ending processes in
-// internal/proc.
+// internal/proc — or when tend picks up code only tend-server carries.
 package platformcheck
 
 import (

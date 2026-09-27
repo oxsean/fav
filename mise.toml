@@ -10,7 +10,7 @@ run = "go run ./tools/test-host"
 [tasks.gate]
 run = "go build ./... && go vet ./... && GOOS=windows go vet ./... && GOOS=linux go vet ./... && go test ./..."
 
-# this Mac's tend, stamped with the checkout it was built from, after the gate
+# this Mac's tend and tend-server, stamped with the checkout they were built from, after the gate
 [tasks.install]
 depends = ["gate"]
-run = 'go build -ldflags "-X main.version=$(git describe --tags --match "v*" --always --dirty)" -o ~/.local/bin/tend ./cmd/tend && ~/.local/bin/tend version'
+run = 'v=$(git describe --tags --match "v*" --always --dirty) && go build -ldflags "-X main.version=$v" -o ~/.local/bin/tend ./cmd/tend && go build -ldflags "-X main.version=$v" -o ~/.local/bin/tend-server ./cmd/tend-server && ~/.local/bin/tend version && ~/.local/bin/tend-server version'

@@ -67,7 +67,7 @@ type Rec struct {
 	Tags      []string `json:"tags,omitempty"`
 
 	Status     string     `json:"status"`
-	ArchivedAt *time.Time `json:"archived_at,omitempty"`
+	ArchivedAt *time.Time `json:"archived_at,omitzero"`
 
 	Cwd       string `json:"cwd,omitempty"`
 	GitRoot   string `json:"git_root,omitempty"`
@@ -81,10 +81,10 @@ type Rec struct {
 	HerdrWorkspace string `json:"herdr_workspace,omitempty"`
 	HerdrTab       string `json:"herdr_tab,omitempty"`
 
-	SessionStartedAt *time.Time `json:"session_started_at,omitempty"` // first timestamp in the transcript; may be unreadable
-	FavoritedAt      *time.Time `json:"favorited_at,omitempty"`
+	SessionStartedAt *time.Time `json:"session_started_at,omitzero"` // first timestamp in the transcript; may be unreadable
+	FavoritedAt      *time.Time `json:"favorited_at,omitzero"`
 	UpdatedAt        time.Time  `json:"updated_at"`
-	LastResumedAt    *time.Time `json:"last_resumed_at,omitempty"`
+	LastResumedAt    *time.Time `json:"last_resumed_at,omitzero"`
 	ResumeCount      int        `json:"resume_count"`
 
 	Supersedes string `json:"supersedes,omitempty"`
