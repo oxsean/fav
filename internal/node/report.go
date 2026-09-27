@@ -27,7 +27,8 @@ const (
 	ReportAsk     = "ask"
 	ReportNote    = "note"
 	ReportVerdict = "verdict"
-	ReportPR      = "pr" // Text: the pull request its work went into
+	ReportPR      = "pr"   // Text: the pull request its work went into
+	ReportPlan    = "plan" // Text: the plan a planner handed in, as JSON
 )
 
 // Env names the supervisor gives its agent.
@@ -66,6 +67,20 @@ func AddVerdict(dir, verdict, summary string) error {
 	}
 	return appendLine(filepath.Join(dir, reportsFile), Report{At: time.Now(), Kind: ReportVerdict, Verdict: verdict,
 		Text: clip(summary, maxReport)})
+}
+
+// maxPlan bounds a plan a planner hands in.
+const maxPlan = 256 << 10
+
+// AddPlan appends the plan (JSON the caller checked) to run directory dir.
+func AddPlan(dir string, plan []byte) error {
+	if len(plan) > maxPlan || !json.Valid(plan) {
+		return &wire.Error{Code: wire.CodeBadRequest, Detail: "plan"}
+	}
+	if _, err := os.Stat(filepath.Join(dir, "spec.json")); err != nil {
+		return err
+	}
+	return appendLine(filepath.Join(dir, reportsFile), Report{At: time.Now(), Kind: ReportPlan, Text: string(plan)})
 }
 
 // reportsFrom reads the whole report lines after offset from; it answers them and where the next read starts.

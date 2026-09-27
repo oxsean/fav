@@ -127,6 +127,16 @@ func foldScenario() []journal.Envelope {
 		Work: &agent.Workspace{Checkout: "/src", Branch: "tend/t10", ReadOnly: true}}))
 	add(ev(task.ERunObserved, task.Observation{ID: "r12", State: task.Exited, NodeRev: 1, ExitCode: &exit0,
 		Verdict: &agent.Verdict{Verdict: agent.VerdictPass, At: started}, Work: &agent.Work{Head: "m0", Discarded: 1}}))
+	plan := &task.Plan{Tasks: []task.PlanTask{{Key: "a", Title: "A"}, {Key: "b", Title: "B", After: []string{"a"}}}, Questions: []string{"why?"}}
+	add(ev(task.ETaskCreated, task.Task{ID: "t13", Title: "requirement", Dir: "/w", Kind: task.KindRequirement, Status: task.StatusTodo}))
+	add(ev(task.ERunQueued, task.Run{ID: "r13", Task: "t13", Machine: "mba", Agent: "fake", Dir: "/w", Stage: task.StagePlan, Planner: true}))
+	add(ev(task.ERunObserved, task.Observation{ID: "r13", State: task.Exited, NodeRev: 1, ExitCode: &exit0, Plan: plan}))
+	add(ev(task.ETaskCreated, task.Task{ID: "t14", Title: "requirement 2", Dir: "/w", Status: task.StatusTodo}))
+	add(ev(task.ERunQueued, task.Run{ID: "r14", Task: "t14", Machine: "mba", Agent: "fake", Dir: "/w", Stage: task.StagePlan, Planner: true}))
+	add(ev(task.ERunObserved, task.Observation{ID: "r14", State: task.Exited, NodeRev: 1, ExitCode: &exit0, Plan: plan}))
+	add(ev(task.EPlanDrafted, task.PlanDraft{ID: "t14", Plan: &task.Plan{Tasks: plan.Tasks[:1]}, By: "u1"}))
+	add(ev(task.ETaskCreated, task.Task{ID: "t15", Title: "A", Parent: "t14", Status: task.StatusBacklog}),
+		ev(task.EPlanApplied, task.PlanApplied{ID: "t14"}))
 	add(ev("some_future_event", map[string]string{"id": "t1"}))
 	return envs
 }
@@ -213,7 +223,7 @@ process.stdout.write(JSON.stringify({state:s,sits}));`
 	var goState any
 	gb, _ := json.Marshal(st)
 	json.Unmarshal(gb, &goState)
-	if runs, _ := page.(map[string]any)["runs"].(map[string]any); len(runs) != 12 || len(st.Runs) != 12 {
+	if runs, _ := page.(map[string]any)["runs"].(map[string]any); len(runs) != 14 || len(st.Runs) != 14 {
 		t.Fatalf("the page folded %d runs: %s", len(runs), out)
 	}
 	for id, x := range st.Tasks {

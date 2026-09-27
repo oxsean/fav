@@ -213,6 +213,10 @@ func cmdTask(args []string) error {
 		return cmdTaskGate(args[1:])
 	case "merge":
 		return cmdTaskMerge(args[1:])
+	case "plan":
+		return cmdTaskPlan(args[1:])
+	case "draft":
+		return cmdTaskDraft(args[1:])
 	case "message", "say":
 		return cmdTaskMessage(args[1:])
 	}
@@ -487,6 +491,8 @@ func cmdRun(args []string) error {
 		return cmdRunSend(args[1:])
 	case "ask", "note":
 		return cmdRunReport(args[0], args[1:])
+	case "plan":
+		return cmdRunPlan(args[1:])
 	case "verdict":
 		return cmdRunVerdict(args[1:])
 	}
@@ -910,6 +916,83 @@ func cmdTaskStart(args []string) error {
 		}
 		fmt.Print(i18n.F("cli.task.started", t.ID, len(st.Subtree(t.ID))))
 		return nil
+	})
+}
+
+// cmdTaskPlan starts a planner that drafts the task's subtasks.
+func cmdTaskPlan(args []string) error {
+	fs := newFlags("task")
+	agentName := fs.String("agent", "", i18n.T("cli.task.flag_plan_agent"))
+	machine := fs.String("machine", "", i18n.T("cli.task.flag_machine"))
+	pos, err := parseWithArgs(fs, args, 1)
+	if err != nil {
+		return err
+	}
+	return withCoord(wire.Options{}, func(cl *coord.Client) error {
+		st, err := readState(cl)
+		if err != nil {
+			return err
+		}
+		id, err := taskID(st, pos[0])
+		if err != nil {
+			return err
+		}
+		if err := write(cl, coord.MTaskPlan, coord.TaskPlan{ID: id, Agent: *agentName, Machine: *machine}, nil); err != nil {
+			return err
+		}
+		fmt.Print(i18n.F("cli.task.planning", id))
+		return nil
+	})
+}
+
+// cmdTaskDraft shows a task's draft plan, or saves, applies or drops it.
+func cmdTaskDraft(args []string) error {
+	fs := newFlags("task")
+	save := fs.String("save", "", i18n.T("cli.task.flag_draft_save"))
+	apply := fs.Bool("apply", false, i18n.T("cli.task.flag_draft_apply"))
+	discard := fs.Bool("discard", false, i18n.T("cli.task.flag_draft_discard"))
+	pos, err := parseWithArgs(fs, args, 1)
+	if err != nil {
+		return err
+	}
+	return withCoord(wire.Options{}, func(cl *coord.Client) error {
+		st, err := readState(cl)
+		if err != nil {
+			return err
+		}
+		id, err := taskID(st, pos[0])
+		if err != nil {
+			return err
+		}
+		t := st.Tasks[id]
+		switch {
+		case *save != "":
+			var b []byte
+			if *save == "-" {
+				b, err = io.ReadAll(io.LimitReader(os.Stdin, 1<<20))
+			} else {
+				b, err = os.ReadFile(*save)
+			}
+			if err != nil {
+				return err
+			}
+			p, err := task.ParsePlan(b)
+			if err != nil {
+				return i18n.E("cli.run.bad_plan", err.Error())
+			}
+			return write(cl, coord.MTaskPlanSave, coord.PlanSave{ID: id, Plan: p, ExpectedRev: t.Rev}, nil)
+		case *discard:
+			return write(cl, coord.MTaskPlanSave, coord.PlanSave{ID: id, ExpectedRev: t.Rev}, nil)
+		case *apply:
+			if err := write(cl, coord.MTaskPlanApply, coord.PlanApply{ID: id, ExpectedRev: t.Rev}, nil); err != nil {
+				return err
+			}
+			fmt.Print(i18n.F("cli.task.applied", id, len(t.Draft.Plan.Tasks)))
+			return nil
+		case t.Draft == nil:
+			return i18n.E("cli.task.no_draft", id)
+		}
+		return printJSON(t.Draft.Plan)
 	})
 }
 

@@ -512,7 +512,7 @@ func (c *Coord) converge(ctx context.Context, m *machine) {
 		c.sent[r.ID] = time.Now()
 		params[i] = node.StartParams{Run: r.ID, Task: r.Task, Coordinator: c.id, Profile: r.Profile, Dir: r.Dir,
 			Brief: r.Brief, Title: r.Title, Runner: r.Runner, Resume: r.Resume, Project: r.Project, Dispatcher: c.person(r.Dispatcher),
-			Verdict: r.Judge, Check: r.Check, Work: r.Work}
+			Verdict: r.Judge, Check: r.Check, Work: r.Work, Planner: r.Planner}
 	}
 	canResume := slices.Contains(m.hello.Methods, node.MRunResume)
 	var inputs []input
@@ -588,7 +588,11 @@ func heldBack(err error) bool {
 }
 
 func observation(s node.Snapshot) task.Observation {
-	return task.Observation{ID: s.Run, State: s.State.State, ExitCode: s.ExitCode, Reason: s.Reason, Detail: s.Detail,
+	var plan *task.Plan
+	if len(s.Plan) > 0 {
+		json.Unmarshal(s.Plan, &plan)
+	}
+	return task.Observation{Plan: plan, ID: s.Run, State: s.State.State, ExitCode: s.ExitCode, Reason: s.Reason, Detail: s.Detail,
 		Attention: s.Attention, Ask: s.Ask, Note: s.Note, Last: s.Last, Usage: s.Usage, Stream: s.Stream, Requests: s.Requests,
 		Sends: s.Sends, Verdict: s.Verdict, Check: s.Check, Work: s.Work, Provider: s.Provider, Session: s.Session, Pane: s.Pane, NodeRev: s.Rev,
 		StartedAt: s.StartedAt, EndedAt: s.EndedAt}

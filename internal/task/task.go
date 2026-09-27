@@ -83,6 +83,7 @@ type Task struct {
 	WorkOn    string    `json:"work_on,omitempty"`   // the machine that made it
 	Head      string    `json:"head,omitempty"`      // the branch's head as its latest run left it
 	Merged    bool      `json:"merged,omitempty"`    // its branch went into its parent's
+	Draft     *Draft    `json:"draft,omitempty"`     // a plan of subtasks not applied yet
 	Rev       int       `json:"rev,omitzero"`
 	CreatedAt time.Time `json:"created_at,omitzero"`
 	UpdatedAt time.Time `json:"updated_at,omitzero"`
@@ -108,6 +109,8 @@ type Run struct {
 	Checked    *agent.CheckResult `json:"checked,omitempty"`    // how the hook went
 	Work       *agent.Workspace   `json:"work,omitempty"`       // where it works in git; Dir is then the checkout
 	Worked     *agent.Work        `json:"worked,omitempty"`     // what it did there
+	Planner    bool               `json:"planner,omitempty"`    // it is to hand in a plan (tend run plan)
+	Plan       *Plan              `json:"plan,omitempty"`       // the plan it handed in
 	Project    string             `json:"project,omitempty"`    // its task's when it was queued
 	Dispatcher string             `json:"dispatcher,omitempty"` // the user who queued it
 	Want       string             `json:"want,omitempty"`       // run | stop
@@ -214,6 +217,7 @@ type Observation struct {
 	Verdict   *agent.Verdict     `json:"verdict,omitempty"`
 	Check     *agent.CheckResult `json:"check,omitempty"`
 	Work      *agent.Work        `json:"work,omitempty"`
+	Plan      *Plan              `json:"plan,omitempty"`
 	Provider  string             `json:"provider,omitempty"`
 	Session   string             `json:"session,omitempty"`
 	Pane      string             `json:"pane,omitempty"`
@@ -349,6 +353,7 @@ func (s *State) apply(e journal.Event, seq int64, at time.Time) error {
 		r.observe(o)
 		if open && !Open(r.State) {
 			s.worked(r)
+			s.drafted(r)
 		}
 	case ERunStopAsked:
 		return s.run(e, func(r *Run) { r.Want = "stop" })
@@ -405,6 +410,9 @@ func (s *State) apply(e journal.Event, seq int64, at time.Time) error {
 		if ok, err := s.applyFlow(e, seq, at); ok {
 			return err
 		}
+		if ok, err := s.applyPlan(e, at); ok {
+			return err
+		}
 		return fmt.Errorf("unknown event")
 	}
 	return nil
@@ -453,7 +461,7 @@ func (r *Run) observe(o Observation) {
 	if o.NodeRev > 0 { // what the node says now; the coordinator's own observations carry none of it
 		r.Attention, r.Ask, r.Note, r.Last, r.Usage = o.Attention, o.Ask, o.Note, o.Last, o.Usage
 		r.Stream, r.Requests = o.Stream, o.Requests
-		r.Verdict, r.Checked, r.Worked = o.Verdict, o.Check, o.Work
+		r.Verdict, r.Checked, r.Worked, r.Plan = o.Verdict, o.Check, o.Work, o.Plan
 		r.Sends = mergeSends(r.Sends, o.Sends)
 		r.Answers = slices.DeleteFunc(slices.Clone(r.Answers), func(a agent.Answer) bool { // taken, or no longer asked
 			return !slices.ContainsFunc(r.Requests, func(q agent.Request) bool { return q.ID == a.Request })

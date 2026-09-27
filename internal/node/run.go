@@ -67,6 +67,7 @@ type StartParams struct {
 	Verdict     bool          `json:"verdict,omitempty"`    // it is to end with tend run verdict (feature verdict)
 	Check       []string      `json:"check,omitempty"`      // argv run where it worked once it exits well (feature check)
 	Work        *Workspace    `json:"work,omitempty"`       // where it works in git (feature worktree); Dir is then the checkout
+	Planner     bool          `json:"planner,omitempty"`    // it is to hand in a plan with tend run plan (feature plan)
 }
 
 // Person is a user of the coordinator's team, as a node needs them.
@@ -91,6 +92,9 @@ const FeatureCheck = "check"
 // FeatureFiles: a profile's hooks, MCP servers and skills are applied (claude).
 const FeatureFiles = "files"
 
+// FeaturePlan: a planner is told to hand in a plan, and the plan is reported.
+const FeaturePlan = "plan"
+
 // Spec is a run frozen at its start.
 type Spec struct {
 	Run         string        `json:"run"`
@@ -113,6 +117,7 @@ type Spec struct {
 	Verdict     bool          `json:"verdict,omitempty"`
 	Check       []string      `json:"check,omitempty"`
 	Work        *Workspace    `json:"work,omitempty"`
+	Planner     bool          `json:"planner,omitempty"`
 }
 
 // env is what the agent's environment gains: its commits are authored by the run's dispatcher, and committed by
@@ -142,6 +147,7 @@ type State struct {
 	Verdict   *agent.Verdict     `json:"verdict,omitempty"`   // what it concluded (tend run verdict)
 	Check     *agent.CheckResult `json:"check,omitempty"`     // how the check hook went after it
 	Work      *agent.Work        `json:"work,omitempty"`      // what it did to its task's branch
+	Plan      json.RawMessage    `json:"plan,omitempty"`      // the plan it handed in (tend run plan)
 	Note      string             `json:"note,omitempty"`      // its latest progress note
 	Last      string             `json:"last,omitempty"`      // the newest thing it said
 	Usage     *agent.Usage       `json:"usage,omitempty"`
@@ -510,7 +516,7 @@ func (n *Node) spec(p StartParams, dir string) (Spec, error) {
 	return Spec{Run: p.Run, Task: p.Task, Coordinator: p.Coordinator, Argv: cmd.Argv(), Dir: p.Dir, Runner: runner,
 		Stdin: stdin, Stream: stream, Thread: p.Profile.Provider == tend.ProviderCodex, Provider: agent.SessionProvider(p.Profile.Provider),
 		Agent: p.Profile.Provider, Session: cmp.Or(ls.SessionID, p.Resume), Title: p.Title, StallAfter: n.stallAfter(),
-		Created: time.Now(), Project: p.Project, Dispatcher: p.Dispatcher, Verdict: p.Verdict, Check: p.Check, Work: p.Work}, nil
+		Created: time.Now(), Project: p.Project, Dispatcher: p.Dispatcher, Verdict: p.Verdict, Check: p.Check, Work: p.Work, Planner: p.Planner}, nil
 }
 
 // defaultStall is how long a background run may say nothing before it is marked stalled.
@@ -548,6 +554,9 @@ func (n *Node) brief(p StartParams, spec Spec, dir string) string {
 	if spec.Verdict {
 		out += fmt.Sprintf(verdictConvention, tendCmd)
 	}
+	if spec.Planner {
+		out += fmt.Sprintf(planConvention, tendCmd)
+	}
 	switch w := spec.Work; {
 	case w == nil:
 	case w.ReadOnly:
@@ -583,6 +592,15 @@ const verdictConvention = `
   %[1]s verdict pass "<one line>"      (it meets the criteria)
   %[1]s verdict rework "<what to change>"  (it must change; say what)
   %[1]s verdict blocked "<why>"         (you cannot judge it)
+`
+
+// planConvention tells a planner how to hand in its plan.
+const planConvention = `
+- You are planning, not doing: change no file. Write the plan as JSON to a file outside this directory and hand it in
+  with: %[1]s plan <file>   It checks the plan and says what is wrong; fix it and hand it in again.
+  {"tasks":[{"key":"short-id","title":"…","brief":"what to do, enough to do it without asking","acceptance":["…"],
+   "after":["key it comes after"],"parent":"key of the task it is part of (two levels at most)",
+   "workflow":"feature|fix|docs|none","size":"S|M|L"}],"questions":["what someone should decide"]}
 `
 
 // readBrief is an interactive agent's first message; the brief itself stays in the file (argv shows in ps).

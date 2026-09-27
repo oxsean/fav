@@ -123,7 +123,7 @@ var Methods = []string{MRunStart, MRunStop, MRunList, MRunTail, MRunResume, MAge
 
 // Features lists what run.start and run.resume understand beyond their first shape; a coordinator that needs a feature
 // this node lacks fails the run as node_outdated instead of starting it without.
-var Features = []string{FeatureDispatcher, FeatureAgentDef, FeatureVerdict, FeatureCheck, FeatureWorktree, FeatureFiles}
+var Features = []string{FeatureDispatcher, FeatureAgentDef, FeatureVerdict, FeatureCheck, FeatureWorktree, FeatureFiles, FeaturePlan}
 
 // Tail reads a page of a run's output.log backwards from p.Before.
 func (n *Node) Tail(p TailParams) (Tail, error) {

@@ -35,11 +35,12 @@ type TaskCreate struct {
 }
 
 type Dispatch struct {
-	Task    string `json:"task"`
-	Machine string `json:"machine,omitempty"` // default: the task's, else this machine
-	Agent   string `json:"agent,omitempty"`   // default: the task's, else claude
-	Runner  string `json:"runner,omitempty"`
-	brief   string // a workflow stage's, in place of the task's
+	Task     string `json:"task"`
+	Machine  string `json:"machine,omitempty"` // default: the task's, else this machine
+	Agent    string `json:"agent,omitempty"`   // default: the task's, else claude
+	Runner   string `json:"runner,omitempty"`
+	brief    string // a workflow stage's, in place of the task's
+	planning bool   // a planner's: a task in the backlog may be planned
 }
 
 type TailParams struct {
@@ -110,7 +111,7 @@ var readMethods = []string{remote.MHello, remote.MList, remote.MMessages, remote
 var Methods = []string{MStateGet, MTaskGet, MTaskCreate, MTaskEdit, MTaskStatus, MRunDispatch, MRunStop, MRunAbandon, MRunTail,
 	MAgentList, MMachineList, MSubscribe, MNodeCall, MRunPreview, MRunContinue, MRunAnswer, MRunSend, MRunMessages,
 	MProjectCreate, MProjectEdit, MProjectMember, MMachineShare, MTaskStart, MTaskMove,
-	MAgentDefList, MAgentDefGet, MAgentDefSave, MAgentDefRemove, MAgentDefShare, MInboxList, MUserOffboard, MTaskSync, MTaskSourceAck, MTaskGate, MTaskMerge, MTaskMessage}
+	MAgentDefList, MAgentDefGet, MAgentDefSave, MAgentDefRemove, MAgentDefShare, MInboxList, MUserOffboard, MTaskSync, MTaskSourceAck, MTaskGate, MTaskMerge, MTaskPlan, MTaskPlanSave, MTaskPlanApply, MTaskMessage}
 
 // Handler answers this machine's user.
 func (c *Coord) Handler() wire.Handler { return c.HandlerFor(Owner) }
@@ -224,6 +225,12 @@ func (c *Coord) HandlerFor(p Principal) wire.Handler {
 			return c.command(p, r, c.taskGate, taskView)
 		case MTaskMerge:
 			return c.command(p, r, c.taskMerge, taskView)
+		case MTaskPlan:
+			return c.command(p, r, c.taskPlan, taskView)
+		case MTaskPlanSave:
+			return c.command(p, r, c.planSave, taskView)
+		case MTaskPlanApply:
+			return c.command(p, r, c.planApply, taskView)
 		case MTaskMessage:
 			return c.command(p, r, c.taskMessage, messageView)
 		case MRunDispatch:
@@ -547,7 +554,7 @@ func (c *Coord) plan(who Principal, p Dispatch) (task.Run, error) {
 	if err != nil {
 		return task.Run{}, err
 	}
-	if t.Status != task.StatusTodo {
+	if t.Status != task.StatusTodo && !(p.planning && t.Status == task.StatusBacklog) {
 		return task.Run{}, conflict("task " + t.Status)
 	}
 	if open := c.st.OpenRun(t.ID); open != nil {

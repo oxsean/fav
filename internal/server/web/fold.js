@@ -23,7 +23,7 @@ globalThis.Fold = (() => {
     if (o.detail) r.detail = o.detail;
     if ((o.node_rev || 0) > 0) {
       r.attention = o.attention; r.ask = o.ask; r.note = o.note; r.last = o.last; r.usage = o.usage;
-      r.stream = o.stream; r.requests = o.requests; r.verdict = o.verdict; r.checked = o.check; r.worked = o.work;
+      r.stream = o.stream; r.requests = o.requests; r.verdict = o.verdict; r.checked = o.check; r.worked = o.work; r.plan = o.plan;
       const node = o.sends || [];
       r.sends = [...node, ...(r.sends || []).filter(m => !node.some(x => x.id === m.id))];
       r.answers = (r.answers || []).filter(a => (r.requests || []).some(q => q.id === a.request));
@@ -99,6 +99,18 @@ globalThis.Fold = (() => {
         s.runs[d.id] = {...d, state: 'queued', want: 'run', queued_at: at, seq};
         queuedWork(s, s.runs[d.id]);
         break;
+      case 'plan_drafted': {
+        const t = need(s.tasks, d.id, 'task');
+        t.draft = d.plan ? {plan: d.plan, by: d.by, source_rev: t.source ? t.source.rev : undefined} : undefined;
+        t.rev = (t.rev || 0) + 1; t.updated_at = at;
+        break;
+      }
+      case 'plan_applied': {
+        const t = need(s.tasks, d.id, 'task');
+        delete t.draft;
+        t.rev = (t.rev || 0) + 1; t.updated_at = at;
+        break;
+      }
       case 'run_starting': {
         const r = need(s.runs, d.id, 'run');
         if (r.state === 'queued') { r.state = 'starting'; if (d.dir) r.dir = d.dir; }
@@ -107,7 +119,7 @@ globalThis.Fold = (() => {
       case 'run_observed': {
         const r = need(s.runs, d.id, 'run'), open = openStates.has(r.state);
         observe(r, d);
-        if (open && !openStates.has(r.state)) worked(s, r);
+        if (open && !openStates.has(r.state)) { worked(s, r); drafted(s, r); }
         break;
       }
       case 'run_stop_requested':
@@ -260,6 +272,18 @@ globalThis.Fold = (() => {
       if (w.merged) { t.merged = true; const p = s.tasks[t.parent]; if (p && w.head) p.head = w.head; }
     } else if (!r.work.read_only && w.head) t.head = w.head;
   }
+  // drafted makes a planner's plan its task's draft once its run ended (task.State.drafted).
+  function drafted(s, r) {
+    const t = s.tasks[r.task];
+    if (!t || !r.planner || !r.plan) return;
+    t.draft = {plan: r.plan, run: r.id, source_rev: t.source ? t.source.rev : undefined};
+  }
+  function planSituation(t, last) {
+    if (t.draft) return {kind: 'waiting', reason: 'draft', run: last.id};
+    if (!openStates.has(last.state) && (last.attention === 'asked' || last.attention === 'permission')) return {kind: 'waiting', reason: last.attention, run: last.id};
+    if (last.reason && last.state !== 'exited') return {kind: 'waiting', reason: last.reason, run: last.id};
+    return {kind: 'waiting', reason: 'no_plan', run: last.id};
+  }
   function mergeSituation(last) {
     if (last.worked && last.worked.merged) return {kind: 'queued', reason: 'completing', run: last.id};
     if (last.reason === 'merge_conflict') return {kind: 'waiting', reason: 'merge_conflict', run: last.id};
@@ -308,7 +332,7 @@ globalThis.Fold = (() => {
     if (kids.some(k => k.status !== 'canceled')) {
       if (kids.some(k => k.status !== 'done' && k.status !== 'canceled')) return {kind: 'queued', reason: 'children'};
       if (!t.flow) return {kind: 'waiting', reason: 'accept'};
-    }
+    } else if (last && last.stage === 'plan' && (!t.auto || (last.seq || 0) > (t.start_seq || 0))) return planSituation(t, last);
     if (t.flow && t.auto) return held(s, t) || stageSituation(s, t, last);
     if (last && (!t.auto || (last.seq || 0) > (t.start_seq || 0))) {
       const waiting = !openStates.has(last.state) && (last.attention === 'asked' || last.attention === 'permission');

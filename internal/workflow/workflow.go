@@ -5,6 +5,7 @@ package workflow
 
 import (
 	"embed"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"regexp"
@@ -315,3 +316,33 @@ func indent(s string) string { return strings.ReplaceAll(s, "\n", "\n  ") }
 
 // Verdicts are the words a verdict may be.
 var Verdicts = []string{agent.VerdictPass, agent.VerdictRework, agent.VerdictBlocked}
+
+// PlanBrief is what a planner of t is told: how to plan, then the task (its issue's text for a requirement), its
+// acceptance criteria and the workflows its subtasks may take.
+func PlanBrief(st *task.State, t *task.Task) string {
+	var custom map[string]string
+	if pr := st.Projects[t.Project]; pr != nil {
+		custom = pr.Workflows
+	}
+	var b strings.Builder
+	b.WriteString("Plan the task below as subtasks for coding agents. Read the repository and what the task refers to; do not " +
+		"change any file.\n\nEach subtask is done by one agent in one session, on its own branch cut from this task's branch " +
+		"once the subtasks it comes after are merged there. Keep subtasks small; let them run side by side where they can and " +
+		"order them with \"after\" where they cannot. Give each a brief detailed enough to act on without asking, and " +
+		"acceptance criteria someone can check. Use \"parent\" only to group closely related subtasks. If something must be " +
+		"decided first, put it in \"questions\" and plan what you can.\n\n")
+	fmt.Fprintf(&b, "Workflows a subtask may take: %s, or none (default: the project's).\n\n", strings.Join(Names(custom), ", "))
+	brief := strings.TrimSpace(t.Brief)
+	fmt.Fprintf(&b, "## The task: %s\n\n%s\n", t.Title, brief)
+	if len(t.Accept) > 0 {
+		b.WriteString("\nAcceptance criteria:\n")
+		for _, a := range t.Accept {
+			b.WriteString("- " + a + "\n")
+		}
+	}
+	if d := t.Draft; d != nil && d.Plan != nil {
+		out, _ := json.Marshal(d.Plan)
+		fmt.Fprintf(&b, "\n## The current draft, to improve\n\n%s\n", out)
+	}
+	return b.String()
+}

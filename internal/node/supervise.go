@@ -276,6 +276,8 @@ func (s *sup) reports() {
 				st.Attention, st.Ask = AttentionAsked, r.Text
 			case ReportVerdict:
 				st.Verdict = &agent.Verdict{Verdict: r.Verdict, Summary: r.Text, At: r.At}
+			case ReportPlan:
+				st.Plan = json.RawMessage(r.Text)
 			case ReportPR:
 				if st.Work == nil {
 					st.Work = &agent.Work{}

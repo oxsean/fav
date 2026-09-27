@@ -1,8 +1,10 @@
 package main
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"time"
@@ -175,6 +177,38 @@ func cmdRunVerdict(args []string) error {
 		return i18n.E("cli.run.need_verdict")
 	}
 	return node.AddVerdict(dir, pos[0], strings.Join(pos[1:], " "))
+}
+
+// cmdRunPlan is `tend run plan <file|->`, run by a planner: it checks the plan and hands it in.
+func cmdRunPlan(args []string) error {
+	fs := newFlags("run")
+	pos, err := parseWithArgs(fs, args, 1)
+	if err != nil {
+		return err
+	}
+	dir := os.Getenv(node.EnvRunDir)
+	if dir == "" {
+		return errors.New(i18n.T("cli.run.no_run_dir"))
+	}
+	var b []byte
+	if pos[0] == "-" {
+		b, err = io.ReadAll(io.LimitReader(os.Stdin, 1<<20))
+	} else {
+		b, err = os.ReadFile(pos[0])
+	}
+	if err != nil {
+		return err
+	}
+	p, err := task.ParsePlan(b)
+	if err != nil {
+		return i18n.E("cli.run.bad_plan", err.Error())
+	}
+	b, _ = json.Marshal(p)
+	if err := node.AddPlan(dir, b); err != nil {
+		return err
+	}
+	fmt.Print(i18n.F("cli.run.planned", len(p.Tasks)))
+	return nil
 }
 
 // cmdInbox lists the runs that need you on every machine, longest waiting first.

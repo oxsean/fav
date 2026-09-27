@@ -82,6 +82,15 @@ const treeWords = {
   commits: ['{0} 个提交', '{0} commits'], discarded: ['改了 {0} 个文件，已丢弃', '{0} changed files thrown away'],
   conflictIn: ['合并冲突的文件：', 'Files in conflict:'], resolveHint: ['在 {0} 里合并并提交，然后重试。', 'Merge and commit in {0}, then try again.'],
   retryMerge: ['重试合并', 'Merge again'], merging: ['正在合并', 'Merging'], pullRequest: ['PR', 'Pull request'],
+  'why.draft': ['拆解草稿等你确认', 'A plan waits for you'], 'why.no_plan': ['拆解没有给出计划', 'Its planner handed in no plan'],
+  planTask: ['拆解', 'Plan it'], planning: ['拆解 agent 正在起草', 'A planner is drafting'], draft: ['拆解草稿', 'Plan draft'],
+  draftHelp: ['确认之前不会建任何任务；建出来的子任务都在待办里，点「开始」才派发。', 'Nothing is made until you apply it; the subtasks go to the backlog and run once you start them.'],
+  questions: ['需要你决定', 'To decide'], answer: ['回答', 'Answer'], answerHint: ['回答后拆解 agent 在同一会话里重出草稿。', 'The planner goes on in its session and drafts again.'],
+  applyDraft: ['按草稿建任务', 'Make the subtasks'], discardDraft: ['丢弃草稿', 'Drop the draft'], editDraft: ['编辑草稿', 'Edit the draft'],
+  saveDraft: ['保存草稿', 'Save the draft'], addPlanTask: ['加一个任务', 'Add a task'], removePlanTask: ['删除', 'Remove'],
+  planKey: ['键', 'Key'], partOf: ['属于', 'Part of'], size: ['规模', 'Size'], draftSaved: ['草稿已保存', 'Draft saved'],
+  applied: ['子任务已建好，放在待办里', 'The subtasks are in the backlog'], draftDropped: ['草稿已丢弃', 'Draft dropped'],
+  draftStale: ['需求改过了：这份草稿是按第 {0} 版做的。看过后保存一次，再建任务。', 'The issue changed: this draft was made for revision {0}. Save it once you have checked it, then apply.'],
 };
 
 const Tree = (() => {
@@ -119,8 +128,10 @@ const Tree = (() => {
     const src = task.source ? sourceBlock(task) : '';
     const sub = kids.length ? `<div class="tree-block"><span class="meta-label">${t('subtasks')}</span>${kids.map(k => `<div class="flex">${link(k.id)}${badge(k.status)}${sitBadge(k)}</div>`).join('')}</div>` : '';
     const can = ui.online && !finished(task.status);
-    const flow = (task.flow ? flowBlock(task) : '') + workBlock(task);
-    const actions = can ? `<div class="task-actions">${button('tree-start', `${icon('play')}${t(task.auto ? 'startAgain' : 'start')}`, `data-id="${esc(task.id)}"`, task.status === 'backlog' ? 'primary' : 'quiet')}${button('tree-move', t('moveTask'), `data-id="${esc(task.id)}"`, 'quiet')}</div>` : '';
+    const flow = (task.flow ? flowBlock(task) : '') + workBlock(task) + (task.draft ? draftBlock(task) : '');
+    const planning = Object.values(ui.state.runs).some(r => r.task === task.id && r.planner && openStates.has(r.state));
+    const mayPlan = can && !kids.length && !task.draft && !planning;
+    const actions = can ? `<div class="task-actions">${planning ? `<span class="status sit-running">${t('planning')}</span>` : ''}${mayPlan ? button('tree-plan', t('planTask'), `data-id="${esc(task.id)}"`, 'quiet') : ''}${button('tree-start', `${icon('play')}${t(task.auto ? 'startAgain' : 'start')}`, `data-id="${esc(task.id)}"`, task.status === 'backlog' ? 'primary' : 'quiet')}${button('tree-move', t('moveTask'), `data-id="${esc(task.id)}"`, 'quiet')}</div>` : '';
     return `${rows.length ? `<div class="metadata">${rows.join('')}</div>` : ''}${src}${flow}${acc}${sub}${actions}`;
   }
 
@@ -135,6 +146,50 @@ const Tree = (() => {
     if (d.pr) parts.push(`<a href="${esc(d.pr)}" target="_blank" rel="noreferrer noopener">${t('pullRequest')}</a>`);
     for (const x of d.warnings || []) parts.push(`<span class="muted">${esc(x)}</span>`);
     return parts.join(' · ');
+  }
+
+  // draftBlock is a planner's draft for a task: its tasks as a tree, its questions, and what to do with it.
+  function draftBlock(task) {
+    const plan = task.draft.plan || {tasks: []}, id = esc(task.id);
+    const byKey = Object.fromEntries(plan.tasks.map(x => [x.key, x]));
+    const row = x => `<li><strong>${esc(x.title)}</strong>${x.size ? ` <span class="muted">${esc(x.size)}</span>` : ''}${x.workflow ? ` <span class="mono muted">${esc(x.workflow)}</span>` : ''}${(x.after || []).length ? ` <span class="muted">← ${x.after.map(a => esc(byKey[a]?.title || a)).join(', ')}</span>` : ''}
+      ${plan.tasks.some(k => k.parent === x.key) ? `<ul class="plain">${plan.tasks.filter(k => k.parent === x.key).map(row).join('')}</ul>` : ''}</li>`;
+    const stale = task.source && task.draft.source_rev && task.draft.source_rev !== task.source.rev;
+    const qs = (plan.questions || []).length ? `<div class="notice"><strong>${t('questions')}</strong><ul class="plain">${plan.questions.map(q => `<li>${esc(q)}</li>`).join('')}</ul></div>
+      ${task.draft.run && ui.online ? `<form id="tree-answer-form" class="stack" data-run="${esc(task.draft.run)}" data-command="${commandID()}"><div class="form-error" role="alert" hidden></div><label>${t('answer')}<textarea name="text" rows="2"></textarea><small>${t('answerHint')}</small></label><div class="flex"><button type="submit">${t('answer')}</button></div></form>` : ''}` : '';
+    return `<div class="tree-block"><span class="meta-label">${t('draft')}</span><p class="hint">${t('draftHelp')}</p>${stale ? `<div class="notice">${t('draftStale').replace('{0}', task.draft.source_rev)}</div>` : ''}
+      <ul class="plain">${plan.tasks.filter(x => !x.parent).map(row).join('')}</ul>${qs}
+      ${ui.online ? `<div class="flex">${button('tree-draft-apply', t('applyDraft'), `data-id="${id}"`, stale ? '' : 'primary')}${button('tree-draft-edit', t('editDraft'), `data-id="${id}"`)}${button('tree-draft-discard', t('discardDraft'), `data-id="${id}"`, 'quiet danger')}</div>` : ''}</div>`;
+  }
+
+  // draftForm edits a draft: a row per task.
+  function draftForm(task, plan) {
+    const keys = plan.tasks.map(x => x.key);
+    const opts = (list, v, none) => `${none !== undefined ? `<option value="">${none}</option>` : ''}${list.map(k => `<option value="${esc(k)}" ${k === v ? 'selected' : ''}>${esc(k)}</option>`).join('')}`;
+    const rows = plan.tasks.map((x, i) => `<fieldset class="stack plan-row" data-row="${i}"><legend class="mono">${esc(x.key)}</legend><input type="hidden" name="key" value="${esc(x.key)}">
+      <div class="form-grid"><label>${t('title')}<input name="title" value="${esc(x.title)}" required></label><label>${t('partOf')}<select name="parent">${opts(keys.filter(k => k !== x.key && !plan.tasks.find(p => p.key === k)?.parent), x.parent, '—')}</select></label>
+      <label>${t('workflow')}<select name="workflow"><option value="">${t('projectDefault')}</option>${opts(['none', ...flowNames()], x.workflow || '')}</select></label><label>${t('size')}<select name="size">${opts(['', 'S', 'M', 'L'], x.size || '')}</select></label></div>
+      <label>${t('brief')}<textarea name="brief" rows="3">${esc(x.brief || '')}</textarea></label>
+      <label>${t('acceptance')}<textarea name="acceptance" rows="2">${esc((x.acceptance || []).join('\n'))}</textarea></label>
+      <div class="flex plan-after"><span class="meta-label">${t('after')}</span>${keys.filter(k => k !== x.key).map(k => `<label class="choice"><input type="checkbox" name="after" value="${esc(k)}" ${(x.after || []).includes(k) ? 'checked' : ''}>${esc(k)}</label>`).join('')}</div>
+      <div>${button('tree-draft-remove', t('removePlanTask'), `data-row="${i}"`, 'quiet danger')}</div></fieldset>`).join('');
+    showModal('tree-form', `${t('editDraft')} · ${esc(task.title)}`, `<form id="tree-draft-form" data-id="${esc(task.id)}" data-rev="${task.rev}" data-command="${commandID()}"><div class="modal-body stack"><div class="form-error" role="alert" hidden></div>
+      ${rows}<div>${button('tree-draft-add', `${icon('plus')}${t('addPlanTask')}`, `data-id="${esc(task.id)}"`, 'quiet')}</div></div>${footer(t('saveDraft'))}</form>`, '', true);
+    data.draft = {task: task.id, questions: plan.questions};
+  }
+
+  // draftOf reads the draft form back into a plan.
+  function draftOf(form) {
+    const tasks = [...form.querySelectorAll('.plan-row')].map(f => {
+      const v = n => f.querySelector(`[name="${n}"]`).value.trim();
+      const x = {key: v('key'), title: v('title'), brief: v('brief'), parent: v('parent'), workflow: v('workflow'), size: v('size'),
+        acceptance: v('acceptance').split('\n').map(a => a.trim()).filter(Boolean), after: [...f.querySelectorAll('[name="after"]:checked')].map(c => c.value)};
+      for (const k of Object.keys(x)) if (x[k] === '' || Array.isArray(x[k]) && !x[k].length) delete x[k];
+      return x;
+    });
+    const keys = new Set(tasks.map(x => x.key));
+    for (const x of tasks) { if (x.parent && !keys.has(x.parent)) delete x.parent; if (x.after) x.after = x.after.filter(a => keys.has(a)); }
+    return {tasks, questions: data.draft?.questions};
   }
 
   // workBlock is where a task's work is in git: its branch, what its latest run left there, a merge conflict to resolve.
@@ -399,6 +454,16 @@ const Tree = (() => {
       case 'tree-pass': { const task = ui.state.tasks[d.id]; await api.taskGate({id: d.id, pass: true, expected_rev: task.rev}, {command_id: commandID()}); toast(t('passed')); break; }
       case 'tree-rework': gateForm(ui.state.tasks[d.id]); break;
       case 'tree-merge': await api.taskMerge({id: d.id}, {command_id: commandID()}); toast(t('merging')); break;
+      case 'tree-plan': await api.taskPlan({id: d.id}, {command_id: commandID()}); toast(t('planning')); break;
+      case 'tree-draft-edit': { const tk = ui.state.tasks[d.id]; draftForm(tk, structuredClone(tk.draft.plan)); break; }
+      case 'tree-draft-add': case 'tree-draft-remove': {
+        const form = document.querySelector('#tree-draft-form'), plan = draftOf(form), tk = ui.state.tasks[form.dataset.id];
+        if (action === 'tree-draft-remove') plan.tasks.splice(Number(d.row), 1);
+        else { let n = plan.tasks.length + 1; while (plan.tasks.some(x => x.key === 'task-' + n)) n++; plan.tasks.push({key: 'task-' + n, title: ''}); }
+        draftForm(tk, plan); break;
+      }
+      case 'tree-draft-apply': { const tk = ui.state.tasks[d.id]; await api.taskPlanApply({id: d.id, expected_rev: tk.rev}, {command_id: commandID()}); toast(t('applied')); break; }
+      case 'tree-draft-discard': { const tk = ui.state.tasks[d.id]; await api.taskPlanSave({id: d.id, expected_rev: tk.rev}, {command_id: commandID()}); toast(t('draftDropped')); break; }
       case 'tree-edit-flow': flowForm(d.project, d.name); break;
       case 'tree-remove-flow': {
         const flows = {...ui.state.projects[d.project]?.workflows}; delete flows[d.name];
@@ -430,6 +495,15 @@ const Tree = (() => {
           defaults: {workflow: fd.get('workflow') || undefined, roles, machine: fd.get('machine') || undefined}, hooks}, command);
         if (p) ui.state.projects[p.id] = p;
         closeModal(true); renderPage(); toast(t('settingsSaved')); break;
+      }
+      case 'tree-draft-form':
+        await api.taskPlanSave({id: form.dataset.id, plan: draftOf(form), expected_rev: Number(form.dataset.rev)}, command);
+        closeModal(true); toast(t('draftSaved')); break;
+      case 'tree-answer-form': {
+        const text = String(fd.get('text') || '').trim();
+        if (!text) { const e = form.querySelector('.form-error'); e.hidden = false; e.textContent = t('replyEmpty'); break; }
+        await api.runContinue({run: form.dataset.run, text}, command);
+        toast(t('planning')); break;
       }
       case 'tree-gate-form':
         await api.taskGate({id: form.dataset.id, pass: false, notes: fd.get('notes'), expected_rev: Number(form.dataset.rev)}, command);

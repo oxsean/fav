@@ -37,6 +37,7 @@ func FakeAgent(args []string) error {
 	question := fs.String("question", "", "stream: after the first step, ask the user (QUESTION|OPTION|OPTION…)")
 	verdicts := fs.String("verdicts", "", "report these verdicts in turn, one per run of its task (rework,pass)")
 	write := fs.String("write", "", "append a line naming its run to this file in its directory")
+	plan := fs.String("plan", "", "hand in this plan (JSON) to its run")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -47,7 +48,7 @@ func FakeAgent(args []string) error {
 	if *stream {
 		return fakeStream(fakeOpts{sid: *sid, dir: *dir, steps: *steps, every: *every, exit: *exit, ask: *ask, final: *final,
 			stderr: *stderr, note: *note, askReport: *askReport, permission: *permission, question: *question, leave: *leave,
-			verdicts: *verdicts, write: *write})
+			verdicts: *verdicts, write: *write, plan: *plan})
 	}
 	brief := ""
 	if *promptFile != "" {
@@ -85,6 +86,11 @@ func FakeAgent(args []string) error {
 	}
 	if err := fakeWrite(cwd, *write); err != nil {
 		return err
+	}
+	if *plan != "" {
+		if err := AddPlan(os.Getenv(EnvRunDir), []byte(*plan)); err != nil {
+			return err
+		}
 	}
 	for i := 1; i <= *steps; i++ {
 		time.Sleep(*every)

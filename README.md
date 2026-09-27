@@ -427,6 +427,13 @@ on the task's workpad for the next stage — what every stage's brief carries al
 as Markdown: the stages in the front matter, a `## <stage>` section per stage for its brief (`{{task.brief}}`,
 `{{task.acceptance}}`, `{{#rework}}…{{rework.notes}}…{{/rework}}`, `{{workpad}}`). A task keeps the workflow it was given.
 
+**Planning.** `tend task plan <id>` (or **Plan it**) has the project's planner agent read the task — a requirement's
+issue text — and the repository, and hand in subtasks with `tend run plan`: titles, briefs, acceptance criteria, what
+comes after what, at most two levels, and questions for you. Nothing is made yet: the plan is a draft you edit, answer
+(the planner goes on in its session) or drop; **Make the subtasks** (`tend task draft <id> --apply`) puts them in the
+backlog under the task, and starting the task runs them by their dependencies. A draft is tied to the revision of the
+issue it was made for.
+
 **Branches.** Mark a project's repository `worktrees` and each task works on its own branch, `tend/<task>`, in a
 worktree beside the checkout (`<checkout>-wt/<task>`); your own checkout is left alone. The project's `hooks.setup` runs
 once a worktree is made. Whatever the agent leaves uncommitted is committed for it; a review or test runs on a read-only

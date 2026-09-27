@@ -245,6 +245,8 @@ func (s *State) Situation(t *Task) Situation {
 		if t.Flow == nil {
 			return Situation{Kind: SitWaiting, Reason: WhyAccept}
 		}
+	} else if last := s.Latest(t.ID); last != nil && last.Stage == StagePlan && (!t.Auto || last.Seq > t.StartSeq) {
+		return planSituation(t, last)
 	}
 	if t.Flow != nil && t.Auto { // a workflow goes stage by stage once started
 		if sit, ok := s.held(t); ok {

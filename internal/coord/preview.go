@@ -32,6 +32,9 @@ var runFeatures = func(run *task.Run) []string {
 	if run.Work != nil {
 		out = append(out, node.FeatureWorktree)
 	}
+	if run.Planner {
+		out = append(out, node.FeaturePlan)
+	}
 	if len(run.Profile.Hooks) > 0 || len(run.Profile.MCP) > 0 || len(run.Profile.Skills) > 0 {
 		out = append(out, node.FeatureFiles)
 	}
@@ -307,6 +310,15 @@ func (c *Coord) runContinue(who Principal, r *wire.Request) (string, []journal.E
 			Parent: prev.ID, Project: runTask(c.st, prev).Project, Dispatcher: who.User}
 		if t := runTask(c.st, prev); t.Flow != nil { // it goes on in the task's stage
 			run.Stage, run.Judge, run.Check = t.Stage, prev.Judge, prev.Check
+		}
+		if w := prev.Work; w != nil && w.Merge == "" { // in the same worktree (a read-only copy is made anew)
+			cp := *w
+			cp.Setup = nil
+			run.Work = &cp
+		}
+		if prev.Planner {
+			run.Stage, run.Planner = task.StagePlan, true
+			readOnly(&run.Profile)
 		}
 		return run.ID, []journal.Event{journal.NewEvent(task.ERunQueued, run)}, nil
 	}
