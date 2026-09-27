@@ -39,6 +39,7 @@ type Caps struct {
 	Continue      bool // runs a prompt without a terminal in an existing session
 	PresetSession bool // the session id can be chosen before launch
 	Sessions      bool // its sessions are indexed (transcripts on disk that capture reads)
+	Stream        bool // a headless run talks both ways on stdin / stdout: answers, messages while it runs
 }
 
 // Profile is one way to run an agent (config `agents`).
@@ -51,6 +52,7 @@ type LaunchSpec struct {
 	Prompt     string // the first message
 	PromptFile string // where the task brief is; the prompt refers to it
 	Headless   bool
+	Stream     bool   // headless and both ways: the prompt comes on stdin as the first message
 	SessionID  string // preset session id, when the provider takes one
 	Resume     string // the session a headless run continues
 	Name       string // short name shown by the agent (claude --name)

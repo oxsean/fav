@@ -269,3 +269,8 @@ button.metric:hover strong, button.metric:focus-visible strong { color: var(--ac
   .modal { width: calc(100vw - 20px); max-height: calc(100dvh - 20px); } .modal-header, .modal-body { padding: 16px; } .modal-footer { padding: 12px 16px; } .form-grid { grid-template-columns: 1fr; gap: 14px; } .modal-footer button { min-height: 44px; flex: 1; } .login-main { padding: 30px 18px; } .login-form { padding: 20px; }
 }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; scroll-behavior: auto !important; } }
+.answer-form fieldset { border: 0; padding: 0; margin: 0; }
+.answer-form legend { font-weight: 600; margin-bottom: 4px; }
+.answer-form pre { white-space: pre-wrap; overflow-wrap: anywhere; margin: 0; }
+.answer-form .choice { display: flex; align-items: center; justify-content: flex-start; gap: 8px; font-weight: 400; }
+.answer-form .choice input { width: auto; height: auto; margin: 0; }

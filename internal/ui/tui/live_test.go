@@ -9,6 +9,7 @@ import (
 
 	"github.com/oxsean/fav/internal/capture"
 	"github.com/oxsean/fav/internal/i18n"
+	"github.com/oxsean/fav/internal/render"
 	"github.com/oxsean/fav/internal/tend"
 )
 
@@ -128,7 +129,7 @@ func TestPulseText(t *testing.T) {
 	if got := pulseText(p, capture.Live{Status: "idle"}, now); !strings.Contains(got, "104k") || strings.Contains(got, i18n.F("live.turn", "")) {
 		t.Errorf("Claude shows tokens, an idle session no turn time: %q", got)
 	}
-	if tokens(1_234_567) != "1.2M" || tokens(950) != "950" {
+	if render.Tokens(1_234_567) != "1.2M" || render.Tokens(950) != "950" {
 		t.Error("token format")
 	}
 }

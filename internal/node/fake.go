@@ -30,12 +30,19 @@ func FakeAgent(args []string) error {
 	stderr := fs.String("stderr", "", "a line it prints to stderr before it ends")
 	note := fs.String("note", "", "report this progress note to its run first")
 	askReport := fs.String("ask-report", "", "report this question to its run first")
+	stream := fs.Bool("stream", false, "talk claude's stream-json both ways on stdin and stdout")
+	permission := fs.String("permission", "", "stream: after the first step, ask to use a tool (TOOL:WHAT)")
+	question := fs.String("question", "", "stream: after the first step, ask the user (QUESTION|OPTION|OPTION…)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if *sleep > 0 {
 		time.Sleep(*sleep)
 		return nil
+	}
+	if *stream {
+		return fakeStream(fakeOpts{sid: *sid, dir: *dir, steps: *steps, every: *every, exit: *exit, ask: *ask, final: *final,
+			stderr: *stderr, note: *note, askReport: *askReport, permission: *permission, question: *question, leave: *leave})
 	}
 	brief := ""
 	if *promptFile != "" {

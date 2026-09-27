@@ -1,9 +1,45 @@
 package render
 
 import (
+	"strconv"
+
+	"github.com/oxsean/fav/internal/agent"
 	"github.com/oxsean/fav/internal/i18n"
 	"github.com/oxsean/fav/internal/task"
 )
+
+// Tokens is a token count for the eye: 950, 12k, 509k, 1.2M.
+func Tokens(n int64) string {
+	switch {
+	case n >= 1_000_000:
+		return strconv.FormatFloat(float64(n)/1e6, 'f', 1, 64) + "M"
+	case n >= 1000:
+		return strconv.FormatInt(n/1000, 10) + "k"
+	}
+	return strconv.FormatInt(n, 10)
+}
+
+var sendStates = map[string]string{agent.SendQueued: "send.queued", agent.SendSent: "send.sent", agent.SendFailed: "send.failed"}
+
+// SendState is how far a message for a run got, as a word.
+func SendState(state string) string {
+	if k, ok := sendStates[state]; ok {
+		return i18n.T(k)
+	}
+	return state
+}
+
+// RunUsage is what a run's agent spent as one line, "" when nothing is known.
+func RunUsage(u *agent.Usage) string {
+	if u == nil || *u == (agent.Usage{}) {
+		return ""
+	}
+	in, cached, out := Tokens(u.Input+u.CacheWrite), Tokens(u.CacheRead), Tokens(u.Output)
+	if u.CostUSD > 0 {
+		return i18n.F("run.usage_cost", in, cached, out, u.Turns, strconv.FormatFloat(u.CostUSD, 'f', 2, 64))
+	}
+	return i18n.F("run.usage", in, cached, out, u.Turns)
+}
 
 var runReasons = map[string]string{
 	"cli_missing": "run.reason.cli_missing", "auth_missing": "run.reason.auth_missing", "auth": "run.reason.auth",
@@ -56,9 +92,7 @@ func RunAttention(r *task.Run) string {
 	case task.AttentionAsked:
 		return i18n.T("run.attention.asked")
 	case task.AttentionPermission:
-		if !task.Open(r.State) {
-			return i18n.T("run.attention.permission")
-		}
+		return i18n.T("run.attention.permission")
 	case task.AttentionStalled:
 		if task.Open(r.State) {
 			return i18n.T("run.attention.stalled")

@@ -14,10 +14,11 @@ import (
 
 // Notify events: a run wants someone.
 const (
-	NotifyWaiting = "run.waiting" // it ended on a question or a denied permission: a reply continues it
-	NotifyAsked   = "run.asked"   // it asked a question and runs on
-	NotifyFailed  = "run.failed"  // it failed, or exited with a code other than 0
-	NotifyStalled = "run.stalled" // it has said nothing for a long time
+	NotifyWaiting    = "run.waiting"    // it ended on a question or a denied permission: a reply continues it
+	NotifyAsked      = "run.asked"      // it asked a question and runs on
+	NotifyFailed     = "run.failed"     // it failed, or exited with a code other than 0
+	NotifyStalled    = "run.stalled"    // it has said nothing for a long time
+	NotifyPermission = "run.permission" // it waits for a permission to use a tool
 )
 
 // NotifyEvent is what config's notify_command reads on stdin, one JSON object.
@@ -90,6 +91,8 @@ func notifyEvent(was, now *task.Run) string {
 		return NotifyAsked
 	case task.Open(now.State) && now.Attention == task.AttentionStalled && was.Attention != task.AttentionStalled:
 		return NotifyStalled
+	case task.Open(now.State) && now.Attention == task.AttentionPermission && was.Attention != task.AttentionPermission:
+		return NotifyPermission
 	}
 	return ""
 }

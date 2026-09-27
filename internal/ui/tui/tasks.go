@@ -679,8 +679,15 @@ func (m *Model) taskButtons() []btn {
 	var bs []btn
 	open := r != nil && task.Open(r.State)
 	waiting := r != nil && r.Waiting()
+	asks := waitsOn(r) != nil
 	if waiting {
 		bs = append(bs, btn{keyed(enterKey, i18n.T("tasks.btn_reply")), true, (*Model).openReply})
+	}
+	if asks {
+		bs = append(bs, btn{keyed(enterKey, i18n.T("tasks.btn_answer")), true, (*Model).openAnswer})
+	}
+	if canSend(r) {
+		bs = append(bs, btn{i18n.T("tasks.btn_send"), false, (*Model).openSend})
 	}
 	if !open && x.Status == task.StatusTodo {
 		bs = append(bs, btn{keyed(enterKey, i18n.T("tasks.btn_run")), !waiting, (*Model).openRunDialog})
@@ -794,7 +801,13 @@ func runFacts(r *task.Run, inner, room int) []string {
 		}
 	} else if r.Note != "" && task.Open(r.State) {
 		out = append(out, dimmed.Render(render.Truncate(i18n.F("tasks.note", render.Sanitize(r.Note)), inner)))
+	} else if r.Last != "" && task.Open(r.State) {
+		out = append(out, dimmed.Render(render.Truncate(i18n.F("tasks.last", render.Sanitize(r.Last)), inner)))
 	}
+	if u := render.RunUsage(r.Usage); u != "" {
+		out = append(out, dimmed.Render(render.Truncate(u, inner)))
+	}
+	out = append(out, requestLines(r, inner)...)
 	if h := render.RunHint(r); h != "" && !r.Waiting() {
 		out = append(out, dimmed.Render(render.Truncate(i18n.F("tasks.next", h), inner)))
 	}

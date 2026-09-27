@@ -351,6 +351,8 @@ tend task add "修掉不稳定的分页测试" --dir ~/dev/webapp --brief-file b
 tend run start <task> --machine mba --wait   # 排到 mba 上，一直跟到结束
 tend run list · tend run show <run> · tend run logs <run> -f · tend run stop <run> · tend run abandon <run>
 tend run continue <run> "用 main 分支"   # 回复一个在等你的 run，在它自己的会话里接着跑
+tend run answer <run> --allow | --deny | --answer pg   # 回答运行中的 run 在等的权限或提问
+tend run send <run> "顺便更新 changelog"              # 给运行中的 run 发一条消息，在它当前这一轮里送到
 tend task list [--all] · tend task show <id> · tend task edit <id> --title … · tend task done|reopen|cancel <id>
 tend agent list · tend machine list [--connect]
 tend inbox                                   # 所有机器上需要你的 run，等得最久的在前
@@ -361,8 +363,8 @@ TUI 里第 `5` 页是任务：`w` 新建，`e` 编辑，`x` 标完成 / 重新�
 `X` 停止当前 run，`Space` 到会话页看这次 run 的对话。右栏是任务书、最近几次 run 和最近一次 run 的输出。
 接手就是打开这次 run 会话的恢复框；run 还在驱动它时，恢复框会提示先停掉 run。
 
-**档案。** 内置 `claude`（无界面的 `claude -p`；目录在某个 Herdr workspace 里时，改在新 Herdr tab 里开交互式 Claude）、
-`codex`（`codex exec --json`）、`fake`（测试用）。更多的写进 `config.json`：
+**档案。** 内置 `claude`（无界面的 `claude -p`，stream-json 双向收发；目录在某个 Herdr workspace 里时，改在新 Herdr tab 里开交互式
+Claude）、`codex`（`codex app-server`）、`fake`（测试用）。更多的写进 `config.json`：
 
 ```json
 {"agents": [
@@ -378,9 +380,12 @@ TUI 里第 `5` 页是任务：`w` 新建，`e` 编辑，`x` 标完成 / 重新�
 命令行没装或没登录时 run 会直接失败，所以不派发（`--force` 强制派发；节点那边也会以同样的原因拒绝）。TUI 和网页的派发框显示同样的内容；
 `tend machine list` 多了 AGENTS 一列。
 
-**run 需要你的时候。** 后台没人回答提问，所以后台 agent 会被告知怎么问：最后一条消息以 `ASK:` 开头，或者执行 `tend run ask "…"`
-（`tend run note "…"` 报告进展；两者都经 `TEND_RUN_DIR` 写进 run 的状态）。后台时 Claude 的提问工具是关掉的，
-被权限提示拒掉的工具会列出来。这样结束的 run 显示为「等你回复」或「等你批准」；`tend run continue <run> "…"`（TUI 和网页里的
+**run 需要你的时候。** 后台的 claude 和 codex run 会一直保持对话：权限请求（claude 配 `"permission": "default"`、codex 的审批）
+或它提的问题（claude 的 AskUserQuestion、codex 的 user input）会等着，直到你用 `tend run answer`、TUI 的任务对话框或网页回答；
+`tend run send` 在它干活时给它发消息（claude 在当前这一轮读到，codex 会调整正在跑的这一轮）。run 会显示它最新说的话和到目前的花费
+（tokens，claude 另有估算的费用）。后台 agent 也会被告知怎么以提问结束：最后一条消息以 `ASK:` 开头，或者执行 `tend run ask "…"`
+（`tend run note "…"` 报告进展；两者都经 `TEND_RUN_DIR` 写进 run 的状态）。权限模式没问就拒掉的工具会列出来。
+这样结束的 run 显示为「等你回复」或「等你批准」；`tend run continue <run> "…"`（TUI 和网页里的
 **回复**）带着你的回答，在同一个会话里起一个新的后台 run。`tend run continue --session <id> "…"` 对任意已索引的会话也一样。
 失败的 run 会说明原因：`cli_missing`、`auth_missing`、`auth`、`quota`、`rate_limit`、`overloaded`、`context_overflow`、`network`、
 `session_missing`、`permission_denied`，附上命令行的原话和下一步（`tend run show`）。15 分钟没有输出的 run 标为「长时间没有输出」
@@ -389,7 +394,7 @@ TUI 里第 `5` 页是任务：`w` 新建，`e` 编辑，`x` 标完成 / 重新�
 **待处理**计数把所有需要你的 run 放在一起，等得最久的在前。
 
 想收到通知就配一个命令：`"notify_command": ["my-notifier"]` 会在 run 需要人的时候运行，标准输入是一个 JSON 对象（`event` 为
-`run.waiting`、`run.asked`、`run.failed` 或 `run.stalled`，还有 run、task、title、machine、agent、state、reason、detail、ask）；
+`run.waiting`、`run.asked`、`run.permission`、`run.failed` 或 `run.stalled`，还有 run、task、title、machine、agent、state、reason、detail、ask）；
 `notify_events` 可以只选其中几种。
 
 **谁在协调。** 同一时刻只有一个进程记任务日志、派发 run：谁拿到 `~/.agent/tend/coord/` 里的锁就是谁——打开任务页的 TUI、

@@ -39,6 +39,7 @@ const (
 	ovTaskForm
 	ovTaskRun
 	ovTaskReply
+	ovTaskAnswer
 )
 
 // ovPad: border + padding columns left of the overlay box; box-local zones add it.
@@ -81,6 +82,8 @@ type overlay struct {
 	opts       [][]string     // task form and run dialog: the choices (machines, agents)
 	pick       []int          // the chosen index of each
 	preview    *coord.Preview // run dialog: how the choice would run
+	request    string         // answer dialog: the request answered (taskID is the run)
+	send       bool           // reply dialog: a message for the running run, not a continuation
 	previewErr error
 
 	msg   capture.Message
@@ -341,6 +344,8 @@ func (m *Model) renderOverlay() string {
 		return m.renderTaskRun()
 	case ovTaskReply:
 		return m.renderReply()
+	case ovTaskAnswer:
+		return m.renderAnswer()
 	}
 	return ""
 }
@@ -446,7 +451,7 @@ func (m *Model) ovWidth() int {
 		w = min(m.w-8, 96)
 	case ovTask:
 		w = min(max(w, 64, groupsWidth([]btnGroup{{bs: m.taskButtons()}})), m.w-4)
-	case ovTaskForm, ovTaskReply:
+	case ovTaskForm, ovTaskReply, ovTaskAnswer:
 		w = min(m.w-8, 100)
 	}
 	return w

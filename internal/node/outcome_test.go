@@ -157,3 +157,25 @@ func TestAFailuresDetailIsTheLineThatToldItWhereverTheLogPutIt(t *testing.T) {
 		t.Fatal(got)
 	}
 }
+
+func TestARunKeepsWhatItsAgentLastSaidAndSpent(t *testing.T) {
+	n := New(t.TempDir())
+	result := `{"type":"result","subtype":"success","result":"All done.","total_cost_usd":0.25,"num_turns":3,` +
+		`"usage":{"input_tokens":10,"cache_read_input_tokens":400,"cache_creation_input_tokens":50,"output_tokens":7}}`
+	end := ended(t, n, StartParams{Task: "t_1", Profile: fake("--steps", "1", "--every", "10ms", "--final", result), Brief: "b"})
+	u := end.Usage
+	if u == nil || u.Input != 10 || u.CacheRead != 400 || u.CacheWrite != 50 || u.Output != 7 || u.CostUSD != 0.25 || u.Turns != 3 {
+		t.Fatalf("%+v", u)
+	}
+	end = ended(t, n, StartParams{Task: "t_1", Profile: fake("--steps", "2", "--every", "10ms"), Brief: "b"})
+	if end.Last != "fake step 2 of 2" || end.Usage == nil || end.Usage.Turns != 1 {
+		t.Fatalf("%q %+v", end.Last, end.Usage)
+	}
+}
+
+func TestUsageAddsTurnsAndKeepsClaudesRunningCost(t *testing.T) {
+	u := agent.Usage{}.Add(agent.Usage{Input: 1, Output: 2, CostUSD: 0.1, Turns: 1}).Add(agent.Usage{Input: 3, CostUSD: 0.3, Turns: 2}).Add(agent.Usage{Output: 1, Turns: 1})
+	if u.Input != 4 || u.Output != 3 || u.CostUSD != 0.3 || u.Turns != 4 {
+		t.Fatalf("%+v", u)
+	}
+}

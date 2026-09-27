@@ -27,7 +27,7 @@ type claude struct{}
 
 func (claude) Name() string { return tend.ProviderClaude }
 func (claude) Caps() Caps {
-	return Caps{Resume: true, Fork: true, Headless: true, Continue: true, PresetSession: true, Sessions: true}
+	return Caps{Resume: true, Fork: true, Headless: true, Continue: true, PresetSession: true, Sessions: true, Stream: true}
 }
 func (claude) Installed() bool { return onPath("claude") }
 
@@ -54,7 +54,11 @@ func (claude) Start(cwd, prompt string) (CommandSpec, error) {
 
 func (claude) Launch(s LaunchSpec) (CommandSpec, error) {
 	var args []string
-	if s.Headless {
+	switch {
+	case s.Stream: // permission prompts and questions come as control requests on stdout, answered on stdin
+		args = append(args, "-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose",
+			"--permission-prompt-tool", "stdio")
+	case s.Headless:
 		// ⚠️ no one answers a question in the background: the run convention makes it the final message
 		args = append(args, "-p", "--output-format", "stream-json", "--verbose", "--disallowedTools", "AskUserQuestion")
 	}
@@ -82,7 +86,7 @@ type codex struct{}
 
 func (codex) Name() string { return tend.ProviderCodex }
 func (codex) Caps() Caps {
-	return Caps{Resume: true, Fork: true, Headless: true, Continue: true, Sessions: true}
+	return Caps{Resume: true, Fork: true, Headless: true, Continue: true, Sessions: true, Stream: true}
 }
 func (codex) Installed() bool { return onPath("codex") }
 
@@ -103,6 +107,16 @@ func (codex) Start(cwd, prompt string) (CommandSpec, error) {
 }
 
 func (codex) Launch(s LaunchSpec) (CommandSpec, error) {
+	if s.Stream { // JSON-RPC on stdin / stdout: the supervisor starts the thread in s.Dir and each turn
+		args := []string{"app-server", "-c", "approval_policy=on-request"} // ⚠️ bare TOML values: codex.cmd refuses quotes
+		if s.Profile.Model != "" {
+			args = append(args, "-c", "model="+s.Profile.Model)
+		}
+		if s.Profile.Permission != "" {
+			args = append(args, "-c", "sandbox_mode="+s.Profile.Permission)
+		}
+		return CommandSpec{Exec: "codex", Args: append(args, s.Profile.Args...), Cwd: s.Dir}, nil
+	}
 	var args []string
 	if s.Headless {
 		args = append(args, "exec", "--json", "--skip-git-repo-check")
@@ -132,7 +146,7 @@ type fake struct{}
 
 func (fake) Name() string { return ProviderFake }
 func (fake) Caps() Caps {
-	return Caps{Headless: true, Continue: true, PresetSession: true}
+	return Caps{Headless: true, Continue: true, PresetSession: true, Stream: true}
 }
 func (fake) Installed() bool { return true }
 func (fake) Resume(r *tend.Rec, name string) (CommandSpec, error) {
@@ -148,6 +162,9 @@ func (fake) Launch(s LaunchSpec) (CommandSpec, error) {
 	args := []string{"_fake-agent", "--session", cmp.Or(s.Resume, s.SessionID), "--dir", s.Dir}
 	if s.PromptFile != "" {
 		args = append(args, "--prompt-file", s.PromptFile)
+	}
+	if s.Stream {
+		args = append(args, "--stream")
 	}
 	args = append(args, s.Profile.Args...)
 	return CommandSpec{Exec: self, Args: args, Cwd: s.Dir}, nil

@@ -2,7 +2,11 @@
 
 const words = {
   asked: ['等你回复', 'Waiting for you'], permission: ['等你批准', 'Needs permission'], stalled: ['长时间无输出', 'No output lately'],
-  question: ['它问', 'It asked'], progress: ['进展', 'Progress'], nextStep: ['下一步', 'Next'], reply: ['回复', 'Reply'],
+  question: ['它问', 'It asked'], itAsks: ['它在问你', 'It asks you'], wantsTool: ['它想用 {0}：', 'It wants to use {0}:'],
+  allow: ['允许', 'Allow'], deny: ['拒绝', 'Deny'], answer: ['回答', 'Answer'], noAnswer: ['不回答', "Don't answer"], answered: ['已回答', 'Answered'],
+  sendMessage: ['发消息', 'Send a message'], sendPlaceholder: ['在它这一轮里告诉它…', 'Tell it, in its current turn…'], messageQueued: ['消息已排队', 'Message queued'],
+  message: ['消息', 'Message'], 'send.queued': ['排队中', 'queued'], 'send.sent': ['已送达', 'sent'], 'send.failed': ['没送到', 'not delivered'], progress: ['进展', 'Progress'], lastSaid: ['最后说', 'Said'],
+  usage: ['输入 {0} tokens，缓存命中 {1}，输出 {2} · {3} 轮', '{0} tokens in, {1} from cache, {2} out · {3} turns'], usageCost: [' · 约 ${0}', ' · about ${0}'], nextStep: ['下一步', 'Next'], reply: ['回复', 'Reply'],
   replyPlaceholder: ['你的回答；会作为新的后台运行进入同一个会话', 'Your answer; it goes to the same session as a new background run'],
   replied: ['回复已排队', 'Reply queued'], replyEmpty: ['先写回复内容', 'Write a reply first'], checking: ['正在检查机器…', 'Checking the machine…'],
   'reason.cli_missing': ['那台机器上没装这个 agent 的命令行', "The agent's CLI is not installed on that machine"],
@@ -137,8 +141,10 @@ const openStates = new Set(['queued', 'starting', 'running', 'unknown']);
 const statusSymbols = {queued:'◷', starting:'◌', running:'●', unknown:'?', exited:'✓', stopped:'■', failed:'!', canceled:'×', abandoned:'⊘', todo:'○', done:'✓', connected:'●', connecting:'◌', offline:'×', idle:'○', asked:'?', permission:'!', stalled:'…'};
 const why = w => t('why.'+w.code).replace('{0}', w.detail || '');
 const waiting = run => run && !openStates.has(run.state) && ['asked', 'permission'].includes(run.attention);
-const attention = run => run && (waiting(run) || openStates.has(run.state) && ['asked', 'stalled'].includes(run.attention)) ? run.attention : '';
-const runNeedsYou = run => !!run && (waiting(run) || ['failed', 'unknown'].includes(run.state) || run.state === 'exited' && run.exit_code != null && run.exit_code !== 0 || openStates.has(run.state) && ['asked', 'stalled'].includes(run.attention));
+const attention = run => run && (waiting(run) || openStates.has(run.state) && ['asked', 'stalled', 'permission'].includes(run.attention)) ? run.attention : '';
+const runNeedsYou = run => !!run && (waiting(run) || ['failed', 'unknown'].includes(run.state) || run.state === 'exited' && run.exit_code != null && run.exit_code !== 0 || openStates.has(run.state) && ['asked', 'stalled', 'permission'].includes(run.attention));
+const tokens = n => n>=1e6?`${(n/1e6).toFixed(1)}M`:n>=1000?`${Math.floor(n/1000)}k`:String(n||0);
+const usageText = u => !u||!(u.input||u.output||u.cache_read||u.cache_write)?'':[tokens((u.input||0)+(u.cache_write||0)),tokens(u.cache_read),tokens(u.output),u.turns||0].reduce((s,v,i)=>s.replace(`{${i}}`,v),t('usage'))+(u.cost_usd?t('usageCost').replace('{0}',u.cost_usd.toFixed(2)):'');
 const since = run => run.ended_at || run.started_at || run.queued_at;
 const badge = state => `<span class="status ${esc(state)}"><span class="status-icon" aria-hidden="true">${statusSymbols[state] || '·'}</span>${t(state)}</span>`;
 const clone = value => JSON.parse(JSON.stringify(value));
@@ -156,7 +162,7 @@ const ui = {
   authenticated:false, loggedOut:false, online:true, reconnecting:false, page:'tasks', loading:false, error:'',
   state:{seq:0,tasks:{},runs:{}}, machines:[], agents:[], task:'t_7a21', run:'', tab:'output', mobileDetail:false,
   search:'', status:'', machine:'', runState:'', who:'', raw:false, follow:true, pending:0,
-  briefs:new Map(), drafts:new Map(), outputs:new Map(), chats:new Map(), busy:new Set(), lastSync:new Date(), unsubscribe:null,
+  briefs:new Map(), drafts:new Map(), choices:new Map(), outputs:new Map(), chats:new Map(), busy:new Set(), lastSync:new Date(), unsubscribe:null,
   modalType:'', modalTask:'', modalDirty:false, modalReturn:null, requestGeneration:0, viewReadLoading:false,
   detailError:'', modalOpener:null, focusTask:'t_7a21', toastTimer:null, reconnectTimer:null, frozenOutput:null, machineSync:new Date()
 };
@@ -417,11 +423,39 @@ function runFacts(run, terminal, writeDisabled) {
   if(attention(run))lines.push(`<div>${badge(attention(run))}</div>`);
   if(terminal&&run.reason&&words['reason.'+run.reason])lines.push(`<div>${t('reason.'+run.reason)}${run.detail?` · <code>${esc(run.detail)}</code>`:''}</div>`);
   else if(terminal&&run.detail)lines.push(`<div><code>${esc(run.detail)}</code></div>`);
-  if(run.ask)lines.push(`<div><strong>${t('question')}</strong><article class="brief">${markdown(run.ask)}</article></div>`);
+  const asking=openStates.has(run.state)&&(run.requests||[]).some(q=>q.kind==='question');
+  if(run.ask&&!asking)lines.push(`<div><strong>${t('question')}</strong><article class="brief">${markdown(run.ask)}</article></div>`);
   else if(run.note&&!terminal)lines.push(`<div><strong>${t('progress')}</strong> ${esc(run.note)}</div>`);
+  else if(run.last&&!terminal)lines.push(`<div><strong>${t('lastSaid')}</strong> ${esc(run.last)}</div>`);
+  if(usageText(run.usage))lines.push(`<div class="muted">${usageText(run.usage)}</div>`);
   if(terminal&&hints[run.reason])lines.push(`<div class="hint">${t('nextStep')}: ${t(hints[run.reason])}</div>`);
+  const asks=openStates.has(run.state)?(run.requests||[]).map(q=>requestForm(run,q,writeDisabled)).join(''):'';
+  const sends=(run.sends||[]).slice(-3).map(m=>`<div class="muted">${t('message')} · ${t('send.'+m.state)}: ${esc(m.text)}</div>`).join('');
+  const send=run.state==='running'&&run.stream?`<form id="send-form" class="stack mt-10" data-run="${esc(run.id)}" data-command="${commandID()}"><div class="form-error" role="alert" hidden></div><label class="sr-only" for="send-text">${t('sendMessage')}</label><textarea name="text" id="send-text" rows="2" placeholder="${t('sendPlaceholder')}" ${writeDisabled}>${esc(ui.drafts.get('send:'+run.id)||'')}</textarea><div class="flex"><button type="submit" ${writeDisabled}>${t('sendMessage')}</button></div></form>`:'';
   const reply=terminal&&run.session&&!openRun(run.task)?`<form id="reply-form" class="stack mt-10" data-run="${esc(run.id)}" data-command="${commandID()}"><div class="form-error" role="alert" hidden></div><label class="sr-only" for="reply-text">${t('reply')}</label><textarea name="text" id="reply-text" rows="3" placeholder="${t('replyPlaceholder')}" ${writeDisabled}>${esc(ui.drafts.get(run.id)||'')}</textarea><div class="flex"><button class="${waiting(run)?'primary':''}" type="submit" ${writeDisabled}>${t('reply')}</button></div></form>`:'';
-  return lines.length||reply?`<div class="run-alert stack">${lines.join('')}${reply}</div>`:'';
+  return lines.length||reply||asks||send||sends?`<div class="run-alert stack">${lines.join('')}${asks}${sends}${send}${reply}</div>`:'';
+}
+// requestForm: what a running run waits on — a tool to allow or deny, or questions to answer by picking an option.
+function requestForm(run, q, writeDisabled) {
+  const head=`<form class="answer-form stack" data-run="${esc(run.id)}" data-request="${esc(q.id)}" data-command="${commandID()}"><div class="form-error" role="alert" hidden></div>`;
+  if(q.kind==='question'){
+    const qs=(q.questions||[]).map((x,i)=>`<fieldset class="stack"><legend>${esc(x.header?x.header+' · ':'')}${esc(x.question)}</legend>${(x.options||[]).map((o,j)=>{const key=`${q.id}/${i}`,checked=(ui.choices.get(key)??(x.options||[])[0])===o;return `<label class="choice"><input type="radio" name="q${i}" value="${esc(o)}" data-choice="${esc(key)}" ${checked?'checked':''} ${writeDisabled}>${esc(o)}</label>`;}).join('')}</fieldset>`).join('');
+    return `${head}<strong>${t('itAsks')}</strong>${qs}<div class="flex"><button class="primary" type="submit" data-allow="1" ${writeDisabled}>${t('answer')}</button><button type="submit" data-allow="0" ${writeDisabled}>${t('noAnswer')}</button></div></form>`;
+  }
+  return `${head}<strong>${t('wantsTool').replace('{0}',esc(q.tool))}</strong><pre class="mono"><code>${esc(q.summary||'')}</code></pre><div class="flex"><button class="primary" type="submit" data-allow="1" ${writeDisabled}>${t('allow')}</button><button type="submit" data-allow="0" ${writeDisabled}>${t('deny')}</button></div></form>`;
+}
+async function submitAnswer(form, submitter) {
+  const run=ui.state.runs[form.dataset.run],q=(run?.requests||[]).find(x=>x.id===form.dataset.request);if(!q)return;
+  const allow=submitter?.dataset.allow!=='0',answer={run:run.id,request:q.id,allow};
+  if(allow&&q.kind==='question'){const data=new FormData(form);answer.answers=Object.fromEntries((q.questions||[]).map((x,i)=>[x.question,data.get('q'+i)||'']));}
+  const result=await api.runAnswer(answer,{command_id:form.dataset.command});
+  ui.state.runs[result.id]=result;renderPage();toast(t('answered'));
+}
+async function submitSend(form) {
+  const text=new FormData(form).get('text')||'';
+  if(!text.trim()){const e=form.querySelector('.form-error');e.hidden=false;e.textContent=t('replyEmpty');return;}
+  const result=await api.runSend({run:form.dataset.run,text},{command_id:form.dataset.command});
+  ui.drafts.delete('send:'+form.dataset.run);ui.state.runs[result.id]=result;renderPage();toast(t('messageQueued'));
 }
 async function submitReply(form) {
   const text=new FormData(form).get('text')||'';
@@ -634,7 +668,7 @@ function showKeyboard() {
 }
 
 document.addEventListener('submit',async event=>{
-  event.preventDefault();const form=event.target,submitter=form.querySelector('[type="submit"]');if(submitter?.disabled)return;
+  event.preventDefault();const form=event.target,submitter=event.submitter||form.querySelector('[type="submit"]');if(submitter?.disabled)return;
   if(submitter)submitter.disabled=true;ui.modalSubmitting=form.id!=='login-form';
   try{
     if(form.id==='login-form')await login(new FormData(form).get('token'));
@@ -642,7 +676,9 @@ document.addEventListener('submit',async event=>{
     else if(form.id==='dispatch-form')await submitDispatch(form);
     else if(form.id==='confirm-form')await submitConfirm(form);
     else if(form.id==='reply-form')await submitReply(form);
-  }catch(error){if(form.id==='reply-form'){const e=form.querySelector('.form-error');e.hidden=false;e.textContent=errorText(error);}else modalError(errorText(error));if(error.code==='conflict'){const state=await api.stateGet({no_briefs:true});ui.state=state;refreshDispatchAdvice();}}
+    else if(form.id==='send-form')await submitSend(form);
+    else if(form.classList.contains('answer-form'))await submitAnswer(form,submitter);
+  }catch(error){if(form.id==='reply-form'||form.id==='send-form'||form.classList.contains('answer-form')){const e=form.querySelector('.form-error');e.hidden=false;e.textContent=errorText(error);}else modalError(errorText(error));if(error.code==='conflict'){const state=await api.stateGet({no_briefs:true});ui.state=state;refreshDispatchAdvice();}}
   finally{ui.modalSubmitting=false;if(submitter?.isConnected)submitter.disabled=false;if(form.id==='dispatch-form')refreshDispatchAdvice();}
 });
 document.addEventListener('click',async event=>{
@@ -687,6 +723,8 @@ document.addEventListener('input',event=>{
   const el=event.target;
   if(el.id==='search-input'){ui.search=el.value;renderTaskList();}
   if(el.id==='reply-text')ui.drafts.set(el.closest('form').dataset.run,el.value);
+  if(el.id==='send-text')ui.drafts.set('send:'+el.closest('form').dataset.run,el.value);
+  if(el.dataset.choice)ui.choices.set(el.dataset.choice,el.value);
   if(modal.open&&ui.modalType==='task-form'){
     ui.modalDirty=true;
     if(el.id==='task-brief'){document.querySelector('#brief-bytes').textContent=new TextEncoder().encode(el.value).length;document.querySelector('#brief-preview').innerHTML=markdown(el.value);}

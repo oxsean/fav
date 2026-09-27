@@ -30,6 +30,8 @@ cexec() { ssh mba "$docker exec -i tend-linux $*"; }
 
 server_home=$r/server
 cexec mkdir -p "$server_home"
+printf '{"agents": [{"name": "gated", "provider": "fake", "args": ["--steps", "8", "--every", "1s", "--permission", "Bash:srv e2e deploy"]}]}' |
+	cexec tee "$server_home/config.json" >/dev/null
 token() { cexec env TEND_HOME=$server_home /root/.local/bin/tend server token add "$@" 2>/dev/null; }
 [ $# -gt 0 ] || set -- mba linux win
 nodes=$#
@@ -157,7 +159,7 @@ wait_runs
 for h in $hosts; do
 	check "$h exited 0" "$(jq_runs "print(' '.join(r['state']+str(r.get('exit_code')) for r in rs if r['machine']=='$h'))")" exited0
 	run=$(jq_runs "print([r['id'] for r in rs if r['machine']=='$h'][0])")
-	check "$h output" "$("$tend" run logs "$run" | grep -c 'fake step')" 2
+	check "$h output" "$("$tend" run logs "$run" | grep -c '"text":"fake step')" 2
 done
 
 stop_server
@@ -175,6 +177,16 @@ first=$(jq_runs "print([r['id'] for r in rs if r['machine']=='$last'][0])")
 wait_runs
 check "a reply on $last continues the session" "$(jq_runs "f=[x for x in rs if x['id']=='$first'][0]; print(' '.join(r['state']+str(r.get('exit_code'))+(':same' if r.get('session')==f.get('session') else ':other') for r in rs if r.get('parent')=='$first'))")" "exited0:same"
 check "$last agents checked" "$("$tend" machine list --connect --json | python3 -c "import json,sys; print(sorted([m for m in json.load(sys.stdin) if m['name']=='$last'][0].get('agents',{})))")" "['claude', 'codex']"
+"$tend" task add "srv e2e gated" --machine "$last" --agent gated --dir "$(dir_of "$last")" >/dev/null
+t=$("$tend" task list --json | python3 -c "import json,sys; print([t['id'] for t in json.load(sys.stdin) if t['title']=='srv e2e gated'][0])")
+"$tend" run start "$t" --runner background >/dev/null
+gated=$(jq_runs "print([r['id'] for r in rs if r['agent']=='gated'][0])")
+deadline=$(($(date +%s) + 90))
+until [ "$(jq_runs "print(len([r for r in rs if r['id']=='$gated'][0].get('requests') or []))")" = 1 ] || [ "$(date +%s)" -gt "$deadline" ]; do sleep 2; done
+"$tend" run answer "$gated" --allow >/dev/null && "$tend" run send "$gated" "srv e2e message" >/dev/null
+wait_runs
+check "$last permission answered" "$(jq_runs "print([r['state']+str(r.get('exit_code'))+':'+','.join(m['state'] for m in r.get('sends') or []) for r in rs if r['id']=='$gated'][0])")" "exited0:sent"
+check "$last agent heard it" "$("$tend" run logs "$gated" | grep -c -e 'allowed Bash' -e 'heard: srv e2e message')" 2
 
 for p in $pids; do kill "$p" 2>/dev/null; done
 stop_server

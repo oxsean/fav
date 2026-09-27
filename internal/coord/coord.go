@@ -44,6 +44,8 @@ const (
 	MTaskGet       = "task.get"
 	MRunPreview    = "run.preview"
 	MRunContinue   = "run.continue"
+	MRunAnswer     = "run.answer"
+	MRunSend       = "run.send"
 	PushJournal    = "journal"
 	defaultSlots   = 2
 	subscribeQueue = 256

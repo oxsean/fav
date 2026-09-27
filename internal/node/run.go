@@ -73,6 +73,7 @@ type Spec struct {
 	Dir         string        `json:"dir"`
 	Runner      string        `json:"runner"`
 	Stdin       bool          `json:"stdin,omitempty"`    // prompt.md goes to the agent's stdin
+	Stream      bool          `json:"stream,omitempty"`   // stream-json both ways: prompt.md is the first message
 	Thread      bool          `json:"thread,omitempty"`   // the session id comes as codex's thread.started on stdout
 	Provider    string        `json:"provider,omitempty"` // whose sessions it leaves
 	Agent       string        `json:"agent,omitempty"`    // the profile's provider
@@ -84,22 +85,27 @@ type Spec struct {
 
 // State is what the supervisor writes.
 type State struct {
-	Rev       int        `json:"rev"`
-	State     string     `json:"state"`
-	Pid       int        `json:"pid,omitempty"`        // the agent
-	PidStart  int64      `json:"pid_start,omitempty"`  // when the agent started (proc.StartTime): pid's identity
-	Sup       int        `json:"supervisor,omitempty"` // the supervisor
-	Pane      string     `json:"pane,omitempty"`
-	Provider  string     `json:"provider,omitempty"`
-	Session   string     `json:"session,omitempty"`
-	ExitCode  *int       `json:"exit_code,omitempty"`
-	Reason    string     `json:"reason,omitempty"`
-	Detail    string     `json:"detail,omitempty"`    // what the agent or its CLI said about how it ended
-	Attention string     `json:"attention,omitempty"` // asked | permission | stalled: someone should look
-	Ask       string     `json:"ask,omitempty"`       // the question it asked
-	Note      string     `json:"note,omitempty"`      // its latest progress note
-	StartedAt *time.Time `json:"started_at,omitempty"`
-	EndedAt   *time.Time `json:"ended_at,omitempty"`
+	Rev       int             `json:"rev"`
+	State     string          `json:"state"`
+	Pid       int             `json:"pid,omitempty"`        // the agent
+	PidStart  int64           `json:"pid_start,omitempty"`  // when the agent started (proc.StartTime): pid's identity
+	Sup       int             `json:"supervisor,omitempty"` // the supervisor
+	Pane      string          `json:"pane,omitempty"`
+	Provider  string          `json:"provider,omitempty"`
+	Session   string          `json:"session,omitempty"`
+	ExitCode  *int            `json:"exit_code,omitempty"`
+	Reason    string          `json:"reason,omitempty"`
+	Detail    string          `json:"detail,omitempty"`    // what the agent or its CLI said about how it ended
+	Attention string          `json:"attention,omitempty"` // asked | permission | stalled: someone should look
+	Ask       string          `json:"ask,omitempty"`       // the question it asked
+	Note      string          `json:"note,omitempty"`      // its latest progress note
+	Last      string          `json:"last,omitempty"`      // the newest thing it said
+	Usage     *agent.Usage    `json:"usage,omitempty"`
+	Stream    bool            `json:"stream,omitempty"`   // it takes answers and messages while it runs
+	Requests  []agent.Request `json:"requests,omitempty"` // what it waits on
+	Sends     []agent.Send    `json:"sends,omitempty"`    // messages for it and how far they got
+	StartedAt *time.Time      `json:"started_at,omitempty"`
+	EndedAt   *time.Time      `json:"ended_at,omitempty"`
 }
 
 // Attentions.
@@ -372,8 +378,10 @@ func (n *Node) spec(p StartParams, dir string) (Spec, error) {
 	if prov.Caps().PresetSession && p.Resume == "" {
 		ls.SessionID = newUUID()
 	}
-	stdin := false
+	stdin, stream := false, false
 	switch {
+	case runner == RunnerBackground && prov.Caps().Stream:
+		stream, ls.Stream = true, true
 	case runner == RunnerHerdr:
 		ls.Prompt = fmt.Sprintf(readBrief, promptFile)
 		ls.Profile.Args = append(append([]string(nil), ls.Profile.Args...), "--add-dir", dir)
@@ -393,7 +401,7 @@ func (n *Node) spec(p StartParams, dir string) (Spec, error) {
 		return Spec{}, &wire.Error{Code: wire.CodeBadRequest, Detail: err.Error()}
 	}
 	return Spec{Run: p.Run, Task: p.Task, Coordinator: p.Coordinator, Argv: cmd.Argv(), Dir: p.Dir, Runner: runner,
-		Stdin: stdin, Thread: p.Profile.Provider == tend.ProviderCodex, Provider: agent.SessionProvider(p.Profile.Provider),
+		Stdin: stdin, Stream: stream, Thread: p.Profile.Provider == tend.ProviderCodex, Provider: agent.SessionProvider(p.Profile.Provider),
 		Agent: p.Profile.Provider, Session: cmp.Or(ls.SessionID, p.Resume), Title: p.Title, StallAfter: n.stallAfter(),
 		Created: time.Now()}, nil
 }
@@ -425,7 +433,11 @@ func (n *Node) brief(p StartParams, spec Spec, dir string) string {
 		self = "tend"
 	}
 	tendCmd := shell.POSIX.Join([]string{self, "run"})
-	return strings.TrimRight(p.Brief, "\n") + "\n\n" + fmt.Sprintf(convention, p.Run, agent.AskMark, tendCmd, tendCmd)
+	c := convention
+	if spec.Stream {
+		c = streamConvention
+	}
+	return strings.TrimRight(p.Brief, "\n") + "\n\n" + fmt.Sprintf(c, p.Run, agent.AskMark, tendCmd, tendCmd)
 }
 
 // convention tells a background agent how to ask and report: nobody answers a prompt while it runs.
@@ -433,6 +445,16 @@ const convention = `---
 This task runs unattended under tend (run %[1]s); nobody watches it live and nobody can answer a prompt.
 - If you need a decision or information from the user to go on, stop working and make your final message start with
   "%[2]s" followed by the question. The answer comes back as a new message in this session.
+- To report progress, you may run: %[3]s note "<one line>"
+- To ask while you keep working on something else, you may run: %[4]s ask "<question>"
+`
+
+// streamConvention tells a background agent whose prompts are answered remotely how to ask and report.
+const streamConvention = `---
+This task runs under tend (run %[1]s); nobody watches it live. A permission prompt or a question you ask with
+AskUserQuestion waits until the user answers it remotely, which may take a while.
+- If you need a decision or information from the user to go on, ask with AskUserQuestion, or stop working and make
+  your final message start with "%[2]s" followed by the question.
 - To report progress, you may run: %[3]s note "<one line>"
 - To ask while you keep working on something else, you may run: %[4]s ask "<question>"
 `
@@ -569,6 +591,9 @@ func (n *Node) Snapshot(id string) (Snapshot, error) {
 	default: // the agent starts only after its first state is written, and a supervisor this late starts none
 		ended := created.Add(notLaunched)
 		s.State = State{State: StateFailed, Reason: "not_launched", Provider: spec.Provider, Session: spec.Session, EndedAt: &ended}
+	}
+	if spec.Stream {
+		s.Stream, s.Sends = true, withQueued(dir, s.State)
 	}
 	return s, nil
 }

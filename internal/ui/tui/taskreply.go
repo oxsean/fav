@@ -24,18 +24,30 @@ func canReply(r *task.Run) bool {
 	return r != nil && r.Session != "" && !task.Open(r.State)
 }
 
+// canSend: r runs and takes messages while it does.
+func canSend(r *task.Run) bool { return r != nil && r.State == task.Running && r.Stream }
+
 func (m *Model) openReply() {
-	r := m.selectedRun()
-	if !canReply(r) {
-		return
+	if r := m.selectedRun(); canReply(r) {
+		m.openText(r, false)
 	}
+}
+
+func (m *Model) openSend() {
+	if r := m.selectedRun(); canSend(r) {
+		m.openText(r, true)
+	}
+}
+
+// openText opens the text dialog for r: a reply that continues its session, or a message while it runs.
+func (m *Model) openText(r *task.Run, send bool) {
 	area := newArea()
 	area.CharLimit = 256 << 10
 	area.ShowLineNumbers = false
 	area.Prompt = ""
 	area.Placeholder = i18n.T("tasks.reply_placeholder")
 	area.SetHeight(5)
-	m.ov = overlay{kind: ovTaskReply, focus: -1, taskID: r.ID, area: area}
+	m.ov = overlay{kind: ovTaskReply, focus: -1, taskID: r.ID, area: area, send: send}
 	m.pending = m.ov.area.Focus()
 }
 
@@ -93,17 +105,23 @@ func (m *Model) sendReply() tea.Cmd {
 		m.flash(i18n.T("tasks.reply_empty"))
 		return nil
 	}
-	id := m.ov.taskID
+	id, send := m.ov.taskID, m.ov.send
 	m.closeOverlay()
+	if send {
+		return m.write(coord.MRunSend, coord.SendMessage{Run: id, Text: text}, i18n.F("tasks.sent", id), nil)
+	}
 	return m.write(coord.MRunContinue, coord.Continue{Run: id, Text: text}, i18n.F("tasks.replied", id), nil)
 }
 
 func (m *Model) renderReply() string {
 	w := m.ovWidth()
 	inner := w - 4
-	body := []string{boldSty.Foreground(cText).Render(render.Truncate(i18n.F("tasks.reply_title", m.ov.taskID), inner)),
-		dimmed.Render(render.Truncate(i18n.T("tasks.reply_hint"), inner)), ""}
-	if r := m.tasks.st.Runs[m.ov.taskID]; r != nil && r.Ask != "" {
+	title, hint := i18n.F("tasks.reply_title", m.ov.taskID), i18n.T("tasks.reply_hint")
+	if m.ov.send {
+		title, hint = i18n.F("tasks.send_title", m.ov.taskID), i18n.T("tasks.send_hint")
+	}
+	body := []string{boldSty.Foreground(cText).Render(render.Truncate(title, inner)), dimmed.Render(render.Truncate(hint, inner)), ""}
+	if r := m.tasks.st.Runs[m.ov.taskID]; r != nil && r.Ask != "" && !m.ov.send {
 		lines := render.Wrap(render.Sanitize(r.Ask), inner)
 		if len(lines) > 6 {
 			lines = append(lines[:5], dimmed.Render(i18n.F("tasks.more_lines", len(lines)-5)))

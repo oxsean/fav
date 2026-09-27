@@ -120,7 +120,8 @@ func Supervise(dir string) error {
 	if paths.Exists(filepath.Join(dir, "state.json")) || !claim(dir) { // decided already: never start twice
 		return nil
 	}
-	s := &sup{dir: dir, spec: spec, st: State{State: StateStarting, Provider: spec.Provider, Session: spec.Session, Sup: os.Getpid()}}
+	s := &sup{dir: dir, spec: spec, st: State{State: StateStarting, Provider: spec.Provider, Session: spec.Session, Sup: os.Getpid(),
+		Stream: spec.Stream}, inputs: map[string]pending{}, userDenied: map[string]bool{}}
 	if s.stopAsked() {
 		return s.end(StateStopped, "asked", nil)
 	}
@@ -143,6 +144,15 @@ type sup struct {
 	seen time.Time // the agent's latest output
 	read int64     // how far reports.jsonl has been read
 
+	in           *streamIn          // a stream run's stdin
+	proto        proto              // how it speaks there
+	inputs       map[string]pending // requests waiting for an answer, by id
+	userDenied   map[string]bool    // tools the user denied
+	reqAttention bool               // the attention was set by waiting requests
+	answersAt    int64              // how far answers.jsonl has been read
+	inboxAt      int64              // how far inbox.jsonl has been read
+	sent         bool               // a message went to the agent while it ran
+
 	transcript string    // an interactive run's transcript, once found
 	liveAt     time.Time // when the pane, hook events and transcript were last read
 	liveAsked  bool      // the attention was set by what they showed, so it goes when they stop showing it
@@ -150,9 +160,13 @@ type sup struct {
 
 // outcome is what the agent's output said about how it ends.
 type outcome struct {
-	final  string   // its final message so far
-	err    string   // the last error it reported
-	denied []string // tools a permission prompt denied (no one answers them in the background)
+	final    string   // its final message so far
+	err      string   // the last error it reported
+	denied   []string // tools a permission prompt denied (no one answers them in the background)
+	last     string   // the newest thing it said
+	usage    *agent.Usage
+	dirty    bool      // last or usage changed since the state was written
+	turnDone time.Time // a stream run's turn ended then and nothing followed yet
 }
 
 func (s *sup) save() error {
@@ -201,6 +215,7 @@ func (s *sup) finish(state, reason string, code *int) error {
 	return s.keep(func(st *State) {
 		st.State, st.Reason, st.ExitCode, st.EndedAt = state, reason, code, &now
 		st.Attention, st.Ask = "", ""
+		s.settleRequests(st)
 	})
 }
 
@@ -217,11 +232,13 @@ func (s *sup) exited(code int) error {
 	now := time.Now()
 	return s.keep(func(st *State) {
 		st.State, st.ExitCode, st.EndedAt = StateExited, &code, &now
+		st.Last, st.Usage = o.last, o.usage
+		s.settleRequests(st)
 		if st.Attention == AttentionStalled {
 			st.Attention = ""
 		}
-		if len(o.denied) > 0 {
-			st.Attention, st.Reason, st.Detail = AttentionPermission, agent.ReasonPermission, strings.Join(o.denied, ", ")
+		if denied := slices.DeleteFunc(slices.Clone(o.denied), func(t string) bool { return s.userDenied[t] }); len(denied) > 0 {
+			st.Attention, st.Reason, st.Detail = AttentionPermission, agent.ReasonPermission, strings.Join(denied, ", ")
 		}
 		if ask := agent.AskOf(o.final); ask != "" {
 			st.Attention, st.Ask = AttentionAsked, clip(ask, maxReport)
@@ -277,6 +294,16 @@ func (s *sup) stall() {
 	case !quiet && att == AttentionStalled:
 		s.keep(func(st *State) { st.Attention = "" })
 	}
+}
+
+// interrupt asks a stream run's agent to end its turn and closes its input; false when the run has no stream.
+func (s *sup) interrupt() bool {
+	if s.in == nil || s.in.isClosed() {
+		return false
+	}
+	s.proto.interrupt()
+	s.in.close()
+	return true
 }
 
 // liveEvery is how often an interactive run's pane, hook events and transcript are read.
@@ -385,6 +412,16 @@ func (s *sup) run() error {
 		}
 		defer f.Close()
 		c.Stdin = f
+	} else if s.spec.Stream {
+		r, w, err := os.Pipe()
+		if err != nil {
+			s.end(StateFailed, err.Error(), nil)
+			return err
+		}
+		defer r.Close()
+		c.Stdin, s.in = r, &streamIn{w: w}
+		s.proto = newProto(s)
+		defer s.in.close()
 	} else if interactive {
 		c.Stdin = os.Stdin
 	}
@@ -418,6 +455,9 @@ func (s *sup) run() error {
 	}
 	tree, err := proc.StartTree(c, interactive)
 	closeAll(writeEnds) // the agent has its own copies
+	if s.in != nil {
+		c.Stdin.(*os.File).Close()
+	}
 	if err != nil {
 		closeAll(readEnds)
 		pipes.Wait()
@@ -435,6 +475,13 @@ func (s *sup) run() error {
 		st.State, st.Pid, st.PidStart, st.StartedAt, st.Pane = StateRunning, c.Process.Pid, proc.StartTime(c.Process.Pid), &now, pane["pane"]
 	})
 	crashAt("running")
+	var fast <-chan time.Time
+	if s.in != nil {
+		s.startStream()
+		t := time.NewTicker(streamEvery)
+		defer t.Stop()
+		fast = t.C
+	}
 
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs, syscall.SIGHUP, syscall.SIGTERM, os.Interrupt)
@@ -444,16 +491,20 @@ func (s *sup) run() error {
 	tick := time.NewTicker(time.Second)
 	defer tick.Stop()
 	var asked time.Time
-	reason := ""
+	reason, soft := "", false // soft: a stop interrupted the turn and waits for the agent to end it
 	for {
 		select {
 		case err := <-done:
 			s.drain(tree, &pipes, readEnds)
+			if s.in != nil {
+				s.endStream()
+			}
 			code := c.ProcessState.ExitCode()
 			if asked.IsZero() && s.stopAsked() {
 				asked, reason = time.Now(), "asked"
 			}
 			s.reports()
+			s.flushOut()
 			crashAt("ending")
 			if !asked.IsZero() {
 				return s.finish(StateStopped, reason, &code)
@@ -464,7 +515,8 @@ func (s *sup) run() error {
 			}
 			return s.exited(code)
 		case sig := <-sigs:
-			if asked.IsZero() {
+			if asked.IsZero() || soft {
+				soft = false
 				asked, reason = time.Now(), "signal"
 				if sig == syscall.SIGHUP {
 					reason = "tab_closed"
@@ -473,19 +525,26 @@ func (s *sup) run() error {
 			}
 		case <-tick.C:
 			s.reports()
+			s.flushOut()
 			if interactive {
 				s.watchLive()
 			} else {
 				s.stall()
 			}
-			if asked.IsZero() {
-				if s.stopAsked() {
-					asked, reason = time.Now(), "asked"
+			switch {
+			case asked.IsZero() && s.stopAsked():
+				asked, reason = time.Now(), "asked"
+				if soft = s.interrupt(); !soft {
 					tree.Stop()
 				}
-			} else if time.Since(asked) > stopGrace {
+			case soft && time.Since(asked) > interruptGrace:
+				soft, asked = false, time.Now()
+				tree.Stop()
+			case !asked.IsZero() && !soft && time.Since(asked) > stopGrace:
 				tree.Kill()
 			}
+		case <-fast:
+			s.streamTick()
 		}
 	}
 }
@@ -542,13 +601,22 @@ func (s *sup) copyOut(r io.Reader, w io.Writer) {
 
 // event is the part of a claude stream-json or codex exec --json line the supervisor reads.
 type event struct {
-	Type     string `json:"type"`
-	Subtype  string `json:"subtype"`
-	ThreadID string `json:"thread_id"`
-	Result   string `json:"result"`
-	IsError  bool   `json:"is_error"`
-	Message  string `json:"message"`
-	Denials  []struct {
+	Type     string          `json:"type"`
+	Subtype  string          `json:"subtype"`
+	ThreadID string          `json:"thread_id"`
+	Result   string          `json:"result"`
+	IsError  bool            `json:"is_error"`
+	Message  json.RawMessage `json:"message"` // codex: the error's text; claude: the assistant's message
+	Cost     float64         `json:"total_cost_usd"`
+	Turns    int             `json:"num_turns"`
+	Usage    struct {
+		Input      int64 `json:"input_tokens"`
+		CacheRead  int64 `json:"cache_read_input_tokens"`
+		CacheWrite int64 `json:"cache_creation_input_tokens"`
+		Cached     int64 `json:"cached_input_tokens"` // codex: part of input_tokens
+		Output     int64 `json:"output_tokens"`
+	} `json:"usage"`
+	Denials []struct {
 		ToolName string `json:"tool_name"`
 	} `json:"permission_denials"`
 	Item struct {
@@ -558,11 +626,42 @@ type event struct {
 	Error json.RawMessage `json:"error"`
 }
 
-const maxFinal = 16 << 10
+const (
+	maxFinal = 16 << 10
+	maxLast  = 500
+)
+
+// said records the newest thing the agent said.
+func (s *sup) said(text string) {
+	if text = strings.TrimSpace(text); text != "" {
+		s.out.last, s.out.dirty = clip(text, maxLast), true
+	}
+}
+
+// spent adds one turn's usage.
+func (s *sup) spent(t agent.Usage) {
+	u := agent.Usage{}
+	if s.out.usage != nil {
+		u = *s.out.usage
+	}
+	u = u.Add(t)
+	s.out.usage, s.out.dirty = &u, true
+}
+
+// flushOut writes what the agent said and spent since the last write.
+func (s *sup) flushOut() {
+	s.mu.Lock()
+	dirty, last, usage := s.out.dirty, s.out.last, s.out.usage
+	s.out.dirty = false
+	s.mu.Unlock()
+	if dirty {
+		s.keep(func(st *State) { st.Last, st.Usage = last, usage })
+	}
+}
 
 func (s *sup) line(line []byte) {
 	text := bytes.TrimSpace(line)
-	if len(text) == 0 {
+	if len(text) == 0 || s.proto != nil && s.proto.line(text) {
 		return
 	}
 	var ev event
@@ -570,6 +669,7 @@ func (s *sup) line(line []byte) {
 		if s.spec.Agent != tend.ProviderClaude && s.spec.Agent != tend.ProviderCodex {
 			s.mu.Lock()
 			s.out.final = clip(string(text), maxFinal) // a plain CLI: its last line is its final message
+			s.said(string(text))
 			s.mu.Unlock()
 		}
 		return
@@ -583,9 +683,33 @@ func (s *sup) line(line []byte) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	switch {
+	case ev.Type == "result":
+		s.out.turnDone = time.Now()
+	case ev.Type == "assistant" || ev.Type == "user" || ev.Type == "system" && ev.Subtype == "init":
+		s.out.turnDone = time.Time{}
+	}
 	switch ev.Type {
+	case "assistant": // claude
+		var m struct {
+			Content []struct {
+				Type string `json:"type"`
+				Text string `json:"text"`
+			} `json:"content"`
+		}
+		if json.Unmarshal(ev.Message, &m) == nil {
+			for _, c := range m.Content {
+				if c.Type == "text" {
+					s.said(c.Text)
+				}
+			}
+		}
+	case "turn.completed": // codex
+		s.spent(agent.Usage{Input: ev.Usage.Input - ev.Usage.Cached, CacheRead: ev.Usage.Cached, Output: ev.Usage.Output, Turns: 1})
 	case "result": // claude's last event
 		s.out.final = clip(ev.Result, maxFinal)
+		s.spent(agent.Usage{Input: ev.Usage.Input, CacheRead: ev.Usage.CacheRead, CacheWrite: ev.Usage.CacheWrite,
+			Output: ev.Usage.Output, CostUSD: ev.Cost, Turns: ev.Turns})
 		if ev.IsError {
 			s.out.err = clip(cmp.Or(ev.Result, ev.Subtype), maxFinal)
 		}
@@ -598,9 +722,11 @@ func (s *sup) line(line []byte) {
 	case "item.completed": // codex
 		if ev.Item.Type == "agent_message" {
 			s.out.final = clip(ev.Item.Text, maxFinal)
+			s.said(ev.Item.Text)
 		}
 	case "error", "turn.failed": // codex
-		msg := ev.Message
+		var msg string
+		json.Unmarshal(ev.Message, &msg)
 		var e struct {
 			Message string `json:"message"`
 		}

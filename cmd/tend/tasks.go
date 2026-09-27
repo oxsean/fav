@@ -447,6 +447,10 @@ func cmdRun(args []string) error {
 		return cmdRunLogs(args[1:])
 	case "continue", "reply":
 		return cmdRunContinue(args[1:])
+	case "answer":
+		return cmdRunAnswer(args[1:])
+	case "send":
+		return cmdRunSend(args[1:])
 	case "ask", "note":
 		return cmdRunReport(args[0], args[1:])
 	}
@@ -654,10 +658,17 @@ func cmdRunShow(args []string) error {
 		fmt.Print(i18n.F("cli.run.show", r.ID, r.Task, r.Machine, r.Agent, r.Dir, runState(r), took(r, time.Now()),
 			orDash(r.Provider), orDash(r.Session), reason))
 		for _, l := range []struct{ key, v string }{{"cli.run.show_detail", r.Detail}, {"cli.run.show_parent", r.Parent},
-			{"cli.run.show_note", r.Note}, {"cli.run.show_ask", r.Ask}, {"cli.run.show_hint", render.RunHint(r)}} {
+			{"cli.run.show_note", r.Note}, {"cli.run.show_last", r.Last}, {"cli.run.show_usage", render.RunUsage(r.Usage)},
+			{"cli.run.show_ask", r.Ask}, {"cli.run.show_hint", render.RunHint(r)}} {
 			if l.v != "" {
 				fmt.Print(i18n.F(l.key, render.Sanitize(l.v)))
 			}
+		}
+		for _, q := range r.Requests {
+			fmt.Print(requestLine(q))
+		}
+		for _, m := range r.Sends {
+			fmt.Print(i18n.F("cli.run.show_send", render.SendState(m.State), render.Sanitize(m.Text)))
 		}
 		return nil
 	})

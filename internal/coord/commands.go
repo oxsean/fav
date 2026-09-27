@@ -94,7 +94,7 @@ var readMethods = []string{remote.MHello, remote.MList, remote.MMessages, remote
 
 // Methods are the client methods.
 var Methods = []string{MStateGet, MTaskGet, MTaskCreate, MTaskEdit, MTaskStatus, MRunDispatch, MRunStop, MRunAbandon, MRunTail,
-	MAgentList, MMachineList, MSubscribe, MNodeCall, MRunPreview, MRunContinue}
+	MAgentList, MMachineList, MSubscribe, MNodeCall, MRunPreview, MRunContinue, MRunAnswer, MRunSend}
 
 // Handler answers clients.
 func (c *Coord) Handler() wire.Handler {
@@ -176,6 +176,10 @@ func (c *Coord) Handler() wire.Handler {
 			return c.command(r, c.runStop, runView)
 		case MRunAbandon:
 			return c.command(r, c.runAbandon, runView)
+		case MRunAnswer:
+			return c.command(r, c.runAnswer, runView)
+		case MRunSend:
+			return c.command(r, c.runSend, runView)
 		}
 		return nil, &wire.Error{Code: wire.CodeUnknownMethod, Detail: r.Method}
 	}

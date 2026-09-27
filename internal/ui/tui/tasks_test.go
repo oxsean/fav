@@ -11,6 +11,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/oxsean/fav/internal/coord"
+	"github.com/oxsean/fav/internal/filelock"
 	"github.com/oxsean/fav/internal/node"
 	"github.com/oxsean/fav/internal/remote"
 	"github.com/oxsean/fav/internal/task"
@@ -329,4 +330,57 @@ func TestTasksThatNeedYouComeFirstLongestWaitingFirst(t *testing.T) {
 	if s := screenText(m); !strings.Contains(s, "2 need you") && !strings.Contains(s, "2 个等你处理") {
 		t.Fatalf("the title counts them:\n%s", s)
 	}
+}
+
+func TestARunThatWaitsIsAnsweredAndSentAMessage(t *testing.T) {
+	var runDir string
+	m, _ := tasksModelWith(t, func(dir string, spec node.Spec) (string, error) {
+		runDir = dir
+		unlock, err := filelock.TryLock(filepath.Join(dir, "lock")) // a live supervisor
+		if err != nil {
+			return "", err
+		}
+		t.Cleanup(unlock)
+		b := `{"rev":1,"state":"running","stream":true,"provider":"claude","session":"` + spec.Session + `","attention":"permission",` +
+			`"requests":[{"id":"perm-1","kind":"permission","tool":"Bash","summary":"make deploy","at":"2026-09-27T10:00:00Z"}]}`
+		return "", os.WriteFile(filepath.Join(dir, "state.json"), []byte(b), 0o600)
+	})
+	key(m, "5")
+	var tk task.Task
+	if err := m.tasks.cl.CallCommand(t.Context(), coord.MTaskCreate, "c1", coord.TaskCreate{Title: "deploy", Dir: t.TempDir(), Agent: "fake"}, &tk); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, m, func() bool { return len(m.tasks.list) == 1 })
+	key(m, "enter")
+	key(m, "enter")
+	key(m, "enter")
+	waitFor(t, m, func() bool { r := m.selectedRun(); return r != nil && len(r.Requests) == 1 })
+	if s := screenText(m); !strings.Contains(s, "make deploy") {
+		t.Fatalf("the task shows what it waits on:\n%s", s)
+	}
+	key(m, "enter")
+	key(m, "enter")
+	if m.ov.kind != ovTaskAnswer || !strings.Contains(screenText(m), "make deploy") {
+		t.Fatalf("Enter on a waiting run answers it: %v\n%s", m.ov.kind, screenText(m))
+	}
+	for i, l := range strings.Split(m.screen(), "\n") {
+		if w := ansi.StringWidth(l); w != m.w {
+			t.Fatalf("line %d is %d wide, not %d", i, w, m.w)
+		}
+	}
+	key(m, "enter")
+	waitFor(t, m, func() bool {
+		b, _ := os.ReadFile(filepath.Join(runDir, "answers.jsonl"))
+		return strings.Contains(string(b), `"request":"perm-1","allow":true`)
+	})
+	m.openSend()
+	if m.ov.kind != ovTaskReply || !m.ov.send {
+		t.Fatalf("a running stream run takes a message: %v", m.ov.kind)
+	}
+	typeText(m, "use tabs")
+	key(m, "ctrl+s")
+	waitFor(t, m, func() bool {
+		b, _ := os.ReadFile(filepath.Join(runDir, "inbox.jsonl"))
+		return strings.Contains(string(b), "use tabs")
+	})
 }

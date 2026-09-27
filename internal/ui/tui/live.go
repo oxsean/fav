@@ -62,23 +62,12 @@ func pulseText(p capture.Pulse, l capture.Live, now time.Time) string {
 	case p.Window > 0:
 		parts = append(parts, i18n.F("live.context_pct", p.Context*100/p.Window))
 	case p.Context > 0:
-		parts = append(parts, i18n.F("live.context_tokens", tokens(p.Context)))
+		parts = append(parts, i18n.F("live.context_tokens", render.Tokens(int64(p.Context))))
 	}
 	if p.Reply != "" {
 		parts = append(parts, i18n.F("live.reply", p.Reply))
 	}
 	return strings.Join(parts, "  ·  ")
-}
-
-// tokens: 950, 12k, 509k, 1.2M.
-func tokens(n int) string {
-	switch {
-	case n >= 1_000_000:
-		return strconv.FormatFloat(float64(n)/1e6, 'f', 1, 64) + "M"
-	case n >= 1000:
-		return strconv.Itoa(n/1000) + "k"
-	}
-	return strconv.Itoa(n)
 }
 
 func (m *Model) pollLive() tea.Cmd {

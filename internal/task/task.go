@@ -6,9 +6,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"slices"
 	"sort"
 	"time"
 
+	"github.com/oxsean/fav/internal/agent"
 	"github.com/oxsean/fav/internal/journal"
 	"github.com/oxsean/fav/internal/tend"
 )
@@ -84,6 +86,12 @@ type Run struct {
 	Attention string            `json:"attention,omitempty"` // asked | permission | stalled
 	Ask       string            `json:"ask,omitempty"`
 	Note      string            `json:"note,omitempty"`
+	Last      string            `json:"last,omitempty"`     // the newest thing its agent said
+	Usage     *agent.Usage      `json:"usage,omitempty"`    // what its agent spent
+	Stream    bool              `json:"stream,omitempty"`   // it takes answers and messages while it runs
+	Requests  []agent.Request   `json:"requests,omitempty"` // what it waits on, as its node last said
+	Answers   []agent.Answer    `json:"answers,omitempty"`  // given, not yet taken by the node
+	Sends     []agent.Send      `json:"sends,omitempty"`    // messages for it and how far they got
 	Provider  string            `json:"provider,omitempty"`
 	Session   string            `json:"session,omitempty"`
 	Pane      string            `json:"pane,omitempty"`
@@ -104,7 +112,21 @@ const (
 	ERunStopAsked = "run_stop_requested"
 	ERunCanceled  = "run_canceled"
 	ERunAbandoned = "run_abandoned"
+	ERunAnswered  = "run_answered"
+	ERunSent      = "run_sent"
 )
+
+// RunAnswer: the user answered a request of run ID.
+type RunAnswer struct {
+	ID     string       `json:"id"`
+	Answer agent.Answer `json:"answer"`
+}
+
+// RunSend: the user sent run ID a message.
+type RunSend struct {
+	ID   string     `json:"id"`
+	Send agent.Send `json:"send"`
+}
 
 type TaskEdit struct {
 	ID      string  `json:"id"`
@@ -132,20 +154,25 @@ type RunStarting struct {
 
 // Observation is what a node reported about a run.
 type Observation struct {
-	ID        string     `json:"id"`
-	State     string     `json:"state"`
-	ExitCode  *int       `json:"exit_code,omitempty"`
-	Reason    string     `json:"reason,omitempty"`
-	Detail    string     `json:"detail,omitempty"`
-	Attention string     `json:"attention,omitempty"`
-	Ask       string     `json:"ask,omitempty"`
-	Note      string     `json:"note,omitempty"`
-	Provider  string     `json:"provider,omitempty"`
-	Session   string     `json:"session,omitempty"`
-	Pane      string     `json:"pane,omitempty"`
-	NodeRev   int        `json:"node_rev"`
-	StartedAt *time.Time `json:"started_at,omitempty"`
-	EndedAt   *time.Time `json:"ended_at,omitempty"`
+	ID        string          `json:"id"`
+	State     string          `json:"state"`
+	ExitCode  *int            `json:"exit_code,omitempty"`
+	Reason    string          `json:"reason,omitempty"`
+	Detail    string          `json:"detail,omitempty"`
+	Attention string          `json:"attention,omitempty"`
+	Ask       string          `json:"ask,omitempty"`
+	Note      string          `json:"note,omitempty"`
+	Last      string          `json:"last,omitempty"`
+	Usage     *agent.Usage    `json:"usage,omitempty"`
+	Stream    bool            `json:"stream,omitempty"`
+	Requests  []agent.Request `json:"requests,omitempty"`
+	Sends     []agent.Send    `json:"sends,omitempty"`
+	Provider  string          `json:"provider,omitempty"`
+	Session   string          `json:"session,omitempty"`
+	Pane      string          `json:"pane,omitempty"`
+	NodeRev   int             `json:"node_rev"`
+	StartedAt *time.Time      `json:"started_at,omitempty"`
+	EndedAt   *time.Time      `json:"ended_at,omitempty"`
 }
 
 // State is everything the journal says.
@@ -253,6 +280,26 @@ func (s *State) apply(e journal.Event, at time.Time) error {
 				r.State, r.Want, r.EndedAt = Abandoned, "stop", &at
 			}
 		})
+	case ERunAnswered:
+		var d RunAnswer
+		if err := json.Unmarshal(e.Data, &d); err != nil {
+			return err
+		}
+		return s.run(e, func(r *Run) {
+			if !slices.ContainsFunc(r.Answers, func(a agent.Answer) bool { return a.Request == d.Answer.Request }) {
+				r.Answers = append(r.Answers, d.Answer)
+			}
+		})
+	case ERunSent:
+		var d RunSend
+		if err := json.Unmarshal(e.Data, &d); err != nil {
+			return err
+		}
+		return s.run(e, func(r *Run) {
+			if !slices.ContainsFunc(r.Sends, func(m agent.Send) bool { return m.ID == d.Send.ID }) {
+				r.Sends = append(r.Sends, d.Send)
+			}
+		})
 	default:
 		return fmt.Errorf("unknown event")
 	}
@@ -300,7 +347,12 @@ func (r *Run) observe(o Observation) {
 		r.Detail = o.Detail
 	}
 	if o.NodeRev > 0 { // what the node says now; the coordinator's own observations carry none of it
-		r.Attention, r.Ask, r.Note = o.Attention, o.Ask, o.Note
+		r.Attention, r.Ask, r.Note, r.Last, r.Usage = o.Attention, o.Ask, o.Note, o.Last, o.Usage
+		r.Stream, r.Requests = o.Stream, o.Requests
+		r.Sends = mergeSends(r.Sends, o.Sends)
+		r.Answers = slices.DeleteFunc(slices.Clone(r.Answers), func(a agent.Answer) bool { // taken, or no longer asked
+			return !slices.ContainsFunc(r.Requests, func(q agent.Request) bool { return q.ID == a.Request })
+		})
 	}
 	if o.Session != "" {
 		r.Provider, r.Session = o.Provider, o.Session
@@ -314,6 +366,26 @@ func (r *Run) observe(o Observation) {
 	if o.EndedAt != nil {
 		r.EndedAt = o.EndedAt
 	}
+	if !Open(r.State) { // nothing waits any more, and what never went out will not
+		r.Requests, r.Answers = nil, nil
+		r.Sends = slices.Clone(r.Sends)
+		for i := range r.Sends {
+			if r.Sends[i].State == agent.SendQueued {
+				r.Sends[i].State = agent.SendFailed
+			}
+		}
+	}
+}
+
+// mergeSends is ours with the node's word on each message; the node's order comes first.
+func mergeSends(ours, node []agent.Send) []agent.Send {
+	out := slices.Clone(node)
+	for _, m := range ours {
+		if !slices.ContainsFunc(out, func(x agent.Send) bool { return x.ID == m.ID }) {
+			out = append(out, m)
+		}
+	}
+	return out
 }
 
 // Would: observing o changes r.
@@ -366,7 +438,7 @@ func (r *Run) NeedsYou() bool {
 	case r.State == Exited:
 		return r.ExitCode != nil && *r.ExitCode != 0
 	case Open(r.State):
-		return r.Attention == AttentionAsked || r.Attention == AttentionStalled
+		return r.Attention == AttentionAsked || r.Attention == AttentionStalled || r.Attention == AttentionPermission
 	}
 	return false
 }

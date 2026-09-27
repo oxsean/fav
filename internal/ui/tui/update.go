@@ -637,6 +637,8 @@ func (m *Model) overlayKey(msg tea.KeyPressMsg) tea.Cmd {
 		return m.taskRunKey(msg)
 	case ovTaskReply:
 		return m.replyKey(msg)
+	case ovTaskAnswer:
+		return m.answerKey(msg)
 	case ovMessage:
 		switch a := keyAct(inReader, msg.String()); a {
 		case actClose:

@@ -355,6 +355,8 @@ tend task add "Fix the flaky pager test" --dir ~/dev/webapp --brief-file brief.m
 tend run start <task> --machine mba --wait   # queue it on mba and follow it until it ends
 tend run list · tend run show <run> · tend run logs <run> -f · tend run stop <run> · tend run abandon <run>
 tend run continue <run> "use the main branch"   # answer a run that waits, in its own session
+tend run answer <run> --allow | --deny | --answer pg   # answer the permission or question a running run waits on
+tend run send <run> "also update the changelog"      # a message for a running run, in its current turn
 tend task list [--all] · tend task show <id> · tend task edit <id> --title … · tend task done|reopen|cancel <id>
 tend agent list · tend machine list [--connect]
 tend inbox                                   # runs that need you, on every machine, longest waiting first
@@ -366,8 +368,9 @@ with a profile, stop, abandon, take over), `X` stops the run, `Space` shows the 
 The right pane shows the brief, the latest runs and the last run's output. Taking over opens the resume dialog of the run's
 session; while the run still drives it, the dialog says to stop the run first.
 
-**Agents.** Built in: `claude` (headless `claude -p`, or an interactive Claude in a new Herdr tab when a Herdr workspace holds
-the directory), `codex` (`codex exec --json`) and `fake` (for tests). More go into `config.json`:
+**Agents.** Built in: `claude` (headless `claude -p` talking stream-json both ways, or an interactive Claude in a new Herdr
+tab when a Herdr workspace holds the directory), `codex` (`codex app-server`) and `fake` (for tests). More go into
+`config.json`:
 
 ```json
 {"agents": [
@@ -386,10 +389,14 @@ or not logged in there would fail the run at once, so it is not dispatched (`--f
 it too, with that reason). The TUI's and the web page's run dialogs show the same; `tend machine list` has an AGENTS
 column.
 
-**When a run needs you.** Nobody answers a prompt in the background, so a background agent is told how to ask: end with
-a final message starting `ASK:`, or run `tend run ask "…"` (`tend run note "…"` reports progress; both reach the run's
-state through `TEND_RUN_DIR`). Claude's question tool is off in the background, and tools a permission prompt
-denied are named. A run that ends like that shows as *waiting for your reply* or *needs your permission*;
+**When a run needs you.** A background claude or codex run keeps its conversation open: a permission prompt (claude with
+`"permission": "default"`, codex approvals) or a question it asks (claude's AskUserQuestion, codex's user input) waits
+until you answer it with `tend run answer`, the TUI's task dialog or the web page, and `tend run send` gives it a message
+while it works (claude reads it in its current turn, codex steers the turn). The run shows its latest words and what it
+has spent so far (tokens, and claude's cost estimate). A background agent is also told how to end on a question: a final
+message starting `ASK:`, or `tend run ask "…"` (`tend run note "…"` reports progress; both reach the run's state through
+`TEND_RUN_DIR`). Tools denied without asking (by the permission mode) are named. A run that ends like that shows as
+*waiting for your reply* or *needs your permission*;
 `tend run continue <run> "…"` (the TUI's and the web page's **Reply**) starts a new background run in the same session
 with your answer. `tend run continue --session <id> "…"` does the same for any indexed session. A failed run says why:
 `cli_missing`, `auth_missing`, `auth`, `quota`, `rate_limit`, `overloaded`, `context_overflow`, `network`,
@@ -400,7 +407,7 @@ event is a prompt. `tend inbox`, the top of the TUI's task list and the web page
 that needs you, longest waiting first.
 
 To hear about it, set a command: `"notify_command": ["my-notifier"]` runs with one JSON object on stdin
-(`event`: `run.waiting`, `run.asked`, `run.failed` or `run.stalled`, plus run, task, title, machine, agent, state,
+(`event`: `run.waiting`, `run.asked`, `run.permission`, `run.failed` or `run.stalled`, plus run, task, title, machine, agent, state,
 reason, detail, ask) whenever a run comes to want someone; `notify_events` narrows the events.
 
 **Who coordinates.** One process at a time keeps the task journal and sends runs out: whichever holds the lock in

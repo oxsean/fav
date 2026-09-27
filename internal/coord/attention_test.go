@@ -175,3 +175,49 @@ func TestARunTheNodeHoldsBackWaitsInsteadOfFailing(t *testing.T) {
 		t.Fatalf("it runs once the directory is free: %+v", end)
 	}
 }
+
+func TestAPermissionIsAnsweredThroughTheCoordinator(t *testing.T) {
+	e := newEnv(t, tend.Config{Agents: []tend.AgentProfile{{Name: "gated", Provider: agent.ProviderFake,
+		Args: []string{"--steps", "2", "--every", "20ms", "--permission", "Bash:make deploy"}}}})
+	e.start()
+	tk := e.task("deploy", "gated")
+	r := e.dispatch(Dispatch{Task: tk.ID})
+	w := e.wait(r.ID, func(r *task.Run) bool { return len(r.Requests) == 1 })
+	if !w.Stream || w.Requests[0].Summary != "make deploy" || w.Attention != task.AttentionPermission || !w.NeedsYou() {
+		t.Fatalf("%+v", w)
+	}
+	if err := e.call(MRunAnswer, Answer{Run: r.ID, Answer: agent.Answer{Request: "nope", Allow: true}}, nil); wire.Code(err) != wire.CodeConflict {
+		t.Fatalf("a request it does not wait on: %v", err)
+	}
+	e.must(MRunAnswer, Answer{Run: r.ID, Answer: agent.Answer{Request: w.Requests[0].ID, Allow: true}}, nil)
+	end := e.wait(r.ID, ended)
+	if end.State != task.Exited || len(end.Requests) != 0 || len(end.Answers) != 0 || end.Attention != "" {
+		t.Fatalf("%+v", end)
+	}
+}
+
+func TestAMessageGoesToARunningRunAndAQuestionNeedsItsAnswers(t *testing.T) {
+	e := newEnv(t, tend.Config{Agents: []tend.AgentProfile{{Name: "chatty", Provider: agent.ProviderFake,
+		Args: []string{"--steps", "8", "--every", "150ms", "--question", "Which DB?|pg|mysql"}}}})
+	e.start()
+	tk := e.task("pick", "chatty")
+	r := e.dispatch(Dispatch{Task: tk.ID})
+	w := e.wait(r.ID, func(r *task.Run) bool { return len(r.Requests) == 1 })
+	if err := e.call(MRunAnswer, Answer{Run: r.ID, Answer: agent.Answer{Request: w.Requests[0].ID, Allow: true}}, nil); wire.Code(err) != wire.CodeBadRequest {
+		t.Fatalf("an answer answers every question: %v", err)
+	}
+	e.must(MRunAnswer, Answer{Run: r.ID, Answer: agent.Answer{Request: w.Requests[0].ID, Allow: true, Answers: map[string]string{"Which DB?": "pg"}}}, nil)
+	e.wait(r.ID, func(r *task.Run) bool { return len(r.Requests) == 0 })
+	var got task.Run
+	e.must(MRunSend, SendMessage{Run: r.ID, Text: "use tabs"}, &got)
+	if len(got.Sends) != 1 || got.Sends[0].State != agent.SendQueued {
+		t.Fatalf("%+v", got.Sends)
+	}
+	end := e.wait(r.ID, ended)
+	if len(end.Sends) != 1 || end.Sends[0].State != agent.SendSent {
+		t.Fatalf("%+v", end.Sends)
+	}
+	if err := e.call(MRunSend, SendMessage{Run: r.ID, Text: "late"}, nil); wire.Code(err) != wire.CodeConflict {
+		t.Fatalf("an ended run takes no message: %v", err)
+	}
+}

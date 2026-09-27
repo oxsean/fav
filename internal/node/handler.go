@@ -19,6 +19,8 @@ const (
 	MRunList   = "run.list"
 	MRunTail   = "run.tail"
 	MRunResume = "run.resume"   // run.start continuing a session (StartParams.Resume)
+	MRunAnswer = "run.answer"   // an answer to what a stream run waits on (AnswerParams)
+	MRunSend   = "run.send"     // a message for a running stream run (SendParams)
 	MAgents    = "node.agents"  // how each agent CLI stands here
 	MChanged   = "node.changed" // push: a run's state changed
 )
@@ -92,6 +94,18 @@ func (n *Node) Handler(sessions remote.Handler) wire.Handler {
 				return nil, err
 			}
 			return n.Tail(p)
+		case MRunAnswer:
+			var p AnswerParams
+			if err := r.Decode(&p); err != nil {
+				return nil, err
+			}
+			return n.Answer(p)
+		case MRunSend:
+			var p SendParams
+			if err := r.Decode(&p); err != nil {
+				return nil, err
+			}
+			return n.Send(p)
 		}
 		res, err := sessions.Handle(ctx, r.Method, r.Params)
 		if h, ok := res.(remote.Hello); ok && err == nil {
@@ -104,7 +118,7 @@ func (n *Node) Handler(sessions remote.Handler) wire.Handler {
 }
 
 // Methods lists what Handler answers.
-var Methods = []string{MRunStart, MRunStop, MRunList, MRunTail, MRunResume, MAgents}
+var Methods = []string{MRunStart, MRunStop, MRunList, MRunTail, MRunResume, MAgents, MRunAnswer, MRunSend}
 
 // Tail reads a page of a run's output.log backwards from p.Before.
 func (n *Node) Tail(p TailParams) (Tail, error) {

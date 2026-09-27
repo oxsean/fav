@@ -122,6 +122,8 @@ const api = (() => {
     runStop: write('run.stop'),
     runAbandon: write('run.abandon'),
     runContinue: write('run.continue'),
+    runAnswer: write('run.answer'),
+    runSend: write('run.send'),
     runPreview: params => call('run.preview', params),
     runTail: params => call('run.tail', params),
     machineList: params => call('machine.list', params),

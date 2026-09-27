@@ -492,7 +492,34 @@ func (c *Coord) converge(ctx context.Context, m *machine) {
 			Brief: r.Brief, Title: r.Title, Runner: r.Runner, Resume: r.Resume}
 	}
 	canResume := slices.Contains(m.hello.Methods, node.MRunResume)
+	var inputs []input
+	if slices.Contains(m.hello.Methods, node.MRunSend) {
+		inputs = c.inputsFor(m, seen)
+	}
 	c.mu.Unlock()
+
+	for _, in := range inputs {
+		var s node.Snapshot
+		var ok bool
+		var err error
+		if in.answer != nil {
+			ok, err = c.callNode(ctx, m, conn, node.MRunAnswer, node.AnswerParams{Run: in.run, Answer: *in.answer}, &s)
+		} else {
+			ok, err = c.callNode(ctx, m, conn, node.MRunSend, node.SendParams{Run: in.run, Send: *in.send}, &s)
+		}
+		if !ok {
+			return
+		}
+		if err != nil {
+			continue // sent again after resendAfter, until the node's list shows it taken or the run ends
+		}
+		o := observation(s)
+		c.mu.Lock()
+		if r := c.st.Runs[in.run]; r != nil && r.Would(o) {
+			c.commit(nil, journal.NewEvent(task.ERunObserved, o))
+		}
+		c.mu.Unlock()
+	}
 
 	for _, id := range stops {
 		var s node.Snapshot
@@ -539,7 +566,8 @@ func heldBack(err error) bool {
 
 func observation(s node.Snapshot) task.Observation {
 	return task.Observation{ID: s.Run, State: s.State.State, ExitCode: s.ExitCode, Reason: s.Reason, Detail: s.Detail,
-		Attention: s.Attention, Ask: s.Ask, Note: s.Note, Provider: s.Provider, Session: s.Session, Pane: s.Pane, NodeRev: s.Rev,
+		Attention: s.Attention, Ask: s.Ask, Note: s.Note, Last: s.Last, Usage: s.Usage, Stream: s.Stream, Requests: s.Requests,
+		Sends: s.Sends, Provider: s.Provider, Session: s.Session, Pane: s.Pane, NodeRev: s.Rev,
 		StartedAt: s.StartedAt, EndedAt: s.EndedAt}
 }
 
