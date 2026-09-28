@@ -596,8 +596,10 @@ const verdictConvention = `
 
 // planConvention tells a planner how to hand in its plan.
 const planConvention = `
-- You are planning, not doing: change no file. Write the plan as JSON to a file outside this directory and hand it in
-  with: %[1]s plan <file>   It checks the plan and says what is wrong; fix it and hand it in again.
+- You are planning, not doing: change no file. Hand the plan in as JSON on standard input with
+  %[1]s plan - <<'PLAN'
+  followed by the JSON and a last line holding only PLAN, unindented. It checks the plan and says what is wrong; fix
+  it and hand it in again.
   {"tasks":[{"key":"short-id","title":"…","brief":"what to do, enough to do it without asking","acceptance":["…"],
    "after":["key it comes after"],"parent":"key of the task it is part of (two levels at most)",
    "workflow":"feature|fix|docs|none","size":"S|M|L"}],"questions":["what someone should decide"]}

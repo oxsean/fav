@@ -211,7 +211,7 @@ function markdown(source) {
   endList();if(code)html+=`<pre>${esc(codeLines.join('\n'))}</pre>`;return html;
 }
 function normalizeOutput(text,provider) {
-  const events=[], toolsByID=new Map();
+  const events=[], toolsByID=new Map();let usage;
   text.split('\n').filter(Boolean).forEach((line,index)=>{
     const base={index:index+1,raw:line};let event;
     try {event=JSON.parse(line);}catch(_){events.push({...base,kind:'text',text:line});return;}
@@ -227,12 +227,30 @@ function normalizeOutput(text,provider) {
       else if(event.type==='result')events.push({...base,kind:'result',text:event.result||event.subtype,cost:event.total_cost_usd,duration:event.duration_ms});
       else if(event.type==='stream_event'&&event.event?.delta?.text)events.push({...base,kind:'assistant',text:event.event.delta.text});
       else events.push({...base,kind:'raw',text:line});
+    } else if(provider==='codex'&&(event.method||event.jsonrpc||('id' in event&&('result' in event||'error' in event)))) {
+      const m=event.method||'',p=event.params||{},item=p.item;
+      if(!m){if(event.error)events.push({...base,kind:'raw',text:line});return;}
+      if(m==='item/completed'&&item){
+        if(item.type==='userMessage')events.push({...base,kind:'user',text:(item.content||[]).map(c=>c.text||'').join('\n')});
+        else if(item.type==='agentMessage')events.push({...base,kind:'assistant',text:item.text||''});
+        else if(item.type==='reasoning'){const s=(item.summary||[]).map(x=>typeof x==='string'?x:x.text||'').join('\n');if(s)events.push({...base,kind:'assistant',text:s});}
+        else if(item.type==='commandExecution')events.push({...base,kind:'tool',name:'command',input:item.command||'',result:item.aggregatedOutput||'',exit:item.exitCode??undefined});
+        else if(item.type==='fileChange')events.push({...base,kind:'tool',name:'file_change',input:(item.changes||[]).map(c=>c.path).join('\n'),result:(item.changes||[]).map(c=>c.diff||'').join('\n')});
+        else if(item.type==='mcpToolCall')events.push({...base,kind:'tool',name:`${item.server}.${item.tool}`,input:JSON.stringify(item.arguments??{},null,2),result:(item.result?.content||[]).map(c=>c.text??JSON.stringify(c)).join('\n')||(item.error?JSON.stringify(item.error):'')});
+        else events.push({...base,kind:'raw',text:line});
+      }
+      else if(m.endsWith('/requestApproval'))events.push({...base,kind:'systemEvent',text:`approval: ${p.command||(p.changes?Object.keys(p.changes).join(' '):'')}${p.reason?' · '+p.reason:''}`});
+      else if(m==='warning'||m==='error')events.push({...base,kind:'systemEvent',text:p.message||p.error?.message||m});
+      else if(m==='thread/started'||m==='turn/started')events.push({...base,kind:'systemEvent',text:m});
+      else if(m==='thread/tokenUsage/updated')usage=p.tokenUsage?.total;
+      else if(m==='turn/completed'){const u=usage,e=p.turn?.error;events.push({...base,kind:'result',text:e?e.message||JSON.stringify(e):`${u?u.inputTokens-(u.cachedInputTokens||0):'—'} input · ${u?.cachedInputTokens??'—'} cached · ${u?.outputTokens??'—'} output tokens`});}
+      else if(!(m==='item/started'||/delta$/i.test(m)||/^(hook|mcpServer|account|remoteControl|serverRequest|thread\/status)\//.test(m)))events.push({...base,kind:'raw',text:line});
     } else if(provider==='codex') {
       const item=event.item;
       if(item?.type==='agent_message'||item?.type==='reasoning')events.push({...base,kind:'assistant',text:item.text});
       else if(item?.type==='command_execution')events.push({...base,kind:'tool',name:'command_execution',input:item.command,result:item.aggregated_output,exit:item.exit_code});
       else if(item?.type==='file_change'||item?.type==='mcp_tool_call')events.push({...base,kind:'tool',name:item.type,input:JSON.stringify(item,null,2)});
-      else if(event.type==='turn.completed')events.push({...base,kind:'result',text:`${event.usage?.input_tokens??'—'} input · ${event.usage?.cached_input_tokens??'—'} cached · ${event.usage?.output_tokens??'—'} output tokens`});
+      else if(event.type==='turn.completed')events.push({...base,kind:'result',text:`${event.usage?event.usage.input_tokens-(event.usage.cached_input_tokens||0):'—'} input · ${event.usage?.cached_input_tokens??'—'} cached · ${event.usage?.output_tokens??'—'} output tokens`});
       else if(['thread.started','turn.started'].includes(event.type))events.push({...base,kind:'systemEvent',text:event.type});
       else events.push({...base,kind:'raw',text:line});
     } else events.push({...base,kind:'text',text:line});

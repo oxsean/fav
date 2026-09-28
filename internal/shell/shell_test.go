@@ -85,3 +85,32 @@ func TestAncestorsSeen(t *testing.T) {
 		t.Error("no parent processes read")
 	}
 }
+
+// Split reads a POSIX line back into words only when running it would do nothing but run those words.
+func TestSplitReadsOnlyPlainWords(t *testing.T) {
+	for line, want := range map[string][]string{
+		`/bin/zsh -lc 'go test ./...'`:          {"/bin/zsh", "-lc", "go test ./..."},
+		`tend run note "it's done"`:             {"tend", "run", "note", "it's done"},
+		`tend run verdict pass 'a '\''b'\'' c'`: {"tend", "run", "verdict", "pass", "a 'b' c"},
+		`a "x \"y\" \\z"  b`:                    {"a", `x "y" \z`, "b"},
+		"a 'two\nlines'":                        {"a", "two\nlines"},
+		`a ''`:                                  {"a", ""},
+		`a \; b`:                                {"a", ";", "b"},
+		`/bin/zsh -lc "/x/tend run verdict pass 'looks good'"`: {"/bin/zsh", "-lc", "/x/tend run verdict pass 'looks good'"},
+	} {
+		if got, ok := POSIX.Split(line); !ok || !slices.Equal(got, want) {
+			t.Errorf("Split(%q) = %q %v, want %q", line, got, ok, want)
+		}
+	}
+	for _, line := range []string{
+		"a; b", "a && b", "a | b", "a > f", "a < f", "$(a)", "a `b`", `a "$HOME"`, "a $X", "a\nb", "a 'open",
+		`a "open`, "a *", "a ?", "a [x]", "~/a", "a {b,c}", "(a)", "a & ", "a #c", "a=1 b", "",
+	} {
+		if got, ok := POSIX.Split(line); ok {
+			t.Errorf("Split(%q) = %q, want refused", line, got)
+		}
+	}
+	if _, ok := PowerShell.Split("a b"); ok {
+		t.Error("only POSIX lines are split")
+	}
+}

@@ -505,7 +505,8 @@ func (s *sup) workFailed(err error) error {
 // workConvention tells an agent working on its task's branch how to leave its work.
 const workConvention = `
 - You work in your own git worktree on branch %[1]s. Commit your changes to it before you stop; do not switch
-  branches, rebase, or push: tend merges and pushes the branch.
+  branches, rebase, or push: tend merges and pushes the branch. If a sandbox keeps you from committing, do not ask
+  for permission to commit: leave the changes, and tend commits what you leave when you stop.
 `
 
 // copyConvention tells a reviewing agent that its directory is a copy.

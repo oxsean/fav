@@ -138,3 +138,64 @@ func (k Kind) Quote(s string) string {
 	}
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
+
+// Split reads a POSIX line back into its words, only when the shell would run them as they are: plain words, single
+// quotes, backslash escapes, and double quotes without expansion. Anything else (operators, redirections, expansions,
+// globs, an assignment before the command, an unquoted newline) is refused.
+func (k Kind) Split(line string) ([]string, bool) {
+	if k != POSIX {
+		return nil, false
+	}
+	var words []string
+	var w strings.Builder
+	inWord := false
+	for i := 0; i < len(line); i++ {
+		c := line[i]
+		switch {
+		case c == ' ' || c == '\t':
+			if inWord {
+				words, inWord = append(words, w.String()), false
+				w.Reset()
+			}
+			continue
+		case c == '\'':
+			j := strings.IndexByte(line[i+1:], '\'')
+			if j < 0 {
+				return nil, false
+			}
+			w.WriteString(line[i+1 : i+1+j])
+			i += j + 1
+		case c == '"':
+			i++
+			for ; i < len(line) && line[i] != '"'; i++ {
+				switch line[i] {
+				case '$', '`':
+					return nil, false
+				case '\\':
+					if i+1 < len(line) && strings.IndexByte(`"\$`+"`", line[i+1]) >= 0 {
+						i++
+					}
+				}
+				w.WriteByte(line[i])
+			}
+			if i >= len(line) {
+				return nil, false
+			}
+		case c == '\\':
+			if i+1 >= len(line) || line[i+1] == '\n' {
+				return nil, false
+			}
+			i++
+			w.WriteByte(line[i])
+		case strings.IndexByte(";&|<>()$`\n*?[]{}#", c) >= 0, c == '~' && !inWord, c == '=' && len(words) == 0:
+			return nil, false
+		default:
+			w.WriteByte(c)
+		}
+		inWord = true
+	}
+	if inWord {
+		words = append(words, w.String())
+	}
+	return words, len(words) > 0
+}

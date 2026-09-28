@@ -121,6 +121,7 @@ func (c *codexProto) response(m rpcMessage) {
 			Thread struct {
 				ID string `json:"id"`
 			} `json:"thread"`
+			Sandbox map[string]any `json:"sandbox"`
 		}
 		json.Unmarshal(m.Result, &r)
 		c.mu.Lock()
@@ -129,7 +130,13 @@ func (c *codexProto) response(m rpcMessage) {
 		if r.Thread.ID != "" && !c.s.bound() {
 			c.s.keep(func(st *State) { st.Session = r.Thread.ID })
 		}
-		c.call("turn/start", map[string]any{"threadId": r.Thread.ID, "input": textInput(brief)}, "")
+		turn := map[string]any{"threadId": r.Thread.ID, "input": textInput(brief)}
+		if r.Sandbox["type"] == "workspaceWrite" { // tend run note / ask / verdict write the run's directory
+			roots, _ := r.Sandbox["writableRoots"].([]any)
+			r.Sandbox["writableRoots"] = append(roots, c.s.dir)
+			turn["sandboxPolicy"] = r.Sandbox
+		}
+		c.call("turn/start", turn, "")
 	case "turn/start":
 		var r struct {
 			Turn struct {
@@ -167,6 +174,10 @@ func (c *codexProto) request(m rpcMessage) {
 	pd := pending{id: m.ID, method: m.Method}
 	switch m.Method {
 	case "item/commandExecution/requestApproval":
+		if ownReport(p.Command) {
+			c.reply(m.ID, map[string]any{"decision": "accept"})
+			return
+		}
 		req.Tool, req.Summary = "shell", clip(firstOf(p.Command, p.Reason), maxSummary)
 	case "item/fileChange/requestApproval":
 		req.Tool, req.Summary = "apply_patch", clip(firstOf(p.Reason, p.GrantRoot), maxSummary)

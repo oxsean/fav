@@ -46,6 +46,15 @@ func (c claudeProto) line(text []byte) bool {
 		}
 		return true
 	}
+	if r.ToolName == "Bash" {
+		var in struct {
+			Command string `json:"command"`
+		}
+		if json.Unmarshal(r.Input, &in) == nil && ownReport(in.Command) {
+			c.answer(pending{tool: r.ToolName, input: r.Input}, agent.Answer{Request: m.RequestID, Allow: true})
+			return true
+		}
+	}
 	req := agent.Request{ID: m.RequestID, Kind: agent.RequestPermission, Tool: r.ToolName, At: time.Now()}
 	if r.ToolName == "AskUserQuestion" {
 		req.Kind, req.Questions = agent.RequestQuestion, questionsOf(r.Input)
