@@ -132,6 +132,63 @@ func (m *Model) boardMove(d int) {
 	}
 }
 
+// rowCell is a task row's trailing fields, right of the title, within budget w: a running task's id, stage,
+// machine, agent/model, last line, elapsed time and tokens/cost; a waiting one's kind of wait, id, what it asked
+// and how long it has waited; anything else its situation. Fields drop right to left as the budget narrows
+// (render.Fields).
+func (m *Model) rowCell(x *task.Task, r *task.Run, w int) string {
+	sit := m.tasks.st.Situation(x)
+	switch {
+	case sit.Kind == task.SitWaiting:
+		kind := render.SitText(sit)
+		if r != nil {
+			if k := render.WaitKind(r); k != "" {
+				kind = k
+			}
+		}
+		fields := []string{kind, render.ShortID(x.ID)}
+		if r != nil {
+			if ask := render.WaitAsk(r); ask != "" {
+				fields = append(fields, render.Truncate(ask, 60))
+			}
+		}
+		fields = append(fields, i18n.F("tasks.waited", render.Elapsed(waitedSince(x, r), m.now)))
+		return render.Fields(fields, 1, w)
+	case r != nil && task.Open(r.State):
+		fields := []string{render.ShortID(x.ID)}
+		if x.Stage != "" {
+			fields = append(fields, x.Stage)
+		}
+		if r.Machine != "" {
+			fields = append(fields, r.Machine)
+		}
+		if am := render.AgentModel(r); am != "" {
+			fields = append(fields, am)
+		}
+		if r.Last != "" {
+			fields = append(fields, render.Truncate(r.Last, 60))
+		}
+		if r.StartedAt != nil {
+			fields = append(fields, render.Elapsed(*r.StartedAt, m.now))
+		}
+		if u := render.UsageShort(r.Usage); u != "" {
+			fields = append(fields, u)
+		}
+		return render.Fields(fields, 1, w)
+	case sit.Reason == task.WhyDispatch:
+		return ""
+	}
+	return render.SitText(sit)
+}
+
+// waitedSince is when x's row started waiting: its run's end (or start, still running), else its own creation.
+func waitedSince(x *task.Task, r *task.Run) time.Time {
+	if r != nil {
+		return r.Since()
+	}
+	return x.CreatedAt
+}
+
 // taskRow draws one task of the list or the tree, depth levels in.
 func (m *Model) taskRow(x *task.Task, depth int, selected bool, w int) string {
 	lead := " "
@@ -139,16 +196,9 @@ func (m *Model) taskRow(x *task.Task, depth int, selected bool, w int) string {
 		lead = "*"
 	}
 	glyph, sty := taskGlyph(m, x)
-	cell := ""
-	if r := m.lastRun(x.ID); r != nil {
-		cell = runStateText(r)
-		if r.Machine != "" {
-			cell += " · " + r.Machine
-		}
-	} else if sit := m.tasks.st.Situation(x); sit.Kind != task.SitWaiting || sit.Reason != task.WhyDispatch {
-		cell = render.SitText(sit)
-	}
 	indent := strings.Repeat("  ", depth)
+	cellBudget := max(8, (w-4-len(indent))/2)
+	cell := m.rowCell(x, m.lastRun(x.ID), cellBudget)
 	titleW := max(4, w-4-len(indent)-render.Width(cell)-2)
 	if selected {
 		return selTitle.Render(render.Pad(lead+indent+glyph+" "+render.Pad(render.Truncate(x.Title, titleW), titleW)+"  "+cell, w))
@@ -222,6 +272,12 @@ func (m *Model) taskRows(out []string, y0, x0, w, h int) []string {
 			mm.tasks.cursor = idx
 		})
 		out = append(out, m.taskRow(x, t.depth[x.ID], i == t.cursor, w))
+		if t.layout == layoutHome && idx == 0 {
+			out = append(out, m.homeAskLines(w)...)
+			if over := len(out) - (h - len(bottom)); over > 0 {
+				out = out[:len(out)-over]
+			}
+		}
 	}
 	for len(bottom) > 0 && len(out) < h-len(bottom) {
 		out = append(out, "")
@@ -229,13 +285,81 @@ func (m *Model) taskRows(out []string, y0, x0, w, h int) []string {
 	return append(out, bottom...)
 }
 
-// board draws a column per situation, each scrolled to keep the selected task in sight.
+// cardHeight is the screen lines one board card draws, including the blank line after it.
+const cardHeight = 4
+
+// cardLines is a board card: id and title; its stage breadcrumb (the current stage marked) or, without a workflow,
+// its situation; agent@machine, situation, rework count (↺n) and subtask progress (done/total), the least
+// important dropped first as colW narrows.
+func (m *Model) cardLines(x *task.Task, colW int, selected bool) []string {
+	glyph, sty := taskGlyph(m, x)
+	id := render.ShortID(x.ID)
+	title := render.Truncate(x.Title, max(1, colW-render.Width(id)-3))
+	l1 := " " + glyph + " " + id + " " + title
+	l2 := " " + m.cardStageLine(x, colW-1)
+	l3 := " " + m.cardMetaLine(x, colW-1)
+	if selected {
+		return []string{selTitle.Render(render.Pad(l1, colW)), selTitle.Render(render.Pad(l2, colW)), selTitle.Render(render.Pad(l3, colW))}
+	}
+	return []string{" " + sty.Render(glyph) + " " + dimmed.Render(id) + " " + title, dimmed.Render(l2), dimmed.Render(l3)}
+}
+
+// cardStageLine is a card's second line: its workflow's stages with the current one marked, else its situation.
+func (m *Model) cardStageLine(x *task.Task, w int) string {
+	if x.Flow == nil || len(x.Flow.Stages) == 0 {
+		return render.Truncate(render.SitText(m.tasks.st.Situation(x)), w)
+	}
+	names := make([]string, len(x.Flow.Stages))
+	for i, s := range x.Flow.Stages {
+		names[i] = s.Name
+		if s.Name == x.Stage {
+			names[i] = "[" + s.Name + "]"
+		}
+	}
+	return render.Truncate(strings.Join(names, " > "), w)
+}
+
+// cardMetaLine is a card's third line: agent@machine, its situation, rework count and subtask progress.
+func (m *Model) cardMetaLine(x *task.Task, w int) string {
+	var fields []string
+	r, am := m.lastRun(x.ID), ""
+	switch {
+	case r != nil:
+		am = strings.Trim(r.Agent+"@"+r.Machine, "@")
+	case x.Agent != "" || x.Machine != "":
+		am = strings.Trim(x.Agent+"@"+x.Machine, "@")
+	}
+	if am != "" {
+		fields = append(fields, am)
+	}
+	fields = append(fields, render.SitText(m.tasks.st.Situation(x)))
+	if x.Loops > 0 {
+		fields = append(fields, i18n.F("tasks.rework_n", x.Loops))
+	}
+	if done, total := m.subtaskProgress(x.ID); total > 0 {
+		fields = append(fields, i18n.F("tasks.subtasks_n", done, total))
+	}
+	return render.Fields(fields, 1, w)
+}
+
+// subtaskProgress is how many of x's subtasks are done (canceled counts as done) and how many there are.
+func (m *Model) subtaskProgress(id string) (done, total int) {
+	for _, c := range m.tasks.st.Children(id) {
+		total++
+		if c.Status == task.StatusDone || c.Status == task.StatusCanceled {
+			done++
+		}
+	}
+	return
+}
+
+// board draws a column per situation, each scrolled to keep the selected card in sight.
 func (m *Model) board(out []string, y0, x0, w, h int) []string {
 	t := &m.tasks
 	n := len(boardKinds)
 	colW := max(8, (w-(n-1)*2)/n)
 	curCol, curRow := m.boardAt(t.cursor)
-	room := h - len(out) - 1
+	room := max(0, (h-len(out)-1)/cardHeight)
 	cols := make([][]string, n)
 	for c, kind := range boardKinds {
 		xs := t.cols[c]
@@ -248,27 +372,24 @@ func (m *Model) board(out []string, y0, x0, w, h int) []string {
 		for _, ys := range t.cols[:c] {
 			base += len(ys)
 		}
-		for r := first; r < len(xs) && len(cols[c]) <= room; r++ {
+		cards := 0
+		for r := first; r < len(xs) && cards < room; r++ {
 			x, idx := xs[r], base+r
-			glyph, sty := taskGlyph(m, x)
-			title := render.Truncate(x.Title, colW-3)
-			line := " " + sty.Render(glyph) + " " + render.Pad(title, colW-3)
-			if idx == t.cursor {
-				line = selTitle.Render(render.Pad(" "+glyph+" "+title, colW))
-			}
-			m.mark(y0+len(out)+len(cols[c]), x0+c*(colW+2), colW, func(mm *Model) {
+			cols[c] = append(cols[c], m.cardLines(x, colW, idx == t.cursor)...)
+			cols[c] = append(cols[c], "")
+			m.markRows(y0+len(out)+1+cards*cardHeight, x0+c*(colW+2), colW, cardHeight-1, func(mm *Model) {
 				if mm.tasks.cursor == idx {
 					mm.openTask()
 				}
 				mm.tasks.cursor = idx
 			})
-			cols[c] = append(cols[c], line)
+			cards++
 		}
 		if len(xs) == 0 {
 			cols[c] = append(cols[c], dimmed.Render(render.Pad(" -", colW)))
 		}
 	}
-	for r := 0; r <= room; r++ {
+	for r := 0; r <= room*cardHeight; r++ {
 		var parts []string
 		for c := range cols {
 			parts = append(parts, fit(at(cols[c], r), colW))

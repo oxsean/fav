@@ -997,6 +997,11 @@ func (m *Model) footer() string {
 		left, right = []footGroup{{fk(enterKey, "footer.enter_find", 0)}, {fk(escKey, "footer.esc_cancel", 0)}}, nil
 	case m.chipFocus >= 0:
 		left, right = []footGroup{{fk(arrowsLR, "footer.chip_switch", 0), fk(enterKey, "footer.chip_open", 0)}, {fk(keyName("down")+"/"+escKey, "footer.chip_back", 0)}}, nil
+	case m.view == viewTasks && m.tasks.layout == layoutBoard:
+		left = []footGroup{
+			{fk("h l", "footer.board_cols", 0), fk("j k", "footer.board_cards", 0), fk(enterKey, "footer.enter_actions", 1)},
+			{fk(footKeyOf(inList, actSort), "footer.task_layout", 2), fk(keyOf(inList, actSearch), "footer.search", 0)},
+		}
 	case m.view == viewTasks:
 		left = []footGroup{
 			{fk(enterKey, "footer.enter_actions", 0), fk(keyName("space"), "footer.task_session", 3)},

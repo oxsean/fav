@@ -64,12 +64,18 @@ const teamWords = {
   projectDir: ['代码目录', 'Checkout'], projectDirHint: ['可选：选一台机器上的目录，项目的任务在那里运行。', 'Optional: a directory on a machine where the project\'s tasks run.'],
   dirMachine: ['机器', 'Machine'], noDir: ['不选', 'None'], dirUp: ['上一级', 'Up'], dirRoots: ['可用目录', 'Allowed directories'],
   dirPick: ['用这个目录', 'Use this directory'], dirPicked: ['已选：{0}', 'Chosen: {0}'], noDirs: ['这里没有子目录', 'No directories here'],
+  shareTrust: ['这台机器跑在它主人的账号下：派来的 agent 能读主人 home 下的文件，用主人的 claude / codex 额度，提交的 committer 是主人（作者记为派发人）。要长期共享，给它单独开一个 OS 用户或容器，登录团队自己的 CLI 账号。',
+    'This machine runs under its owner\'s account: agents sent here can read files in the owner\'s home, spend the owner\'s claude / codex quota, and commit as the owner (the dispatcher is the author). To share it for long, give it its own OS user or container signed in to the team\'s CLI accounts.'],
+  approveHelp: ['关着时，只有主人和运行的派发人能批准执行命令、写文件；提问类的，项目参与者都能答。', 'When off, only the owner and the run\'s dispatcher approve commands and file writes; any project participant answers questions.'],
+  logins: ['登录方式', 'Signs in with'], inProjects: ['项目', 'Projects'], ownsMachines: ['机器', 'Machines'], seen: ['最近活动', 'Last active'],
+  pendingInvites: ['待接受的邀请', 'Pending invitations'], expiresAt: ['{0} 失效', 'Expires {0}'], invitedBy: ['{0} 发出', 'From {0}'],
+  revokeInvite: ['作废', 'Revoke'], inviteRevoked: ['邀请已作废', 'Invitation revoked'],
   internal: ['服务器出错。', 'The server failed.'], team: ['团队', 'Team'], make: ['创建', 'Create'], changeSaved: ['已保存', 'Saved'], add: ['添加', 'Add'], saveShare: ['保存共享', 'Save sharing'], nobody: ['无', 'Nobody'],
 };
 
 const Team = (() => {
   const pages = ['projects', 'account', 'admin'];
-  const data = {users: [], logins: [], creds: [], tokens: [], identities: [], admits: [], audit: [], inviteInfo: null, device: null, deviceCode: '', deviceError: '', deviceResult: ''};
+  const data = {users: [], invites: [], logins: [], creds: [], tokens: [], identities: [], admits: [], audit: [], inviteInfo: null, device: null, deviceCode: '', deviceError: '', deviceResult: ''};
   const roles = ['participant', 'reader'];
 
   async function rest(method, path, body) {
@@ -181,7 +187,7 @@ const Team = (() => {
     const loads = [rest('GET', '/api/users').then(v => data.users = v)];
     if (page === 'machines') loads.push(rest('GET', '/api/machines').then(v => data.creds = v));
     if (page === 'account') loads.push(rest('GET', '/api/tokens').then(v => data.tokens = v), rest('GET', '/api/identities').then(v => data.identities = v), loadLogins(), Tree.loadWebhook());
-    if (page === 'admin' && isAdmin()) loads.push(rest('GET', '/api/admits').then(v => data.admits = v), rest('GET', '/api/audit').then(v => data.audit = v));
+    if (page === 'admin' && isAdmin()) loads.push(rest('GET', '/api/admits').then(v => data.admits = v), rest('GET', '/api/audit').then(v => data.audit = v), rest('GET', '/api/invites').then(v => data.invites = v));
     try { await Promise.all(loads); } catch (error) { toast(errorText(error)); }
     if (ui.page === page) renderPage();
   }
@@ -222,15 +228,20 @@ const Team = (() => {
 
   function adminPage() {
     if (!isAdmin()) return statePanel('error', t('forbidden'), '');
-    const users = rows(data.users.map(u => `<div class="agent-row"><strong>${esc(u.name)}</strong><span class="mono">${esc(u.username || u.email || u.id)}</span>${u.id === ui.me?.id || u.id === 'local'
+    const inProjects = id => projects().filter(p => p.owner === id || (p.members || {})[id]).map(p => p.name);
+    const machinesOf = id => (ui.machines || []).filter(m => m.owner === id).map(m => m.name);
+    const facts = u => [(u.logins || []).length ? `${t('logins')} ${u.logins.map(esc).join(', ')}` : '', inProjects(u.id).length ? `${t('inProjects')} ${inProjects(u.id).map(esc).join(', ')}` : '',
+      machinesOf(u.id).length ? `${t('ownsMachines')} ${machinesOf(u.id).map(esc).join(', ')}` : '', u.seen ? `${t('seen')} ${when(u.seen)}` : ''].filter(Boolean).join(' · ');
+    const users = rows(data.users.map(u => `<div class="agent-row"><strong>${esc(u.name)}</strong><span class="mono">${esc(u.username || u.email || u.id)}</span><span class="muted user-facts">${facts(u)}</span>${u.id === ui.me?.id || u.id === 'local'
       ? `<span>${t('role.' + u.role)}</span>`
       : `<select data-team-user-role="${esc(u.id)}" aria-label="${t('role')}">${['member', 'admin'].map(r => `<option value="${r}" ${u.role === r ? 'selected' : ''}>${t('role.' + r)}</option>`).join('')}</select>${button('team-disable', t(u.disabled ? 'enable' : 'disable'), `data-id="${esc(u.id)}" data-disabled="${u.disabled ? '' : '1'}"`, u.disabled ? 'quiet' : 'quiet danger')}${u.disabled ? '' : button('tree-offboard', t('offboard'), `data-id="${esc(u.id)}"`, 'quiet danger')}`}${u.disabled ? `<span>${t('disabled')}</span>` : ''}</div>`), t('nobody'));
     const admits = rows(data.admits.map(a => `<div class="agent-row"><strong>${t('admit.' + a.kind)}</strong><span class="mono">${esc(a.value)}</span><span>${t('role.' + a.role)}</span>${button('team-remove-admit', t('removeMember'), `data-kind="${esc(a.kind)}" data-value="${esc(a.value)}"`, 'quiet danger')}</div>`), t('nobody'));
     const addAdmit = `<form id="team-admit-form" class="form-grid mt-12"><select name="kind" aria-label="${t('value')}">${['email', 'domain', 'login'].map(k => `<option value="${k}">${t('admit.' + k)}</option>`).join('')}</select><input name="value" required placeholder="corp.example" aria-label="${t('value')}"><select name="role" aria-label="${t('role')}"><option value="member">${t('role.member')}</option><option value="admin">${t('role.admin')}</option></select><button type="submit">${t('addAdmit')}</button></form>`;
     const invite = `<form id="team-invite-form" class="flex"><select name="role" aria-label="${t('role')}"><option value="member">${t('role.member')}</option><option value="admin">${t('role.admin')}</option></select><button type="submit">${t('makeInvite')}</button></form>`;
+    const invites = rows(data.invites.map(i => `<div class="agent-row"><strong class="mono">${esc(i.id)}</strong><span>${t('role.' + i.role)}</span><span>${esc(t('invitedBy').replace('{0}', userName(i.created_by)))}</span><span>${esc(t('expiresAt').replace('{0}', when(i.expires)))}</span>${button('team-revoke-invite', t('revokeInvite'), `data-id="${esc(i.id)}"`, 'quiet danger')}</div>`), t('nobody'));
     const audit = rows(data.audit.map(e => `<div class="agent-row"><span class="mono">${date(e.at)}</span><strong>${esc(e.kind)}</strong><span>${esc(e.actor ? userName(e.actor) : '—')}</span><span class="mono">${esc(e.detail || '')}</span><span class="mono">${esc(e.ip || '')}</span></div>`), t('nobody'));
     return `<header class="page-heading"><div><h1>${t('admin')}</h1></div></header>
-      <div class="machine-page stack">${section(t('users'), '', users)}${section(t('admits'), t('admitsHelp'), admits + addAdmit)}${section(t('invite'), '', invite)}${section(t('audit'), '', audit)}</div>`;
+      <div class="machine-page stack">${section(t('users'), '', users)}${section(t('admits'), t('admitsHelp'), admits + addAdmit)}${section(t('invite'), '', invite + `<h3 class="meta-label mt-12">${t('pendingInvites')}</h3>` + invites)}${section(t('audit'), '', audit)}</div>`;
   }
 
   // Machines page additions.
@@ -239,6 +250,13 @@ const Team = (() => {
     const share = ui.state.shares?.[m.name], mine = isAdmin() || m.owner === ui.me?.id;
     const whom = share ? [...(share.users || []).map(userName), ...(share.projects || []).map(id => ui.state.projects?.[id]?.name || id)] : [];
     return `<div class="team-machine"><div><span class="meta-label">${t('ownedBy')}</span><span>${esc(m.owner ? userName(m.owner) : '—')}</span></div><div><span class="meta-label">${t('share')}</span><span>${whom.length ? esc(whom.join(', ')) : t('notShared')}</span></div>${mine && m.owner ? button('team-share', t('share'), `data-machine="${esc(m.name)}"`, 'quiet') : ''}</div>`;
+  }
+  // machineGroup is where m goes on the machines page: the viewer's, shared with them, or someone else's.
+  function machineGroup(m) {
+    if (!m.owner || m.owner === ui.me?.id) return 'mine';
+    const s = ui.state.shares?.[m.name];
+    const mine = projects().filter(p => myRole(p) === 'participant').map(p => p.id);
+    return s && ((s.users || []).includes(ui.me?.id) || (s.projects || []).some(id => mine.includes(id))) ? 'shared' : 'other';
   }
   function machineCreds() {
     if (!data.creds.length) return '';
@@ -298,9 +316,9 @@ const Team = (() => {
     const check = (name, value, label, on) => `<label class="choice"><input type="checkbox" name="${name}" value="${esc(value)}" ${on ? 'checked' : ''}>${esc(label)}</label>`;
     const people = data.users.filter(u => !u.disabled && u.id !== m?.owner).map(u => check('users', u.id, u.name, (s.users || []).includes(u.id))).join('');
     const projs = projects().map(p => check('projects', p.id, p.name, (s.projects || []).includes(p.id))).join('');
-    showModal('team-form', `${t('shareTitle')} · ${esc(machine)}`, `<form id="team-share-form" data-machine="${esc(machine)}" data-command="${commandID()}"><div class="modal-body stack"><div class="form-error" role="alert" hidden></div><p class="hint">${t('shareHelp')}</p>
+    showModal('team-form', `${t('shareTitle')} · ${esc(machine)}`, `<form id="team-share-form" data-machine="${esc(machine)}" data-command="${commandID()}"><div class="modal-body stack"><div class="form-error" role="alert" hidden></div><p class="hint">${t('shareHelp')}</p><div class="notice">${t('shareTrust')}</div>
       <fieldset class="stack"><legend>${t('users')}</legend>${people || `<span class="muted">${t('nobody')}</span>`}</fieldset><fieldset class="stack"><legend>${t('projects')}</legend>${projs || `<span class="muted">${t('nobody')}</span>`}</fieldset>
-      <label class="choice"><input type="checkbox" name="approve" value="1" ${s.approve ? 'checked' : ''}>${t('approve')}</label></div>${footer(t('saveShare'))}</form>`, '', true);
+      <label class="choice"><input type="checkbox" name="approve" value="1" ${s.approve ? 'checked' : ''}>${t('approve')}</label><small class="hint">${t('approveHelp')}</small></div>${footer(t('saveShare'))}</form>`, '', true);
   }
   function nameForm(id, title, label, hint) {
     showModal('team-form', title, `<form id="${id}"><div class="modal-body stack"><div class="form-error" role="alert" hidden></div><label>${label}<input name="name" required autofocus class="mono">${hint ? `<small>${hint}</small>` : ''}</label></div>${footer(t('make'))}</form>`, '');
@@ -325,6 +343,7 @@ const Team = (() => {
       case 'team-revoke': confirmRevoke(d.id, d.kind); break;
       case 'team-rebind': await rest('POST', '/api/machines/rebind', {id: d.id}); toast(t('changeSaved')); await enter('machines'); break;
       case 'team-disable': await rest('POST', '/api/users', {id: d.id, disabled: !!d.disabled}); await enter('admin'); break;
+      case 'team-revoke-invite': await rest('DELETE', '/api/invites', {id: d.id}); toast(t('inviteRevoked')); await enter('admin'); break;
       case 'team-remove-admit': await rest('DELETE', '/api/admits', {kind: d.kind, value: d.value}); await enter('admin'); break;
       case 'team-copy': copy(d.value); break;
       case 'device-allow': await decideDevice(true); break;
@@ -393,7 +412,7 @@ const Team = (() => {
       case 'team-admit-form': await rest('POST', '/api/admits', f); form.reset(); await enter('admin'); break;
       case 'team-invite-form': {
         const v = await rest('POST', '/api/invites', f);
-        showSecret(t('invite'), secretBox(t('inviteMade'), v.url)); break;
+        showSecret(t('invite'), secretBox(t('inviteMade'), v.url)); await enter('admin'); break;
       }
       default: return false;
     }
@@ -406,6 +425,6 @@ const Team = (() => {
     return `<label>${t('project')}<select name="project"><option value="">${t('noProject')}</option>${mine.map(p => `<option value="${esc(p.id)}" ${p.id === value ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}</select></label>`;
   }
 
-  return {pages, rest, name: userName, users: () => data.users, loadLogins, loginExtras, afterSignIn, nav, enter, render, machineHeader, machineCard, machineCreds, click, change, submit, projectField,
+  return {pages, rest, name: userName, users: () => data.users, loadLogins, loginExtras, afterSignIn, nav, enter, render, machineHeader, machineCard, machineGroup, machineCreds, click, change, submit, projectField,
     loadInvite, deniedPanel, deviceCodeFromHash, deviceLoadedFor, loadDevice, devicePanel};
 })();

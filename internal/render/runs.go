@@ -4,11 +4,20 @@ import (
 	"cmp"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/oxsean/fav/internal/agent"
 	"github.com/oxsean/fav/internal/i18n"
 	"github.com/oxsean/fav/internal/task"
 )
+
+// Elapsed is how long from to lasted: exact seconds under a minute, else ShortDur.
+func Elapsed(from, to time.Time) string {
+	if d := to.Sub(from); d < time.Minute {
+		return d.Round(time.Second).String()
+	}
+	return ShortDur(to.Sub(from))
+}
 
 // Tokens is a token count for the eye: 950, 12k, 509k, 1.2M.
 func Tokens(n int64) string {
@@ -29,6 +38,67 @@ func SendState(state string) string {
 		return i18n.T(k)
 	}
 	return state
+}
+
+// ShortID is id shortened for a row: its kind prefix and the first six characters of what follows.
+func ShortID(id string) string {
+	i := strings.IndexByte(id, '_')
+	if i < 0 || i+7 > len(id) {
+		return id
+	}
+	return id[:i+7]
+}
+
+// AgentModel is a run's agent and model, one field: "claude/opus" or just the agent when no model is known.
+func AgentModel(r *task.Run) string {
+	a := cmp.Or(r.Agent, r.Profile.Provider)
+	if r.Profile.Model == "" {
+		return a
+	}
+	return a + "/" + r.Profile.Model
+}
+
+// UsageShort is a run's spend for a row: a token count, with cost when the agent gives one.
+func UsageShort(u *agent.Usage) string {
+	if u == nil {
+		return ""
+	}
+	tok := Tokens(u.Input + u.CacheWrite + u.Output)
+	if u.CostUSD > 0 {
+		return i18n.F("run.usage_short_cost", tok, strconv.FormatFloat(u.CostUSD, 'f', 2, 64))
+	}
+	return i18n.F("run.usage_short", tok)
+}
+
+// WaitAsk is what a waiting run's row shows it asked: the first question, or the tool it wanted to use.
+func WaitAsk(r *task.Run) string {
+	if len(r.Requests) == 0 {
+		return ""
+	}
+	q := r.Requests[0]
+	if q.Kind == agent.RequestQuestion && len(q.Questions) > 0 {
+		return q.Questions[0].Question
+	}
+	return q.Summary
+}
+
+// WaitKind is what a waiting row is waiting on, as a short word: a permission, a question, or why it stopped.
+func WaitKind(r *task.Run) string {
+	switch {
+	case r.Attention == task.AttentionPermission:
+		return i18n.T("run.attention.permission")
+	case r.Attention == task.AttentionAsked:
+		return i18n.T("run.attention.asked")
+	case task.Open(r.State) && r.Attention == task.AttentionStalled:
+		return i18n.T("run.attention.stalled")
+	case r.State == task.Failed:
+		return i18n.T("sit.failed")
+	case r.State == task.Unknown:
+		return i18n.T("sit.unknown")
+	case r.State == task.Exited:
+		return i18n.T("sit.exited")
+	}
+	return RunReason(r.Reason)
 }
 
 // RunUsage is what a run's agent spent as one line, "" when nothing is known.

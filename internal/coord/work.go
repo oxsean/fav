@@ -15,7 +15,7 @@ import (
 // caller holds mu.
 func (c *Coord) workspace(t *task.Task, pr *task.Project, repo task.Repo, checkout string) *agent.Workspace {
 	return &agent.Workspace{Checkout: checkout, Branch: task.BranchOf(t.ID), Chain: c.chain(t), Base: repo.Base, Remote: repo.Remote,
-		Setup: pr.Hooks["setup"]}
+		Setup: pr.Hooks["setup"], BeforeRun: pr.Hooks["before_run"]}
 }
 
 // chain are the branches of t's ancestors, outermost first. The caller holds mu.

@@ -73,6 +73,8 @@ func (s *Server) apiRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/admits", s.api(s.adminOnly(s.addAdmit)))
 	mux.HandleFunc("DELETE /api/admits", s.api(s.adminOnly(s.removeAdmit)))
 	mux.HandleFunc("POST /api/invites", s.api(s.adminOnly(s.invite)))
+	mux.HandleFunc("GET /api/invites", s.api(s.adminOnly(s.listInvites)))
+	mux.HandleFunc("DELETE /api/invites", s.api(s.adminOnly(s.revokeInvite)))
 	mux.HandleFunc("GET /api/tokens", s.api(s.listTokens))
 	mux.HandleFunc("POST /api/tokens", s.api(s.addToken))
 	mux.HandleFunc("DELETE /api/tokens", s.api(s.revokeToken))
@@ -97,6 +99,9 @@ type PublicUser struct {
 	Email    string `json:"email,omitempty"` // admins only
 	Role     string `json:"role"`
 	Disabled bool   `json:"disabled,omitempty"`
+	// To admins: how they sign in and when a credential of theirs was last used.
+	Logins []string  `json:"logins,omitempty"`
+	Seen   time.Time `json:"seen,omitzero"`
 }
 
 func (s *Server) listUsers(w http.ResponseWriter, r *http.Request, c caller) {
@@ -110,6 +115,17 @@ func (s *Server) listUsers(w http.ResponseWriter, r *http.Request, c caller) {
 		p := PublicUser{ID: u.ID, Name: displayName(u), Username: u.Username, Role: u.Role, Disabled: u.Disabled}
 		if c.admin() {
 			p.Email = u.Email
+			ids, _ := s.team().Identities(u.ID)
+			for _, i := range ids {
+				if !slices.Contains(p.Logins, i.Provider) {
+					p.Logins = append(p.Logins, i.Provider)
+				}
+			}
+			for _, x := range s.creds(func(x store.Credential) bool { return x.Owner == u.ID }) {
+				if x.LastUsed.After(p.Seen) {
+					p.Seen = x.LastUsed
+				}
+			}
 		}
 		out = append(out, p)
 	}
@@ -201,6 +217,33 @@ func (s *Server) invite(w http.ResponseWriter, r *http.Request, c caller) {
 	}
 	s.audit(r, c.user.ID, "invite", p.Role)
 	writeJSON(w, http.StatusOK, map[string]any{"url": s.base(r) + "/#invite-" + secret, "expires": time.Now().Add(inviteAge)})
+}
+
+func (s *Server) listInvites(w http.ResponseWriter, r *http.Request, c caller) {
+	list, err := s.team().Invites()
+	if err != nil {
+		apiError(w, http.StatusInternalServerError, "internal")
+		return
+	}
+	writeJSON(w, http.StatusOK, list)
+}
+
+func (s *Server) revokeInvite(w http.ResponseWriter, r *http.Request, c caller) {
+	var p struct {
+		ID string `json:"id"`
+	}
+	if !decode(w, r, &p) {
+		return
+	}
+	if err := s.team().RevokeInvite(p.ID); errors.Is(err, store.ErrNotFound) {
+		apiError(w, http.StatusNotFound, "not_found")
+		return
+	} else if err != nil {
+		apiError(w, http.StatusInternalServerError, "internal")
+		return
+	}
+	s.audit(r, c.user.ID, "invite.revoke", p.ID)
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // Credentials of the caller's (all, for an admin's machines), newest first.

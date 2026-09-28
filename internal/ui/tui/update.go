@@ -84,6 +84,8 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch {
 		case m.ov.active():
 			cmd = m.overlayKey(msg)
+		case m.homeDenying():
+			cmd = m.homeDenyKey(msg)
 		case m.chat.typing:
 			cmd = m.chatSearchKey(msg)
 		case m.typing:
@@ -337,6 +339,11 @@ func (m *Model) searchKey(msg tea.KeyPressMsg) tea.Cmd {
 // navKey: list navigation; keys come from the table in keys.go. ⚠️ Every action needs a non-letter key (letters never
 // reach here under a CJK IME).
 func (m *Model) navKey(msg tea.KeyPressMsg) tea.Cmd {
+	if m.view == viewTasks {
+		if cmd, ok := m.homeAskKey(msg); ok {
+			return cmd
+		}
+	}
 	a := keyAct(inList, msg.String())
 	if m.view == viewTasks {
 		if cmd, ok := m.taskKey(a); ok {

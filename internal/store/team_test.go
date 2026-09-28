@@ -3,6 +3,7 @@ package store
 import (
 	"errors"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -75,6 +76,18 @@ func TestAnInviteLetsOnePersonInOnce(t *testing.T) {
 	old, _ := tm.NewInvite(RoleMember, LocalUser, -time.Minute)
 	if _, err := tm.Admit(gitea("6", "", false), old); !errors.Is(err, ErrNotAdmitted) {
 		t.Fatalf("an expired invite: %v", err)
+	}
+	waiting, _ := tm.NewInvite(RoleAdmin, LocalUser, time.Hour)
+	list, err := tm.Invites()
+	if err != nil || len(list) != 1 || list[0].Role != RoleAdmin || strings.Contains(waiting, list[0].ID) || list[0].ID != Sum(waiting)[:inviteIDLen] {
+		t.Fatalf("only the waiting one is listed, by its hash: %+v %v", list, err)
+	}
+	must(t, tm.RevokeInvite(list[0].ID))
+	if _, err := tm.Admit(gitea("7", "", false), waiting); !errors.Is(err, ErrNotAdmitted) {
+		t.Fatalf("a revoked invite: %v", err)
+	}
+	if err := tm.RevokeInvite(list[0].ID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("revoked twice: %v", err)
 	}
 }
 

@@ -570,7 +570,13 @@ func (r *Run) Since() time.Time {
 	return r.QueuedAt
 }
 
-// NeedsYou are the latest runs of the open tasks that need someone, longest waiting first.
+// Blocking: r is holding its agent still, waiting on a permission or a question.
+func (r *Run) Blocking() bool {
+	return r.Attention == AttentionAsked || r.Attention == AttentionPermission
+}
+
+// NeedsYou are the latest runs of the open tasks that need someone: those blocking their agent (a permission or a
+// question) first, the rest after, both groups longest waiting first.
 func (s *State) NeedsYou() []*Run {
 	var out []*Run
 	for _, t := range s.Tasks {
@@ -581,6 +587,12 @@ func (s *State) NeedsYou() []*Run {
 			out = append(out, runs[len(runs)-1])
 		}
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Since().Before(out[j].Since()) })
+	sort.Slice(out, func(i, j int) bool {
+		bi, bj := out[i].Blocking(), out[j].Blocking()
+		if bi != bj {
+			return bi
+		}
+		return out[i].Since().Before(out[j].Since())
+	})
 	return out
 }

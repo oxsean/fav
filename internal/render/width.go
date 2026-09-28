@@ -34,6 +34,18 @@ func Pad(s string, width int) string {
 	return s
 }
 
+// Fields joins parts with " · ", dropping from the end until it fits width; the first keep parts never drop
+// (the last of them is truncated instead). Used to shrink a row: fields drop right to left as the terminal narrows.
+func Fields(parts []string, keep, width int) string {
+	for n := len(parts); n > keep; n-- {
+		if s := strings.Join(parts[:n], " · "); Width(s) <= width {
+			return s
+		}
+	}
+	n := min(keep, len(parts))
+	return Truncate(strings.Join(parts[:n], " · "), width)
+}
+
 func PadLeft(s string, width int) string {
 	s = Truncate(s, width)
 	if n := width - runewidth.StringWidth(s); n > 0 {

@@ -420,6 +420,54 @@ func (t *Team) Invite(secret string) (InviteInfo, error) {
 	return out, nil
 }
 
+// inviteIDLen is how much of an invitation's hash names it in lists: enough to tell them apart, never the secret.
+const inviteIDLen = 12
+
+// PendingInvite is an invitation nobody used yet that still works.
+type PendingInvite struct {
+	ID        string    `json:"id"`
+	Role      string    `json:"role"`
+	CreatedBy string    `json:"created_by"`
+	Created   time.Time `json:"created"`
+	Expires   time.Time `json:"expires"`
+}
+
+// Invites are the invitations still waiting, newest first.
+func (t *Team) Invites() ([]PendingInvite, error) {
+	rows, err := t.r.Query(`SELECT substr(sum, 1, ?), role, created_by, created, expires FROM invites WHERE used_at = 0 AND expires > ?
+		ORDER BY created DESC`, inviteIDLen, time.Now().UnixNano())
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []PendingInvite{}
+	for rows.Next() {
+		var p PendingInvite
+		var created, expires int64
+		if err := rows.Scan(&p.ID, &p.Role, &p.CreatedBy, &created, &expires); err != nil {
+			return nil, err
+		}
+		p.Created, p.Expires = fromNanos(created), fromNanos(expires)
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
+// RevokeInvite ends the unused invitation id names.
+func (t *Team) RevokeInvite(id string) error {
+	if len(id) != inviteIDLen {
+		return ErrNotFound
+	}
+	res, err := t.w.Exec(`DELETE FROM invites WHERE substr(sum, 1, ?) = ? AND used_at = 0`, inviteIDLen, id)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 // NewCredential makes a secret of kind for owner (a node token names its machine); ttl 0 never expires. The secret
 // is shown once: only its hash is kept.
 func (t *Team) NewCredential(kind, name, owner string, ttl time.Duration) (string, Credential, error) {

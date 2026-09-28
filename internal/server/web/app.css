@@ -387,3 +387,8 @@ button.chip.link:hover:not(:disabled) { border-color: var(--accent); text-decora
 .file-button { position: relative; cursor: pointer; }
 .file-button input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
 .launch-preview { white-space: pre-wrap; word-break: break-all; max-height: 40vh; overflow: auto; margin: 0; }
+.user-facts { flex: 1 1 100%; font-size: 12px; }
+.group-title { font-size: 14px; margin: 0; }
+.offboard-steps { display: grid; gap: 6px; }
+#tree-dir-checks .ok { color: var(--success); }
+#tree-dir-checks .warn { color: var(--warning); }

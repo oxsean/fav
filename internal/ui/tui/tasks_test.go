@@ -11,6 +11,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/oxsean/fav/internal/agent"
 	"github.com/oxsean/fav/internal/coord"
 	"github.com/oxsean/fav/internal/filelock"
 	"github.com/oxsean/fav/internal/node"
@@ -351,6 +352,7 @@ func TestARunThatWaitsIsAnsweredAndSentAMessage(t *testing.T) {
 		return "", os.WriteFile(filepath.Join(dir, "state.json"), []byte(b), 0o600)
 	})
 	key(m, "5")
+	key(m, "o") // the list layout: the home layout answers in place, tested separately
 	var tk task.Task
 	if err := m.tasks.cl.CallCommand(t.Context(), coord.MTaskCreate, "c1", coord.TaskCreate{Title: "deploy", Dir: t.TempDir(), Agent: "fake"}, &tk); err != nil {
 		t.Fatal(err)
@@ -388,6 +390,253 @@ func TestARunThatWaitsIsAnsweredAndSentAMessage(t *testing.T) {
 		b, _ := os.ReadFile(filepath.Join(runDir, "inbox.jsonl"))
 		return strings.Contains(string(b), "use tabs")
 	})
+}
+
+func TestHomeAnswersAQuestionInPlace(t *testing.T) {
+	var runDir string
+	m, _ := tasksModelWith(t, func(dir string, spec node.Spec) (string, error) {
+		runDir = dir
+		unlock, err := filelock.TryLock(filepath.Join(dir, "lock"))
+		if err != nil {
+			return "", err
+		}
+		t.Cleanup(unlock)
+		b := `{"rev":1,"state":"running","stream":true,"provider":"claude","session":"` + spec.Session + `","attention":"asked",` +
+			`"requests":[{"id":"q-1","kind":"question","questions":[{"question":"Which?","options":["A","B","C"]}],"at":"2026-09-27T10:00:00Z"}]}`
+		return "", os.WriteFile(filepath.Join(dir, "state.json"), []byte(b), 0o600)
+	})
+	key(m, "5")
+	var tk task.Task
+	if err := m.tasks.cl.CallCommand(t.Context(), coord.MTaskCreate, "c1", coord.TaskCreate{Title: "deploy", Dir: t.TempDir(), Agent: "fake"}, &tk); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, m, func() bool { return len(m.tasks.list) == 1 })
+	key(m, "enter")
+	key(m, "enter")
+	key(m, "enter")
+	waitFor(t, m, func() bool { r := m.selectedRun(); return r != nil && len(r.Requests) == 1 })
+	if s := screenText(m); !strings.Contains(s, "Which?") || !strings.Contains(s, "1) A") {
+		t.Fatalf("the home layout expands the question with numbered options:\n%s", s)
+	}
+	for i, l := range strings.Split(m.screen(), "\n") {
+		if w := ansi.StringWidth(l); w != m.w {
+			t.Fatalf("line %d is %d wide, not %d", i, w, m.w)
+		}
+	}
+	key(m, "2") // picks option B
+	key(m, "enter")
+	if m.ov.active() {
+		t.Fatalf("it answers in place, no dialog opens: %v", m.ov.kind)
+	}
+	waitFor(t, m, func() bool {
+		b, _ := os.ReadFile(filepath.Join(runDir, "answers.jsonl"))
+		return strings.Contains(string(b), `"Which?":"B"`)
+	})
+}
+
+func TestHomeDeniesAPermissionWithAReason(t *testing.T) {
+	var runDir string
+	m, _ := tasksModelWith(t, func(dir string, spec node.Spec) (string, error) {
+		runDir = dir
+		unlock, err := filelock.TryLock(filepath.Join(dir, "lock"))
+		if err != nil {
+			return "", err
+		}
+		t.Cleanup(unlock)
+		b := `{"rev":1,"state":"running","stream":true,"provider":"claude","session":"` + spec.Session + `","attention":"permission",` +
+			`"requests":[{"id":"perm-1","kind":"permission","tool":"Bash","summary":"rm -rf build","at":"2026-09-27T10:00:00Z"}]}`
+		return "", os.WriteFile(filepath.Join(dir, "state.json"), []byte(b), 0o600)
+	})
+	key(m, "5")
+	var tk task.Task
+	if err := m.tasks.cl.CallCommand(t.Context(), coord.MTaskCreate, "c1", coord.TaskCreate{Title: "deploy", Dir: t.TempDir(), Agent: "fake"}, &tk); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, m, func() bool { return len(m.tasks.list) == 1 })
+	key(m, "enter")
+	key(m, "enter")
+	key(m, "enter")
+	waitFor(t, m, func() bool { r := m.selectedRun(); return r != nil && len(r.Requests) == 1 })
+	key(m, "n")
+	if !m.tasks.askDeny {
+		t.Fatal("n starts a deny reason")
+	}
+	typeText(m, "not now")
+	key(m, "enter")
+	if m.tasks.askDeny {
+		t.Fatal("enter sends the deny and closes the reason field")
+	}
+	waitFor(t, m, func() bool {
+		b, _ := os.ReadFile(filepath.Join(runDir, "answers.jsonl"))
+		return strings.Contains(string(b), `"allow":false,"message":"not now"`)
+	})
+}
+
+func TestTheAnswerDialogPicksByDigitOrTakesItsOwnWords(t *testing.T) {
+	var runDir string
+	m, _ := tasksModelWith(t, func(dir string, spec node.Spec) (string, error) {
+		runDir = dir
+		unlock, err := filelock.TryLock(filepath.Join(dir, "lock"))
+		if err != nil {
+			return "", err
+		}
+		t.Cleanup(unlock)
+		b := `{"rev":1,"state":"running","stream":true,"provider":"claude","session":"` + spec.Session + `","attention":"asked",` +
+			`"requests":[{"id":"q-1","kind":"question","questions":[{"question":"Which?","options":["A","B","C"]}],"at":"2026-09-27T10:00:00Z"}]}`
+		return "", os.WriteFile(filepath.Join(dir, "state.json"), []byte(b), 0o600)
+	})
+	key(m, "5")
+	key(m, "o") // list layout: the dialog is opened by hand, not answered in place
+	var tk task.Task
+	if err := m.tasks.cl.CallCommand(t.Context(), coord.MTaskCreate, "c1", coord.TaskCreate{Title: "deploy", Dir: t.TempDir(), Agent: "fake"}, &tk); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, m, func() bool { return len(m.tasks.list) == 1 })
+	key(m, "enter")
+	key(m, "enter")
+	key(m, "enter")
+	waitFor(t, m, func() bool { r := m.selectedRun(); return r != nil && len(r.Requests) == 1 })
+	key(m, "enter")
+	key(m, "enter")
+	if m.ov.kind != ovTaskAnswer {
+		t.Fatalf("enter opens the answer dialog: %v", m.ov.kind)
+	}
+	key(m, "3") // the digit picks the third option, C
+	key(m, "tab")
+	typeText(m, "actually, D")
+	key(m, "enter") // the other field's own words win over the pick
+	waitFor(t, m, func() bool {
+		b, _ := os.ReadFile(filepath.Join(runDir, "answers.jsonl"))
+		return strings.Contains(string(b), `"Which?":"actually, D"`)
+	})
+}
+
+func TestTheAnswerDialogDeniesWithAReason(t *testing.T) {
+	var runDir string
+	m, _ := tasksModelWith(t, func(dir string, spec node.Spec) (string, error) {
+		runDir = dir
+		unlock, err := filelock.TryLock(filepath.Join(dir, "lock"))
+		if err != nil {
+			return "", err
+		}
+		t.Cleanup(unlock)
+		b := `{"rev":1,"state":"running","stream":true,"provider":"claude","session":"` + spec.Session + `","attention":"permission",` +
+			`"requests":[{"id":"perm-1","kind":"permission","tool":"Bash","summary":"rm -rf build","at":"2026-09-27T10:00:00Z"}]}`
+		return "", os.WriteFile(filepath.Join(dir, "state.json"), []byte(b), 0o600)
+	})
+	key(m, "5")
+	key(m, "o")
+	var tk task.Task
+	if err := m.tasks.cl.CallCommand(t.Context(), coord.MTaskCreate, "c1", coord.TaskCreate{Title: "deploy", Dir: t.TempDir(), Agent: "fake"}, &tk); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, m, func() bool { return len(m.tasks.list) == 1 })
+	key(m, "enter")
+	key(m, "enter")
+	key(m, "enter")
+	waitFor(t, m, func() bool { r := m.selectedRun(); return r != nil && len(r.Requests) == 1 })
+	key(m, "enter")
+	key(m, "enter")
+	if m.ov.kind != ovTaskAnswer {
+		t.Fatalf("enter opens the answer dialog: %v", m.ov.kind)
+	}
+	key(m, "tab") // to the reason field (no selectors on a permission ask)
+	typeText(m, "too risky")
+	key(m, "enter") // the reason field's Enter denies
+	waitFor(t, m, func() bool {
+		b, _ := os.ReadFile(filepath.Join(runDir, "answers.jsonl"))
+		return strings.Contains(string(b), `"allow":false,"message":"too risky"`)
+	})
+}
+
+func TestARowShowsItsTaskIDStageAgentAndLastLineWhenRunningAndWhatItWaitsOnOtherwise(t *testing.T) {
+	m, _ := tasksModel(t)
+	m.w = 220
+	m.detail = true // the list alone gets the full width, room enough to keep every field
+	key(m, "5")
+	waitFor(t, m, func() bool { return m.tasks.loaded })
+	st := task.New()
+	now := time.Now()
+	started := now.Add(-90 * time.Second)
+	st.Tasks["t_run12345678"] = &task.Task{ID: "t_run12345678", Title: "build it", Stage: "implement", Status: task.StatusTodo, CreatedAt: now}
+	st.Runs["r_run"] = &task.Run{ID: "r_run", Task: "t_run12345678", Agent: "dev-claude", Machine: "mba", State: task.Running,
+		Last: "running gate", StartedAt: &started, QueuedAt: now}
+	ended := now.Add(-5 * time.Minute)
+	st.Tasks["t_wait87654321"] = &task.Task{ID: "t_wait87654321", Title: "review it", Status: task.StatusTodo, CreatedAt: now}
+	st.Runs["r_wait"] = &task.Run{ID: "r_wait", Task: "t_wait87654321", State: task.Exited, Attention: task.AttentionAsked,
+		Requests: []agent.Request{{ID: "q1", Kind: agent.RequestQuestion, Questions: []agent.Question{{Question: "which env?"}}}},
+		EndedAt:  &ended, QueuedAt: now}
+	m.tasks.st = st
+	m.tasks.layout = layoutList
+	m.filterTasks()
+	s := screenText(m)
+	for _, want := range []string{"t_run12", "implement", "mba", "dev-claude", "running gate", "t_wait87", "which env?"} {
+		if !strings.Contains(s, want) {
+			t.Fatalf("the row wants %q:\n%s", want, s)
+		}
+	}
+}
+
+func TestBoardCardsShowStageAgentMachineReworkAndSubtasks(t *testing.T) {
+	m, _ := tasksModel(t)
+	m.w = 260 // wide enough that a card's meta line keeps agent@machine, situation, rework and subtasks together
+	key(m, "5")
+	waitFor(t, m, func() bool { return m.tasks.loaded })
+	st := task.New()
+	st.Tasks["t_1"] = &task.Task{ID: "t_1", Title: "ship it", Status: task.StatusTodo, Loops: 2,
+		Flow: &task.Flow{Stages: []task.Stage{{Name: "implement"}, {Name: "review"}, {Name: "accept"}}}, Stage: "review", CreatedAt: time.Now()}
+	st.Tasks["t_1a"] = &task.Task{ID: "t_1a", Parent: "t_1", Status: task.StatusDone, CreatedAt: time.Now()}
+	st.Tasks["t_1b"] = &task.Task{ID: "t_1b", Parent: "t_1", Status: task.StatusTodo, CreatedAt: time.Now()}
+	st.Runs["r_1"] = &task.Run{ID: "r_1", Task: "t_1", Agent: "reviewer-codex", Machine: "mba", State: task.Running, QueuedAt: time.Now()}
+	m.tasks.st = st
+	m.tasks.layout = layoutBoard
+	m.filterTasks()
+	s := screenText(m)
+	for _, want := range []string{"ship it", "implement > [review]", "reviewer-codex@mba", "↺2", "1/2"} {
+		if !strings.Contains(s, want) {
+			t.Fatalf("board card wants %q:\n%s", want, s)
+		}
+	}
+	for i, l := range strings.Split(m.screen(), "\n") {
+		if w := ansi.StringWidth(l); w != m.w {
+			t.Fatalf("line %d is %d wide, not %d", i, w, m.w)
+		}
+	}
+}
+
+func TestTheBoardFilterAcceptsProjectStageAndNeedsYouTerms(t *testing.T) {
+	m, _ := tasksModel(t)
+	key(m, "5")
+	waitFor(t, m, func() bool { return m.tasks.loaded })
+	st := task.New()
+	st.Tasks["t_a"] = &task.Task{ID: "t_a", Title: "alpha", Project: "p_1", Stage: "review", Status: task.StatusTodo, CreatedAt: time.Now()}
+	st.Tasks["t_b"] = &task.Task{ID: "t_b", Title: "beta", Project: "p_2", Stage: "implement", Status: task.StatusTodo, CreatedAt: time.Now()}
+	st.Runs["r_b"] = &task.Run{ID: "r_b", Task: "t_b", State: task.Failed, EndedAt: func() *time.Time { x := time.Now(); return &x }()}
+	m.tasks.st = st
+
+	m.search.SetValue("project:p_1")
+	m.filterTasks()
+	if got := ids(m); got != "t_a" {
+		t.Fatalf("project: filters to that project: %q", got)
+	}
+	m.search.SetValue("stage:implement")
+	m.filterTasks()
+	if got := ids(m); got != "t_b" {
+		t.Fatalf("stage: filters to that stage: %q", got)
+	}
+	m.search.SetValue("needs:you")
+	m.filterTasks()
+	if got := ids(m); got != "t_b" {
+		t.Fatalf("needs:you filters to what needs you: %q", got)
+	}
+}
+
+func ids(m *Model) string {
+	var out []string
+	for _, x := range m.tasks.list {
+		out = append(out, x.ID)
+	}
+	return strings.Join(out, " ")
 }
 
 func TestTasksAreArrangedAsHomeListTreeOrBoard(t *testing.T) {

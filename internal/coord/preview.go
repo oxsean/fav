@@ -32,6 +32,9 @@ var runFeatures = func(run *task.Run) []string {
 	if run.Work != nil {
 		out = append(out, node.FeatureWorktree)
 	}
+	if run.Work != nil && len(run.Work.BeforeRun) > 0 {
+		out = append(out, node.FeatureBeforeRun)
+	}
 	if run.Planner {
 		out = append(out, node.FeaturePlan)
 	}

@@ -9,6 +9,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
@@ -55,6 +56,9 @@ type tasksState struct {
 	watch      string            // a run shown under the detail, whichever task is selected
 	marked     map[string]bool   // the range: tasks an action applies to together
 	unsaved    map[string][]byte // edited text the coordinator did not take, by edit key; the next edit starts from it
+	askPick    int               // the home layout's inline answer: the option highlighted for its question
+	askDeny    bool              // it is composing a deny reason
+	askReason  textinput.Model
 }
 
 // feed carries the coordinator's journal pushes from the connection to the model; lost is set when it overflowed.
@@ -473,6 +477,24 @@ func (m *Model) write(method string, params any, note string, then func(*Model) 
 	}
 }
 
+// parseTaskFilter splits the search box into plain text and its project:<id>, stage:<name> and needs:you terms.
+func parseTaskFilter(raw string) (q, project, stage string, needsYou bool) {
+	var words []string
+	for _, w := range strings.Fields(strings.ToLower(strings.TrimSpace(raw))) {
+		switch {
+		case strings.HasPrefix(w, "project:"):
+			project = strings.TrimPrefix(w, "project:")
+		case strings.HasPrefix(w, "stage:"):
+			stage = strings.TrimPrefix(w, "stage:")
+		case w == "needs:you":
+			needsYou = true
+		default:
+			words = append(words, w)
+		}
+	}
+	return strings.Join(words, " "), project, stage, needsYou
+}
+
 // filterTasks: open tasks (and done ones whose run is still open) first, newest first; the search box filters by text.
 func (m *Model) filterTasks() {
 	t := &m.tasks
@@ -483,8 +505,16 @@ func (m *Model) filterTasks() {
 	if s := m.selectedTask(); s != nil {
 		cur = s.ID
 	}
-	q := strings.ToLower(strings.TrimSpace(m.search.Value()))
+	q, project, stage, needsYou := parseTaskFilter(m.search.Value())
 	match := func(x *task.Task) bool {
+		switch {
+		case project != "" && strings.ToLower(x.Project) != project:
+			return false
+		case stage != "" && strings.ToLower(x.Stage) != stage:
+			return false
+		case needsYou && !m.needsYou(x):
+			return false
+		}
 		return q == "" || strings.Contains(strings.ToLower(x.Title+"\n"+x.Brief+"\n"+x.Dir), q)
 	}
 	var needs, open, closed []*task.Task
@@ -909,10 +939,7 @@ func (m *Model) runLine(r *task.Run, w int, dim bool) string {
 		if r.EndedAt != nil {
 			end = *r.EndedAt
 		}
-		took = render.ShortDur(end.Sub(*r.StartedAt))
-		if end.Sub(*r.StartedAt) < time.Minute {
-			took = end.Sub(*r.StartedAt).Round(time.Second).String()
-		}
+		took = render.Elapsed(*r.StartedAt, end)
 	}
 	text := i18n.F("tasks.run_line", runStateText(r), r.Machine, r.Agent, took)
 	if dim {

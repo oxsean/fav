@@ -32,7 +32,7 @@ const treeWords = {
   inboxNoneShown: ['没有符合筛选的事', 'Nothing matches the filters'],
   usedByProjects: ['项目 {0} 在用', 'Used by {0}'], usedByTasks: ['{0} 个未完成任务', '{0} open tasks'], unused: ['还没有用到', 'Not used yet'],
   preview: ['预览', 'Preview'], launchPreview: ['运行时启动的命令', 'What a run starts'], launchHelp: ['<dir> 和 <brief> 在运行时换成工作目录和任务书。', '<dir> and <brief> become the run\'s directory and brief.'],
-  importAgent: ['导入 .md', 'Import .md'], closeView: ['关闭', 'Close'], exportAgent: ['导出 .md', 'Export .md'],
+  importAgent: ['导入 .md', 'Import .md'], exportAgent: ['导出 .md', 'Export .md'],
   inboxHelp: ['你负责、验收或派发的任务，需要你处理时出现在这里。', 'Tasks you own, accept or dispatched appear here when they need you.'],
   openTask: ['打开任务', 'Open task'], newAgent: ['新建定义', 'New definition'], editAgent: ['编辑定义', 'Edit definition'],
   agentsHelp: ['定义决定谁来做：类型、模型、强度、权限和说明书。Markdown 加 YAML frontmatter，和 Claude Code 的 subagent 同格式。', 'A definition says who does the work: type, model, effort, permissions and instructions. Markdown with a YAML front matter, like Claude Code subagents.'],
@@ -44,8 +44,13 @@ const treeWords = {
   context: ['项目说明', 'Project context'], contextHint: ['每个 run 的任务书开头都会带上。', 'Put at the head of every run\'s brief.'],
   repos: ['仓库', 'Repositories'], reposHint: ['每行一个：名称 远端 基准分支 [worktrees] 机器=目录 …；写 worktrees 则每个任务在自己的分支和工作区里做，子任务合进父任务的分支', 'One per line: name remote base [worktrees] machine=dir …; with worktrees each task works on its own branch and worktree, and subtasks merge into their parent’s branch'],
   implementAgent: ['实现 agent', 'Implementing agent'], reviewAgent: ['评审 agent', 'Review agent'], testAgent: ['测试 agent', 'Test agent'],
-  plannerAgent: ['拆解 agent', 'Planner agent'], checkHook: ['check hook（阶段结束后运行）', 'check hook (runs after a stage)'],
-  setupHook: ['setup hook（worktree 建好后运行）', 'setup hook (runs once the worktree is made)'], settingsSaved: ['项目设置已保存', 'Project settings saved'],
+  plannerAgent: ['拆解 agent', 'Planner agent'],
+  'hook.setup': ['setup hook（worktree 建好后运行一次）', 'setup hook (runs once the worktree is made)'],
+  'hook.before_run': ['before_run hook（每次运行开工前在 worktree 里运行，失败则运行失败）', 'before_run hook (runs in the worktree before each run; failing fails the run)'],
+  'hook.check': ['check hook（阶段结束后运行）', 'check hook (runs after a stage)'],
+  'hook.cleanup': ['cleanup hook（合并后删 worktree 前运行）', 'cleanup hook (runs before a merged worktree is removed)'],
+  checkDirs: ['检查目录', 'Check the directories'], noDirsToCheck: ['仓库还没写目录', 'No repository lists a directory'],
+  dirMissing: ['不在，或不在允许的目录里', 'Not there, or outside the allowed directories'], dirGit: ['git 仓库', 'git checkout'], dirNotGit: ['在，但不是 git 仓库', 'There, but not a git checkout'], settingsSaved: ['项目设置已保存', 'Project settings saved'],
   'why.source_changed': ['需求有变化', 'Its issue changed'], 'why.source_closed': ['issue 已在外面关闭', 'Its issue was closed outside tend'],
   source: ['来源', 'Source'], sourceRev: ['第 {0} 版', 'revision {0}'], sourceChanged: ['issue 有新版本，本轮仍按第 {0} 版做。', 'The issue has a newer revision; this round still follows revision {0}.'],
   takeChange: ['采用新版本', 'Take the new revision'], keepScope: ['维持本轮范围', 'Keep this round\'s scope'],
@@ -75,6 +80,14 @@ const treeWords = {
   browserNotify: ['浏览器通知', 'Browser notifications'], enableNotify: ['开启', 'Enable'], notifyOn: ['已开启', 'On'],
   notifyBlocked: ['浏览器拒绝了通知', 'The browser blocks notifications'], offboard: ['交接并停用', 'Hand over and disable'],
   offboardHelp: ['他负责的项目和没有项目的任务交给下面这个人，项目里的任务交给项目负责人；他的机器不再对别人开放，他的所有凭据立即失效。', 'Their projects and tasks outside projects go to the person below, their project tasks to each project\'s owner; their machines close to everyone else and every credential of theirs ends now.'],
+  'off.projects': ['他负责的项目：{0}', 'Projects they own: {0}'], 'off.tasks': ['不在项目里、或在这些项目里的未完成任务', 'Open tasks outside projects or in those'],
+  'off.projectTasks': ['其他项目里他负责或验收的未完成任务', 'Open tasks they own or accept in other projects'], 'off.defs': ['他的 agent 定义：{0}', 'Their agent definitions: {0}'],
+  'off.machines': ['他的机器：{0}', 'Their machines: {0}'], 'off.member': ['项目成员身份', 'Project memberships'], 'off.creds': ['他所有的 token 和登录', 'Every token and sign-in of theirs'],
+  'off.heir': ['下面选的接手人', 'the person chosen below'], 'off.closed': ['停止分享', 'no longer shared'], 'off.removed': ['移除', 'removed'], 'off.revoked': ['立即失效', 'ended now'],
+  'off.audit': ['停用和每一项转移都记进安全审计。以后可以重新启用，吊销的 token 不会恢复。', 'The disabling and every handover go into the audit log. They can be enabled again later; revoked tokens stay revoked.'],
+  syncLog: ['同步记录', 'Sync log'], notMirrored: ['没有对应任务', 'No task'], subOf: ['{0} 的子工单', 'sub-issue of {0}'],
+  commentWritten: ['评论写于 {0}', 'Comment written {0}'], noComment: ['还没写评论', 'No comment yet'], trackerClosed: ['已关闭', 'closed'], toRead: ['待重读', 'to read again'],
+  previewComment: ['预览评论', 'Preview the comment'], commentFor: ['{0} 的进度评论（现在写会是这样）', 'The progress comment on {0}, as it would be written now'], back: ['返回', 'Back'],
   handTo: ['交给', 'Hand to'], offboarded: ['已交接并停用', 'Handed over and disabled'],
   'why.advance': ['本阶段完成，即将进入下一阶段', 'Its stage is done; it moves on next'], 'why.rework': ['被退回，即将返工', 'Sent back; it goes back next'],
   'why.max_loops': ['退回次数到上限', 'Sent back as often as its workflow allows'], 'why.blocked': ['本阶段没有给出结论', 'Its stage reached no verdict'],
@@ -429,7 +442,7 @@ const Tree = (() => {
       <p class="muted">${usedBy(d.name)}</p>${(d.warnings || []).map(w => `<div class="notice">${esc(w)}</div>`).join('')}
       <span class="meta-label">${t('launchPreview')}</span><pre class="mono launch-preview"><code>${esc((d.launch || []).join(' ') || '—')}</code></pre>${(d.launch || []).some(x => x.includes('<')) ? `<p class="hint">${esc(t('launchHelp'))}</p>` : ''}
       <span class="meta-label">${t('definition')}</span><pre class="mono launch-preview"><code>${esc(d.text)}</code></pre></div>
-      <footer class="modal-footer">${button('close-modal', t('closeView'))}${button('tree-export-agent', t('exportAgent'), `data-name="${esc(d.name)}"`)}</footer>`, '', true);
+      <footer class="modal-footer">${button('close-modal', t('close'))}${button('tree-export-agent', t('exportAgent'), `data-name="${esc(d.name)}"`)}</footer>`, '', true);
     data.viewing = d;
   }
 
@@ -457,10 +470,28 @@ const Tree = (() => {
       <fieldset class="stack"><legend>${t('after')}</legend>${others.map(x => `<label class="choice"><input type="checkbox" name="after" value="${esc(x.id)}" ${(task.after || []).includes(x.id) ? 'checked' : ''}>${esc(x.title)}</label>`).join('') || `<span class="muted">${t('nobody')}</span>`}</fieldset></div>${footer(t('save'))}</form>`, '');
   }
 
+  // offboardSteps are what cannot end with user and where each goes: projects and loose tasks to the heir, project
+  // tasks to each project's owner, machines closed, memberships and credentials ended.
+  function offboardSteps(user) {
+    const projects = Object.values(ui.state.projects || {}), owned = projects.filter(p => p.owner === user);
+    const tasks = Object.values(ui.state.tasks).filter(x => !finished(x.status) && (x.owner === user || x.approver === user));
+    const loose = tasks.filter(x => !x.project || owned.some(p => p.id === x.project)), inProjects = tasks.filter(x => !loose.includes(x));
+    const machines = (ui.machines || []).filter(m => m.owner === user), member = projects.filter(p => (p.members || {})[user]);
+    const defs = data.defs.filter(d => d.owner === user);
+    const step = (n, what, to) => n ? `<li><strong class="num">${n}</strong> ${what}<span class="muted"> → ${to}</span></li>` : '';
+    const byOwner = [...new Set(inProjects.map(x => Team.name(ui.state.projects[x.project]?.owner || '')))].map(esc).join(', ');
+    return [step(owned.length, t('off.projects').replace('{0}', owned.map(p => esc(p.name)).join(', ')), t('off.heir')),
+      step(loose.length, t('off.tasks'), t('off.heir')), step(inProjects.length, t('off.projectTasks'), byOwner),
+      step(defs.length, t('off.defs').replace('{0}', defs.map(d => esc(d.name)).join(', ')), t('off.heir')),
+      step(machines.length, t('off.machines').replace('{0}', machines.map(m => esc(m.name)).join(', ')), t('off.closed')),
+      step(member.length, t('off.member'), t('off.removed')), `<li>${t('off.creds')}<span class="muted"> → ${t('off.revoked')}</span></li>`].join('');
+  }
+
   function offboard(user) {
     const heirs = Team.users().filter(u => !u.disabled && u.id !== user).map(u => `<option value="${esc(u.id)}" ${u.id === ui.me?.id ? 'selected' : ''}>${esc(u.name)}</option>`).join('');
     showModal('tree-form', `${t('offboard')} · ${esc(Team.name(user))}`, `<form id="tree-offboard-form" data-id="${esc(user)}"><div class="modal-body stack"><div class="form-error" role="alert" hidden></div><p>${t('offboardHelp')}</p>
-      <label>${t('handTo')}<select name="to" required autofocus>${heirs}</select></label></div><footer class="modal-footer">${button('close-modal', t('cancel'))}<button type="submit" class="primary danger">${t('offboard')}</button></footer></form>`, '');
+      <ul class="plain offboard-steps">${offboardSteps(user)}</ul>
+      <label>${t('handTo')}<select name="to" required autofocus>${heirs}</select></label><p class="hint">${t('off.audit')}</p></div><footer class="modal-footer">${button('close-modal', t('cancel'))}<button type="submit" class="primary danger">${t('offboard')}</button></footer></form>`, '');
   }
 
   const trackerKinds = {gitea: 'Gitea', github: 'GitHub', gitlab: 'GitLab'};
@@ -471,13 +502,35 @@ const Tree = (() => {
     const state = x => x.stopped ? `<span class="status failed">${t('trackerStopped')}</span>` : x.paused_until ? `<span class="status queued">${t('trackerPaused')}</span>` : `<span class="status exited">${t('trackerOK')}</span>`;
     const rows = mine.map(x => `<div class="agent-row"><strong class="mono">${esc(x.repo)}</strong><span>${esc(trackerKinds[x.kind] || x.kind)} · ${esc(x.base)} · @${esc(x.bot)}</span>${state(x)}
       <span>${t('syncedIssues').replace('{0}', x.issues)}${x.failing ? ' · ' + t('failingIssues').replace('{0}', x.failing) : ''}</span><span>${t('trackerLastOK')} ${x.last_ok ? date(x.last_ok) : '—'} · ${t('trackerScanned')} ${x.polled ? date(x.polled) : '—'}</span>
-      ${x.hook ? `<span>${t('trackerHook')} <code>${esc(x.hook)}</code></span>` : ''}${button('tree-tracker-settings', t('trackerSettings'), `data-id="${esc(x.id)}" data-project="${esc(project)}"`, 'quiet')}
+      ${x.hook ? `<span>${t('trackerHook')} <code>${esc(x.hook)}</code></span>` : ''}${button('tree-tracker-settings', t('trackerSettings'), `data-id="${esc(x.id)}" data-project="${esc(project)}"`, 'quiet')}${button('tree-tracker-log', t('syncLog'), `data-id="${esc(x.id)}" data-project="${esc(project)}"`, 'quiet')}
       ${x.last_error ? `<code class="muted">${esc(x.last_error)}</code>` : ''}${button('tree-rescan', t('rescan'), `data-id="${esc(x.id)}" data-project="${esc(project)}"`, 'quiet')}${button('tree-token', t('replaceToken'), `data-id="${esc(x.id)}" data-project="${esc(project)}"`, 'quiet')}${button('tree-unbind', t('unbind'), `data-id="${esc(x.id)}" data-project="${esc(project)}"`, 'quiet danger')}</div>`);
     showModal('tree-form', `${t('trackers')} · ${esc(ui.state.projects[project]?.name || project)}`, `<form id="tree-tracker-form" data-project="${esc(project)}"><div class="modal-body stack"><div class="form-error" role="alert" hidden></div>
       <p class="hint">${t('trackersHelp')}</p><div class="agent-list">${rows.join('') || `<div class="agent-row"><span>${t('noTrackers')}</span></div>`}</div>
       <h3>${t('bindRepo')}</h3><div class="form-grid"><label>${t('trackerKind')}<select name="kind">${Object.entries(trackerKinds).map(([k, v]) => `<option value="${k}">${v}</option>`).join('')}</select></label><label>${t('trackerBase')}<input name="base" required class="mono" placeholder="https://git.example"></label><label>${t('trackerRepo')}<input name="repo" required class="mono" placeholder="team/app"></label></div>
       <label>${t('trackerToken')}<input name="token" type="password" required autocomplete="off"><small>${t('trackerTokenHint')}</small></label>
       ${syncFields({label: 'tend', poll: 60, comment: true, on_accept: 'close'})}</div>${footer(t('bindRepo'))}</form>`, '', true);
+  }
+
+  // syncLog lists the issues a binding follows: which task, when its comment was written, what failed; each one's
+  // progress comment can be previewed as the sync would write it now.
+  async function syncLog(id, project) {
+    const x = (await Team.rest('GET', '/api/trackers')).find(v => v.id === id), rows = await Team.rest('GET', '/api/trackers/issues?id=' + encodeURIComponent(id));
+    if (!x) return;
+    const link = n => `<a href="${esc(x.base.replace(/\/$/, ''))}/${esc(x.repo)}/${x.kind === 'gitlab' ? '-/' : ''}issues/${n}" target="_blank" rel="noreferrer">#${n}</a>`;
+    const row = i => `<div class="agent-row"><strong class="mono">${link(i.number)}</strong><span>${i.task ? `<button type="button" class="link-button mono" data-action="tree-open" data-id="${esc(i.task)}">${esc(i.task)}</button>` : `<span class="muted">${t('notMirrored')}</span>`}${i.parent ? ' · ' + t('subOf').replace('{0}', '#' + i.parent) : ''}</span>
+      <span class="muted">${i.written ? t('commentWritten').replace('{0}', date(i.written)) : t('noComment')}${i.closed ? ' · ' + t('trackerClosed') : ''}${i.dirty ? ' · ' + t('toRead') : ''}</span>${i.pr ? `<a href="${esc(i.pr)}" target="_blank" rel="noreferrer">PR</a>` : ''}
+      ${i.task ? button('tree-tracker-preview', t('previewComment'), `data-id="${esc(id)}" data-number="${i.number}"`, 'quiet') : ''}${i.last_error ? `<code class="form-error">${esc(i.last_error)}</code>` : ''}</div>`;
+    showModal('tree-form', `${t('syncLog')} · ${esc(x.repo)}`, `<div class="modal-body stack"><div class="agent-list">${rows.map(row).join('') || `<div class="agent-row"><span>${t('nobody')}</span></div>`}</div>
+      <div id="tree-comment-preview"></div></div><footer class="modal-footer">${button('tree-trackers', t('back'), `data-project="${esc(project)}"`)}</footer>`, '', true);
+  }
+
+  async function commentPreview(id, number) {
+    const box = document.querySelector('#tree-comment-preview'); if (!box) return;
+    box.innerHTML = `<p class="muted">${t('loading')}</p>`;
+    try {
+      const v = await Team.rest('GET', `/api/trackers/preview?id=${encodeURIComponent(id)}&number=${number}`);
+      box.innerHTML = `<span class="meta-label">${esc(t('commentFor').replace('{0}', '#' + number))}</span><pre class="mono launch-preview"><code>${esc(v.body)}</code></pre>`;
+    } catch (error) { box.innerHTML = `<p class="form-error">${esc(errorText(error))}</p>`; }
   }
 
   // syncFields are the inputs of a binding's settings set.
@@ -503,6 +556,7 @@ const Tree = (() => {
   }
 
   // Project settings: the text forms of repos (one per line) and hooks (argv split on spaces).
+  const hookNames = ['setup', 'before_run', 'check', 'cleanup'];
   const repoLine = r => [r.name, r.remote || '-', r.base || '-', ...(r.worktrees ? ['worktrees'] : []), ...Object.entries(r.dirs || {}).map(([m, d]) => `${m}=${d}`)].join(' ');
   function parseRepos(text) {
     return text.split('\n').map(l => l.trim()).filter(Boolean).map(l => {
@@ -527,8 +581,27 @@ const Tree = (() => {
       <label>${t('defaultWorkflow')}<select name="workflow"><option value="">${t('noWorkflow')}</option>${[...new Set([...builtinFlows, ...Object.keys(p.workflows || {})])].sort().map(n => `<option value="${esc(n)}" ${n === p.defaults?.workflow ? 'selected' : ''}>${esc(n)}</option>`).join('')}</select></label></div>
       <fieldset class="stack"><legend>${t('customWorkflows')}</legend>${Object.keys(p.workflows || {}).sort().map(n => `<div class="flex"><span class="mono grow">${esc(n)}</span>${button('tree-edit-flow', t('edit'), `data-project="${esc(id)}" data-name="${esc(n)}"`, 'quiet')}${button('tree-remove-flow', t('removeMember'), `data-project="${esc(id)}" data-name="${esc(n)}"`, 'quiet danger')}</div>`).join('') || `<span class="muted">${t('noCustomWorkflows')}</span>`}
       <div>${button('tree-edit-flow', `${icon('plus')}${t('newWorkflow')}`, `data-project="${esc(id)}"`, 'quiet')}</div></fieldset>
-      <label>${t('setupHook')}<input name="setup" class="mono" value="${esc((hooks.setup || []).join(' '))}"></label>
-      <label>${t('checkHook')}<input name="check" class="mono" value="${esc((hooks.check || []).join(' '))}"></label></div>${footer(t('save'))}</form>`, '', true);
+      <div>${button('tree-check-dirs', t('checkDirs'), `data-project="${esc(id)}"`, 'quiet')}<ul id="tree-dir-checks" class="plain"></ul></div>
+      ${hookNames.map(h => `<label>${t('hook.' + h)}<input name="${h}" class="mono" value="${esc((hooks[h] || []).join(' '))}"></label>`).join('')}</div>${footer(t('save'))}</form>`, '', true);
+  }
+
+  // checkDirs asks each machine a repo is checked out on whether that directory is there and is a git checkout.
+  async function checkDirs() {
+    const box = document.querySelector('#tree-dir-checks'), text = document.querySelector('#tree-project-form textarea[name=repos]');
+    if (!box || !text) return;
+    const pairs = parseRepos(text.value).flatMap(r => Object.entries(r.dirs).map(([machine, dir]) => ({repo: r.name, machine, dir})));
+    if (!pairs.length) { box.innerHTML = `<li class="muted">${t('noDirsToCheck')}</li>`; return; }
+    box.innerHTML = pairs.map((p, i) => `<li id="dir-check-${i}"><span class="mono">${esc(p.machine)}:${esc(p.dir)}</span> <span class="muted">${t('loading')}</span></li>`).join('');
+    await Promise.all(pairs.map(async (p, i) => {
+      const parent = p.dir.replace(/[\\/][^\\/]+[\\/]?$/, ''), name = p.dir.split(/[\\/]/).filter(Boolean).pop();
+      let said;
+      try {
+        const v = await api.nodeCall({machine: p.machine, method: 'node.dirs', params: {path: parent}});
+        const d = (v.dirs || []).find(x => x.name === name);
+        said = !d ? `<span class="form-error">${t('dirMissing')}</span>` : d.git ? `<span class="ok">✓ ${t('dirGit')}</span>` : `<span class="warn">${t('dirNotGit')}</span>`;
+      } catch (error) { said = `<span class="form-error">${esc(errorText(error))}</span>`; }
+      const li = document.querySelector('#dir-check-' + i); if (li) li.innerHTML = `<span class="mono">${esc(p.machine)}:${esc(p.dir)}</span> ${said}`;
+    }));
   }
 
   const flowTemplate = `---\nname: my-flow\ndescription: what it is for\nmax_loops: 2\nstages:\n  - {name: implement, role: implement, check: true}\n  - {name: review, role: review, output: verdict, on_rework: implement}\n  - {name: accept, gate: human}\n---\n## implement\n\n{{task.brief}}\n\n{{#rework}}Round {{loops}}: fix this first:\n\n{{rework.notes}}\n{{/rework}}\n`;
@@ -547,7 +620,7 @@ const Tree = (() => {
     switch (action) {
       case 'tree-start': await api.taskStart({id: d.id}, {command_id: commandID()}); toast(t('started')); break;
       case 'tree-move': moveTask(ui.state.tasks[d.id]); break;
-      case 'tree-open': ui.page = 'tasks'; renderShell(); await selectTask(d.id); break;
+      case 'tree-open': if (modal.open) closeModal(true); ui.page = 'tasks'; renderShell(); await selectTask(d.id); break;
       case 'tree-inbox-filter': data[d.key] = d.value; render(); break;
       case 'tree-new-agent': agentStart(); break;
       case 'tree-edit-agent': agentForm(await api.agentDefGet({name: d.name})); break;
@@ -559,14 +632,17 @@ const Tree = (() => {
       case 'tree-share-agent': shareAgent(await api.agentDefGet({name: d.name})); break;
       case 'tree-remove-agent': await api.agentDefRemove({name: d.name}, {command_id: commandID()}); await enter('agents'); break;
       case 'tree-project': projectSettings(d.project); break;
+      case 'tree-check-dirs': await checkDirs(); break;
       case 'tree-source': await api.taskSourceAck({id: d.id, accept: !!d.accept}, {command_id: commandID()}); toast(t('acked')); break;
       case 'tree-trackers': await trackers(d.project); break;
+      case 'tree-tracker-log': await syncLog(d.id, d.project); break;
+      case 'tree-tracker-preview': await commentPreview(d.id, d.number); break;
       case 'tree-tracker-settings': await trackerSettings(d.id, d.project); break;
       case 'tree-rescan': await Team.rest('POST', '/api/trackers/rescan', {id: d.id}); toast(t('changeSaved')); await trackers(d.project); break;
       case 'tree-unbind': await Team.rest('DELETE', '/api/trackers', {id: d.id}); await trackers(d.project); break;
       case 'tree-token': tokenForm(d.id, d.project); break;
       case 'tree-notify': askNotify(); break;
-      case 'tree-offboard': offboard(d.id); break;
+      case 'tree-offboard': try { data.defs = (await api.agentDefList()).defs; } catch (_) {} offboard(d.id); break;
       case 'tree-pass': { const task = ui.state.tasks[d.id]; await api.taskGate({id: d.id, pass: true, expected_rev: task.rev}, {command_id: commandID()}); toast(t('passed')); break; }
       case 'tree-rework': gateForm(ui.state.tasks[d.id]); break;
       case 'tree-merge': await api.taskMerge({id: d.id}, {command_id: commandID()}); toast(t('merging')); break;
@@ -612,7 +688,7 @@ const Tree = (() => {
         const roles = {};
         for (const r of ['implement', 'review', 'test', 'planner']) if (fd.get(r)) roles[r] = fd.get(r);
         const old = ui.state.projects[form.dataset.id] || {}, hooks = {...old.hooks};
-        for (const h of ['setup', 'check']) { const a = String(fd.get(h) || '').trim().split(/\s+/).filter(Boolean); if (a.length) hooks[h] = a; else delete hooks[h]; }
+        for (const h of hookNames) { const a = String(fd.get(h) || '').trim().split(/\s+/).filter(Boolean); if (a.length) hooks[h] = a; else delete hooks[h]; }
         const p = await api.projectEdit({id: form.dataset.id, context: fd.get('context') || '', repos: parseRepos(String(fd.get('repos') || '')),
           defaults: {workflow: fd.get('workflow') || undefined, roles, machine: fd.get('machine') || undefined}, hooks}, command);
         if (p) ui.state.projects[p.id] = p;

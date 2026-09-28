@@ -447,7 +447,7 @@ issue it was made for.
 
 **Branches.** Mark a project's repository `worktrees` and each task works on its own branch, `tend/<task>`, in a
 worktree beside the checkout (`<checkout>-wt/<task>`); your own checkout is left alone. The project's `hooks.setup` runs
-once a worktree is made. Whatever the agent leaves uncommitted is committed for it; a review or test runs on a read-only
+once a worktree is made, and `hooks.before_run` in it before every run (a failing one fails the run). Whatever the agent leaves uncommitted is committed for it; a review or test runs on a read-only
 copy of the branch that is thrown away after (the run says how many files it changed there). Subtasks start from their
 parent's branch and run side by side; each one done is merged into its parent's branch before it counts as done, so a
 task that comes after another starts with that work in. A merge that conflicts is undone and waits: merge it yourself in
@@ -572,6 +572,13 @@ board, 7 days of tokens and cost, and the latest sessions. Tasks show as a list 
 machine, project, stage and run; the view, filters, selected task and tab are in the address, so a reload or a shared
 link shows the same thing. `⌘K` (`Ctrl+K`) opens a command palette that finds any action or task by its Chinese
 or English name; every action also has a key (`?` lists them: `n` new task, `g h` home, `g b` board, `d` dispatch, …).
+**Needs you** says why each item is yours (you own it, accept it or dispatched it), filters by kind and role, and
+answers in place: `1` allows, `2` denies with an optional reason, a digit picks an option, or give your own words.
+**Runs** (`g r`) lists every run by state and machine with a preview of its latest output. A task's detail shows its
+workflow budget against what its runs spent; an agent definition shows where it is used and the command a run of it
+starts, and imports or exports as Markdown; project settings check each repository directory on its machine; a tracker
+binding's **Sync log** lists its issues and previews the progress comment; the Admin page lists pending invitations to
+revoke, and a handover lists what goes where before it runs.
 **Settings** picks the theme (light, dark or the system's), a skin (tend, Forest,
 Ember, Graphite) with its own accent if you like, standard or high contrast, and one of three densities, kept in the
 browser; skins are made on the server (`/theme/<name>.css`) and keep text at 4.5:1 (7:1 in high contrast) whatever the

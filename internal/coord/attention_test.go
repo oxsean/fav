@@ -45,7 +45,7 @@ func TestAPreviewSaysWhyARunWouldNotStart(t *testing.T) {
 	}
 	var ms Machines
 	e.must(MMachineList, MachinesParams{}, &ms)
-	if ms.Machines[0].Agents[tend.ProviderCodex].Auth != agent.AuthMissing {
+	if m := ms.Machines[0]; m.Agents[tend.ProviderCodex].Auth != agent.AuthMissing || m.Via != ViaLocal || len(m.Missing) != 0 {
 		t.Fatalf("machine.list keeps the checks: %+v", ms.Machines[0])
 	}
 	r := e.dispatch(Dispatch{Task: tk.ID, Agent: "codex"})

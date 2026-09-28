@@ -99,7 +99,7 @@ func TestNeedsYouIsTheLatestRunOfOpenTasksThatWantsSomeone(t *testing.T) {
 	for _, r := range s.NeedsYou() {
 		got = append(got, r.ID)
 	}
-	if strings.Join(got, " ") != "r_fail r_stall r_wait" {
+	if strings.Join(got, " ") != "r_wait r_fail r_stall" {
 		t.Fatal(got)
 	}
 }

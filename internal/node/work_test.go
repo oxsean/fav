@@ -94,6 +94,36 @@ func TestATaskWorksOnItsBranchInItsOwnWorktree(t *testing.T) {
 	}
 }
 
+func TestABeforeRunHookRunsBeforeEveryRunInItsWorktree(t *testing.T) {
+	needGit(t)
+	n := New(t.TempDir())
+	n.Limits.AllowHooks = true
+	checkout, mark := repo(t), filepath.Join(t.TempDir(), "before")
+	w := &Workspace{Checkout: checkout, Branch: "tend/t_1", Base: "main", BeforeRun: []string{os.Args[0], "_touch", mark}}
+	run := func(w *Workspace) Snapshot {
+		return finished(t, n, start(t, n, StartParams{Task: "t_1", Profile: fake("--steps", "1", "--every", "10ms"), Brief: "b", Work: w}).Run)
+	}
+	wt := filepath.Join(checkout+"-wt", "t_1")
+	for i := range 2 {
+		os.Remove(mark)
+		end := run(w)
+		if where, _ := os.ReadFile(mark); end.State.State != StateExited || !samePlace(string(where), wt) {
+			t.Fatalf("run %d: the hook runs in the worktree first: %+v %q", i, end.State, where)
+		}
+	}
+	bad := *w
+	bad.BeforeRun = []string{filepath.Join(t.TempDir(), "no-such-hook")}
+	if end := run(&bad); end.State.State != StateFailed || end.State.Reason != ReasonBeforeRunFailed || !paths.Exists(wt) {
+		t.Fatalf("a failing hook fails the run and keeps the worktree: %+v", end.State)
+	}
+	ro := *w
+	ro.ReadOnly = true
+	os.Remove(mark)
+	if end := run(&ro); end.State.State != StateExited || paths.Exists(mark) {
+		t.Fatalf("a read-only copy runs no hook: %+v", end.State)
+	}
+}
+
 func TestSiblingsWorkAtOnceAndMergeIntoTheirParent(t *testing.T) {
 	needGit(t)
 	n := New(t.TempDir())

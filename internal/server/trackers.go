@@ -8,6 +8,8 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -43,6 +45,8 @@ func (s *Server) trackerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/trackers/settings", s.api(s.trackerSettings))
 	mux.HandleFunc("POST /api/trackers/credential", s.api(s.trackerCredential))
 	mux.HandleFunc("POST /api/trackers/rescan", s.api(s.rescanTracker))
+	mux.HandleFunc("GET /api/trackers/issues", s.api(s.trackerIssues))
+	mux.HandleFunc("GET /api/trackers/preview", s.api(s.trackerPreview))
 	mux.HandleFunc("POST /hooks/{id}", s.trackerHook)
 }
 
@@ -260,6 +264,58 @@ func (s *Server) trackerCredential(w http.ResponseWriter, r *http.Request, c cal
 	s.audit(r, c.user.ID, "tracker.credential", x.Project+" "+x.Repo)
 	s.syncer.Wake()
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// TrackerIssueView is one issue a binding follows, as its sync log shows it.
+type TrackerIssueView struct {
+	Number    int64     `json:"number"`
+	Task      string    `json:"task,omitempty"`
+	Written   time.Time `json:"written,omitzero"`
+	Closed    bool      `json:"closed,omitempty"`
+	Dirty     bool      `json:"dirty,omitempty"`
+	LastError string    `json:"last_error,omitempty"`
+	Parent    int64     `json:"parent,omitempty"`
+	PR        string    `json:"pr,omitempty"`
+}
+
+// trackerIssues is a binding's sync log: every issue it follows, the latest written first.
+func (s *Server) trackerIssues(w http.ResponseWriter, r *http.Request, c caller) {
+	x, ok := s.managed(w, c, r.URL.Query().Get("id"))
+	if !ok {
+		return
+	}
+	rows, err := s.team().TrackerIssues(x.ID, false)
+	if err != nil {
+		apiError(w, http.StatusInternalServerError, "internal")
+		return
+	}
+	out := make([]TrackerIssueView, 0, len(rows))
+	for _, i := range rows {
+		out = append(out, TrackerIssueView{Number: i.Number, Task: i.Task, Written: i.Written, Closed: i.Closed, Dirty: i.Dirty,
+			LastError: i.LastError, Parent: i.Parent, PR: i.PR})
+	}
+	sort.SliceStable(out, func(a, b int) bool { return out[a].Written.After(out[b].Written) })
+	writeJSON(w, http.StatusOK, out)
+}
+
+// trackerPreview is the progress comment the sync would write on issue number now.
+func (s *Server) trackerPreview(w http.ResponseWriter, r *http.Request, c caller) {
+	x, ok := s.managed(w, c, r.URL.Query().Get("id"))
+	if !ok {
+		return
+	}
+	number, _ := strconv.ParseInt(r.URL.Query().Get("number"), 10, 64)
+	row, err := s.team().TrackerIssue(x.ID, number)
+	if err != nil || row.Task == "" || s.syncer == nil {
+		apiError(w, http.StatusNotFound, "not_found")
+		return
+	}
+	body, _, ok := s.syncer.progress(x, settingsOf(x), row.Task)
+	if !ok {
+		apiError(w, http.StatusNotFound, "not_found")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"body": body})
 }
 
 func (s *Server) rescanTracker(w http.ResponseWriter, r *http.Request, c caller) {

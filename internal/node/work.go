@@ -23,14 +23,18 @@ import (
 // review, a merge into an integration branch, and the project's setup and cleanup hooks.
 const FeatureWorktree = "worktree"
 
+// FeatureBeforeRun: a workspace's before_run hook runs in the task's worktree before each run.
+const FeatureBeforeRun = "before_run"
+
 // Workspace is where a run works in git (agent.Workspace).
 type Workspace = agent.Workspace
 
 // Run reasons of a workspace.
 const (
-	ReasonWork          = "work"           // the worktree could not be made (Detail says why)
-	ReasonSetupFailed   = "setup_failed"   // the setup hook failed; the new worktree was removed
-	ReasonMergeConflict = "merge_conflict" // the merge stopped on conflicts and was undone
+	ReasonWork            = "work"              // the worktree could not be made (Detail says why)
+	ReasonSetupFailed     = "setup_failed"      // the setup hook failed; the new worktree was removed
+	ReasonBeforeRunFailed = "before_run_failed" // the before_run hook failed; the worktree stays
+	ReasonMergeConflict   = "merge_conflict"    // the merge stopped on conflicts and was undone
 )
 
 var (
@@ -76,7 +80,9 @@ func workDir(w *Workspace, run string) string {
 	return dirOf(w, w.Branch)
 }
 
-func workHooks(w *Workspace) bool { return len(w.Setup) > 0 || len(w.Cleanup) > 0 }
+func workHooks(w *Workspace) bool {
+	return len(w.Setup) > 0 || len(w.Cleanup) > 0 || len(w.BeforeRun) > 0
+}
 
 // gitIn runs git in dir; env adds to its environment.
 type gitIn struct {
@@ -252,7 +258,7 @@ func (s *sup) prepare() (from string, err error) {
 		if !samePlace(wt, dir) {
 			return "", errors.New(w.Branch + " is checked out in " + wt)
 		}
-		return from, nil
+		return from, s.beforeRun(w, dir)
 	}
 	if paths.Exists(dir) {
 		return "", errors.New(dir + " is in the way")
@@ -266,16 +272,26 @@ func (s *sup) prepare() (from string, err error) {
 	if len(w.Setup) > 0 {
 		if exit, tail := s.hook(w.Setup, dir, "setup"); exit != 0 {
 			g.run("worktree", "remove", "--force", dir)
-			return "", &hookFailed{tail}
+			return "", &hookFailed{"setup", tail}
 		}
 	}
-	return from, nil
+	return from, s.beforeRun(w, dir)
 }
 
-// hookFailed: the setup hook failed with this tail of its output.
-type hookFailed struct{ tail string }
+func (s *sup) beforeRun(w *Workspace, dir string) error {
+	if len(w.BeforeRun) == 0 || w.Merge != "" {
+		return nil
+	}
+	if exit, tail := s.hook(w.BeforeRun, dir, "before_run"); exit != 0 {
+		return &hookFailed{"before_run", tail}
+	}
+	return nil
+}
 
-func (h *hookFailed) Error() string { return "setup hook failed:\n" + h.tail }
+// hookFailed: a workspace hook failed with this tail of its output.
+type hookFailed struct{ name, tail string }
+
+func (h *hookFailed) Error() string { return h.name + " hook failed:\n" + h.tail }
 
 // sweepCopies removes the read-only copies of runs that ended without removing theirs.
 func (s *sup) sweepCopies(g gitIn) {
@@ -476,6 +492,9 @@ func (s *sup) workFailed(err error) error {
 	var hf *hookFailed
 	if errors.As(err, &hf) {
 		reason, detail = ReasonSetupFailed, hf.tail
+		if hf.name == "before_run" {
+			reason = ReasonBeforeRunFailed
+		}
 	}
 	now := time1()
 	return s.keep(func(st *State) {

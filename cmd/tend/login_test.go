@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sync/atomic"
 	"testing"
 )
@@ -47,7 +48,7 @@ func TestLoginSavesTheTokenAndConfig(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if fi, _ := os.Stat(tokenPath); fi.Mode().Perm() != 0o600 {
+	if fi, _ := os.Stat(tokenPath); runtime.GOOS != "windows" && fi.Mode().Perm() != 0o600 {
 		t.Fatalf("mode %v", fi.Mode())
 	}
 	if got := string(b); got != "tend_abc123\n" {

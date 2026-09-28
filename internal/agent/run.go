@@ -120,5 +120,7 @@ type Workspace struct {
 	ReadOnly bool     `json:"read_only,omitempty"` // a detached copy of the branch's head, thrown away after
 	Merge    string   `json:"merge,omitempty"`     // a merge run: this branch goes into Branch; no agent runs
 	Setup    []string `json:"setup,omitempty"`     // run in a worktree once it is made
-	Cleanup  []string `json:"cleanup,omitempty"`   // run in a merged branch's worktree before it is removed
+	// BeforeRun runs in the task's worktree before each run's agent starts.
+	BeforeRun []string `json:"before_run,omitempty"`
+	Cleanup   []string `json:"cleanup,omitempty"` // run in a merged branch's worktree before it is removed
 }

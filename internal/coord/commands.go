@@ -77,8 +77,17 @@ type Machine struct {
 	OS       string                 `json:"os,omitempty"`
 	Hostname string                 `json:"hostname,omitempty"`
 	Version  string                 `json:"version,omitempty"`
-	Agents   map[string]agent.Check `json:"agents,omitempty"` // how each agent CLI stood when last checked
+	Agents   map[string]agent.Check `json:"agents,omitempty"`  // how each agent CLI stood when last checked
+	Via      string                 `json:"via,omitempty"`     // local | ssh | dial (the node dialed in)
+	Missing  []string               `json:"missing,omitempty"` // node features its build lacks
 }
+
+// How a machine is reached, in Machine.Via.
+const (
+	ViaLocal = "local"
+	ViaSSH   = "ssh"
+	ViaDial  = "dial"
+)
 
 type Machines struct {
 	Machines []Machine `json:"machines"`
@@ -743,7 +752,16 @@ func (c *Coord) Machines(ctx context.Context, connect bool) Machines {
 // machineView is how m stands; the caller holds mu.
 func (c *Coord) machineView(m *machine) Machine {
 	x := Machine{Name: m.name, Slots: c.slots(m.name), OS: m.hello.OS, Hostname: m.hello.Hostname, Version: m.hello.Version,
-		Agents: m.checks}
+		Agents: m.checks, Via: ViaLocal}
+	switch {
+	case m.attached:
+		x.Via = ViaDial
+	case m.host != nil:
+		x.Via = ViaSSH
+	}
+	if m.conn != nil && m.hello.Version != "" {
+		x.Missing = missingFeatures(m.hello, node.Features)
+	}
 	if c.team() {
 		x.Owner = c.ownerOf(m.name)
 	}
