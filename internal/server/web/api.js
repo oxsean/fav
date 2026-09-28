@@ -129,6 +129,7 @@ const api = (() => {
     runPreview: params => call('run.preview', params),
     runTail: params => call('run.tail', params),
     machineList: params => call('machine.list', params),
+    nodeCall: params => call('node.call', params),
     agentList: () => call('agent.list'),
     subscribe(params, listener, onRefetch) {
       journal.clear();

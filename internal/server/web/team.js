@@ -45,6 +45,9 @@ const teamWords = {
   'signin.internal': ['服务器出错，请稍后再试。', 'The server failed. Try again later.'],
   exists: ['名字已被占用。', 'That name is taken.'], name: ['名字不合法。', 'That name is not valid.'], self: ['不能改自己。', 'You cannot change yourself.'],
   csrf: ['请求被拒绝，请刷新页面。', 'The request was refused. Reload the page.'], forbidden: ['你没有这个权限。', 'You are not allowed to do that.'],
+  projectDir: ['代码目录', 'Checkout'], projectDirHint: ['可选：选一台机器上的目录，项目的任务在那里运行。', 'Optional: a directory on a machine where the project\'s tasks run.'],
+  dirMachine: ['机器', 'Machine'], noDir: ['不选', 'None'], dirUp: ['上一级', 'Up'], dirRoots: ['可用目录', 'Allowed directories'],
+  dirPick: ['用这个目录', 'Use this directory'], dirPicked: ['已选：{0}', 'Chosen: {0}'], noDirs: ['这里没有子目录', 'No directories here'],
   internal: ['服务器出错。', 'The server failed.'], team: ['团队', 'Team'], make: ['创建', 'Create'], changeSaved: ['已保存', 'Saved'], add: ['添加', 'Add'], saveShare: ['保存共享', 'Save sharing'], nobody: ['无', 'Nobody'],
 };
 
@@ -170,8 +173,38 @@ const Team = (() => {
   function showSecret(title, body) {
     showModal('team-secret', title, `<div class="modal-body stack">${body}</div>`, `<footer class="modal-footer">${button('close-modal', t('close'), 'autofocus')}</footer>`, true);
   }
+  let browse = null;
+  const dirMachines = () => (ui.machines || []).filter(m => m.state === 'connected' && (isAdmin() || m.owner === ui.me?.id));
+  function dirField() {
+    const ms = dirMachines();
+    if (!ms.length) return '';
+    return `<fieldset class="dir-pick"><legend>${t('projectDir')}</legend><small>${t('projectDirHint')}</small><label>${t('dirMachine')}<select data-team-dir-machine><option value="">${t('noDir')}</option>${ms.map(m => `<option value="${esc(m.name)}">${esc(m.name)}</option>`).join('')}</select></label><input type="hidden" name="dir"><p class="dir-picked" hidden></p><div id="team-dirs" class="dir-list"></div></fieldset>`;
+  }
+  async function browseDirs(machine, path) {
+    const box = document.querySelector('#team-dirs');
+    if (!box) return;
+    if (browse?.machine !== machine) pickDir('');
+    browse = machine ? {machine, path} : null;
+    if (!machine) { box.innerHTML = ''; return; }
+    box.innerHTML = `<p class="muted">${t('loading')}</p>`;
+    let v;
+    try { v = await api.nodeCall({machine, method: 'node.dirs', params: {path}}); } catch (error) { if (browse?.machine === machine) box.innerHTML = `<p class="form-error">${esc(errorText(error))}</p>`; return; }
+    if (browse?.machine !== machine || browse.path !== path) return;
+    const up = v.parent ? button('team-dir-open', `↑ ${t('dirUp')}`, `data-path="${esc(v.parent)}"`, 'quiet') : v.path ? button('team-dir-open', `↑ ${t('dirRoots')}`, 'data-path=""', 'quiet') : '';
+    const here = v.path ? `<code>${esc(v.path)}</code>${button('team-dir-pick', t('dirPick'), `data-path="${esc(v.path)}"`)}` : '';
+    const rows = (v.dirs || []).map(d => `<li>${button('team-dir-open', `${esc(d.name)}${d.git ? ' <span class="muted mono">git</span>' : ''}`, `data-path="${esc(d.path)}"`, 'link')}</li>`).join('');
+    box.innerHTML = `<div class="dir-here">${up}${here}</div>${rows ? `<ul>${rows}</ul>` : `<p class="muted">${t('noDirs')}</p>`}`;
+  }
+  function pickDir(path) {
+    const input = document.querySelector('#team-project-form input[name=dir]'), note = document.querySelector('#team-project-form .dir-picked');
+    if (!input) return;
+    input.value = path;
+    note.hidden = !path;
+    note.textContent = t('dirPicked').replace('{0}', path);
+  }
   function newProject() {
-    showModal('team-form', t('newProject'), `<form id="team-project-form" data-command="${commandID()}"><div class="modal-body stack"><div class="form-error" role="alert" hidden></div><label>${t('projectName')}<input name="name" required autofocus></label><label>${t('projectID')}<input name="slug" class="mono" pattern="[a-z0-9][a-z0-9_\\-]{0,31}"><small>${t('projectIDHint')}</small></label><label>${t('owner')}<select name="owner">${userOptions(ui.me?.id)}</select></label></div>${footer(t('make'))}</form>`, '');
+    browse = null;
+    showModal('team-form', t('newProject'), `<form id="team-project-form" data-command="${commandID()}"><div class="modal-body stack"><div class="form-error" role="alert" hidden></div><label>${t('projectName')}<input name="name" required autofocus></label><label>${t('projectID')}<input name="slug" class="mono" pattern="[a-z0-9][a-z0-9_\\-]{0,31}"><small>${t('projectIDHint')}</small></label><label>${t('owner')}<select name="owner">${userOptions(ui.me?.id)}</select></label>${dirField()}</div>${footer(t('make'))}</form>`, '');
   }
   function editProject(id) {
     const p = ui.state.projects[id]; if (!p) return;
@@ -203,6 +236,8 @@ const Team = (() => {
     const d = el.dataset;
     switch (action) {
       case 'team-new-project': newProject(); break;
+      case 'team-dir-open': await browseDirs(browse?.machine || '', d.path); break;
+      case 'team-dir-pick': pickDir(d.path); break;
       case 'team-edit-project': editProject(d.project); break;
       case 'team-add-member': addMember(d.project); break;
       case 'team-remove-member': await setMember(d.project, d.user, ''); break;
@@ -229,6 +264,7 @@ const Team = (() => {
     renderPage(); toast(t('memberSaved'));
   }
   async function change(el) {
+    if ('teamDirMachine' in el.dataset) { await browseDirs(el.value, ''); return true; }
     if (el.dataset.teamRole) { await setMember(el.dataset.teamRole, el.dataset.user, el.value); return true; }
     if (el.dataset.teamUserRole) { await rest('POST', '/api/users', {id: el.dataset.teamUserRole, role: el.value}); toast(t('changeSaved')); await enter('admin'); return true; }
     return false;
@@ -242,7 +278,11 @@ const Team = (() => {
         const p = form.dataset.id
           ? await api.projectEdit({id: form.dataset.id, name: f.name.trim(), owner: f.owner}, command)
           : await api.projectCreate({id: f.slug || undefined, name: f.name.trim(), owner: f.owner}, command);
-        ui.state.projects[p.id] = p; closeModal(true); renderPage(); toast(t('projectSaved')); break;
+        ui.state.projects[p.id] = p;
+        if (!form.dataset.id && f.dir && browse?.machine) {
+          const repo = {name: f.dir.split(/[\\/]/).filter(Boolean).pop() || p.id, dirs: {[browse.machine]: f.dir}};
+          ui.state.projects[p.id] = await api.projectEdit({id: p.id, repos: [repo]}, {command_id: commandID()});
+        } closeModal(true); renderPage(); toast(t('projectSaved')); break;
       }
       case 'team-member-form': closeModal(true); await setMember(form.dataset.project, f.user, f.role); break;
       case 'team-share-form': {

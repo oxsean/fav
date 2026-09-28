@@ -106,6 +106,12 @@ func (n *Node) Handler(sessions remote.Handler) wire.Handler {
 				return nil, err
 			}
 			return n.Send(p)
+		case MDirs:
+			var p DirsParams
+			if err := r.Decode(&p); err != nil {
+				return nil, err
+			}
+			return n.Dirs(p)
 		}
 		res, err := shareSessions(ctx, n.Limits.ShareSessions, sessions, r.Method, r.Params)
 		if h, ok := res.(remote.Hello); ok && err == nil {
@@ -119,7 +125,7 @@ func (n *Node) Handler(sessions remote.Handler) wire.Handler {
 }
 
 // Methods lists what Handler answers.
-var Methods = []string{MRunStart, MRunStop, MRunList, MRunTail, MRunResume, MAgents, MRunAnswer, MRunSend}
+var Methods = []string{MRunStart, MRunStop, MRunList, MRunTail, MRunResume, MAgents, MRunAnswer, MRunSend, MDirs}
 
 // Features lists what run.start and run.resume understand beyond their first shape; a coordinator that needs a feature
 // this node lacks fails the run as node_outdated instead of starting it without.

@@ -40,6 +40,32 @@ type InboxItem struct {
 	Reason  string    `json:"reason"`
 	Run     string    `json:"run,omitempty"`
 	Since   time.Time `json:"since"`
+	As      []string  `json:"as,omitempty"`
+}
+
+// Roles in InboxItem.As: why an item waits for the viewer.
+const (
+	AsOwner      = "owner"
+	AsApprover   = "approver"
+	AsDispatcher = "dispatcher"
+)
+
+// roles are why task t's situation sit is for user: owner, approver, dispatcher; the owner when nobody else is named.
+func roles(st *task.State, t *task.Task, sit task.Situation, user string) []string {
+	var out []string
+	if t.Owner == user {
+		out = append(out, AsOwner)
+	}
+	if sit.Reason == task.WhyAccept && t.Approver == user {
+		out = append(out, AsApprover)
+	}
+	if r := st.Runs[sit.Run]; r != nil && r.Dispatcher == user {
+		out = append(out, AsDispatcher)
+	}
+	if len(out) == 0 {
+		out = append(out, AsOwner)
+	}
+	return out
 }
 
 type Inbox struct {
@@ -188,7 +214,8 @@ func (c *Coord) inbox(p Principal) Inbox {
 		if r := c.st.Runs[sit.Run]; r != nil {
 			since = r.Since()
 		}
-		out.Items = append(out.Items, InboxItem{Task: t.ID, Title: t.Title, Project: t.Project, Reason: sit.Reason, Run: sit.Run, Since: since})
+		out.Items = append(out.Items, InboxItem{Task: t.ID, Title: t.Title, Project: t.Project, Reason: sit.Reason, Run: sit.Run, Since: since,
+			As: roles(c.st, t, sit, p.User)})
 	}
 	sort.Slice(out.Items, func(i, j int) bool { return out.Items[i].Since.Before(out.Items[j].Since) })
 	return out

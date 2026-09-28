@@ -78,6 +78,7 @@ var methodAccess = map[string]access{
 	MInboxList:      reader,
 	MUserOffboard:   admin,
 	MTaskSync:       internal,
+	MTaskLink:       internal,
 	MTaskSourceAck:  writer,
 	MTaskGate:       writer,
 	MTaskMerge:      writer,

@@ -1,5 +1,5 @@
-// Package tracker speaks to issue trackers (Gitea, GitHub, GitLab): it reads a
-// repository's issues and their comments, and writes one comment, a close or a label back. Only tend-server carries it.
+// Package tracker speaks to issue trackers (Gitea, GitHub, GitLab): it reads a repository's issues and their comments,
+// writes one comment, a close or a label back, and opens sub-issues and pull requests. Only tend-server carries it.
 package tracker
 
 import (
@@ -21,12 +21,14 @@ const (
 )
 
 type Repo struct {
-	ID       int64  `json:"id"`
-	FullName string `json:"full_name"`
-	URL      string `json:"url"`
+	ID            int64  `json:"id"`
+	FullName      string `json:"full_name"`
+	URL           string `json:"url"`
+	DefaultBranch string `json:"default_branch,omitempty"`
 }
 
 type Issue struct {
+	ID        int64     `json:"id,omitempty"` // the tracker-wide id, which GitHub's sub-issues take
 	Number    int64     `json:"number"`
 	Title     string    `json:"title"`
 	Body      string    `json:"body"`
@@ -42,6 +44,12 @@ type Comment struct {
 	Body      string    `json:"body"`
 	Author    string    `json:"author"` // login
 	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// PullRequest is a pull request, a merge request on GitLab.
+type PullRequest struct {
+	Number int64  `json:"number"`
+	URL    string `json:"url"`
 }
 
 // Page is the issues updated since a time; NotModified when the tracker says nothing changed since ETag.
@@ -63,6 +71,12 @@ type Tracker interface {
 	EditComment(ctx context.Context, number, id int64, body string) error // ErrNotFound when it was deleted
 	Close(ctx context.Context, number int64) error
 	Label(ctx context.Context, number int64, label string) error
+	CreateIssue(ctx context.Context, title, body string) (Issue, error)
+	// LinkSubIssue makes child a sub-issue of parent on GitHub; elsewhere child's body names its parent and this does nothing.
+	LinkSubIssue(ctx context.Context, parent int64, child Issue) error
+	// PullRequest is the open pull request from branch head; ErrNotFound when there is none.
+	PullRequest(ctx context.Context, head string) (PullRequest, error)
+	OpenPullRequest(ctx context.Context, head, base, title, body string) (PullRequest, error)
 }
 
 // Config says which repository, where, and as whom.

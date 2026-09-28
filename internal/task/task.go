@@ -73,12 +73,15 @@ type Task struct {
 	StartSeq  int64     `json:"start_seq,omitempty"` // the seq of its last start; runs queued before it are earlier tries
 	Held      string    `json:"held,omitempty"`      // why the coordinator could not dispatch it; cleared by an edit or a start
 	Source    *Source   `json:"source,omitempty"`    // the issue a requirement comes from
+	Issue     string    `json:"issue,omitempty"`     // the sub-issue that mirrors it on its root's tracker
+	PR        string    `json:"pr,omitempty"`        // the pull request opened from its branch
 	Workflow  string    `json:"workflow,omitempty"`  // the workflow's name; "" runs as one run at a time
 	Flow      *Flow     `json:"flow,omitempty"`      // that workflow, frozen when it was given
 	Stage     string    `json:"stage,omitempty"`     // where in it the task is
 	Loops     int       `json:"loops,omitempty"`     // how often a stage sent it back
 	StageSeq  int64     `json:"stage_seq,omitempty"` // the seq it came to Stage at; runs before it were other stages'
 	Notes     []Note    `json:"notes,omitempty"`     // its workpad's own lines
+	Stages    []Staged  `json:"stages,omitempty"`    // when it moved to each stage, oldest first
 	Branch    string    `json:"branch,omitempty"`    // the branch its work is on, once a run made it
 	WorkOn    string    `json:"work_on,omitempty"`   // the machine that made it
 	Head      string    `json:"head,omitempty"`      // the branch's head as its latest run left it

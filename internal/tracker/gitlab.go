@@ -20,6 +20,7 @@ type gitlabUser struct {
 }
 
 type gitlabIssue struct {
+	ID          int64        `json:"id"`
 	IID         int64        `json:"iid"`
 	Title       string       `json:"title"`
 	Description string       `json:"description"`
@@ -58,16 +59,17 @@ func (g *gitlab) Me(ctx context.Context) (string, error) {
 
 func (g *gitlab) Repo(ctx context.Context) (Repo, error) {
 	var r struct {
-		ID     int64  `json:"id"`
-		Path   string `json:"path_with_namespace"`
-		WebURL string `json:"web_url"`
+		ID            int64  `json:"id"`
+		Path          string `json:"path_with_namespace"`
+		WebURL        string `json:"web_url"`
+		DefaultBranch string `json:"default_branch"`
 	}
 	_, err := g.do(ctx, http.MethodGet, g.project(""), nil, nil, &r)
-	return Repo{ID: r.ID, FullName: r.Path, URL: r.WebURL}, err
+	return Repo{ID: r.ID, FullName: r.Path, URL: r.WebURL, DefaultBranch: r.DefaultBranch}, err
 }
 
 func (i gitlabIssue) issue() Issue {
-	out := Issue{Number: i.IID, Title: i.Title, Body: i.Description, Closed: i.State == "closed", Labels: i.Labels, URL: i.WebURL,
+	out := Issue{ID: i.ID, Number: i.IID, Title: i.Title, Body: i.Description, Closed: i.State == "closed", Labels: i.Labels, URL: i.WebURL,
 		UpdatedAt: i.UpdatedAt}
 	for _, a := range i.Assignees {
 		out.Assignees = append(out.Assignees, a.Username)
@@ -154,4 +156,36 @@ func (g *gitlab) Close(ctx context.Context, number int64) error {
 func (g *gitlab) Label(ctx context.Context, number int64, label string) error {
 	_, err := g.do(ctx, http.MethodPut, g.issuePath(number, ""), nil, map[string]string{"add_labels": label}, nil)
 	return err
+}
+
+func (g *gitlab) CreateIssue(ctx context.Context, title, body string) (Issue, error) {
+	var i gitlabIssue
+	_, err := g.do(ctx, http.MethodPost, g.project("/issues"), nil, map[string]string{"title": title, "description": body}, &i)
+	return i.issue(), err
+}
+
+func (g *gitlab) LinkSubIssue(context.Context, int64, Issue) error { return nil }
+
+type gitlabMerge struct {
+	IID    int64  `json:"iid"`
+	WebURL string `json:"web_url"`
+}
+
+func (g *gitlab) PullRequest(ctx context.Context, head string) (PullRequest, error) {
+	var batch []gitlabMerge
+	q := url.Values{"state": {"opened"}, "source_branch": {head}}
+	if _, err := g.do(ctx, http.MethodGet, g.project("/merge_requests?"+q.Encode()), nil, nil, &batch); err != nil {
+		return PullRequest{}, err
+	}
+	if len(batch) == 0 {
+		return PullRequest{}, ErrNotFound
+	}
+	return PullRequest{Number: batch[0].IID, URL: batch[0].WebURL}, nil
+}
+
+func (g *gitlab) OpenPullRequest(ctx context.Context, head, base, title, body string) (PullRequest, error) {
+	var m gitlabMerge
+	_, err := g.do(ctx, http.MethodPost, g.project("/merge_requests"), nil,
+		map[string]string{"source_branch": head, "target_branch": base, "title": title, "description": body}, &m)
+	return PullRequest{Number: m.IID, URL: m.WebURL}, err
 }

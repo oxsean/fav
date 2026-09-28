@@ -86,6 +86,51 @@ func TestEachTrackerReadsAndWritesWhatTheSyncNeeds(t *testing.T) {
 	}
 }
 
+func TestEachTrackerOpensSubIssuesAndPullRequests(t *testing.T) {
+	for _, kind := range []string{tracker.KindGitea, tracker.KindGitHub, tracker.KindGitLab} {
+		t.Run(kind, func(t *testing.T) {
+			g := trackertest.New(kind, "acme/app", "tend-bot", "tok")
+			defer g.Close()
+			tr, err := tracker.New(tracker.Config{Kind: kind, Base: g.URL, Repo: "acme/app", Token: "tok"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			ctx := context.Background()
+			if r, err := tr.Repo(ctx); err != nil || r.DefaultBranch != "main" {
+				t.Fatalf("the default branch: %+v %v", r, err)
+			}
+			g.Open(2, "parent", "body", "tend")
+			kid, err := tr.CreateIssue(ctx, "child", "Part of #2")
+			if err != nil || kid.Number <= 2 || kid.URL == "" || g.Get(kid.Number).Body != "Part of #2" {
+				t.Fatalf("a new issue: %+v %v", kid, err)
+			}
+			if err := tr.LinkSubIssue(ctx, 2, kid); err != nil {
+				t.Fatal(err)
+			}
+			if got, want := g.SubIssues(2), map[bool]int{true: 1}[kind == tracker.KindGitHub]; len(got) != want {
+				t.Fatalf("only GitHub has sub-issues: %v", got)
+			}
+			if _, err := tr.PullRequest(ctx, "tend/t1"); !errors.Is(err, tracker.ErrNotFound) {
+				t.Fatalf("no pull request yet: %v", err)
+			}
+			if _, err := tr.OpenPullRequest(ctx, "tend/t1", "main", "Add it", "For #2"); err == nil {
+				t.Fatal("a branch the repository lacks is refused")
+			}
+			g.Branch("tend/t1")
+			pr, err := tr.OpenPullRequest(ctx, "tend/t1", "main", "Add it", "For #2")
+			if err != nil || pr.Number == 0 || pr.URL == "" {
+				t.Fatalf("%+v %v", pr, err)
+			}
+			if again, err := tr.PullRequest(ctx, "tend/t1"); err != nil || again != pr {
+				t.Fatalf("found by its branch: %+v %v", again, err)
+			}
+			if page, err := tr.Issues(ctx, time.Time{}, "", ""); err != nil || len(page.Issues) != 2 {
+				t.Fatalf("a pull request is not an issue: %+v %v", page.Issues, err)
+			}
+		})
+	}
+}
+
 func TestADeliveryIsTrustedOnlyWithItsSecret(t *testing.T) {
 	body, secret := []byte(`{"action":"opened"}`), []byte("s3cret")
 	m := hmac.New(sha256.New, secret)

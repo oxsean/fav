@@ -123,7 +123,7 @@ const words = {
   readonlyChat: ['仅查看已有对话，不在这里发送消息。', 'Read existing messages. Sending is not available here.']
 };
 Object.assign(words, {
-  undo: ['撤销', 'Undo'], sendKey: ['在多行框里发送或保存', 'Send or save from a multi-line box'], undone: ['已撤销', 'Undone'], nothingToUndo: ['没有可撤销的', 'Nothing to undo'],
+  undo: ['撤销', 'Undo'], reworks: ['打回次数', 'Times sent back'], dropRefused: ['只能这样移：拖到已结束、未开始，把未开始的拖去开始，把结束的拖回等你', 'Only these moves: to finished, to the backlog, a backlog task to start, a finished one back to needs you'], reopened: ['已重新打开', 'Reopened'], sendKey: ['在多行框里发送或保存', 'Send or save from a multi-line box'], digitsHelp: ['首页和收件箱：1 允许、2 拒绝，或选第几个选项', 'Home and inbox: 1 allows, 2 denies, or picks that option'], digitsChoose: ['按数字选', 'Press a digit to choose'], denyWhy: ['拒绝理由（可选）', 'Why not (optional)'], ownWords: ['其他：', 'Other:'], waited: ['等了 {0}', 'waited {0}'], offlineTop: ['{0} 离线', '{0} offline'], todayTop: ['今天 {0} token', 'Today {0} tokens'], undone: ['已撤销', 'Undone'], nothingToUndo: ['没有可撤销的', 'Nothing to undo'],
   sendMulti: ['{0} 发送 · Enter 换行', '{0} sends · Enter adds a line'], sendSingle: ['Enter 发送', 'Enter sends'],
   sendsTo: ['发给正在跑的 {0}：它在这一轮里读到', 'Goes to {0}, still running: it reads it in its current turn'],
   repliesTo: ['作为 {0} 的回复：同一个会话里新开一个后台运行', 'Answers {0}: a new background run in the same session'],
@@ -156,8 +156,11 @@ const waiting = run => run && !openStates.has(run.state) && ['asked', 'permissio
 const attention = run => run && (waiting(run) || openStates.has(run.state) && ['asked', 'stalled', 'permission'].includes(run.attention)) ? run.attention : '';
 const runNeedsYou = run => !!run && (waiting(run) || ['failed', 'unknown'].includes(run.state) || run.state === 'exited' && run.exit_code != null && run.exit_code !== 0 || openStates.has(run.state) && ['asked', 'stalled', 'permission'].includes(run.attention));
 const tokens = n => n>=1e6?`${(n/1e6).toFixed(1)}M`:n>=1000?`${Math.floor(n/1000)}k`:String(n||0);
+// money is a cost worth showing, or nothing below half a cent.
+const money = usd => usd >= 0.005 ? '$' + usd.toFixed(2) : '';
 const usageText = u => !u||!(u.input||u.output||u.cache_read||u.cache_write)?'':[tokens((u.input||0)+(u.cache_write||0)),tokens(u.cache_read),tokens(u.output),u.turns||0].reduce((s,v,i)=>s.replace(`{${i}}`,v),t('usage'))+(u.cost_usd?t('usageCost').replace('{0}',u.cost_usd.toFixed(2)):'');
 const since = run => run.ended_at || run.started_at || run.queued_at;
+const ago = value => { const m = Math.max(0, Math.floor((Date.now() - new Date(value).getTime()) / 6e4)); return m < 60 ? `${m}m` : m < 1440 ? `${Math.floor(m / 60)}h` : `${Math.floor(m / 1440)}d`; };
 const badge = state => `<span class="status ${esc(state)}"><span class="status-icon" aria-hidden="true">${statusSymbols[state] || '·'}</span>${t(state)}</span>`;
 const clone = value => JSON.parse(JSON.stringify(value));
 const time = value => value ? new Date(value).toLocaleTimeString(lang === 'zh' ? 'zh-CN' : 'en-GB', {hour:'2-digit', minute:'2-digit', second:'2-digit'}) : '—';
@@ -261,6 +264,13 @@ function runUsage(id) {
   for(const r of taskRuns(id))for(const k in sum)sum[k]+=r.usage?.[k]||0;
   return sum;
 }
+// byProvider splits a task's usage by provider when more than one ran it.
+function byProvider(id) {
+  const by={};
+  for(const r of taskRuns(id)){if(!r.usage)continue;const p=r.provider||r.agent;const x=by[p]||(by[p]={tokens:0,usd:0});x.tokens+=(r.usage.input||0)+(r.usage.cache_write||0)+(r.usage.output||0);x.usd+=r.usage.cost_usd||0;}
+  const rows=Object.entries(by);if(rows.length<2)return '';
+  return `<span class="muted"> · ${rows.map(([p,x])=>`${esc(p)} ${tokens(x.tokens)}${money(x.usd)?' '+money(x.usd):''}`).join(' · ')}</span>`;
+}
 // ring is a parent task's subtasks done of those not canceled, as a small ring.
 function ring(task) {
   const kids=Object.values(ui.state.tasks).filter(x=>x.parent===task.id&&x.status!=='canceled');if(!kids.length)return '';
@@ -299,7 +309,13 @@ function renderCounts() {
   if(tasks)tasks.textContent=Object.keys(ui.state.tasks).length;
   if(machines)machines.textContent=`${ui.machines.filter(m=>m.state==='connected').length}/${ui.machines.length}`;
   const top=document.querySelector('#agents-top'),n=Object.values(ui.state.runs).filter(r=>['running','starting'].includes(r.state)).length;
-  if(top)top.textContent=n?t('agentsTop').replace('{0}',n):'';
+  if(top){
+    const day=new Date();day.setHours(0,0,0,0);let used=0,usd=0;
+    for(const r of Object.values(ui.state.runs)){if(!r.usage||new Date(r.ended_at||r.started_at||r.queued_at)<day)continue;used+=(r.usage.input||0)+(r.usage.cache_write||0)+(r.usage.output||0);usd+=r.usage.cost_usd||0;}
+    const off=ui.machines.filter(m=>m.state==='offline').map(m=>m.name);
+    top.textContent=[n?t('agentsTop').replace('{0}',n):'',off.length?t('offlineTop').replace('{0}',off.join(', ')):'',used?t('todayTop').replace('{0}',tokens(used)+(money(usd)?' · '+money(usd):'')):''].filter(Boolean).join(' · ');
+    top.classList.toggle('warn',!!off.length);
+  }
 }
 function renderBanner() {
   const el=document.querySelector('#connection-banner');if(!el)return;
@@ -350,9 +366,31 @@ function listTools() {
 const boardColumns=['waiting','running','queued','backlog','done'];
 function renderBoard() {
   const tasks=filteredTasks(),col=task=>{const k=Fold.situation(ui.state,task).kind;return k==='canceled'?'done':k;};
-  const card=task=>{const run=latestRun(task.id),state=run?run.state:task.status;return `<button type="button" class="board-card" data-action="board-open" data-id="${esc(task.id)}"><span class="row-line"><span class="row-glyph status ${esc(state)}" aria-hidden="true">${statusSymbols[state]||'·'}</span><span class="row-title">${esc(task.title)}</span>${ring(task)}</span>
-    <span class="board-meta">${task.stage?`<span class="chip">${esc(task.stage)}</span>`:''}${Tree.sitBadge(task)}<span class="muted">${esc(run?.machine||task.machine||'')}${run?.agent?' / '+esc(run.agent):''}</span></span></button>`;};
-  return `<div class="board-page">${listTools()}<div class="board" id="task-list">${boardColumns.map(k=>{const cards=tasks.filter(x=>col(x)===k);return `<section class="board-column" aria-label="${t('sit.'+k)}"><h2>${t('sit.'+k)}<span class="count">${cards.length}</span></h2>${cards.map(card).join('')||`<p class="muted board-empty">—</p>`}</section>`;}).join('')}</div></div>`;
+  const card=task=>{const run=latestRun(task.id),state=run?run.state:task.status,cost=runUsage(task.id).cost_usd;
+    const at=task.flow?task.flow.stages.findIndex(x=>x.name===task.stage):-1,strip=task.flow?`<span class="mini-stages" aria-label="${esc(task.stage||'')}">${task.flow.stages.map((x,i)=>`<span class="${i===at&&!['done','canceled'].includes(task.status)?'current':i<at||task.status==='done'?'past':''}" title="${esc(x.name)}"></span>`).join('')}</span>`:'';
+    return `<button type="button" class="board-card" data-action="board-open" data-id="${esc(task.id)}" draggable="${ui.online}" data-drag="${esc(task.id)}"><span class="row-line"><span class="row-glyph status ${esc(state)}" aria-hidden="true">${statusSymbols[state]||'·'}</span><span class="muted mono">${esc(task.id)}</span>${task.loops?`<span class="muted mono" title="${t('reworks')}">↺${task.loops}</span>`:''}${money(cost)?`<span class="muted mono num">${money(cost)}</span>`:''}${ring(task)}</span><span class="row-title">${esc(task.title)}</span>
+    <span class="board-meta">${task.stage?`<span class="chip">${esc(task.stage)}${task.loops?' · '+t('round').replace('{0}',task.loops+1):''}</span>`:''}${strip}${Tree.sitBadge(task)}<span class="muted">${esc(run?.agent||'')}${run?'@'+esc(run.machine):esc(task.machine||'')}</span>${run&&openStates.has(run.state)?`<span class="muted mono num">${elapsed(run)}</span>`:''}</span></button>`;};
+  return `<div class="board-page">${listTools()}<div class="board" id="task-list">${boardColumns.map(k=>{const cards=tasks.filter(x=>col(x)===k);return `<section class="board-column" data-col="${k}" aria-label="${t('sit.'+k)}"><h2>${t('sit.'+k)}<span class="count">${cards.length}</span></h2>${cards.map(card).join('')||`<p class="muted board-empty">—</p>`}</section>`;}).join('')}</div></div>`;
+}
+// boardKey moves the focus between cards: left and right to the nearest card of the next column that has one, up and down within a column.
+function boardKey(key){
+  const cols=[...document.querySelectorAll('.board-column')].map(c=>[...c.querySelectorAll('.board-card')]),now=document.activeElement?.closest?.('.board-card');
+  let ci=cols.findIndex(c=>c.includes(now)),ri=ci<0?0:cols[ci].indexOf(now);
+  if(ci<0){ci=cols.findIndex(c=>c.length);if(ci<0)return;cols[ci][0].focus();return;}
+  if(key==='ArrowDown'||key==='ArrowUp'){cols[ci][Math.min(cols[ci].length-1,Math.max(0,ri+(key==='ArrowDown'?1:-1)))].focus();return;}
+  const step=key==='ArrowRight'?1:-1;
+  for(let c=ci+step;c>=0&&c<cols.length;c+=step)if(cols[c].length){cols[c][Math.min(ri,cols[c].length-1)].focus();return;}
+}
+// boardMove is the command a card dropped on column to stands for, or null: done and backlog set its status, a started
+// column starts a backlog task, and a finished task comes back as to do.
+function boardMove(task, to) {
+  if(!task||!ui.online)return null;
+  const idle=!openRun(task.id),finished=['done','canceled'].includes(task.status);
+  if(to==='done'&&task.status==='todo'&&idle&&!task.flow)return ()=>setTaskStatus('done',task.id);
+  if(to==='backlog'&&(task.status==='todo'&&idle||finished))return ()=>setTaskStatus('backlog',task.id);
+  if(['queued','running'].includes(to)&&task.status==='backlog')return async()=>{await api.taskStart({id:task.id},{command_id:commandID()});toast(t('started'));};
+  if(to==='waiting'&&finished)return ()=>setTaskStatus('todo',task.id,'reopened');
+  return null;
 }
 function renderTaskList() {
   const el=document.querySelector('#task-list');if(!el)return;
@@ -371,7 +409,7 @@ function renderDetail() {
   el.innerHTML=`${button('back-tasks',`${icon('back')}${t('backTasks')}`,'','mobile-back')}<div class="detail-eyebrow"><span class="mono">${task.id}</span><span>·</span>${badge(task.status)}<span>· rev ${task.rev}</span></div>
     <div class="detail-header"><h2>${esc(task.title)}</h2><div class="detail-actions">${button('edit',`${icon('edit')}${t('edit')}`,writeDisabled)}${button('dispatch',`${icon('play')}${t('dispatch')}`,writeDisabled,'primary')}</div></div>
     <div class="task-actions">${task.flow&&openTask(task)?'':button(openTask(task)?'done':'reopen',`${icon(openTask(task)?'check':'refresh')}${t(openTask(task)?'markDone':'reopen')}`,writeDisabled,'quiet')}${task.status!=='canceled'?button('cancel-task',t('cancelTask'),writeDisabled,'quiet'):''}</div>${Tree.detail(task)}
-    <div class="metadata"><div><span class="meta-label">${t('directory')}</span><code class="meta-value">${esc(task.dir||'—')}</code></div><div><span class="meta-label">${t('defaultMachine')}</span><span class="meta-value mono">${esc(task.machine||t('unspecified'))}</span></div><div><span class="meta-label">${t('defaultAgent')}</span><span class="meta-value mono">${esc(task.agent||t('unspecified'))}</span></div>${usageText(runUsage(task.id))?`<div><span class="meta-label">${t('taskUsage')}</span><span class="meta-value">${usageText(runUsage(task.id))}</span></div>`:''}</div>
+    <div class="metadata"><div><span class="meta-label">${t('directory')}</span><code class="meta-value">${esc(task.dir||'—')}</code></div><div><span class="meta-label">${t('defaultMachine')}</span><span class="meta-value mono">${esc(task.machine||t('unspecified'))}</span></div><div><span class="meta-label">${t('defaultAgent')}</span><span class="meta-value mono">${esc(task.agent||t('unspecified'))}</span></div>${usageText(runUsage(task.id))?`<div><span class="meta-label">${t('taskUsage')}</span><span class="meta-value">${usageText(runUsage(task.id))}${byProvider(task.id)}</span></div>`:''}</div>
     <div class="tabs" role="tablist" aria-label="${t('viewDetails')}">${['output','conversation','brief','history'].map(tab=>`<button class="tab ${ui.tab===tab?'active':''}" role="tab" id="tab-${tab}" aria-selected="${ui.tab===tab}" aria-controls="detail-body" tabindex="${ui.tab===tab?'0':'-1'}" data-action="tab" data-tab="${tab}">${t(tab)}${tab==='history'?`<span class="count">${runs.length}</span>`:''}</button>`).join('')}</div>
     <div id="detail-body" role="tabpanel" aria-labelledby="tab-${ui.tab}"></div>`;
   const body=document.querySelector('#detail-body');
@@ -499,15 +537,27 @@ function runFacts(run, terminal, writeDisabled) {
 function requestForm(run, q, writeDisabled) {
   const head=`<form class="answer-form stack" data-run="${esc(run.id)}" data-request="${esc(q.id)}" data-command="${commandID()}"><div class="form-error" role="alert" hidden></div>`;
   if(q.kind==='question'){
-    const qs=(q.questions||[]).map((x,i)=>`<fieldset class="stack"><legend>${esc(x.header?x.header+' · ':'')}${esc(x.question)}</legend>${(x.options||[]).map((o,j)=>{const key=`${q.id}/${i}`,checked=(ui.choices.get(key)??(x.options||[])[0])===o;return `<label class="choice"><input type="radio" name="q${i}" value="${esc(o)}" data-choice="${esc(key)}" ${checked?'checked':''} ${writeDisabled}>${esc(o)}</label>`;}).join('')}</fieldset>`).join('');
-    return `${head}<strong>${t('itAsks')}</strong>${qs}<div class="flex"><button class="primary" type="submit" data-allow="1" ${writeDisabled}>${t('answer')}</button><button type="submit" data-allow="0" ${writeDisabled}>${t('noAnswer')}</button></div></form>`;
+    const own=(i)=>`<label class="choice"><input type="radio" name="q${i}" value="" data-own="${i}" ${writeDisabled}>${t('ownWords')}<input name="own${i}" class="grow" aria-label="${t('ownWords')}" ${writeDisabled}></label>`;
+    const qs=(q.questions||[]).map((x,i)=>`<fieldset class="stack"><legend>${esc(x.header?x.header+' · ':'')}${esc(x.question)}</legend>${(x.options||[]).map((o,j)=>{const key=`${q.id}/${i}`,checked=(ui.choices.get(key)??(x.options||[])[0])===o;return `<label class="choice"><input type="radio" name="q${i}" value="${esc(o)}" data-choice="${esc(key)}" ${checked?'checked':''} ${writeDisabled}>${esc(o)}</label>`;}).join('')}${own(i)}</fieldset>`).join('');
+    return `${head}<strong>${t('itAsks')}</strong>${qs}<div class="flex"><button class="primary" type="submit" data-allow="1" ${writeDisabled}>${t('answer')}</button><button type="submit" data-allow="0" ${writeDisabled}>${t('noAnswer')}</button><span class="hint">${t('digitsChoose')}</span></div></form>`;
   }
-  return `${head}<strong>${t('wantsTool').replace('{0}',esc(q.tool))}</strong><pre class="mono"><code>${esc(q.summary||'')}</code></pre><div class="flex"><button class="primary" type="submit" data-allow="1" ${writeDisabled}>${t('allow')}</button><button type="submit" data-allow="0" ${writeDisabled}>${t('deny')}</button></div></form>`;
+  return `${head}<strong>${t('wantsTool').replace('{0}',esc(q.tool))}</strong><pre class="mono"><code>${esc(q.summary||'')}</code></pre><div class="flex"><button class="primary" type="submit" data-allow="1" ${writeDisabled}>${keyed('1',t('allow'))}</button><input name="message" class="grow" placeholder="${t('denyWhy')}" aria-label="${t('denyWhy')}" ${writeDisabled}><button type="submit" data-allow="0" ${writeDisabled}>${keyed('2',t('deny'))}</button></div></form>`;
+}
+const keyed=(key,label)=>`<kbd>${key}</kbd> ${label}`;
+// answerKey answers the first request on the page by digit: 1 allows and 2 denies a tool; n picks option n of a question.
+function answerKey(key){
+  const form=document.querySelector('#page-content .answer-form');if(!form||!ui.online)return false;
+  const allow=form.querySelector('[data-allow="1"]'),deny=form.querySelector('[data-allow="0"]');
+  if(form.querySelector('input[name="message"]')){if(key==='1')form.requestSubmit(allow);else if(key==='2')form.requestSubmit(deny);else return false;return true;}
+  const radios=[...form.querySelectorAll('fieldset')[0]?.querySelectorAll('input[type="radio"]')||[]],pick=radios[Number(key)-1];if(!pick)return false;
+  pick.checked=true;pick.dispatchEvent(new Event('change',{bubbles:true}));(pick.dataset.own?form.querySelector(`[name="own${pick.dataset.own}"]`):allow).focus();return true;
 }
 async function submitAnswer(form, submitter) {
   const run=ui.state.runs[form.dataset.run],q=(run?.requests||[]).find(x=>x.id===form.dataset.request);if(!q)return;
   const allow=submitter?.dataset.allow!=='0',answer={run:run.id,request:q.id,allow};
-  if(allow&&q.kind==='question'){const data=new FormData(form);answer.answers=Object.fromEntries((q.questions||[]).map((x,i)=>[x.question,data.get('q'+i)||'']));}
+  const data=new FormData(form);
+  if(allow&&q.kind==='question')answer.answers=Object.fromEntries((q.questions||[]).map((x,i)=>[x.question,(data.get('q'+i)||String(data.get('own'+i)||'').trim())]));
+  if(!allow&&String(data.get('message')||'').trim())answer.message=String(data.get('message')).trim();
   const result=await api.runAnswer(answer,{command_id:form.dataset.command});
   ui.state.runs[result.id]=result;renderPage();toast(t('answered'));
 }
@@ -761,7 +811,7 @@ async function reconnect() {
 }
 api.onClose(disconnect);
 function showKeyboard() {
-  showModal('keyboard',t('keyboard'),`<div class="modal-body stack"><p class="hint">${t('keyboardHelp')}</p>${Palette.rows()}${[['↑ ↓','move'],['Enter','viewDetails'],[/Mac|iPhone|iPad/.test(navigator.platform||'')?'⌘Enter':'Ctrl+Enter','sendKey'],['Esc','shortcutClose']].map(([key,label])=>`<div class="flex between"><span>${t(label)}</span><kbd>${key}</kbd></div>`).join('')}</div>`,`<footer class="modal-footer">${button('close-modal',t('close'),'autofocus')}</footer>`);
+  showModal('keyboard',t('keyboard'),`<div class="modal-body stack"><p class="hint">${t('keyboardHelp')}</p>${Palette.rows()}${[['↑ ↓','move'],['Enter','viewDetails'],[/Mac|iPhone|iPad/.test(navigator.platform||'')?'⌘Enter':'Ctrl+Enter','sendKey'],['1 – 9','digitsHelp'],['Esc','shortcutClose']].map(([key,label])=>`<div class="flex between"><span>${t(label)}</span><kbd>${key}</kbd></div>`).join('')}</div>`,`<footer class="modal-footer">${button('close-modal',t('close'),'autofocus')}</footer>`);
 }
 
 document.addEventListener('submit',async event=>{
@@ -848,8 +898,23 @@ document.addEventListener('change',async event=>{
   else if(el.id==='run-select'){ui.run=el.value;ui.follow=true;ui.pending=0;renderDetail();if(ui.tab==='conversation')await fetchChat();else await fetchOutput();}
   else if(el.id==='dispatch-machine'||el.id==='dispatch-agent')refreshDispatchAdvice();
   else if(el.dataset.look&&el.dataset.look!=='accent')Look.change(el);
-  else if(el.dataset.teamRole||el.dataset.teamUserRole){try{await Team.change(el);}catch(error){toast(errorText(error));}}
+  else if(Home.change(el)){}
+  else if(el.id==='tree-import-agent')await Tree.importAgent(el);
+  else if(el.dataset.teamRole||el.dataset.teamUserRole||'teamDirMachine' in el.dataset){try{await Team.change(el);}catch(error){toast(errorText(error));}}
   if(modal.open&&ui.modalType==='task-form')ui.modalDirty=true;
+});
+let dragged=null;
+document.addEventListener('dragstart',event=>{
+  const card=event.target.closest?.('[data-drag]');if(!card)return;
+  dragged=ui.state.tasks[card.dataset.drag];event.dataTransfer.setData('text/plain',card.dataset.drag);event.dataTransfer.effectAllowed='move';
+  for(const col of document.querySelectorAll('[data-col]'))col.classList.toggle('drop-ok',!!boardMove(dragged,col.dataset.col));
+});
+document.addEventListener('dragover',event=>{const col=event.target.closest?.('[data-col]');if(col&&boardMove(dragged,col.dataset.col)){event.preventDefault();event.dataTransfer.dropEffect='move';}});
+document.addEventListener('dragend',()=>{dragged=null;for(const col of document.querySelectorAll('[data-col]'))col.classList.remove('drop-ok');});
+document.addEventListener('drop',async event=>{
+  const col=event.target.closest?.('[data-col]');if(!col||!dragged)return;event.preventDefault();
+  const move=boardMove(dragged,col.dataset.col);dragged=null;
+  try{if(move)await move();else toast(t('dropRefused'));}catch(error){toast(errorText(error));}
 });
 modal.addEventListener('cancel',event=>{event.preventDefault();closeModal();});
 document.addEventListener('keydown',event=>{
@@ -863,10 +928,13 @@ document.addEventListener('keydown',event=>{
   const textInput=event.target.matches('input,textarea,select,[contenteditable="true"]');
   if(textInput){if(event.key==='Escape'){event.target.blur();event.preventDefault();}return;}
   if(!ui.authenticated)return;
+  if(/^[1-9]$/.test(event.key)&&['home','inbox'].includes(ui.page)&&answerKey(event.key)){event.preventDefault();return;}
   if(Palette.key(event))return;
   if(event.key==='Escape'){event.preventDefault();ui.mobileDetail=false;renderPage();document.querySelector(`#row-${ui.task}`)?.focus();}
   else if(event.target.matches('[role="tab"]')&&['ArrowLeft','ArrowRight'].includes(event.key)){
     event.preventDefault();const tabs=['output','conversation','brief','history'],index=tabs.indexOf(ui.tab);ui.tab=tabs[(index+(event.key==='ArrowRight'?1:3))%4];renderDetail();document.querySelector(`#tab-${ui.tab}`)?.focus();if(ui.tab==='conversation')fetchChat();if(ui.tab==='output')fetchOutput();
+  } else if(ui.page==='tasks'&&ui.view==='board'&&['ArrowDown','ArrowUp','ArrowLeft','ArrowRight'].includes(event.key)){
+    event.preventDefault();boardKey(event.key);
   } else if(ui.page==='tasks'&&['ArrowDown','ArrowUp'].includes(event.key)&&!event.target.closest('.output-view,.chat-list')){
     event.preventDefault();const rows=filteredTasks();if(!rows.length)return;const index=rows.findIndex(task=>task.id===ui.focusTask),next=Math.min(rows.length-1,Math.max(0,index+(event.key==='ArrowDown'?1:-1)));ui.focusTask=rows[next].id;renderTaskList();document.querySelector(`#row-${ui.focusTask}`)?.focus();
   } else if(event.key==='Enter'&&event.target===document.body&&ui.focusTask){event.preventDefault();selectTask(ui.focusTask);}

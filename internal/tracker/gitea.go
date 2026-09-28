@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -14,6 +15,7 @@ type gitea struct {
 	rest
 	page      int    // Gitea's default MAX_RESPONSE_ITEMS is 50; GitHub's per_page is 100 at most
 	pageParam string // limit | per_page
+	subIssues bool   // GitHub's
 }
 
 func newGitea(cfg Config) *gitea {
@@ -27,7 +29,7 @@ func newGitHub(cfg Config) *gitea {
 	if cfg.Base == "https://github.com" {
 		api = "https://api.github.com"
 	}
-	g := &gitea{rest: rest{cfg: cfg, api: api, accept: "application/vnd.github+json"}, page: 100, pageParam: "per_page"}
+	g := &gitea{rest: rest{cfg: cfg, api: api, accept: "application/vnd.github+json"}, page: 100, pageParam: "per_page", subIssues: true}
 	g.auth = func(h http.Header) {
 		h.Set("Authorization", "Bearer "+cfg.Token)
 		h.Set("X-GitHub-Api-Version", "2022-11-28")
@@ -41,6 +43,7 @@ type giteaUser struct {
 }
 
 type giteaIssue struct {
+	ID          int64                   `json:"id"`
 	Number      int64                   `json:"number"`
 	Title       string                  `json:"title"`
 	Body        string                  `json:"body"`
@@ -69,16 +72,17 @@ func (g *gitea) Me(ctx context.Context) (string, error) {
 
 func (g *gitea) Repo(ctx context.Context) (Repo, error) {
 	var r struct {
-		ID       int64  `json:"id"`
-		FullName string `json:"full_name"`
-		HTMLURL  string `json:"html_url"`
+		ID            int64  `json:"id"`
+		FullName      string `json:"full_name"`
+		HTMLURL       string `json:"html_url"`
+		DefaultBranch string `json:"default_branch"`
 	}
 	_, err := g.do(ctx, http.MethodGet, g.repoPath(""), nil, nil, &r)
-	return Repo{ID: r.ID, FullName: r.FullName, URL: r.HTMLURL}, err
+	return Repo{ID: r.ID, FullName: r.FullName, URL: r.HTMLURL, DefaultBranch: r.DefaultBranch}, err
 }
 
 func (i giteaIssue) issue() Issue {
-	out := Issue{Number: i.Number, Title: i.Title, Body: i.Body, Closed: i.State == "closed", URL: i.HTMLURL, UpdatedAt: i.UpdatedAt}
+	out := Issue{ID: i.ID, Number: i.Number, Title: i.Title, Body: i.Body, Closed: i.State == "closed", URL: i.HTMLURL, UpdatedAt: i.UpdatedAt}
 	for _, l := range i.Labels {
 		out.Labels = append(out.Labels, l.Name)
 	}
@@ -166,4 +170,53 @@ func (g *gitea) Close(ctx context.Context, number int64) error {
 func (g *gitea) Label(ctx context.Context, number int64, label string) error {
 	_, err := g.do(ctx, http.MethodPost, g.repoPath("/issues/"+strconv.FormatInt(number, 10)+"/labels"), nil, map[string][]string{"labels": {label}}, nil)
 	return err
+}
+
+func (g *gitea) CreateIssue(ctx context.Context, title, body string) (Issue, error) {
+	var i giteaIssue
+	_, err := g.do(ctx, http.MethodPost, g.repoPath("/issues"), nil, map[string]string{"title": title, "body": body}, &i)
+	return i.issue(), err
+}
+
+func (g *gitea) LinkSubIssue(ctx context.Context, parent int64, child Issue) error {
+	if !g.subIssues {
+		return nil
+	}
+	_, err := g.do(ctx, http.MethodPost, g.repoPath("/issues/"+strconv.FormatInt(parent, 10)+"/sub_issues"), nil, map[string]int64{"sub_issue_id": child.ID}, nil)
+	return err
+}
+
+type giteaPull struct {
+	Number  int64  `json:"number"`
+	HTMLURL string `json:"html_url"`
+	Head    struct {
+		Ref string `json:"ref"`
+	} `json:"head"`
+}
+
+func (g *gitea) PullRequest(ctx context.Context, head string) (PullRequest, error) {
+	for page := 1; ; page++ {
+		q := url.Values{"state": {"open"}, g.pageParam: {strconv.Itoa(g.page)}, "page": {strconv.Itoa(page)}}
+		if g.subIssues { // GitHub filters by owner:branch; Gitea lists them all
+			q.Set("head", strings.Split(g.cfg.Repo, "/")[0]+":"+head)
+		}
+		var batch []giteaPull
+		if _, err := g.do(ctx, http.MethodGet, g.repoPath("/pulls?"+q.Encode()), nil, nil, &batch); err != nil {
+			return PullRequest{}, err
+		}
+		for _, p := range batch {
+			if p.Head.Ref == head {
+				return PullRequest{Number: p.Number, URL: p.HTMLURL}, nil
+			}
+		}
+		if len(batch) < g.page {
+			return PullRequest{}, ErrNotFound
+		}
+	}
+}
+
+func (g *gitea) OpenPullRequest(ctx context.Context, head, base, title, body string) (PullRequest, error) {
+	var p giteaPull
+	_, err := g.do(ctx, http.MethodPost, g.repoPath("/pulls"), nil, map[string]string{"head": head, "base": base, "title": title, "body": body}, &p)
+	return PullRequest{Number: p.Number, URL: p.HTMLURL}, err
 }

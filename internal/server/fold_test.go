@@ -91,7 +91,7 @@ func foldScenario() []journal.Envelope {
 	add(ev(task.ERunObserved, task.Observation{ID: "r5", State: task.Exited, NodeRev: 1, ExitCode: &exit0, StartedAt: &started, EndedAt: &started,
 		Check: &agent.CheckResult{Argv: []string{"gate"}, Exit: 1, Tail: "FAIL"}}))
 	add(ev(task.ETaskNoted, task.TaskNote{ID: "t8", Note: task.Note{Stage: "implement", Kind: task.NoteRework, Text: "check failed"}}),
-		ev(task.ETaskStaged, task.TaskStage{ID: "t8", Stage: "implement", Loops: 1}))
+		ev(task.ETaskStaged, task.TaskStage{ID: "t8", Stage: "implement", Loops: 1, Back: true}))
 	add(ev(task.ERunQueued, task.Run{ID: "r6", Task: "t8", Machine: "mba", Agent: "fake", Dir: "/w", Stage: "implement"}))
 	add(ev(task.ERunObserved, task.Observation{ID: "r6", State: task.Exited, NodeRev: 1, ExitCode: &exit0}))
 	add(ev(task.ETaskStaged, task.TaskStage{ID: "t8", Stage: "review", Loops: 1}))
@@ -123,6 +123,7 @@ func foldScenario() []journal.Envelope {
 			Work: &agent.Work{Conflict: []string{"a.go"}}}))
 	add(ev(task.ETaskStatus, task.TaskStatus{ID: "t12", Status: task.StatusCanceled}), ev(task.ETaskStatus, task.TaskStatus{ID: "t11", Status: task.StatusDone}))
 	add(ev(task.ETaskStaged, task.TaskStage{ID: "t10", Stage: "review"}))
+	add(ev(task.ETaskLinked, task.Linked{ID: "t11", Issue: "https://git.example/a/b/issues/9"}), ev(task.ETaskLinked, task.Linked{ID: "t10", PR: "https://git.example/a/b/pulls/10"}))
 	add(ev(task.ERunQueued, task.Run{ID: "r12", Task: "t10", Machine: "mba", Agent: "fake", Dir: "/src", Stage: "review", Judge: true,
 		Work: &agent.Workspace{Checkout: "/src", Branch: "tend/t10", ReadOnly: true}}))
 	add(ev(task.ERunObserved, task.Observation{ID: "r12", State: task.Exited, NodeRev: 1, ExitCode: &exit0,

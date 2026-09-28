@@ -77,6 +77,17 @@ type TaskNote struct {
 }
 
 // Note is a line of a task's workpad that no run wrote: a message, a gate's decision, why a stage sent it back.
+// Staged is one move of a task to a stage: on, or sent back.
+type Staged struct {
+	At    time.Time `json:"at,omitzero"`
+	Stage string    `json:"stage"`
+	Loops int       `json:"loops,omitempty"`
+	Back  bool      `json:"back,omitempty"`
+}
+
+// maxStaged is how many moves a task keeps; older ones fall off.
+const maxStaged = 50
+
 type Note struct {
 	At    time.Time `json:"at,omitzero"`
 	Stage string    `json:"stage,omitempty"`
@@ -233,6 +244,10 @@ func (s *State) applyFlow(e journal.Event, seq int64, at time.Time) (bool, error
 			return true, fmt.Errorf("no stage %s of task %s", d.Stage, d.ID)
 		}
 		t.Stage, t.Loops, t.StageSeq = d.Stage, d.Loops, seq
+		t.Stages = append(t.Stages, Staged{At: at, Stage: d.Stage, Loops: d.Loops, Back: d.Back})
+		if len(t.Stages) > maxStaged {
+			t.Stages = t.Stages[len(t.Stages)-maxStaged:]
+		}
 		t.Rev++
 		t.UpdatedAt = at
 	case ETaskNoted:

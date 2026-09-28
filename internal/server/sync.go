@@ -42,6 +42,8 @@ type TrackerSettings struct {
 	OnAccept    string `json:"on_accept"`              // close | label
 	AcceptLabel string `json:"accept_label,omitempty"` // on_accept label: this one
 	Poll        int    `json:"poll"`                   // seconds between scans
+	SubIssues   bool   `json:"sub_issues,omitempty"`   // mirror each subtask as a sub-issue of its parent's issue
+	PR          bool   `json:"pr,omitempty"`           // open a pull request from a requirement's pushed branch once it awaits acceptance or is done
 }
 
 // DefaultSettings import issues labelled tend, keep a progress comment and close an issue once its requirement is done.
@@ -81,11 +83,13 @@ type Syncer struct {
 	mu      sync.Mutex
 	retry   map[string]time.Time // issue key → not before
 	updated map[string]time.Time // issue key → the updated time its last read saw
+	unsure  map[string]time.Time // task → when making its sub-issue got no answer
+	branch  func(*task.State, *task.Task) (head, base string, ok bool)
 }
 
 func NewSyncer(team *store.Team, c *coord.Coord, seal *Sealer, notice func(coord.Notice)) *Syncer {
 	return &Syncer{team: team, coord: c, seal: seal, do: c.HandlerFor(coord.System), open: tracker.New, now: time.Now, notice: notice,
-		wake: make(chan struct{}, 1), retry: map[string]time.Time{}, updated: map[string]time.Time{}}
+		wake: make(chan struct{}, 1), retry: map[string]time.Time{}, updated: map[string]time.Time{}, unsure: map[string]time.Time{}, branch: pullBranch}
 }
 
 // Wake has the worker look now.
@@ -142,6 +146,9 @@ func (s *Syncer) binding(ctx context.Context, x store.Tracker) error {
 		if err := s.scan(ctx, x, tr, set); err != nil {
 			return err
 		}
+	}
+	if err := s.links(ctx, x, tr, set); err != nil {
+		return err
 	}
 	for _, id := range s.writeBacks(x, set) {
 		if err := s.team.MarkDirty(x.ID, id); err != nil {
@@ -334,25 +341,18 @@ func (s *Syncer) issue(ctx context.Context, x store.Tracker, tr tracker.Tracker,
 			theirs = append(theirs, c)
 		}
 	}
-	if row.Task == "" && !s.wanted(x, set, i) {
-		row.Dirty = false
-		return s.team.PutTrackerIssue(row)
-	}
-	title, text, digest := snapshot(i, theirs)
-	owner := s.assignee(x, i)
-	p := coord.TaskSync{Project: x.Project, Kind: x.Kind, Tracker: x.ID, Base: x.Base, Repo: x.Repo, RepoID: x.RepoID, Number: i.Number,
-		URL: i.URL, Title: title, Text: text, Digest: digest, Closed: i.Closed, Owner: owner, Unmapped: owner == "" && len(i.Assignees) > 0}
-	b, _ := json.Marshal(p)
-	res, err := s.do(ctx, &wire.Request{Method: coord.MTaskSync, CommandID: "sync-" + journal.Digest(b), Params: b})
-	if err != nil {
-		return err
-	}
-	var t struct{ ID string }
-	if b, err := json.Marshal(res); err == nil {
-		json.Unmarshal(b, &t)
-	}
-	if t.ID != "" {
-		row.Task = t.ID
+	if row.Parent == 0 {
+		if row.Task == "" && !s.wanted(x, set, i) {
+			row.Dirty = false
+			return s.team.PutTrackerIssue(row)
+		}
+		id, err := s.requirement(ctx, x, i, theirs)
+		if err != nil {
+			return err
+		}
+		if id != "" {
+			row.Task = id
+		}
 	}
 	s.mu.Lock()
 	s.updated[x.ID+"#"+fmt.Sprint(i.Number)] = i.UpdatedAt
@@ -383,6 +383,24 @@ func (s *Syncer) issue(ctx context.Context, x store.Tracker, tr tracker.Tracker,
 	}
 	row.Dirty, row.LastError = false, ""
 	return s.team.PutTrackerIssue(row)
+}
+
+// requirement records issue i, with the comments of people, as its task in the journal; "" when it makes none.
+func (s *Syncer) requirement(ctx context.Context, x store.Tracker, i tracker.Issue, theirs []tracker.Comment) (string, error) {
+	title, text, digest := snapshot(i, theirs)
+	owner := s.assignee(x, i)
+	p := coord.TaskSync{Project: x.Project, Kind: x.Kind, Tracker: x.ID, Base: x.Base, Repo: x.Repo, RepoID: x.RepoID, Number: i.Number,
+		URL: i.URL, Title: title, Text: text, Digest: digest, Closed: i.Closed, Owner: owner, Unmapped: owner == "" && len(i.Assignees) > 0}
+	b, _ := json.Marshal(p)
+	res, err := s.do(ctx, &wire.Request{Method: coord.MTaskSync, CommandID: "sync-" + journal.Digest(b), Params: b})
+	if err != nil {
+		return "", err
+	}
+	var t struct{ ID string }
+	if b, err := json.Marshal(res); err == nil {
+		json.Unmarshal(b, &t)
+	}
+	return t.ID, nil
 }
 
 // writeComment edits row's progress comment, or makes it when there is none (or it was deleted); a comment made whose
@@ -430,7 +448,7 @@ func snapshot(i tracker.Issue, comments []tracker.Comment) (title, text, digest 
 // progress is the comment x's issue carries for taskID, and whether the task is done; ok is false when the journal no
 // longer holds it.
 func (s *Syncer) progress(x store.Tracker, set TrackerSettings, taskID string) (body string, done, ok bool) {
-	var owner, approver, status, stages string
+	var owner, approver, status, stages, pr string
 	var kids []string
 	var total, finished int
 	s.coord.Read(func(st *task.State) {
@@ -439,7 +457,7 @@ func (s *Syncer) progress(x store.Tracker, set TrackerSettings, taskID string) (
 			return
 		}
 		ok, done = true, t.Status == task.StatusDone
-		owner, approver = t.Owner, t.Approver
+		owner, approver, pr = t.Owner, t.Approver, t.PR
 		status = statusLine(st.Situation(t))
 		stages = stageLine(t)
 		for _, k := range st.Subtree(t.ID)[1:] {
@@ -470,6 +488,9 @@ func (s *Syncer) progress(x store.Tracker, set TrackerSettings, taskID string) (
 	}
 	if total > 0 {
 		fmt.Fprintf(&b, "\nProgress: %d/%d subtasks finished\n", finished, total)
+	}
+	if pr != "" {
+		b.WriteString("\nPull request: " + pr + "\n")
 	}
 	if people := s.mentions(x, owner, approver); people != "" {
 		b.WriteString("\n" + people + "\n")

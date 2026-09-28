@@ -36,6 +36,22 @@ type TaskSync struct {
 	Unmapped bool   `json:"unmapped,omitempty"`
 }
 
+// taskLink records the sub-issue or pull request the sync worker opened for a task; nothing when it is recorded already.
+func (c *Coord) taskLink(_ Principal, r *wire.Request) (string, []journal.Event, error) {
+	var p task.Linked
+	if err := r.Decode(&p); err != nil {
+		return "", nil, err
+	}
+	t := c.st.Tasks[p.ID]
+	if t == nil {
+		return "", nil, notFound("task " + p.ID)
+	}
+	if (p.Issue == "" || p.Issue == t.Issue) && (p.PR == "" || p.PR == t.PR) {
+		return t.ID, nil, nil
+	}
+	return t.ID, []journal.Event{journal.NewEvent(task.ETaskLinked, p)}, nil
+}
+
 // Sourced is the task that stands for issue number of repo at base, nil when none does; the caller holds mu.
 func sourced(st *task.State, base string, repo, number int64) *task.Task {
 	for _, t := range st.Tasks {

@@ -55,13 +55,14 @@ func TestATaskThatNeedsSomeoneReachesThePeopleItConcerns(t *testing.T) {
 		t.Fatalf("a task to accept reaches its approver too: %+v", n)
 	}
 	var in Inbox
-	if err := callAs(e.as(ann), MInboxList, "", nil, &in); err != nil || len(in.Items) != 1 || in.Items[0].Task != parent.ID {
+	if err := callAs(e.as(ann), MInboxList, "", nil, &in); err != nil || len(in.Items) != 1 || in.Items[0].Task != parent.ID || !slices.Equal(in.Items[0].As, []string{AsApprover}) {
 		t.Fatalf("ann's inbox holds what she accepts: %+v %v", in, err)
 	}
 	if err := callAs(e.as(dee), MInboxList, "", nil, &in); err != nil || len(in.Items) != 0 {
 		t.Fatalf("a reader has nothing to act on: %+v %v", in, err)
 	}
-	if err := callAs(e.as(bob), MInboxList, "", nil, &in); err != nil || len(in.Items) != 2 || in.Items[0].Task != asks.ID {
+	if err := callAs(e.as(bob), MInboxList, "", nil, &in); err != nil || len(in.Items) != 2 || in.Items[0].Task != asks.ID ||
+		!slices.Equal(in.Items[0].As, []string{AsOwner, AsDispatcher}) {
 		t.Fatalf("bob's, longest waiting first: %+v %v", in, err)
 	}
 }

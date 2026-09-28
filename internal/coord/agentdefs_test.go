@@ -32,6 +32,9 @@ func TestADefinitionIsAFileInModeOneAndRunsCompiled(t *testing.T) {
 	if v.Name != "careful" || v.Owner != Owner.User || !strings.Contains(v.Text, "Read everything twice.") {
 		t.Fatalf("%+v", v)
 	}
+	if !slices.Contains(v.Launch, "<brief>") {
+		t.Fatalf("its reader sees what a run starts: %q", v.Launch)
+	}
 	if b, err := os.ReadFile(filepath.Join(e.home, "defs", "agents", "careful.md")); err != nil || !strings.Contains(string(b), "effort: high") {
 		t.Fatalf("mode 1 keeps it as a file: %s %v", b, err)
 	}

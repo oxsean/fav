@@ -53,6 +53,7 @@ const (
 	MMachineShare   = "machine.share"
 	MTaskStart      = "task.start"
 	MTaskSync       = "task.sync"
+	MTaskLink       = "task.link"
 	MTaskSourceAck  = "task.source_ack"
 	MTaskGate       = "task.gate"
 	MTaskMerge      = "task.merge"

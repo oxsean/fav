@@ -59,6 +59,8 @@ globalThis.Fold = (() => {
         const t = need(s.tasks, d.id, 'task');
         if (!stageOf(t.flow, d.stage)) throw new Error(`no stage ${d.stage} of task ${d.id}`);
         t.stage = d.stage; t.loops = d.loops || undefined; t.stage_seq = seq; t.rev = (t.rev || 0) + 1; t.updated_at = at;
+        const mark = {at, stage: d.stage}; if (d.loops) mark.loops = d.loops; if (d.back) mark.back = true;
+        t.stages = [...(t.stages || []), mark].slice(-50);
         break;
       }
       case 'task_noted': {
@@ -78,6 +80,13 @@ globalThis.Fold = (() => {
         if (d.repo) src.repo = d.repo;
         if (d.url) src.url = d.url;
         src.fetched_at = at; t.rev = (t.rev || 0) + 1; t.updated_at = at;
+        break;
+      }
+      case 'task_linked': {
+        const t = need(s.tasks, d.id, 'task');
+        if (d.issue) t.issue = d.issue;
+        if (d.pr) t.pr = d.pr;
+        t.rev = (t.rev || 0) + 1; t.updated_at = at;
         break;
       }
       case 'task_source_acked': {

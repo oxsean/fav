@@ -105,13 +105,13 @@ const (
 
 // readMethods are the session reads node.call forwards.
 var readMethods = []string{remote.MHello, remote.MList, remote.MMessages, remote.MText, remote.MSteps, remote.MPulse,
-	remote.MChecks, remote.MLive, remote.MEcho}
+	remote.MChecks, remote.MLive, remote.MEcho, node.MDirs}
 
 // Methods are the client methods.
 var Methods = []string{MStateGet, MTaskGet, MTaskCreate, MTaskEdit, MTaskStatus, MRunDispatch, MRunStop, MRunAbandon, MRunTail,
 	MAgentList, MMachineList, MSubscribe, MNodeCall, MRunPreview, MRunContinue, MRunAnswer, MRunSend, MRunMessages,
 	MProjectCreate, MProjectEdit, MProjectMember, MMachineShare, MTaskStart, MTaskMove,
-	MAgentDefList, MAgentDefGet, MAgentDefSave, MAgentDefRemove, MAgentDefShare, MInboxList, MUserOffboard, MTaskSync, MTaskSourceAck, MTaskGate, MTaskMerge, MTaskPlan, MTaskPlanSave, MTaskPlanApply, MTaskMessage}
+	MAgentDefList, MAgentDefGet, MAgentDefSave, MAgentDefRemove, MAgentDefShare, MInboxList, MUserOffboard, MTaskSync, MTaskLink, MTaskSourceAck, MTaskGate, MTaskMerge, MTaskPlan, MTaskPlanSave, MTaskPlanApply, MTaskMessage}
 
 // Handler answers this machine's user.
 func (c *Coord) Handler() wire.Handler { return c.HandlerFor(Owner) }
@@ -219,6 +219,8 @@ func (c *Coord) HandlerFor(p Principal) wire.Handler {
 			return c.command(p, r, c.taskMove, taskView)
 		case MTaskSync:
 			return c.command(p, r, c.taskSync, taskView)
+		case MTaskLink:
+			return c.command(p, r, c.taskLink, taskView)
 		case MTaskSourceAck:
 			return c.command(p, r, c.taskSourceAck, taskView)
 		case MTaskGate:

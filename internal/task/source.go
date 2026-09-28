@@ -12,7 +12,15 @@ import (
 const (
 	ETaskSourced     = "task_sourced"      // SourceUpdate: the tracker's issue as the sync worker read it
 	ETaskSourceAcked = "task_source_acked" // SourceAck: someone took or declined a newer revision, or saw the issue closed
+	ETaskLinked      = "task_linked"       // Linked: the sync worker opened a sub-issue for the task or a pull request from its branch
 )
+
+// Linked is what the sync worker opened for a task; an empty field leaves the task's as it is.
+type Linked struct {
+	ID    string `json:"id"`
+	Issue string `json:"issue,omitempty"`
+	PR    string `json:"pr,omitempty"`
+}
 
 // KindRequirement is a task that stands for a requirement: a root, often from a tracker's issue.
 const KindRequirement = "requirement"
@@ -125,6 +133,23 @@ func (s *State) applySource(e journal.Event, at time.Time) (bool, error) {
 			src.URL = d.URL
 		}
 		src.FetchedAt = at
+		t.Rev++
+		t.UpdatedAt = at
+	case ETaskLinked:
+		var d Linked
+		if err := json.Unmarshal(e.Data, &d); err != nil {
+			return true, err
+		}
+		t := s.Tasks[d.ID]
+		if t == nil {
+			return true, fmt.Errorf("no task %s", d.ID)
+		}
+		if d.Issue != "" {
+			t.Issue = d.Issue
+		}
+		if d.PR != "" {
+			t.PR = d.PR
+		}
 		t.Rev++
 		t.UpdatedAt = at
 	case ETaskSourceAcked:

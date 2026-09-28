@@ -6,7 +6,9 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"time"
 
+	"github.com/oxsean/fav/internal/agent"
 	"github.com/oxsean/fav/internal/defs"
 	"github.com/oxsean/fav/internal/fileio"
 	"github.com/oxsean/fav/internal/journal"
@@ -35,6 +37,8 @@ type AgentDefView struct {
 	Text        string         `json:"text,omitempty"`
 	Warnings    []string       `json:"warnings,omitempty"`
 	Rev         int            `json:"rev,omitzero"`
+	UpdatedAt   time.Time      `json:"updated_at,omitzero"`
+	Launch      []string       `json:"launch,omitempty"` // what a run of it starts, to whoever may read it
 }
 
 type AgentDefList struct {
@@ -99,7 +103,7 @@ func (c *Coord) readsDef(p Principal, d *task.AgentDef) bool {
 
 func (c *Coord) defView(p Principal, d *task.AgentDef) AgentDefView {
 	v := AgentDefView{Name: d.Name, Description: d.Description, Role: d.Role, Provider: d.Provider, Model: d.Model, Effort: d.Effort,
-		Owner: d.Owner, Rev: d.Rev}
+		Owner: d.Owner, Rev: d.Rev, UpdatedAt: d.UpdatedAt}
 	if c.manages(p, d) {
 		share := d.Share
 		v.Share, v.Manage = &share, true
@@ -107,8 +111,23 @@ func (c *Coord) defView(p Principal, d *task.AgentDef) AgentDefView {
 	if c.readsDef(p, d) {
 		v.Text = string(defs.Format(d.AgentDef))
 		_, v.Warnings = defs.Check(d.AgentDef)
+		v.Launch = c.launchOf(d)
 	}
 	return v
+}
+
+// launchOf is the command a headless run of d starts, with placeholders for the run's directory and brief.
+func (c *Coord) launchOf(d *task.AgentDef) []string {
+	prof, err := defs.Compile(d.AgentDef, c.profile)
+	if err != nil {
+		return nil
+	}
+	cs, err := agent.LaunchOf(agent.LaunchSpec{Profile: prof, Dir: "<dir>", PromptFile: "<brief>", Headless: true, Stream: true})
+	if err != nil {
+		return nil
+	}
+	cs.Exec = filepath.Base(cs.Exec)
+	return cs.Argv()
 }
 
 func (c *Coord) agentDefList(p Principal) AgentDefList {
