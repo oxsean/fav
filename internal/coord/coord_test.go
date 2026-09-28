@@ -74,6 +74,7 @@ type env struct {
 	probe  func(provider string) agent.Check
 	owner  func(machine string) string // team mode
 	users  map[string]User
+	usersM sync.Mutex
 	notice func(Notice)
 }
 
@@ -118,7 +119,12 @@ func (e *env) start() {
 	opt := Options{Home: e.home, Version: "test", Config: e.cfg, Node: n, Sessions: remote.NewLocal("test"), Dial: e.dial, MachineOwner: e.owner,
 		Notice: e.notice}
 	if e.users != nil {
-		opt.Users = func(id string) (User, bool) { u, ok := e.users[id]; return u, ok }
+		opt.Users = func(id string) (User, bool) {
+			e.usersM.Lock()
+			defer e.usersM.Unlock()
+			u, ok := e.users[id]
+			return u, ok
+		}
 	}
 	c, err := Open(opt)
 	if err != nil {

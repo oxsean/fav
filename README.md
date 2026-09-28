@@ -429,7 +429,8 @@ projects or everyone (`--view` lets them read it too). For claude, `hooks` go in
 default workflow). Built in: `feature` (implement → review → accept), `fix` (implement → test → accept) and `docs`
 (implement → accept). Each stage takes the project's agent for its role (`implement`, `review`, `test`); a review or test
 run ends with `tend run verdict pass|rework|blocked "…"`, and a rework sends the task back to implementing, which goes on
-in its own session with what the review said. A stage with `check: true` runs the project's `hooks.check` (say
+in its own session with what the review said. A run's own reports (`tend run note|ask|verdict|plan`) never wait for
+approval, and a codex run in a workspace-write sandbox may write its run directory. A stage with `check: true` runs the project's `hooks.check` (say
 `mise run gate`) on the machine after the agent is done — a failure is a rework; the node takes such runs only with
 `node.allow_hooks`. After `max_loops` reworks, a blocked verdict or a spent budget the task waits for someone. The last
 stage is a human gate: its approver passes it (`tend task gate <id> --pass`), anyone on the task may send it back with
@@ -528,7 +529,8 @@ listed in the server's `config.json`:
 The provider's callback is `<public_url>/auth/<name>/callback`. Nobody joins on their own: `tend-server admin add
 ann@corp.example --role admin` makes the first admin, and after that admins add people on the Admin page or with
 `tend-server admin add <email | domain | provider:username>` (a verified email, any verified email of a domain, or an
-account), or send a one-time invitation link (`tend-server admin invite`, or the Admin page; it lasts 3 days).
+account), or send a one-time invitation link (`tend-server admin invite`, or the Admin page; it lasts 3 days), which can also make
+the invitee a participant or reader of a project (`--project`, `--access`).
 `tend-server admin disable <user>` signs someone out everywhere at once.
 
 Tasks belong to projects. An admin creates a project; its owner adds members as participants (create, dispatch, answer,
@@ -545,7 +547,8 @@ and an approver; a task that comes to wait for someone reaches its owner, its ap
 dispatched the run it is about — in their **Needs you** list on the web page, as a browser notification while the page is
 open, and at a personal webhook (Account page; a JSON POST with a `text` field for ntfy, Slack and the like, with a link to
 the task when `public_url` is set). An admin's **Hand over and disable** on the Admin page gives a leaving member's projects,
-tasks and definitions to others and ends their credentials.
+tasks and definitions to others and ends their credentials; their machines retire, and runs still open on them wait in
+the admins' **Needs you**.
 
 **Issues.** A project can follow a Gitea, GitHub or GitLab repository (Projects page, **Issue sync**): give its address
 (`https://github.com` for GitHub), the repository (`owner/name`, with subgroups on GitLab) and a bot account's token (kept encrypted on the server, with the key in `server.key` or
@@ -555,7 +558,9 @@ closes it once the requirement is done. When an issue changes, its requirement w
 or keeps the current scope; when it is closed outside tend, someone decides whether to go on. The server polls (60 s by
 default); a webhook to `<public_url>/hooks/<id>` with the secret shown at binding time (GitHub: content type
 `application/json`; GitLab: as the secret token) makes it quicker. A refused token
-stops the binding and tells the project's owner and the admins; a rate limit pauses it.
+stops the binding and tells the project's owner and the admins; a rate limit pauses it. The project's owner and the
+admins see on each requirement how its issue syncs: when it last synced, and whether a sync is pending or failed, with
+the error and the next try.
 
 **Web UI.** The server also serves a page at its own address (`http://100.101.8.10:7788/`). Sign in with a provider, or
 with a token; the browser session lasts 30 days, and signing out or revoking it ends it. The page lists tasks and their

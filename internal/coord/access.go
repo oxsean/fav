@@ -127,6 +127,13 @@ func (c *Coord) ownerOf(machine string) string {
 	return c.opt.MachineOwner(machine)
 }
 
+// retired: machine's owner was disabled (offboarded); the caller holds mu.
+func (c *Coord) retired(machine string) bool {
+	owner := c.ownerOf(machine)
+	u, ok := c.user(owner)
+	return c.team() && owner != Owner.User && ok && u.Disabled
+}
+
 // user is id as the team knows them; mode 1 knows only its owner.
 func (c *Coord) user(id string) (User, bool) {
 	if c.opt.Users == nil {

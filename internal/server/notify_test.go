@@ -5,12 +5,14 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/oxsean/fav/internal/coord"
 	"github.com/oxsean/fav/internal/store"
+	"github.com/oxsean/fav/internal/wire"
 )
 
 func TestANoticeReachesItsRecipientsWebhookOnce(t *testing.T) {
@@ -90,5 +92,19 @@ func TestAnAdminOffboardsAMember(t *testing.T) {
 	}
 	if !u.Disabled {
 		t.Fatal("cy is disabled")
+	}
+	if owner := r.srv.opt.Dir.MachineOwner("cy-box"); owner != me.ID {
+		t.Fatalf("a retired machine keeps its owner: %q", owner)
+	}
+	var ms coord.Machines
+	b, _ := json.Marshal(map[string]any{})
+	res, err := r.srv.opt.Coord.HandlerFor(coord.Owner)(context.Background(), &wire.Request{Method: coord.MMachineList, Params: b})
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ = json.Marshal(res)
+	json.Unmarshal(b, &ms)
+	if i := slices.IndexFunc(ms.Machines, func(m coord.Machine) bool { return m.Name == "cy-box" }); i < 0 || !ms.Machines[i].Retired || ms.Machines[i].Owner != me.ID {
+		t.Fatalf("cy-box retires: %+v", ms.Machines)
 	}
 }

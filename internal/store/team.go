@@ -384,13 +384,22 @@ func (t *Team) Admits() ([]Admit, error) {
 
 // NewInvite is a one-time secret that lets one person in with role until ttl passes.
 func (t *Team) NewInvite(role, by string, ttl time.Duration) (string, error) {
+	return t.NewProjectInvite(role, by, "", "", ttl)
+}
+
+// NewProjectInvite is an invitation that also makes its invitee a member of project with access (participant or
+// reader); project "" invites to the server only.
+func (t *Team) NewProjectInvite(role, by, project, access string, ttl time.Duration) (string, error) {
 	if role != RoleAdmin && role != RoleMember {
 		return "", fmt.Errorf("role %q", role)
 	}
+	if project != "" && access != "participant" && access != "reader" || project == "" && access != "" {
+		return "", fmt.Errorf("access %q", access)
+	}
 	secret := newSecret()
 	now := time.Now()
-	_, err := t.w.Exec(`INSERT INTO invites (sum, role, created_by, created, expires) VALUES (?, ?, ?, ?, ?)`,
-		Sum(secret), role, by, now.UnixNano(), now.Add(ttl).UnixNano())
+	_, err := t.w.Exec(`INSERT INTO invites (sum, role, created_by, created, expires, project, access) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		Sum(secret), role, by, now.UnixNano(), now.Add(ttl).UnixNano(), project, access)
 	return secret, err
 }
 
@@ -401,14 +410,17 @@ type InviteInfo struct {
 	Created   time.Time `json:"created,omitzero"`
 	Expires   time.Time `json:"expires,omitzero"`
 	Used      bool      `json:"used,omitempty"`
+	UsedBy    string    `json:"used_by,omitempty"`
+	Project   string    `json:"project,omitempty"` // the project it makes its invitee a member of
+	Access    string    `json:"access,omitempty"`  // there: participant | reader
 }
 
 // Invite looks up an invitation by its secret, used or not: the sign-in page shows it before anyone signs in.
 func (t *Team) Invite(secret string) (InviteInfo, error) {
 	var out InviteInfo
 	var created, expires, usedAt int64
-	err := t.r.QueryRow(`SELECT role, created_by, created, expires, used_at FROM invites WHERE sum = ?`, Sum(secret)).
-		Scan(&out.Role, &out.CreatedBy, &created, &expires, &usedAt)
+	err := t.r.QueryRow(`SELECT role, created_by, created, expires, used_at, used_by, project, access FROM invites WHERE sum = ?`, Sum(secret)).
+		Scan(&out.Role, &out.CreatedBy, &created, &expires, &usedAt, &out.UsedBy, &out.Project, &out.Access)
 	if errors.Is(err, sql.ErrNoRows) {
 		return InviteInfo{}, ErrNotFound
 	}
@@ -430,11 +442,13 @@ type PendingInvite struct {
 	CreatedBy string    `json:"created_by"`
 	Created   time.Time `json:"created"`
 	Expires   time.Time `json:"expires"`
+	Project   string    `json:"project,omitempty"`
+	Access    string    `json:"access,omitempty"`
 }
 
 // Invites are the invitations still waiting, newest first.
 func (t *Team) Invites() ([]PendingInvite, error) {
-	rows, err := t.r.Query(`SELECT substr(sum, 1, ?), role, created_by, created, expires FROM invites WHERE used_at = 0 AND expires > ?
+	rows, err := t.r.Query(`SELECT substr(sum, 1, ?), role, created_by, created, expires, project, access FROM invites WHERE used_at = 0 AND expires > ?
 		ORDER BY created DESC`, inviteIDLen, time.Now().UnixNano())
 	if err != nil {
 		return nil, err
@@ -444,7 +458,7 @@ func (t *Team) Invites() ([]PendingInvite, error) {
 	for rows.Next() {
 		var p PendingInvite
 		var created, expires int64
-		if err := rows.Scan(&p.ID, &p.Role, &p.CreatedBy, &created, &expires); err != nil {
+		if err := rows.Scan(&p.ID, &p.Role, &p.CreatedBy, &created, &expires, &p.Project, &p.Access); err != nil {
 			return nil, err
 		}
 		p.Created, p.Expires = fromNanos(created), fromNanos(expires)
@@ -633,4 +647,23 @@ func (t *Team) Delivered(seq int64, user, event, status string) error {
 func (t *Team) RevokeAll(user string) error {
 	_, err := t.w.Exec(`UPDATE credentials SET revoked = 1 WHERE owner = ?`, user)
 	return err
+}
+
+// RetiredMachines are the machines whose node token belongs to someone disabled: each machine and that owner.
+func (t *Team) RetiredMachines() (map[string]string, error) {
+	rows, err := t.r.Query(`SELECT c.name, c.owner FROM credentials c JOIN users u ON u.id = c.owner WHERE c.kind = ? AND u.disabled = 1
+		ORDER BY c.created`, KindNode)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]string{}
+	for rows.Next() {
+		var name, owner string
+		if err := rows.Scan(&name, &owner); err != nil {
+			return nil, err
+		}
+		out[name] = owner
+	}
+	return out, rows.Err()
 }

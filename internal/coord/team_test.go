@@ -381,3 +381,57 @@ func TestOwnersAndApproversChangeHandsByTheRules(t *testing.T) {
 		t.Fatalf("an approver outside the project: %v", err)
 	}
 }
+
+// Once its owner is disabled a machine is retired, and a run still open on it waits for an admin to stop or abandon.
+func TestTheRunsOfARetiredMachineWaitForAnAdmin(t *testing.T) {
+	e := team(t, tend.Config{Agents: []tend.AgentProfile{{Name: "long", Provider: agent.ProviderFake, Args: []string{"--steps", "400", "--every", "50ms"}}}})
+	e.start()
+	e.project()
+	tk := e.taskAs(bob, "b1", "p1", "long")
+	var r task.Run
+	if err := callAs(e.as(bob), MRunDispatch, "d1", Dispatch{Task: tk.ID, Runner: node.RunnerBackground}, &r); err != nil {
+		t.Fatal(err)
+	}
+	e.wait(r.ID, state(task.Running))
+	inbox := func(p Principal) []InboxItem {
+		var in Inbox
+		if err := callAs(e.as(p), MInboxList, "", nil, &in); err != nil {
+			t.Fatal(err)
+		}
+		return in.Items
+	}
+	if len(inbox(root)) != 0 {
+		t.Fatal("a running task waits for no one")
+	}
+	if err := callAs(e.as(root), MUserOffboard, "o", Offboard{User: ann.User}, nil); err != nil {
+		t.Fatal(err)
+	}
+	e.usersM.Lock()
+	u := e.users[ann.User]
+	u.Disabled = true
+	e.users[ann.User] = u
+	e.usersM.Unlock()
+	var ms Machines
+	if err := callAs(e.as(root), MMachineList, "", nil, &ms); err != nil {
+		t.Fatal(err)
+	}
+	for _, m := range ms.Machines {
+		if !m.Retired {
+			t.Fatalf("ann's machines retire with her: %+v", m)
+		}
+	}
+	got := inbox(root)
+	if len(got) != 1 || got[0].Task != tk.ID || got[0].Run != r.ID || got[0].Reason != task.Running || !slices.Equal(got[0].As, []string{AsAdmin}) {
+		t.Fatalf("the admin is to stop or abandon it: %+v", got)
+	}
+	if len(inbox(bob)) != 0 || len(inbox(cy)) != 0 {
+		t.Fatal("only admins")
+	}
+	if err := callAs(e.as(root), MRunStop, "s", task.RunRef{ID: r.ID}, nil); err != nil {
+		t.Fatalf("an admin stops it: %v", err)
+	}
+	e.wait(r.ID, ended)
+	if len(inbox(root)) != 0 {
+		t.Fatalf("%+v", inbox(root))
+	}
+}

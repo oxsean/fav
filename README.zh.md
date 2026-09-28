@@ -413,7 +413,7 @@ effort 和禁用的工具进 agent 的命令行，正文放在任务书前面。
 **工作流。** 任务可以分阶段走，而不是只跑一个 run：`tend task add … --workflow feature`（或者用项目的默认工作流）。内置
 `feature`（实现 → 评审 → 验收）、`fix`（实现 → 测试 → 验收）、`docs`（实现 → 验收）。每个阶段按角色（`implement`、`review`、`test`）
 用项目配置的 agent；评审或测试的 run 最后用 `tend run verdict pass|rework|blocked "…"` 给结论，要返工就退回实现阶段，实现者在自己原来的
-会话里接着改，任务书是评审意见。写了 `check: true` 的阶段在 agent 结束后在那台机器上跑项目的 `hooks.check`（比如 `mise run gate`），
+会话里接着改，任务书是评审意见。run 自己的汇报（`tend run note|ask|verdict|plan`）不用等批准，codex 在 workspace-write 沙箱里也能写自己的 run 目录。写了 `check: true` 的阶段在 agent 结束后在那台机器上跑项目的 `hooks.check`（比如 `mise run gate`），
 失败就算返工；节点要打开 `node.allow_hooks` 才接这种 run。退回超过 `max_loops` 次、结论是 blocked、或预算用完，任务停下等人。最后一关是
 人工验收：验收人放行（`tend task gate <id> --pass`），任务相关的人都能带着意见打回（`--rework "…"`）。`tend task message <id> "…"`
 会插进正在实现的 run、回复在等你的 run，否则记进任务的工作记录，每个阶段的任务书都会带上它。项目可以用 Markdown 定义自己的工作流：
@@ -493,7 +493,7 @@ tend task list   # 命令行和 TUI 的任务页都改为和 server 说话
 
 回调地址是 `<public_url>/auth/<name>/callback`。不开放注册：`tend-server admin add ann@corp.example --role admin`
 建第一个管理员；之后由管理员在管理页加人，或用 `tend-server admin add <邮箱 | 域名 | provider:用户名>`（已验证的邮箱、
-某个域名下任何已验证的邮箱、某个账号），也可以发一次性邀请链接（`tend-server admin invite` 或管理页，3 天有效）。
+某个域名下任何已验证的邮箱、某个账号），也可以发一次性邀请链接（`tend-server admin invite` 或管理页，3 天有效），邀请还可以让对方加入某个项目，身份是参与或只读（`--project`、`--access`）。
 `tend-server admin disable <用户>` 让这个人在所有地方立即下线。
 
 任务归属于项目。管理员建项目，项目负责人把成员加为「参与」（建任务、派发、回答、发消息）或「只读」（只能看）。
@@ -505,7 +505,7 @@ tend task list   # 命令行和 TUI 的任务页都改为和 server 说话
 项目负责人还设定项目的任务怎么跑：放在每份任务书前面的项目说明、仓库和它在每台机器上的路径（没写目录的任务就用它）、
 默认 agent 和机器，以及 hooks。任务有负责人和验收人；任务停下来等人时，会通知它的负责人、要验收时的验收人，以及相关 run 的派发人：
 出现在网页的**等你**列表里，网页开着时弹浏览器通知，也会发到个人 webhook（账号页设置；POST 一段带 `text` 字段的 JSON，
-适配 ntfy、Slack 等，配了 `public_url` 时带任务链接）。管理员在管理页用**交接并停用**把离开的成员的项目、任务和定义交给别人，并让他的凭据全部失效。
+适配 ntfy、Slack 等，配了 `public_url` 时带任务链接）。管理员在管理页用**交接并停用**把离开的成员的项目、任务和定义交给别人，并让其凭据全部失效；其机器标为已退役，上面没结束的 run 进管理员的**等你**。
 
 **工单。** 项目可以跟一个 Gitea、GitHub 或 GitLab 仓库同步（项目页的**工单同步**）：填地址（GitHub 填 `https://github.com`）、
 仓库（`owner/name`，GitLab 可带子组）和机器人账号的 token
@@ -513,7 +513,7 @@ tend task list   # 命令行和 TUI 的任务页都改为和 server 说话
 会成为项目的需求；指派人用这个工单系统登录过 tend 的，就归他负责。tend 在每个 issue 上只维护一条进度评论，需求完成后关单。
 issue 改了，需求会停下来等人选「采用新版本」或「维持本轮范围」；issue 在外面被关掉，由人决定是否继续。server 默认每 60 秒轮询一次；
 在仓库里加一个指向 `<public_url>/hooks/<id>` 的 webhook（密钥在绑定时只显示一次；GitHub 的 Content type 选
-`application/json`，GitLab 把密钥填作 Secret token）会更快。token 被拒时绑定停下并通知项目负责人和管理员，限流时暂停。
+`application/json`，GitLab 把密钥填作 Secret token）会更快。token 被拒时绑定停下并通知项目负责人和管理员，限流时暂停。项目负责人和管理员在每个需求上能看到它的 issue 同步得怎样：上次同步的时间，是否待同步或同步失败，以及错误和下次重试的时间。
 
 **Web UI。** server 在自己的地址上还提供一个网页（`http://100.101.8.10:7788/`）。用登录服务或 token 登录；
 浏览器会话保持 30 天，退出登录或吊销即失效。网页列出任务和它们的 run；新建、编辑、派发任务；派发前预检；

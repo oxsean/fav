@@ -48,6 +48,7 @@ const (
 	AsOwner      = "owner"
 	AsApprover   = "approver"
 	AsDispatcher = "dispatcher"
+	AsAdmin      = "admin" // its run is still open on a retired machine
 )
 
 // roles are why task t's situation sit is for user: owner, approver, dispatcher; the owner when nobody else is named.
@@ -207,6 +208,11 @@ func (c *Coord) inbox(p Principal) Inbox {
 	out := Inbox{Items: []InboxItem{}}
 	for _, t := range c.st.Tasks {
 		sit := c.st.Situation(t)
+		if r := c.st.Runs[sit.Run]; p.Admin && r != nil && task.Open(r.State) && c.retired(r.Machine) {
+			out.Items = append(out.Items, InboxItem{Task: t.ID, Title: t.Title, Project: t.Project, Reason: sit.Reason, Run: r.ID, Since: r.Since(),
+				As: []string{AsAdmin}})
+			continue
+		}
 		if sit.Kind != task.SitWaiting || sit.Reason == task.WhyDispatch || !canWrite(c.st, p, t) || !slices.Contains(concerns(c.st, t, sit), p.User) {
 			continue
 		}

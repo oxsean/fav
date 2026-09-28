@@ -1,6 +1,7 @@
 package server
 
 import (
+	"cmp"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -174,8 +175,6 @@ func (s *Syncer) binding(ctx context.Context, x store.Tracker) error {
 			s.mu.Lock()
 			s.retry[key] = s.now().Add(issueRetry)
 			s.mu.Unlock()
-			row.LastError = err.Error()
-			s.team.PutTrackerIssue(row)
 			continue
 		}
 		s.team.TrackerResult(x.ID, s.now(), time.Time{}, "", "")
@@ -315,8 +314,17 @@ func (s *Syncer) writeBacks(x store.Tracker, set TrackerSettings) []int64 {
 	return out
 }
 
-// issue reads one issue, records it in the journal, and writes back what is due.
-func (s *Syncer) issue(ctx context.Context, x store.Tracker, tr tracker.Tracker, set TrackerSettings, row store.TrackerIssue) error {
+// issue reads one issue, records it in the journal, and writes back what is due. When it fails, row keeps what it
+// learned (its task, its comment) and, unless the whole binding is to wait, the error.
+func (s *Syncer) issue(ctx context.Context, x store.Tracker, tr tracker.Tracker, set TrackerSettings, row store.TrackerIssue) (err error) {
+	defer func() {
+		if err != nil {
+			if !isStop(err) {
+				row.LastError = err.Error()
+			}
+			s.team.PutTrackerIssue(row)
+		}
+	}()
 	i, err := tr.Issue(ctx, row.Number)
 	if errors.Is(err, tracker.ErrNotFound) {
 		row.Dirty, row.LastError = false, "the issue is gone"
@@ -358,7 +366,7 @@ func (s *Syncer) issue(ctx context.Context, x store.Tracker, tr tracker.Tracker,
 	s.updated[x.ID+"#"+fmt.Sprint(i.Number)] = i.UpdatedAt
 	s.mu.Unlock()
 	if row.Task == "" {
-		row.Dirty = false
+		row.Dirty, row.Synced = false, s.now()
 		return s.team.PutTrackerIssue(row)
 	}
 	if mine != nil && row.CommentID == 0 {
@@ -381,8 +389,75 @@ func (s *Syncer) issue(ctx context.Context, x store.Tracker, tr tracker.Tracker,
 		}
 		row.Closed = true
 	}
-	row.Dirty, row.LastError = false, ""
+	row.Dirty, row.LastError, row.Synced = false, "", s.now()
 	return s.team.PutTrackerIssue(row)
+}
+
+// How a task's issue syncs, in TaskSyncState.State.
+const (
+	SyncOK      = "ok"
+	SyncPending = "sync_pending" // to be read or written again, or its binding waits out a rate limit
+	SyncFailed  = "sync_failed"  // its last try failed, or its binding's last pass failed or stopped
+)
+
+// TaskSyncState is how the issue a task mirrors syncs.
+type TaskSyncState struct {
+	Task    string    `json:"task"`
+	Tracker string    `json:"tracker"`
+	Number  int64     `json:"number"`
+	State   string    `json:"state"`
+	Synced  time.Time `json:"synced,omitzero"` // the last time the issue and the task were brought in step
+	Next    time.Time `json:"next,omitzero"`   // when the worker tries again; zero: at its next pass, or never while stopped
+	Error   string    `json:"error,omitempty"`
+}
+
+// TaskStates are how the issues of project's tasks sync.
+func (s *Syncer) TaskStates(project string) ([]TaskSyncState, error) {
+	xs, err := s.team.Trackers()
+	if err != nil {
+		return nil, err
+	}
+	now, out := s.now(), []TaskSyncState{}
+	for _, x := range xs {
+		if x.Project != project {
+			continue
+		}
+		rows, err := s.team.TrackerIssues(x.ID, false)
+		if err != nil {
+			return nil, err
+		}
+		for _, row := range rows {
+			if row.Task == "" {
+				continue
+			}
+			st := TaskSyncState{Task: row.Task, Tracker: x.ID, Number: row.Number, State: SyncOK, Synced: row.Synced}
+			s.mu.Lock()
+			retry := s.retry[x.ID+"#"+fmt.Sprint(row.Number)]
+			s.mu.Unlock()
+			later := func(t time.Time) {
+				if t.After(now) && t.After(st.Next) {
+					st.Next = t
+				}
+			}
+			switch {
+			case x.Stopped != "":
+				st.State, st.Error = SyncFailed, cmp.Or(x.LastError, x.Stopped)
+			case row.LastError != "":
+				st.State, st.Error = SyncFailed, row.LastError
+				later(retry)
+				later(x.Paused)
+			case x.Paused.After(now):
+				st.State = SyncPending
+				later(x.Paused)
+			case x.LastError != "":
+				st.State, st.Error = SyncFailed, x.LastError
+			case row.Dirty:
+				st.State = SyncPending
+			}
+			out = append(out, st)
+		}
+	}
+	return out, nil
 }
 
 // requirement records issue i, with the comments of people, as its task in the journal; "" when it makes none.

@@ -3,3 +3,4 @@
 .DS_Store
 .idea/
 /.test-hosts
+/tend-server

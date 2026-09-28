@@ -1,10 +1,16 @@
 package server
 
 import (
+	"context"
+	"encoding/json"
 	"net/http"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/oxsean/fav/internal/coord"
+	"github.com/oxsean/fav/internal/store"
+	"github.com/oxsean/fav/internal/wire"
 )
 
 func startDevice(t *testing.T, r *rig, name string) (deviceCode, userCode string) {
@@ -136,5 +142,47 @@ func TestInviteInfoIsPublic(t *testing.T) {
 	expired, _ := r.team.NewInvite("member", "local", -time.Minute)
 	if got := r.api(browser(t), "GET", "/auth/invite?code="+expired, nil, nil); got != http.StatusNotFound {
 		t.Fatalf("an expired invite: %d", got)
+	}
+}
+
+// An invitation to a project makes whoever signs in with it a member there, with the access it names.
+func TestAProjectInviteMakesItsInviteeAMember(t *testing.T) {
+	who := map[string]any{"sub": "11", "email": "eve@else.example", "email_verified": true}
+	_, gitea := idp(t, &who)
+	r := newRig(t, gitea)
+	b, _ := json.Marshal(coord.ProjectCreate{ID: "p1", Name: "One", Owner: store.LocalUser})
+	if _, err := r.c.HandlerFor(coord.Owner)(context.Background(), &wire.Request{Method: coord.MProjectCreate, CommandID: "p", Params: b}); err != nil {
+		t.Fatal(err)
+	}
+	admin := browser(t)
+	if login(t, admin, r.url, r.client) != http.StatusNoContent {
+		t.Fatal("the host's token signs in")
+	}
+	for _, bad := range []map[string]string{{"role": "member", "project": "nope", "access": "reader"}, {"role": "member", "project": "p1", "access": "owner"},
+		{"role": "member", "project": "p1"}} {
+		if got := r.api(admin, "POST", "/api/invites", bad, nil); got != http.StatusBadRequest {
+			t.Fatalf("%v: %d", bad, got)
+		}
+	}
+	var made struct{ URL string }
+	if got := r.api(admin, "POST", "/api/invites", map[string]string{"role": "member", "project": "p1", "access": "reader"}, &made); got != http.StatusOK {
+		t.Fatal(got)
+	}
+	_, secret, _ := strings.Cut(made.URL, "#invite-")
+	var info struct{ Project, Access string }
+	if got := r.api(browser(t), "GET", "/auth/invite?code="+secret, nil, &info); got != http.StatusOK || info.Project != "One" || info.Access != "reader" {
+		t.Fatalf("the sign-in page names the project: %d %+v", got, info)
+	}
+	c := browser(t)
+	signIn(t, c, r.url, "?invite="+secret)
+	var me Me
+	resp, err := c.Get(r.url + "/session")
+	if err != nil {
+		t.Fatal(err)
+	}
+	json.NewDecoder(resp.Body).Decode(&me)
+	resp.Body.Close()
+	if me.ID == "" || r.c.State().Projects["p1"].Members[me.ID] != "reader" {
+		t.Fatalf("eve reads p1: %+v %v", me, r.c.State().Projects["p1"].Members)
 	}
 }

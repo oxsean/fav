@@ -14,10 +14,11 @@ import (
 // database and kept in memory; Reload reads them again (the server does every few seconds, and after it changes
 // them, so tend-server commands run beside it take effect).
 type Directory struct {
-	team  *store.Team
-	mu    sync.RWMutex
-	creds map[string]store.Credential // live ones, by id
-	users map[string]store.User
+	team    *store.Team
+	mu      sync.RWMutex
+	creds   map[string]store.Credential // live ones, by id
+	users   map[string]store.User
+	retired map[string]string // machine → the disabled owner of its node token
 }
 
 func NewDirectory(team *store.Team) (*Directory, error) {
@@ -33,6 +34,10 @@ func (d *Directory) Reload() error {
 		return err
 	}
 	us, err := d.team.Users()
+	if err != nil {
+		return err
+	}
+	retired, err := d.team.RetiredMachines()
 	if err != nil {
 		return err
 	}
@@ -52,7 +57,7 @@ func (d *Directory) Reload() error {
 		users[u.ID] = u
 	}
 	d.mu.Lock()
-	d.creds, d.users = creds, users
+	d.creds, d.users, d.retired = creds, users, retired
 	d.mu.Unlock()
 	return nil
 }
@@ -85,7 +90,7 @@ func (d *Directory) live(id string) bool {
 	return ok
 }
 
-// MachineOwner is the user who owns machine: the owner of its node token.
+// MachineOwner is the user who owns machine: the owner of its node token, or of the last one of a retired machine.
 func (d *Directory) MachineOwner(machine string) string {
 	d.mu.RLock()
 	defer d.mu.RUnlock()
@@ -94,7 +99,7 @@ func (d *Directory) MachineOwner(machine string) string {
 			return c.Owner
 		}
 	}
-	return ""
+	return d.retired[machine]
 }
 
 // NodeNames are the machines that have a node token.

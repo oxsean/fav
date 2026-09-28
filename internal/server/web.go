@@ -15,8 +15,11 @@ import (
 	"time"
 
 	"github.com/oxsean/fav/internal/auth"
+	"github.com/oxsean/fav/internal/coord"
 	"github.com/oxsean/fav/internal/skin"
 	"github.com/oxsean/fav/internal/store"
+	"github.com/oxsean/fav/internal/task"
+	"github.com/oxsean/fav/internal/wire"
 )
 
 //go:embed web
@@ -192,8 +195,8 @@ func (s *Server) loginList(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
-// inviteInfo is what the sign-in page shows for an invitation before anyone signs in: who sent it, the role, and
-// its expiry. An invitation carries no project; joining a project happens afterward, on the projects page.
+// inviteInfo is what the sign-in page shows for an invitation before anyone signs in: who sent it, the role, the
+// project it makes them a member of and with what access, and its expiry.
 func (s *Server) inviteInfo(w http.ResponseWriter, r *http.Request) {
 	info, err := s.team().Invite(r.URL.Query().Get("code"))
 	if err != nil || info.Used || time.Now().After(info.Expires) {
@@ -204,7 +207,32 @@ func (s *Server) inviteInfo(w http.ResponseWriter, r *http.Request) {
 	if u, ok, _ := s.team().User(info.CreatedBy); ok {
 		inviter = displayName(u)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"inviter": inviter, "role": info.Role, "expires": info.Expires})
+	out := map[string]any{"inviter": inviter, "role": info.Role, "expires": info.Expires}
+	if pr := s.opt.Coord.State().Projects[info.Project]; pr != nil {
+		out["project"], out["access"] = pr.Name, info.Access
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// joinInvited makes u, just admitted through invite, a member of the project the invitation names, as whoever sent
+// it; a failure leaves them signed in without it and goes to the audit.
+func (s *Server) joinInvited(r *http.Request, u store.User, invite string) {
+	info, err := s.team().Invite(invite)
+	if err != nil || info.Project == "" || info.UsedBy != u.ID {
+		return
+	}
+	by, ok, _ := s.team().User(info.CreatedBy)
+	if !ok {
+		return
+	}
+	s.opt.Dir.Reload()
+	b, _ := json.Marshal(task.MemberSet{Project: info.Project, User: u.ID, Role: info.Access})
+	req := &wire.Request{Method: coord.MProjectMember, CommandID: "invite-" + u.ID, Params: b}
+	if _, err := s.opt.Coord.HandlerFor(principal(by))(r.Context(), req); err != nil {
+		s.audit(r, info.CreatedBy, "invite.project_failed", u.ID+" "+info.Project+": "+wire.Code(err))
+		return
+	}
+	s.audit(r, info.CreatedBy, "member", info.Project+" "+u.ID+" "+info.Access)
 }
 
 // flow is a sign-in waiting for its callback.
@@ -321,6 +349,9 @@ func (s *Server) callback(w http.ResponseWriter, r *http.Request) {
 		}
 		s.signinPage(w, http.StatusForbidden, code)
 		return
+	}
+	if f.invite != "" {
+		s.joinInvited(r, u, f.invite)
 	}
 	if err := s.startSession(w, r, u, ""); err != nil {
 		s.signinPage(w, http.StatusInternalServerError, "internal")

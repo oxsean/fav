@@ -47,6 +47,7 @@ func (s *Server) trackerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/trackers/rescan", s.api(s.rescanTracker))
 	mux.HandleFunc("GET /api/trackers/issues", s.api(s.trackerIssues))
 	mux.HandleFunc("GET /api/trackers/preview", s.api(s.trackerPreview))
+	mux.HandleFunc("GET /api/trackers/tasks", s.api(s.trackerTasks))
 	mux.HandleFunc("POST /hooks/{id}", s.trackerHook)
 }
 
@@ -295,6 +296,25 @@ func (s *Server) trackerIssues(w http.ResponseWriter, r *http.Request, c caller)
 			LastError: i.LastError, Parent: i.Parent, PR: i.PR})
 	}
 	sort.SliceStable(out, func(a, b int) bool { return out[a].Written.After(out[b].Written) })
+	writeJSON(w, http.StatusOK, out)
+}
+
+// trackerTasks is how the issues of a project's tasks sync, for who manages the project.
+func (s *Server) trackerTasks(w http.ResponseWriter, r *http.Request, c caller) {
+	project := r.URL.Query().Get("project")
+	if !s.managesProject(c, project) {
+		apiError(w, http.StatusNotFound, "not_found")
+		return
+	}
+	if s.syncer == nil {
+		writeJSON(w, http.StatusOK, []TaskSyncState{})
+		return
+	}
+	out, err := s.syncer.TaskStates(project)
+	if err != nil {
+		apiError(w, http.StatusInternalServerError, "internal")
+		return
+	}
 	writeJSON(w, http.StatusOK, out)
 }
 

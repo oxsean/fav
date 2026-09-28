@@ -322,10 +322,12 @@ func cmdAdmin(args []string) error {
 	case "invite":
 		fs := newFlags()
 		role := fs.String("role", store.RoleMember, i18n.T("cli.server.flag_role"))
+		project := fs.String("project", "", i18n.T("cli.server.flag_invite_project"))
+		access := fs.String("access", "", i18n.T("cli.server.flag_invite_access"))
 		if err := fs.Parse(args[1:]); err != nil {
 			return err
 		}
-		secret, err := team.NewInvite(*role, store.LocalUser, 72*time.Hour)
+		secret, err := team.NewProjectInvite(*role, store.LocalUser, *project, *access, 72*time.Hour)
 		if err != nil {
 			return err
 		}

@@ -91,6 +91,28 @@ func TestAnInviteLetsOnePersonInOnce(t *testing.T) {
 	}
 }
 
+func TestAProjectInviteSaysWhichProjectItOpens(t *testing.T) {
+	tm := openTeam(t)
+	if _, err := tm.NewProjectInvite(RoleMember, LocalUser, "p1", "owner", time.Hour); err == nil {
+		t.Fatal("a project invite grants participant or reader")
+	}
+	secret, err := tm.NewProjectInvite(RoleMember, LocalUser, "p1", "reader", time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if list, _ := tm.Invites(); len(list) != 1 || list[0].Project != "p1" || list[0].Access != "reader" {
+		t.Fatalf("%+v", list)
+	}
+	eve, err := tm.Admit(gitea("8", "", false), secret)
+	if err != nil {
+		t.Fatal(err)
+	}
+	info, err := tm.Invite(secret)
+	if err != nil || info.Project != "p1" || info.Access != "reader" || info.UsedBy != eve.ID {
+		t.Fatalf("%+v %v", info, err)
+	}
+}
+
 func TestACredentialIsItsSecretsHashAndGoesWhenRevoked(t *testing.T) {
 	tm := openTeam(t)
 	secret, c, err := tm.NewCredential(KindNode, "mba", LocalUser, 0)

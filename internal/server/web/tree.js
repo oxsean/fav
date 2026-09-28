@@ -27,7 +27,7 @@ const treeWords = {
   moved: ['位置已调整', 'Moved'], heldBecause: ['原因', 'Why'], inboxEmpty: ['没有等你的事', 'Nothing waits for you'],
   allKinds: ['全部', 'All'], 'inbox.answer': ['要回答', 'To answer'], 'inbox.accept': ['待验收或收尾', 'To accept or close'],
   'inbox.trouble': ['出了问题', 'In trouble'], 'inbox.other': ['其他', 'Other'], anyRole: ['任何身份', 'Any role'],
-  'as.owner': ['我负责', 'I own it'], 'as.approver': ['我验收', 'I accept it'], 'as.dispatcher': ['我派发', 'I dispatched it'],
+  'as.owner': ['我负责', 'I own it'], 'as.approver': ['我验收', 'I accept it'], 'as.dispatcher': ['我派发', 'I dispatched it'], 'as.admin': ['我是管理员，它的机器已退役', 'I am an admin and its machine retired'],
   whyYou: ['为什么是你：{0}', 'Why you: {0}'], inboxKind: ['按类型', 'By kind'], inboxAs: ['按身份', 'By role'],
   inboxNoneShown: ['没有符合筛选的事', 'Nothing matches the filters'],
   usedByProjects: ['项目 {0} 在用', 'Used by {0}'], usedByTasks: ['{0} 个未完成任务', '{0} open tasks'], unused: ['还没有用到', 'Not used yet'],
@@ -83,10 +83,11 @@ const treeWords = {
   'off.projects': ['他负责的项目：{0}', 'Projects they own: {0}'], 'off.tasks': ['不在项目里、或在这些项目里的未完成任务', 'Open tasks outside projects or in those'],
   'off.projectTasks': ['其他项目里他负责或验收的未完成任务', 'Open tasks they own or accept in other projects'], 'off.defs': ['他的 agent 定义：{0}', 'Their agent definitions: {0}'],
   'off.machines': ['他的机器：{0}', 'Their machines: {0}'], 'off.member': ['项目成员身份', 'Project memberships'], 'off.creds': ['他所有的 token 和登录', 'Every token and sign-in of theirs'],
-  'off.heir': ['下面选的接手人', 'the person chosen below'], 'off.closed': ['停止分享', 'no longer shared'], 'off.removed': ['移除', 'removed'], 'off.revoked': ['立即失效', 'ended now'],
+  'off.heir': ['下面选的接手人', 'the person chosen below'], 'off.closed': ['停止分享并标为已退役；上面没结束的 run 进管理员的「等你」', 'no longer shared, and retired; runs still open there wait for an admin'], 'off.removed': ['移除', 'removed'], 'off.revoked': ['立即失效', 'ended now'],
   'off.audit': ['停用和每一项转移都记进安全审计。以后可以重新启用，吊销的 token 不会恢复。', 'The disabling and every handover go into the audit log. They can be enabled again later; revoked tokens stay revoked.'],
   syncLog: ['同步记录', 'Sync log'], notMirrored: ['没有对应任务', 'No task'], subOf: ['{0} 的子工单', 'sub-issue of {0}'],
   commentWritten: ['评论写于 {0}', 'Comment written {0}'], noComment: ['还没写评论', 'No comment yet'], trackerClosed: ['已关闭', 'closed'], toRead: ['待重读', 'to read again'],
+  'sync.sync_pending': ['待同步', 'Sync pending'], 'sync.sync_failed': ['同步失败', 'Sync failed'], syncedAt: ['上次同步 {0}', 'Synced {0}'], syncRetry: ['{0} 重试', 'Retries {0}'],
   previewComment: ['预览评论', 'Preview the comment'], commentFor: ['{0} 的进度评论（现在写会是这样）', 'The progress comment on {0}, as it would be written now'], back: ['返回', 'Back'],
   handTo: ['交给', 'Hand to'], offboarded: ['已交接并停用', 'Handed over and disabled'],
   'why.advance': ['本阶段完成，即将进入下一阶段', 'Its stage is done; it moves on next'], 'why.rework': ['被退回，即将返工', 'Sent back; it goes back next'],
@@ -159,7 +160,7 @@ const Tree = (() => {
     if ((task.after || []).length) rows.push(`<div><span class="meta-label">${t('after')}</span><span class="meta-value">${task.after.map(link).join(' · ')}</span></div>`);
     if (task.owner && Team.name) rows.push(`<div><span class="meta-label">${t('taskOwner')}</span><span class="meta-value">${esc(Team.name(task.owner))}${task.approver && task.approver !== task.owner ? ` · ${t('approver')} ${esc(Team.name(task.approver))}` : ''}</span></div>`);
     const acc = (task.acceptance || []).length ? `<div class="tree-block"><span class="meta-label">${t('acceptance')}</span><ul class="plain">${task.acceptance.map(a => `<li>${esc(a)}</li>`).join('')}</ul></div>` : '';
-    const src = task.source ? sourceBlock(task) : task.issue ? `<div class="tree-block"><div class="flex"><span class="meta-label">${t('subIssue')}</span><a href="${esc(task.issue)}" target="_blank" rel="noreferrer noopener">${esc(task.issue)}</a></div></div>` : '';
+    const src = task.source ? sourceBlock(task) : task.issue ? `<div class="tree-block"><div class="flex"><span class="meta-label">${t('subIssue')}</span><a href="${esc(task.issue)}" target="_blank" rel="noreferrer noopener">${esc(task.issue)}</a></div>${syncLine(task)}</div>` : '';
     const sub = kids.length ? `<div class="tree-block"><span class="meta-label">${t('subtasks')}</span>${kids.map(k => `<div class="flex">${link(k.id)}${badge(k.status)}${sitBadge(k)}</div>`).join('')}</div>` : '';
     const can = ui.online && !finished(task.status);
     const flow = (task.flow ? flowBlock(task) : '') + workBlock(task) + (task.draft ? draftBlock(task) : '');
@@ -327,7 +328,27 @@ const Tree = (() => {
     } else if (src.closed && !src.closed_acked && can) {
       body = `<div class="notice">${t('sourceClosed')}</div><div class="flex">${button('tree-source', t('keepGoing'), `data-id="${esc(task.id)}"`)}${button('cancel-task', t('cancelTask'), '', 'quiet')}</div>`;
     }
-    return `<div class="tree-block">${head}${body}</div>`;
+    return `<div class="tree-block">${head}${syncLine(task)}${body}</div>`;
+  }
+
+  const syncs = {};
+  // syncLine is how the issue task mirrors syncs, for who manages its project; the states come from the server, at most
+  // every half minute, and the detail draws again once they arrive.
+  function syncLine(task) {
+    const p = ui.state.projects?.[task.project];
+    if (!Team.rest || !p || !(ui.me?.role === 'admin' || p.owner === ui.me?.id)) return '';
+    const c = syncs[task.project] ||= {at: 0, rows: {}};
+    if (!c.loading && Date.now() - c.at > 30000) {
+      c.loading = true;
+      Team.rest('GET', '/api/trackers/tasks?project=' + encodeURIComponent(task.project))
+        .then(rows => { c.rows = Object.fromEntries(rows.map(r => [r.task, r])); }, () => {})
+        .finally(() => { c.at = Date.now(); c.loading = false; if (currentTask()?.project === task.project) renderDetail(); });
+    }
+    const st = c.rows[task.id];
+    if (!st) return '';
+    const when = [st.synced ? t('syncedAt').replace('{0}', date(st.synced)) : '', st.next ? t('syncRetry').replace('{0}', date(st.next)) : ''].filter(Boolean).join(' · ');
+    const mark = st.state === 'ok' ? '' : `<span class="status ${st.state === 'sync_failed' ? 'failed' : 'queued'}">${t('sync.' + st.state)}</span>`;
+    return `<div class="flex">${mark}${when ? `<span class="muted">${when}</span>` : ''}${st.error ? `<code class="form-error">${esc(st.error)}</code>` : ''}</div>`;
   }
 
   // formFields are a task form's tree fields; a new task may go under any open task, whose project it then joins.
@@ -385,7 +406,7 @@ const Tree = (() => {
     const chip = (key, value, label, n) => `<button type="button" data-action="tree-inbox-filter" data-key="${key}" data-value="${value}" aria-pressed="${data[key] === value}" class="${data[key] === value ? 'active' : ''}">${label}${n !== undefined ? ` <span class="num">${n}</span>` : ''}</button>`;
     const count = (key, fn) => data.inbox.filter(fn).length;
     const kinds = [chip('inboxKind', '', t('allKinds'), data.inbox.length), ...[...Object.keys(inboxKinds), 'other'].map(k => chip('inboxKind', k, t('inbox.' + k), count('inboxKind', x => kindOf(x) === k)))];
-    const roles = [chip('inboxAs', '', t('anyRole')), ...['owner', 'approver', 'dispatcher'].map(r => chip('inboxAs', r, t('as.' + r), count('inboxAs', x => (x.as || []).includes(r))))];
+    const roles = [chip('inboxAs', '', t('anyRole')), ...['owner', 'approver', 'dispatcher', 'admin'].map(r => chip('inboxAs', r, t('as.' + r), count('inboxAs', x => (x.as || []).includes(r))))];
     const rows = shown.map(x => Home.waitRow(x, `<p class="hint inbox-why">${esc(t('whyYou').replace('{0}', (x.as || []).map(r => t('as.' + r)).join(' · ')))}${x.project ? ` · <span class="mono">${esc(x.project)}</span>` : ''}</p>`));
     return `<header class="page-heading"><div><h1>${t('inbox')}</h1><p class="page-subtitle">${t('inboxHelp')}</p></div></header>
       <div class="machine-page"><div class="inbox-filters"><div class="view-toggle" role="group" aria-label="${t('inboxKind')}">${kinds.join('')}</div><div class="view-toggle" role="group" aria-label="${t('inboxAs')}">${roles.join('')}</div></div>

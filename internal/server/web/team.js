@@ -69,7 +69,8 @@ const teamWords = {
   approveHelp: ['关着时，只有主人和运行的派发人能批准执行命令、写文件；提问类的，项目参与者都能答。', 'When off, only the owner and the run\'s dispatcher approve commands and file writes; any project participant answers questions.'],
   logins: ['登录方式', 'Signs in with'], inProjects: ['项目', 'Projects'], ownsMachines: ['机器', 'Machines'], seen: ['最近活动', 'Last active'],
   pendingInvites: ['待接受的邀请', 'Pending invitations'], expiresAt: ['{0} 失效', 'Expires {0}'], invitedBy: ['{0} 发出', 'From {0}'],
-  revokeInvite: ['作废', 'Revoke'], inviteRevoked: ['邀请已作废', 'Invitation revoked'],
+  revokeInvite: ['作废', 'Revoke'], inviteProject: ['邀请进的项目', 'Project to join'], inviteAccess: ['在项目里的身份', 'Access in the project'],
+  inviteNoProject: ['不进项目', 'No project'], invitedTo: ['登录后加入项目「{0}」，身份：{1}', 'Signing in makes you a member of {0}: {1}'], inviteRevoked: ['邀请已作废', 'Invitation revoked'],
   internal: ['服务器出错。', 'The server failed.'], team: ['团队', 'Team'], make: ['创建', 'Create'], changeSaved: ['已保存', 'Saved'], add: ['添加', 'Add'], saveShare: ['保存共享', 'Save sharing'], nobody: ['无', 'Nobody'],
 };
 
@@ -136,7 +137,7 @@ const Team = (() => {
     const label = l => esc(t(invite ? 'acceptWith' : 'signInWith').replace('{0}', l.display || l.name));
     const providers = data.logins.map(l => `<a class="button primary provider" href="/auth/${encodeURIComponent(l.name)}/start${q}">${label(l)}</a>`).join('');
     const inviteCard = invite ? (data.inviteInfo
-      ? `<div class="notice invite-card"><strong>${esc(data.inviteInfo.inviter)}</strong> ${t('invitedBy')} <b>${t('role.' + data.inviteInfo.role)}</b><div class="muted">${t('inviteExpires')} ${when(data.inviteInfo.expires)}</div></div>`
+      ? `<div class="notice invite-card"><strong>${esc(data.inviteInfo.inviter)}</strong> ${t('invitedBy')} <b>${t('role.' + data.inviteInfo.role)}</b>${data.inviteInfo.project ? `<div>${esc(t('invitedTo').replace('{0}', data.inviteInfo.project).replace('{1}', t('role.' + data.inviteInfo.access)))}</div>` : ''}<div class="muted">${t('inviteExpires')} ${when(data.inviteInfo.expires)}</div></div>`
       : `<div class="notice">${t('invited')}</div>`) : '';
     return `${problem && words['signin.' + problem] ? `<div class="form-error" role="alert">${t('signin.' + problem)}</div>` : ''}${inviteCard}
       ${!invite ? `<p class="hint">${t('inviteOnlyNotice')}</p>` : ''}${providers ? `<div class="stack providers">${providers}</div><div class="divider"><span>${t('orToken')}</span></div>` : ''}`;
@@ -237,8 +238,10 @@ const Team = (() => {
       : `<select data-team-user-role="${esc(u.id)}" aria-label="${t('role')}">${['member', 'admin'].map(r => `<option value="${r}" ${u.role === r ? 'selected' : ''}>${t('role.' + r)}</option>`).join('')}</select>${button('team-disable', t(u.disabled ? 'enable' : 'disable'), `data-id="${esc(u.id)}" data-disabled="${u.disabled ? '' : '1'}"`, u.disabled ? 'quiet' : 'quiet danger')}${u.disabled ? '' : button('tree-offboard', t('offboard'), `data-id="${esc(u.id)}"`, 'quiet danger')}`}${u.disabled ? `<span>${t('disabled')}</span>` : ''}</div>`), t('nobody'));
     const admits = rows(data.admits.map(a => `<div class="agent-row"><strong>${t('admit.' + a.kind)}</strong><span class="mono">${esc(a.value)}</span><span>${t('role.' + a.role)}</span>${button('team-remove-admit', t('removeMember'), `data-kind="${esc(a.kind)}" data-value="${esc(a.value)}"`, 'quiet danger')}</div>`), t('nobody'));
     const addAdmit = `<form id="team-admit-form" class="form-grid mt-12"><select name="kind" aria-label="${t('value')}">${['email', 'domain', 'login'].map(k => `<option value="${k}">${t('admit.' + k)}</option>`).join('')}</select><input name="value" required placeholder="corp.example" aria-label="${t('value')}"><select name="role" aria-label="${t('role')}"><option value="member">${t('role.member')}</option><option value="admin">${t('role.admin')}</option></select><button type="submit">${t('addAdmit')}</button></form>`;
-    const invite = `<form id="team-invite-form" class="flex"><select name="role" aria-label="${t('role')}"><option value="member">${t('role.member')}</option><option value="admin">${t('role.admin')}</option></select><button type="submit">${t('makeInvite')}</button></form>`;
-    const invites = rows(data.invites.map(i => `<div class="agent-row"><strong class="mono">${esc(i.id)}</strong><span>${t('role.' + i.role)}</span><span>${esc(t('invitedBy').replace('{0}', userName(i.created_by)))}</span><span>${esc(t('expiresAt').replace('{0}', when(i.expires)))}</span>${button('team-revoke-invite', t('revokeInvite'), `data-id="${esc(i.id)}"`, 'quiet danger')}</div>`), t('nobody'));
+    const inviteTo = projects().map(p => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('');
+    const invite = `<form id="team-invite-form" class="flex"><select name="role" aria-label="${t('role')}"><option value="member">${t('role.member')}</option><option value="admin">${t('role.admin')}</option></select>${inviteTo ? `<select name="project" aria-label="${t('inviteProject')}"><option value="">${t('inviteNoProject')}</option>${inviteTo}</select><select name="access" aria-label="${t('inviteAccess')}">${roles.map(r => `<option value="${r}">${t('role.' + r)}</option>`).join('')}</select>` : ''}<button type="submit">${t('makeInvite')}</button></form>`;
+    const projectName = id => esc(ui.state.projects?.[id]?.name || id);
+    const invites = rows(data.invites.map(i => `<div class="agent-row"><strong class="mono">${esc(i.id)}</strong><span>${t('role.' + i.role)}${i.project ? ` · ${projectName(i.project)} · ${t('role.' + i.access)}` : ''}</span><span>${esc(t('invitedBy').replace('{0}', userName(i.created_by)))}</span><span>${esc(t('expiresAt').replace('{0}', when(i.expires)))}</span>${button('team-revoke-invite', t('revokeInvite'), `data-id="${esc(i.id)}"`, 'quiet danger')}</div>`), t('nobody'));
     const audit = rows(data.audit.map(e => `<div class="agent-row"><span class="mono">${date(e.at)}</span><strong>${esc(e.kind)}</strong><span>${esc(e.actor ? userName(e.actor) : '—')}</span><span class="mono">${esc(e.detail || '')}</span><span class="mono">${esc(e.ip || '')}</span></div>`), t('nobody'));
     return `<header class="page-heading"><div><h1>${t('admin')}</h1></div></header>
       <div class="machine-page stack">${section(t('users'), '', users)}${section(t('admits'), t('admitsHelp'), admits + addAdmit)}${section(t('invite'), '', invite + `<h3 class="meta-label mt-12">${t('pendingInvites')}</h3>` + invites)}${section(t('audit'), '', audit)}</div>`;
@@ -411,6 +414,7 @@ const Team = (() => {
         await rest('DELETE', '/api/' + form.dataset.kind, {id: form.dataset.id}); closeModal(true); await enter(form.dataset.kind === 'tokens' ? 'account' : 'machines'); break;
       case 'team-admit-form': await rest('POST', '/api/admits', f); form.reset(); await enter('admin'); break;
       case 'team-invite-form': {
+        if (!f.project) delete f.access;
         const v = await rest('POST', '/api/invites', f);
         showSecret(t('invite'), secretBox(t('inviteMade'), v.url)); await enter('admin'); break;
       }

@@ -202,20 +202,27 @@ func (s *Server) removeAdmit(w http.ResponseWriter, r *http.Request, c caller) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// invite makes a one-time link: whoever signs in through it joins with the role.
+// invite makes a one-time link: whoever signs in through it joins with the role, and with a project also becomes a
+// member there with the access.
 func (s *Server) invite(w http.ResponseWriter, r *http.Request, c caller) {
 	var p struct {
-		Role string `json:"role"`
+		Role    string `json:"role"`
+		Project string `json:"project"`
+		Access  string `json:"access"`
 	}
 	if !decode(w, r, &p) {
 		return
 	}
-	secret, err := s.team().NewInvite(p.Role, c.user.ID, inviteAge)
+	if p.Project != "" && s.opt.Coord.State().Projects[p.Project] == nil {
+		apiError(w, http.StatusBadRequest, "project")
+		return
+	}
+	secret, err := s.team().NewProjectInvite(p.Role, c.user.ID, p.Project, p.Access, inviteAge)
 	if err != nil {
 		apiError(w, http.StatusBadRequest, "bad_request")
 		return
 	}
-	s.audit(r, c.user.ID, "invite", p.Role)
+	s.audit(r, c.user.ID, "invite", strings.TrimSpace(p.Role+" "+p.Project+" "+p.Access))
 	writeJSON(w, http.StatusOK, map[string]any{"url": s.base(r) + "/#invite-" + secret, "expires": time.Now().Add(inviteAge)})
 }
 

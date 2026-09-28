@@ -80,6 +80,7 @@ type Machine struct {
 	Agents   map[string]agent.Check `json:"agents,omitempty"`  // how each agent CLI stood when last checked
 	Via      string                 `json:"via,omitempty"`     // local | ssh | dial (the node dialed in)
 	Missing  []string               `json:"missing,omitempty"` // node features its build lacks
+	Retired  bool                   `json:"retired,omitempty"` // its owner was disabled: nobody runs anything there again
 }
 
 // How a machine is reached, in Machine.Via.
@@ -763,7 +764,7 @@ func (c *Coord) machineView(m *machine) Machine {
 		x.Missing = missingFeatures(m.hello, node.Features)
 	}
 	if c.team() {
-		x.Owner = c.ownerOf(m.name)
+		x.Owner, x.Retired = c.ownerOf(m.name), c.retired(m.name)
 	}
 	for _, r := range c.st.Runs {
 		if r.Machine == m.name && r.State == task.Queued {

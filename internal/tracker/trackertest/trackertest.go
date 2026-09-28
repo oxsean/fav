@@ -58,10 +58,12 @@ type Server struct {
 	comments []*Comment
 	next     int64
 	clock    time.Time
-	// Faults: RateLimit answers the next n requests 429 with Retry-After 30; Refuse answers every request 401; LoseCreate
-	// makes the next comment it creates answer 502 although the comment is made, LoseIssue the next issue.
+	// Faults: RateLimit answers the next n requests 429 with Retry-After 30; Refuse answers every request 401; Down every
+	// request 503; LoseCreate makes the next comment it creates answer 502 although the comment is made, LoseIssue the
+	// next issue.
 	RateLimit  int
 	Refuse     bool
+	Down       bool
 	LoseCreate bool
 	LoseIssue  bool
 	// Requests counts requests by "METHOD path" without the query.
@@ -216,6 +218,9 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case s.Refuse || !s.authorized(r):
 		http.Error(w, `{"message":"token is required"}`, http.StatusUnauthorized)
+		return
+	case s.Down:
+		http.Error(w, `{"message":"down"}`, http.StatusServiceUnavailable)
 		return
 	case s.RateLimit > 0:
 		s.RateLimit--

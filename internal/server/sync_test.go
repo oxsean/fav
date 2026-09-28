@@ -315,3 +315,62 @@ func TestAWebhookOnlyMarksItsOwnRepositorysIssue(t *testing.T) {
 		})
 	}
 }
+
+// Each task mirrored on an issue says how that issue syncs: when it last did, what failed, when the next try is.
+func TestEachTaskSaysHowItsIssueSyncs(t *testing.T) {
+	r := newSyncRig(t)
+	r.g.Open(3, "Lost", "body", "tend")
+	r.g.LoseCreate = true
+	r.pass(0)
+	x := r.task(3)
+	of := func() TaskSyncState {
+		t.Helper()
+		list, err := r.s.TaskStates("p1")
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, s := range list {
+			if s.Task == x.ID {
+				return s
+			}
+		}
+		t.Fatalf("no state for %s: %+v", x.ID, list)
+		return TaskSyncState{}
+	}
+	if s := of(); s.State != SyncFailed || s.Error == "" || !s.Next.Equal(r.clock.Add(issueRetry)) || !s.Synced.IsZero() || s.Number != 3 {
+		t.Fatalf("the comment's answer was lost: %+v", s)
+	}
+	r.pass(61 * time.Second)
+	if s := of(); s.State != SyncOK || !s.Synced.Equal(r.clock) || s.Error != "" || !s.Next.IsZero() {
+		t.Fatalf("the next try took the comment: %+v", s)
+	}
+	if err := r.team.MarkDirty(r.x.ID, 3); err != nil {
+		t.Fatal(err)
+	}
+	if s := of(); s.State != SyncPending {
+		t.Fatalf("to be read again: %+v", s)
+	}
+	r.g.RateLimit = 5
+	r.pass(61 * time.Second)
+	if s := of(); s.State != SyncPending || !s.Next.After(r.clock) {
+		t.Fatalf("a paused binding tries again later: %+v", s)
+	}
+	r.g.RateLimit, r.g.Down = 0, true
+	r.pass(61 * time.Second)
+	if s := of(); s.State != SyncFailed || s.Error == "" {
+		t.Fatalf("a tracker that does not answer: %+v", s)
+	}
+	r.g.Down = false
+	r.pass(61 * time.Second)
+	if s := of(); s.State != SyncOK {
+		t.Fatalf("it answers again: %+v", s)
+	}
+	r.g.Refuse = true
+	r.pass(61 * time.Second)
+	if s := of(); s.State != SyncFailed || s.Error == "" || !s.Next.IsZero() {
+		t.Fatalf("a stopped binding tries no more until its token is replaced: %+v", s)
+	}
+	if list, _ := r.s.TaskStates("p2"); len(list) != 0 {
+		t.Fatalf("another project's: %+v", list)
+	}
+}
