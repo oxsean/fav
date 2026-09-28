@@ -123,6 +123,35 @@ func Why(code, detail string) string {
 	return i18n.F(k, detail)
 }
 
+var sitReasons = map[string]string{
+	task.WhyAfter: "sit.after", task.WhyChildren: "sit.children", task.WhySlot: "sit.slot", task.WhyReady: "sit.ready",
+	task.WhyCompleting: "sit.completing", task.WhyAccept: "sit.accept", task.WhyDispatch: "sit.dispatch",
+	task.WhyAfterCanceled: "sit.after_canceled", task.WhyHeld: "sit.held", task.WhyEnded: "sit.ended",
+	task.AttentionAsked: "sit.asked", task.AttentionPermission: "sit.permission", task.Unknown: "sit.unknown",
+	task.Failed: "sit.failed", task.Exited: "sit.exited", task.WhySourceChanged: "sit.source_changed",
+	task.WhySourceClosed: "sit.source_closed", task.WhyDraft: "sit.draft", task.WhyNoPlan: "sit.no_plan",
+	task.WhyAdvance: "sit.advance", task.WhyRework: "sit.rework", task.WhyMaxLoops: "sit.max_loops",
+	task.WhyBlocked: "sit.blocked", task.WhyBudget: "sit.budget", task.WhyMergeConflict: "sit.merge_conflict",
+	task.WhyStale: "sit.stale",
+}
+
+var sitKinds = map[string]string{task.SitBacklog: "sit.kind_backlog", task.SitRunning: "sit.kind_running", task.SitQueued: "sit.kind_queued",
+	task.SitWaiting: "sit.kind_waiting", task.SitDone: "sit.kind_done", task.SitCanceled: "sit.kind_canceled"}
+
+// SitText is how a task stands, as a phrase: its reason when tend knows one, else its kind.
+func SitText(s task.Situation) string {
+	if k, ok := sitReasons[s.Reason]; ok {
+		return i18n.T(k)
+	}
+	if s.Reason != "" && s.Kind == task.SitWaiting {
+		return RunReason(s.Reason)
+	}
+	if k, ok := sitKinds[s.Kind]; ok {
+		return i18n.T(k)
+	}
+	return s.Kind
+}
+
 // RunWork is what run r did to its task's branch, in one line; "" when it worked in a plain directory.
 func RunWork(r *task.Run) string {
 	w, done := r.Work, r.Worked

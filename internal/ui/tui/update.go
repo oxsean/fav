@@ -21,7 +21,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if m.noticeNew {
 		m.noticeNew = false
 		seq := m.noticeSeq
-		cmd = tea.Batch(cmd, tea.Tick(noticeFor(m.notice), func(time.Time) tea.Msg { return noticeExpiredMsg{seq} }))
+		d := noticeFor(m.notice)
+		if m.undo != nil && m.undo.seq == seq {
+			d = max(d, undoFor)
+		}
+		cmd = tea.Batch(cmd, tea.Tick(d, func(time.Time) tea.Msg { return noticeExpiredMsg{seq} }))
 	}
 	return mm, cmd
 }
@@ -591,6 +595,10 @@ func (m *Model) navKey(msg tea.KeyPressMsg) tea.Cmd {
 		m.ov = overlay{kind: ovHelp, focus: -1}
 	case actSettings:
 		m.openSettings()
+	case actPalette:
+		m.openPalette()
+	case actUndo:
+		return m.doUndo()
 	}
 	return nil
 }
@@ -639,6 +647,8 @@ func (m *Model) overlayKey(msg tea.KeyPressMsg) tea.Cmd {
 		return m.replyKey(msg)
 	case ovTaskAnswer:
 		return m.answerKey(msg)
+	case ovTaskDraft:
+		return m.draftKey(msg)
 	case ovMessage:
 		switch a := keyAct(inReader, msg.String()); a {
 		case actClose:

@@ -21,11 +21,24 @@ func (m *Model) View() tea.View {
 		v.SetContent(m.screen())
 	}
 	v.AltScreen = true
+	v.WindowTitle = m.windowTitle()
 	if m.mouse {
 		// with the mouse on, native terminal selection needs Shift (Option on iTerm2), or --no-mouse
 		v.MouseMode = tea.MouseModeCellMotion
 	}
 	return v
+}
+
+// windowTitle names tend and how many sessions and tasks wait for you.
+func (m *Model) windowTitle() string {
+	n := m.needCount()
+	if m.tasks.st != nil {
+		n += len(m.tasks.st.NeedsYou())
+	}
+	if n == 0 {
+		return "tend"
+	}
+	return i18n.F("title.waiting", n)
 }
 
 func (m *Model) screen() string {
@@ -989,7 +1002,7 @@ func (m *Model) footer() string {
 			{fk(enterKey, "footer.enter_actions", 0), fk(keyName("space"), "footer.task_session", 3)},
 			{fk(footKeyOf(inList, actNew), "footer.task_new", 1), fk(footKeyOf(inList, actEdit), "key.edit", 4),
 				fk(footKeyOf(inList, actDone), "key.done", 4), fk(keyOf(inList, actCloseTab), "footer.task_stop", 2)},
-			{fk(keyOf(inList, actSearch), "footer.search", 0)},
+			{fk(footKeyOf(inList, actSort), "footer.task_layout", 2), fk(keyOf(inList, actSearch), "footer.search", 0)},
 		}
 	case m.hitsOpen() && m.pane == paneList:
 		left = []footGroup{{fk(arrowsUD, "footer.select_hit", 1), fk(enterKey, "footer.full_text", 0)}, {fk(keyName("right"), "footer.hit_chat", 2), fk(keyName("left"), "footer.hit_back", 0)}}

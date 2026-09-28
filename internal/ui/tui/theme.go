@@ -11,32 +11,38 @@ import (
 	"charm.land/bubbles/v2/textarea"
 	"charm.land/bubbles/v2/textinput"
 	"charm.land/lipgloss/v2"
+
+	"github.com/oxsean/fav/internal/skin"
+	"github.com/oxsean/fav/internal/tend"
 )
 
-// Colours as light / dark pairs; setTheme picks one side once the terminal reports its background. Backgrounds only on
-// the selected card, primary buttons and warning boxes; the screen background is the terminal's.
-type pair struct{ light, dark string }
+// Colours come from a skin (internal/skin, the Web UI's too), its light or dark side picked once the terminal reports
+// its background; the terminal's colour profile brings them down to 256 or 16 colours, or none under NO_COLOR.
+// Backgrounds only on the selected card, primary buttons and warning boxes; the screen background is the terminal's.
+var curSkin = func() skin.Skin { s, _ := skin.Named(skin.Presets[0].Name); return s }()
+
+// useSkin makes the skin cfg names current; a name or accent it does not know falls back to the default.
+func useSkin(cfg tend.Config) {
+	in := skin.Presets[0].Input
+	for _, p := range skin.Presets {
+		if p.Name == cfg.Skin {
+			in = p.Input
+		}
+	}
+	if cfg.Accent != "" {
+		in.Accent = cfg.Accent
+	}
+	in.High = cfg.HighContrast
+	s, err := skin.Make(cfg.Skin, in)
+	if err != nil {
+		s, _ = skin.Make(cfg.Skin, skin.Input{Base: in.Base, Accent: skin.Presets[0].Input.Accent, High: in.High})
+	}
+	curSkin = s
+	setTheme(darkTheme)
+}
 
 var (
-	pAccent = pair{"#0e7490", "#52d7eb"}
-	pText   = pair{"#0f172a", "#dce7f5"}
-	pMuted  = pair{"#64748b", "#8ca4bd"}
-	pFaint  = pair{"#94a3b8", "#5b6b80"}
-	pFrame  = pair{"#cbd5e1", "#2b3c52"}
-	pCard   = pair{"#e2e8f0", "#233348"}
-	pSelBg  = pair{"#dbeafe", "#16314d"}
-	pBtnBg  = pair{"#bae6fd", "#214c70"}
-	pOK     = pair{"#15803d", "#76cfb0"}
-	pWarn   = pair{"#b45309", "#f4ca7b"}
-	pWarnBd = pair{"#fcd34d", "#735b32"}
-	pErr    = pair{"#b91c1c", "#f87171"}
-	pTag    = pair{"#1d4ed8", "#79bdff"}
-	// ⚠️ the overlay backdrop must be darker than pFrame or every border brightens when an overlay opens
-	pBackdrop = pair{"#94a3b8", "#2f3d50"}
-)
-
-var (
-	cAccent, cText, cMuted, cFaint, cFrame, cCard, cSelBg, cBtnBg, cOK, cWarn, cWarnBd, cErr, cTag, cBackdrop color.Color
+	cAccent, cText, cMuted, cFaint, cFrame, cCard, cSelBg, cBtnBg, cOK, cWarn, cWarnBd, cWarnBg, cErr, cTag, cBackdrop color.Color
 
 	accent, dimmed, faint, plainSty, frame, boldSty, okSty, warnSty, errSty, brokenSty, tagSty, hitSty, backSty lipgloss.Style
 	liveTone                                                                                                    []lipgloss.Style // working / waiting / idle / finished
@@ -50,14 +56,18 @@ func init() { setTheme(true) }
 
 func setTheme(dark bool) {
 	darkTheme = dark
-	pick := func(p pair) color.Color {
-		if dark {
-			return lipgloss.Color(p.dark)
-		}
-		return lipgloss.Color(p.light)
+	p := curSkin.Light
+	if dark {
+		p = curSkin.Dark
 	}
-	cAccent, cText, cMuted, cFaint, cFrame, cCard = pick(pAccent), pick(pText), pick(pMuted), pick(pFaint), pick(pFrame), pick(pCard)
-	cSelBg, cBtnBg, cOK, cWarn, cWarnBd, cErr, cTag, cBackdrop = pick(pSelBg), pick(pBtnBg), pick(pOK), pick(pWarn), pick(pWarnBd), pick(pErr), pick(pTag), pick(pBackdrop)
+	c := func(k string) color.Color { return lipgloss.Color(p[k]) }
+	cAccent, cText, cMuted, cFaint, cFrame, cCard = c("accent"), c("text"), c("muted"), c("faint"), c("border"), c("surface-hover")
+	cSelBg, cBtnBg, cOK, cWarn, cWarnBd, cWarnBg, cErr, cTag = c("accent-soft"), c("accent-soft"), c("success"), c("warning"), c("warning"), c("warning-soft"), c("danger"), c("running")
+	// ⚠️ the overlay backdrop must not be brighter than the frame, or every border brightens when an overlay opens
+	cBackdrop = c("faint")
+	if dark {
+		cBackdrop = c("border")
+	}
 
 	accent = lipgloss.NewStyle().Foreground(cAccent)
 	dimmed = lipgloss.NewStyle().Foreground(cMuted)
@@ -70,7 +80,7 @@ func setTheme(dark bool) {
 	errSty = lipgloss.NewStyle().Foreground(cErr)
 	brokenSty = lipgloss.NewStyle().Foreground(cErr).Faint(true) // the "unrecoverable" mark after a card title
 	tagSty = lipgloss.NewStyle().Foreground(cTag)
-	hitSty = lipgloss.NewStyle().Background(cWarn).Foreground(cText).Bold(true)
+	hitSty = lipgloss.NewStyle().Background(cWarnBg).Foreground(cText).Bold(true)
 	liveTone = []lipgloss.Style{accent, lipgloss.NewStyle().Foreground(cErr).Bold(true), dimmed, okSty}
 	backSty = lipgloss.NewStyle().Foreground(cBackdrop)
 

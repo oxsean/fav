@@ -79,6 +79,14 @@ func F(key string, a ...any) string { return fmt.Sprintf(T(key), a...) }
 
 func E(key string, a ...any) error { return fmt.Errorf(T(key), a...) }
 
+// In is key in language l, falling back like T.
+func In(l, key string) string {
+	if s, ok := tables[l][key]; ok {
+		return s
+	}
+	return T(key)
+}
+
 func T(key string) string {
 	if s, ok := tables[current()][key]; ok {
 		return s

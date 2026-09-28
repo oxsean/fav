@@ -367,6 +367,17 @@ In the TUI, view `5` lists the tasks: `w` new task, `e` edit, `x` done / reopen,
 with a profile, stop, abandon, take over), `X` stops the run, `Space` shows the run's conversation in the Sessions view.
 The right pane shows the brief, the latest runs and the last run's output. Taking over opens the resume dialog of the run's
 session; while the run still drives it, the dialog says to stop the run first.
+`o` arranges the tasks as the home (what waits for you, then what runs, with the machines and 7 days of usage below
+when the terminal is taller than 24 rows), a list, a tree with subtasks under their parents, or a board with a column
+per situation (`h` / `l` move between columns). `:` opens a command palette that finds any list action by its Chinese or
+English words; the settings (`,`) pick the skin, an accent (`#rrggbb`) and standard or high contrast, from the same
+generator the Web UI uses. From the task dialog, "Plan subtasks" has the project's planner draft them; the draft is
+reviewed there (subtasks under their parents, the planner's questions) and created, edited in `$EDITOR` as the JSON
+`tend task draft --save` reads, or discarded. "Project settings" edits the task's project as JSON, and the run dialog
+edits the chosen agent's definition or starts a new one as Markdown; what the coordinator refuses is kept for the next edit.
+`Shift+↓` / `Shift+↑` mark a range of tasks for `x` or one run dialog; "Watch beside" keeps a run's output under the
+detail while you look at other tasks. `u` (`Ctrl+Z`) takes back the last favorite, archive, done or reopen for 6 seconds,
+and the terminal title counts what waits for you.
 
 **Task trees.** A task can go under another (`--parent`, three levels at most) and come after others (`--after t1,t2`);
 `--backlog` keeps it aside until it is started. `tend task start <id>` starts a task and everything under it: each one is
@@ -552,7 +563,16 @@ ended or what it asks and takes a reply; stops or abandons runs; marks tasks don
 trees and starts them; lists what needs you; edits and shares agent definitions and project settings; shows the
 machines, who owns them and whom they are shared with; manages projects and members; makes personal tokens for the CLI
 and TUI on the Account page; and, for admins, users, admission rules, invitations and the audit log. It follows the
-journal live and reconnects on its own.
+journal live and reconnects on its own. **Home** puts what waits for you first, with the question or tool request
+right there to answer, allow or deny, then what runs and on which machines, each project's progress with links into the
+board, 7 days of tokens and cost, and the latest sessions. Tasks show as a list or as a board by where they stand, filtered by status,
+machine, project, stage and run; the view, filters, selected task and tab are in the address, so a reload or a shared
+link shows the same thing. `⌘K` (`Ctrl+K`) opens a command palette that finds any action or task by its Chinese
+or English name; every action also has a key (`?` lists them: `n` new task, `g h` home, `g b` board, `d` dispatch, …).
+**Settings** picks the theme (light, dark or the system's), a skin (tend, Forest,
+Ember, Graphite) with its own accent if you like, standard or high contrast, and one of three densities, kept in the
+browser; skins are made on the server (`/theme/<name>.css`) and keep text at 4.5:1 (7:1 in high contrast) whatever the
+accent.
 
 **The server's database.** `tend-server import` moves a mode 1 journal (`coord/events.jsonl`) into the database, with
 the server stopped; the server refuses to start while that journal holds events and no database exists. Beside a

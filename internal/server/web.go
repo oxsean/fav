@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/oxsean/fav/internal/auth"
+	"github.com/oxsean/fav/internal/skin"
 	"github.com/oxsean/fav/internal/store"
 )
 
@@ -59,6 +60,27 @@ func (s *Server) webRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /auth/logins", s.loginList)
 	mux.HandleFunc("GET /auth/{name}/start", s.limited(s.start))
 	mux.HandleFunc("GET /auth/{name}/callback", s.limited(s.callback))
+	mux.HandleFunc("GET /theme/{file}", theme)
+}
+
+// theme serves a skin as a stylesheet, /theme/<name>.css with the name as skin.Named reads it, and the presets for the
+// settings page, /theme/presets.json.
+func theme(w http.ResponseWriter, r *http.Request) {
+	if r.PathValue("file") == "presets.json" {
+		secureHeaders(w)
+		writeJSON(w, http.StatusOK, skin.Presets)
+		return
+	}
+	name, ok := strings.CutSuffix(r.PathValue("file"), ".css")
+	sk, err := skin.Named(name)
+	if !ok || err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	secureHeaders(w)
+	w.Header().Set("Content-Type", "text/css; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-cache")
+	fmt.Fprint(w, sk.CSS())
 }
 
 // secure: cookies need the Secure flag (TLS here, or a public https address behind a proxy that ends it).

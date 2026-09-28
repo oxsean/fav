@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -13,6 +14,7 @@ import (
 	"github.com/coder/websocket"
 
 	"github.com/oxsean/fav/internal/coord"
+	"github.com/oxsean/fav/internal/skin"
 	"github.com/oxsean/fav/internal/store"
 	"github.com/oxsean/fav/internal/task"
 	"github.com/oxsean/fav/internal/wire"
@@ -46,6 +48,46 @@ func TestThePageIsServedWithoutLogin(t *testing.T) {
 	}
 	if resp, _ := http.Get(r.url + "/nope.js"); resp.StatusCode != 404 {
 		t.Fatalf("an unknown file: %d", resp.StatusCode)
+	}
+}
+
+func TestSkinsAreServedAsStylesheets(t *testing.T) {
+	r := newRig(t)
+	resp, err := http.Get(r.url + "/theme/forest-2d7a5b-high.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != 200 || !strings.HasPrefix(resp.Header.Get("Content-Type"), "text/css") || !strings.Contains(string(b), "--accent:") {
+		t.Fatalf("%d %v %s", resp.StatusCode, resp.Header, b)
+	}
+	for _, bad := range []string{"/theme/nope.css", "/theme/tend", "/theme/tend.js"} {
+		if resp, _ := http.Get(r.url + bad); resp.StatusCode != 404 {
+			t.Fatalf("%s: %d", bad, resp.StatusCode)
+		}
+	}
+}
+
+// Every custom property the page uses is one it defines or one a skin gives.
+func TestThePageUsesOnlyTokensItHas(t *testing.T) {
+	defined := map[string]bool{}
+	for _, k := range skin.Tokens {
+		defined[k] = true
+	}
+	entries, _ := webFiles.ReadDir("web")
+	var all string
+	for _, e := range entries {
+		b, _ := webFiles.ReadFile("web/" + e.Name())
+		all += string(b)
+	}
+	for _, m := range regexp.MustCompile(`--([a-z0-9-]+)\s*:`).FindAllStringSubmatch(all, -1) {
+		defined[m[1]] = true
+	}
+	for _, m := range regexp.MustCompile(`var\(--([a-z0-9-]+)`).FindAllStringSubmatch(all, -1) {
+		if !defined[m[1]] {
+			t.Errorf("--%s is used but never defined", m[1])
+		}
 	}
 }
 

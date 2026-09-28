@@ -1,13 +1,16 @@
 package tui
 
 import (
+	"cmp"
 	"strings"
 	"testing"
 
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/oxsean/fav/internal/capture"
+	"github.com/oxsean/fav/internal/i18n"
 	"github.com/oxsean/fav/internal/render"
+	"github.com/oxsean/fav/internal/skin"
 	"github.com/oxsean/fav/internal/tend"
 )
 
@@ -47,7 +50,7 @@ func TestOpenInIDE(t *testing.T) {
 	}
 	m.Update(press(","))
 	for i, s := range settingsTable() {
-		if s.text != nil {
+		if s.text != nil && s.label == "IDE" {
 			m.ov.cursor = i
 		}
 	}
@@ -78,5 +81,41 @@ func TestOpenInIDE(t *testing.T) {
 	}
 	if err := capture.OpenDir("code", "/definitely/not/here"); err == nil || !strings.Contains(err.Error(), "目录不存在") {
 		t.Fatalf("目录不存在应直接报：%v", err)
+	}
+}
+
+func TestSkinAccentAndContrastApplyAtOnce(t *testing.T) {
+	t.Setenv("TEND_HOME", t.TempDir())
+	defer func() { setTheme(true); useSkin(tend.Config{}) }()
+	m := sized(t, 120, 40)
+	m.Update(press(","))
+	find := func(label string) int {
+		for i, s := range settingsTable() {
+			if s.label == label {
+				return i
+			}
+		}
+		t.Fatalf("no %s", label)
+		return 0
+	}
+	before := curSkin.Dark["accent"]
+	m.ov.cursor = find(i18n.T("settings.skin"))
+	m.Update(press("right"))
+	if m.cfg.Skin != "forest" || curSkin.Dark["accent"] == before || tend.LoadConfig().Skin != "forest" {
+		t.Fatalf("the next skin at once: %q %s", m.cfg.Skin, curSkin.Dark["accent"])
+	}
+	m.ov.cursor = find(i18n.T("settings.accent"))
+	for _, c := range []struct{ typed, want string }{{"#C03030", "#c03030"}, {"red", ""}} {
+		m.Update(press("enter"))
+		m.ov.edit.SetValue(c.typed)
+		m.Update(press("enter"))
+		if m.cfg.Accent != c.want || curSkin.Input.Accent != cmp.Or(c.want, skin.Presets[1].Input.Accent) {
+			t.Fatalf("%q: accent %q, skin %s", c.typed, m.cfg.Accent, curSkin.Input.Accent)
+		}
+	}
+	m.ov.cursor = find(i18n.T("settings.contrast"))
+	m.Update(press("right"))
+	if !m.cfg.HighContrast || !curSkin.Input.High {
+		t.Fatal("high contrast at once")
 	}
 }

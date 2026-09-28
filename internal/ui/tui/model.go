@@ -96,6 +96,7 @@ type Model struct {
 	notice     string
 	noticeSeq  int  // bumped by flash; an expiry only clears its own notice
 	noticeNew  bool // flash ran during this Update: schedule the expiry
+	undo       *undoable
 	w, h       int
 	now        time.Time
 	result     Result
@@ -169,6 +170,7 @@ func New(s *tend.Store, idx *index.Index, cfg tend.Config, initialQuery string) 
 		view: view(indexOf(views, cfg.DefaultView)), sortBy: sortBy(indexOf(sorts, cfg.Sort)), wheelStep: max(1, cfg.WheelStep),
 	}
 	setWheelTuning(m.wheelStep, cfg.WheelSpeed)
+	useSkin(cfg)
 	m.startDir, _ = os.Getwd()
 	m.unfav = idx.Attach(s, nil)
 	m.recount()
@@ -734,15 +736,20 @@ func (m *Model) toggleFavorite(r *tend.Rec) {
 	if r == nil {
 		return
 	}
-	title, fresh, now := render.Truncate(r.Title, 30), r.ID == "", time.Now()
-	switch r = m.editRec(r, func(r *tend.Rec) { r.ToggleFavorite(now) }); {
-	case r == nil:
+	title, fresh, now, was := render.Truncate(r.Title, 30), r.ID == "", time.Now(), r.FavoritedAt
+	r = m.editRec(r, func(r *tend.Rec) { r.ToggleFavorite(now) })
+	if r == nil {
+		return
+	}
+	back := m.restoreRec(r, func(r *tend.Rec) { r.FavoritedAt = was })
+	switch {
 	case !r.Favorite():
-		m.flash(i18n.F("flash.unfavorited", title))
+		m.offerUndo(i18n.F("flash.unfavorited", title), back)
 	case fresh:
 		m.flash(i18n.F("flash.favorited_fresh", title))
+		m.undo = &undoable{at: time.Now(), seq: m.noticeSeq, back: back}
 	default:
-		m.flash(i18n.F("flash.favorited", title))
+		m.offerUndo(i18n.F("flash.favorited", title), back)
 	}
 }
 
@@ -750,13 +757,16 @@ func (m *Model) toggleArchive(r *tend.Rec) {
 	if r == nil {
 		return
 	}
-	now := time.Now()
-	switch r = m.editRec(r, func(r *tend.Rec) { r.ToggleArchived(now) }); {
-	case r == nil:
-	case r.Archived():
-		m.flash(i18n.F("flash.archived", r.Title))
-	default:
-		m.flash(i18n.F("flash.unarchived", r.Title))
+	now, was := time.Now(), r.ArchivedAt
+	r = m.editRec(r, func(r *tend.Rec) { r.ToggleArchived(now) })
+	if r == nil {
+		return
+	}
+	back := m.restoreRec(r, func(r *tend.Rec) { r.ArchivedAt = was })
+	if r.Archived() {
+		m.offerUndo(i18n.F("flash.archived", r.Title), back)
+	} else {
+		m.offerUndo(i18n.F("flash.unarchived", r.Title), back)
 	}
 }
 
@@ -764,12 +774,16 @@ func (m *Model) toggleStatus(r *tend.Rec, target string) {
 	if r == nil {
 		return
 	}
-	switch r = m.editRec(r, func(r *tend.Rec) { r.ToggleStatus(target) }); {
-	case r == nil:
-	case r.Status == target:
-		m.flash(i18n.F("flash.status_set", render.StatusLabel(target), r.Title))
-	default:
-		m.flash(i18n.F("flash.back_to_doing", r.Title))
+	was := r.Status
+	r = m.editRec(r, func(r *tend.Rec) { r.ToggleStatus(target) })
+	if r == nil {
+		return
+	}
+	back := m.restoreRec(r, func(r *tend.Rec) { r.Status = was })
+	if r.Status == target {
+		m.offerUndo(i18n.F("flash.status_set", render.StatusLabel(target), r.Title), back)
+	} else {
+		m.offerUndo(i18n.F("flash.back_to_doing", r.Title), back)
 	}
 }
 

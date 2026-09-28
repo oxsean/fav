@@ -23,9 +23,12 @@ type Config struct {
 	ProjectSort  string `json:"project_sort,omitempty"` // projects page group order: active (default) | count | name
 	IDE          string `json:"ide,omitempty"`          // app name or path for "open in IDE"; empty = Rebased
 	Lang         string `json:"lang,omitempty"`         // "" follows the system | zh | en
-	TrashDays    int    `json:"trash_days"`             // days kept in trash; 0 = never auto-purge
-	ToolOutput   int    `json:"tool_output_lines"`      // lines of each tool output kept for message search; 0 = none
-	ResumeIn     string `json:"resume_in,omitempty"`    // what Enter on resume opens: terminal (default) | app | origin (the app for sessions started there)
+	Skin         string `json:"skin,omitempty"`         // a skin.Presets name; "" = the first
+	Accent       string `json:"accent,omitempty"`       // #rrggbb in place of the skin's own accent
+	HighContrast bool   `json:"high_contrast,omitempty"`
+	TrashDays    int    `json:"trash_days"`          // days kept in trash; 0 = never auto-purge
+	ToolOutput   int    `json:"tool_output_lines"`   // lines of each tool output kept for message search; 0 = none
+	ResumeIn     string `json:"resume_in,omitempty"` // what Enter on resume opens: terminal (default) | app | origin (the app for sessions started there)
 	Hosts        []Host `json:"hosts,omitempty"`
 
 	Agents      []AgentProfile           `json:"agents,omitempty"`

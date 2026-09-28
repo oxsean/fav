@@ -14,6 +14,7 @@ import (
 
 	"github.com/oxsean/fav/internal/capture"
 	"github.com/oxsean/fav/internal/index"
+	"github.com/oxsean/fav/internal/skin"
 	"github.com/oxsean/fav/internal/tend"
 )
 
@@ -21,7 +22,7 @@ import (
 func TestFrameLinesFillWidth(t *testing.T) {
 	st := demoStore(t)
 	states := []string{"", "detail", "projects", "syntax", "picker", "help", "help-input", "resume", "resume-edit", "edit",
-		"edit-summary", "settings", "settings-ide", "status", "delete", "start", "message", "handoff", "peek", "remote", "remote-resume"}
+		"edit-summary", "settings", "settings-ide", "palette", "status", "delete", "start", "message", "handoff", "peek", "remote", "remote-resume"}
 	for _, size := range []struct{ w, h int }{{140, 40}, {120, 34}, {80, 24}, {80, 18}, {56, 20}, {50, 16}} {
 		for _, state := range states {
 			m := newModel(t, st, size.w, size.h)
@@ -71,6 +72,8 @@ func openOverlay(m *Model, kind string) {
 	case "resume-edit":
 		m.askResume()
 		m.editTitle()
+	case "palette":
+		m.openPalette()
 	case "settings":
 		m.openSettings()
 	case "settings-ide":
@@ -207,6 +210,38 @@ func demoStore(t *testing.T) *tend.Store {
 		}
 	}
 	return st
+}
+
+// Every skin draws in both themes: each frame keeps the terminal's width and its colours are that skin's.
+func TestEverySkinDrawsInBothThemes(t *testing.T) {
+	st := demoStore(t)
+	defer func() { setTheme(true); useSkin(tend.Config{}) }()
+	for _, p := range skin.Presets {
+		for _, dark := range []bool{false, true} {
+			for _, state := range []string{"", "settings", "help"} {
+				m := newModel(t, st, 120, 34)
+				setTheme(dark)
+				m.cfg.Skin = p.Name
+				useSkin(m.cfg)
+				openOverlay(m, state)
+				frame := m.screen()
+				for i, line := range strings.Split(frame, "\n") {
+					if got := ansi.StringWidth(line); got != 120 {
+						t.Fatalf("%s dark=%v %q line %d is %d wide", p.Name, dark, state, i+1, got)
+					}
+				}
+				pal := curSkin.Light
+				if dark {
+					pal = curSkin.Dark
+				}
+				var r, g, b int
+				fmt.Sscanf(pal["accent"], "#%02x%02x%02x", &r, &g, &b)
+				if !strings.Contains(frame, fmt.Sprintf("38;2;%d;%d;%d", r, g, b)) {
+					t.Fatalf("%s dark=%v %q: its accent %s is not on screen", p.Name, dark, state, pal["accent"])
+				}
+			}
+		}
+	}
 }
 
 func TestOverlayBackdropIsDarkerThanFrame(t *testing.T) {

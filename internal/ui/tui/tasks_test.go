@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -184,6 +185,7 @@ func TestTasksViewCreatesRunsAndShowsATask(t *testing.T) {
 		}
 	}
 
+	key(m, "o") // the list keeps finished tasks; the home does not
 	key(m, "x")
 	waitFor(t, m, func() bool { return m.tasks.st.Tasks[x.ID].Status == task.StatusDone })
 	key(m, "x")
@@ -330,6 +332,9 @@ func TestTasksThatNeedYouComeFirstLongestWaitingFirst(t *testing.T) {
 	if s := screenText(m); !strings.Contains(s, "2 need you") && !strings.Contains(s, "2 个等你处理") {
 		t.Fatalf("the title counts them:\n%s", s)
 	}
+	if got := m.View().WindowTitle; got != "tend · 2 need you" && got != "tend · 2 个等你" {
+		t.Fatalf("the window title counts them: %q", got)
+	}
 }
 
 func TestARunThatWaitsIsAnsweredAndSentAMessage(t *testing.T) {
@@ -383,4 +388,96 @@ func TestARunThatWaitsIsAnsweredAndSentAMessage(t *testing.T) {
 		b, _ := os.ReadFile(filepath.Join(runDir, "inbox.jsonl"))
 		return strings.Contains(string(b), "use tabs")
 	})
+}
+
+func TestTasksAreArrangedAsHomeListTreeOrBoard(t *testing.T) {
+	m, _ := tasksModel(t)
+	key(m, "5")
+	waitFor(t, m, func() bool { return m.tasks.loaded })
+	at := func(min int) time.Time { return time.Date(2026, 9, 26, 10, min, 0, 0, time.UTC) }
+	st := task.New()
+	add := func(id, parent, status string, q int, r *task.Run) {
+		st.Tasks[id] = &task.Task{ID: id, Title: id, Parent: parent, Status: status, CreatedAt: at(q)}
+		if r != nil {
+			r.ID, r.Task, r.QueuedAt = "r"+id, id, at(q)
+			st.Runs[r.ID] = r
+		}
+	}
+	add("t_wait", "", task.StatusTodo, 1, &task.Run{State: task.Failed, EndedAt: func() *time.Time { x := at(2); return &x }()})
+	add("t_run", "", task.StatusTodo, 2, &task.Run{State: task.Running})
+	add("t_kid", "t_run", task.StatusTodo, 3, &task.Run{State: task.Running})
+	add("t_later", "", task.StatusBacklog, 4, nil)
+	add("t_done", "", task.StatusDone, 5, nil)
+	m.tasks.st = st
+	m.filterTasks()
+	ids := func() string {
+		var out []string
+		for _, x := range m.tasks.list {
+			out = append(out, x.ID)
+		}
+		return strings.Join(out, " ")
+	}
+
+	if m.tasks.layout != layoutHome || !strings.HasPrefix(ids(), "t_wait ") || len(m.tasks.list) != 3 || m.tasks.split != 1 {
+		t.Fatalf("the home holds what waits, then what runs: %v %q split %d", m.tasks.layout, ids(), m.tasks.split)
+	}
+	s := screenText(m)
+	for _, want := range []string{"t_wait", "t_run"} {
+		if !strings.Contains(s, want) {
+			t.Fatalf("home lacks %q:\n%s", want, s)
+		}
+	}
+	if strings.Contains(s, "t_done") || strings.Contains(s, "t_later") {
+		t.Fatalf("the home leaves out what neither waits nor runs:\n%s", s)
+	}
+
+	key(m, "o")
+	if m.tasks.layout != layoutList || len(m.tasks.list) != 5 {
+		t.Fatalf("o goes on to the list of every task: %v %q", m.tasks.layout, ids())
+	}
+
+	key(m, "o")
+	if m.tasks.layout != layoutTree || !strings.Contains(ids(), "t_run t_kid") || m.tasks.depth["t_kid"] != 1 || m.tasks.depth["t_run"] != 0 {
+		t.Fatalf("the tree puts subtasks under their parents: %q %v", ids(), m.tasks.depth)
+	}
+	if !strings.Contains(screenText(m), "   ") {
+		t.Fatal("the tree indents")
+	}
+
+	key(m, "o")
+	if m.tasks.layout != layoutBoard {
+		t.Fatalf("%v", m.tasks.layout)
+	}
+	var cols []int
+	for _, c := range m.tasks.cols {
+		cols = append(cols, len(c))
+	}
+	if fmt.Sprint(cols) != "[1 2 0 1 1]" {
+		t.Fatalf("a column per situation, waiting running queued backlog done: %v", cols)
+	}
+	m.tasks.cursor = 0
+	cell := func() string { c, r := m.boardAt(m.tasks.cursor); return fmt.Sprint(c, r) }
+	key(m, "l")
+	if cell() != "1 0" {
+		t.Fatalf("l moves to the running column: %s", cell())
+	}
+	key(m, "j")
+	key(m, "l")
+	if cell() != "3 0" || m.selectedTask().ID != "t_later" {
+		t.Fatalf("l skips the empty column and keeps to the last row there: %s", cell())
+	}
+	key(m, "h")
+	if cell() != "1 0" {
+		t.Fatalf("h moves back left: %s", cell())
+	}
+	for i, l := range strings.Split(m.screen(), "\n") {
+		if w := ansi.StringWidth(l); w != m.w {
+			t.Fatalf("line %d is %d wide, not %d", i, w, m.w)
+		}
+	}
+
+	key(m, "o")
+	if m.tasks.layout != layoutHome {
+		t.Fatalf("o comes back to the home: %v", m.tasks.layout)
+	}
 }

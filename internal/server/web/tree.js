@@ -159,7 +159,7 @@ const Tree = (() => {
       ${plan.tasks.some(k => k.parent === x.key) ? `<ul class="plain">${plan.tasks.filter(k => k.parent === x.key).map(row).join('')}</ul>` : ''}</li>`;
     const stale = task.source && task.draft.source_rev && task.draft.source_rev !== task.source.rev;
     const qs = (plan.questions || []).length ? `<div class="notice"><strong>${t('questions')}</strong><ul class="plain">${plan.questions.map(q => `<li>${esc(q)}</li>`).join('')}</ul></div>
-      ${task.draft.run && ui.online ? `<form id="tree-answer-form" class="stack" data-run="${esc(task.draft.run)}" data-command="${commandID()}"><div class="form-error" role="alert" hidden></div><label>${t('answer')}<textarea name="text" rows="2"></textarea><small>${t('answerHint')}</small></label><div class="flex"><button type="submit">${t('answer')}</button></div></form>` : ''}` : '';
+      ${task.draft.run && ui.online ? `<form id="tree-answer-form" class="stack" data-run="${esc(task.draft.run)}" data-command="${commandID()}"><div class="form-error" role="alert" hidden></div><label>${t('answer')}<textarea name="text" rows="2"></textarea><small>${t('answerHint')}</small></label>${sendHint()}<div class="flex"><button type="submit">${t('answer')}</button></div></form>` : ''}` : '';
     return `<div class="tree-block"><span class="meta-label">${t('draft')}</span><p class="hint">${t('draftHelp')}</p>${stale ? `<div class="notice">${t('draftStale').replace('{0}', task.draft.source_rev)}</div>` : ''}
       <ul class="plain">${plan.tasks.filter(x => !x.parent).map(row).join('')}</ul>${qs}
       ${ui.online ? `<div class="flex">${button('tree-draft-apply', t('applyDraft'), `data-id="${id}"`, stale ? '' : 'primary')}${button('tree-draft-edit', t('editDraft'), `data-id="${id}"`)}${button('tree-draft-discard', t('discardDraft'), `data-id="${id}"`, 'quiet danger')}</div>` : ''}</div>`;
@@ -255,7 +255,7 @@ const Tree = (() => {
   function messageBox(task) {
     const where = messageTo(task);
     return `<form id="tree-message-form" class="stack" data-id="${esc(task.id)}" data-command="${commandID()}"><div class="form-error" role="alert" hidden></div>
-      <label>${t('messageTask')}<textarea name="text" id="task-message-text" rows="2">${esc(ui.drafts.get('task:' + task.id) || '')}</textarea><small id="message-to">${t('to.' + where.to)}</small></label>
+      <label>${t('messageTask')}<textarea name="text" id="task-message-text" rows="2">${esc(ui.drafts.get('task:' + task.id) || '')}</textarea><small id="message-to">${t('to.' + where.to)}</small></label>${sendHint()}
       <div class="flex">${where.toRun ? `<label class="choice"><input type="checkbox" name="to_run" value="1">${t('toRun')}</label>` : ''}<button type="submit">${t('send')}</button></div></form>`;
   }
 
@@ -570,7 +570,7 @@ const Tree = (() => {
   let inboxTimer;
   function stateChanged() {
     clearTimeout(inboxTimer);
-    inboxTimer = setTimeout(() => refreshInbox().then(() => { if (ui.page === 'inbox') renderPage(); }, () => {}), 300);
+    inboxTimer = setTimeout(() => refreshInbox().then(() => { if (ui.page === 'inbox' || ui.page === 'home') preserveRender(); }, () => {}), 300);
   }
 
   function askNotify() {
@@ -586,5 +586,6 @@ const Tree = (() => {
       <section class="team-section"><h2>${t('browserNotify')}</h2>${state === 'granted' ? `<p class="hint">${t('notifyOn')}</p>` : button('tree-notify', t('enableNotify'))}</section>`;
   }
 
-  return {pages, sitBadge, order, detail, formFields, formData, nav, enter, render, click, submit, stateChanged, refreshInbox, account, loadWebhook};
+  return {pages, sitBadge, order, detail, formFields, formData, nav, enter, render, click, submit, stateChanged, refreshInbox, account, loadWebhook,
+    inbox: () => data.inbox, why: reason => whyText({reason})};
 })();

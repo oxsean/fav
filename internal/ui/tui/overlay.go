@@ -40,6 +40,7 @@ const (
 	ovTaskRun
 	ovTaskReply
 	ovTaskAnswer
+	ovTaskDraft
 )
 
 // ovPad: border + padding columns left of the overlay box; box-local zones add it.
@@ -78,6 +79,7 @@ type overlay struct {
 	armed      string      // peek: the digit pressed once, sent on the second press
 	armedAt    time.Time
 	taskID     string         // task form: the task edited ("" = a new one); run dialog: the task to run
+	taskIDs    []string       // run dialog: every task to run, when several are marked
 	taskWas    *task.Task     // task form: the task as task.get read it; only fields changed from it are saved
 	opts       [][]string     // task form and run dialog: the choices (machines, agents)
 	pick       []int          // the chosen index of each
@@ -346,6 +348,8 @@ func (m *Model) renderOverlay() string {
 		return m.renderReply()
 	case ovTaskAnswer:
 		return m.renderAnswer()
+	case ovTaskDraft:
+		return m.renderDraft()
 	}
 	return ""
 }
@@ -451,7 +455,7 @@ func (m *Model) ovWidth() int {
 		w = min(m.w-8, 96)
 	case ovTask:
 		w = min(max(w, 64, groupsWidth([]btnGroup{{bs: m.taskButtons()}})), m.w-4)
-	case ovTaskForm, ovTaskReply, ovTaskAnswer:
+	case ovTaskForm, ovTaskReply, ovTaskAnswer, ovTaskDraft:
 		w = min(m.w-8, 100)
 	}
 	return w

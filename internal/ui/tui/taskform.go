@@ -311,13 +311,26 @@ func (m *Model) openRunDialog() {
 		return
 	}
 	machines, agents := m.machineNames(), m.agentNames()
-	m.ov = overlay{kind: ovTaskRun, focus: -1, taskID: x.ID, opts: [][]string{machines, agents},
+	m.ov = overlay{kind: ovTaskRun, focus: -1, taskID: x.ID, taskIDs: m.markedToRun(), opts: [][]string{machines, agents},
 		pick: []int{choice(machines, firstNonEmpty(x.Machine, coord.Local)), choice(agents, firstNonEmpty(x.Agent, "claude"))}}
 	m.pending = tea.Batch(m.pending, m.previewRun())
 }
 
 func (m *Model) runTask() tea.Cmd {
 	id, machine, agentName := m.ov.taskID, m.picked(0), m.picked(1)
+	if ids := m.ov.taskIDs; len(ids) > 1 {
+		m.closeOverlay()
+		m.tasks.marked, m.tasks.anchor = nil, ""
+		var cmds []tea.Cmd
+		for i, id := range ids {
+			note := ""
+			if i == len(ids)-1 {
+				note = i18n.F("tasks.queued_n", len(ids), machine, agentName)
+			}
+			cmds = append(cmds, m.write(coord.MRunDispatch, coord.Dispatch{Task: id, Machine: machine, Agent: agentName}, note, nil))
+		}
+		return tea.Batch(cmds...)
+	}
 	m.closeOverlay()
 	return m.write(coord.MRunDispatch, coord.Dispatch{Task: id, Machine: machine, Agent: agentName},
 		i18n.F("tasks.queued", machine, agentName), nil)
@@ -370,6 +383,9 @@ func (m *Model) renderTaskRun() string {
 	if x != nil {
 		title = x.Title
 	}
+	if n := len(m.ov.taskIDs); n > 1 {
+		title = i18n.F("tasks.run_n", n)
+	}
 	body := []string{boldSty.Foreground(cText).Render(render.Truncate(i18n.F("tasks.run_title", title), inner)),
 		dimmed.Render(i18n.T("tasks.run_hint")), ""}
 	m.selector(&body, i18n.T("tasks.field_machine"), runMachine, 0, inner, m.ov.field == runMachine)
@@ -380,6 +396,8 @@ func (m *Model) renderTaskRun() string {
 	body = append(append(body, m.previewLines(inner)...), "")
 	body = append(body, m.buttons(len(body)+1, []btn{
 		{keyed(enterKey, i18n.T("tasks.btn_run")), true, func(mm *Model) { mm.pending = mm.runTask() }},
+		{i18n.T("tasks.btn_edit_agent"), false, func(mm *Model) { mm.pending = mm.editAgent(mm.picked(1)) }},
+		{i18n.T("tasks.btn_new_agent"), false, func(mm *Model) { mm.pending = mm.newAgent() }},
 		cancelBtn(),
 	})...)
 	return ovRender(body, w)

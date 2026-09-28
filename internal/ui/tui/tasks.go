@@ -37,15 +37,24 @@ type tasksState struct {
 	loaded     bool
 	machines   []coord.Machine
 	agents     []tend.AgentProfile
-	list       []*task.Task // shown, filtered by the search box
+	list       []*task.Task // shown, filtered by the search box, in the layout's order
+	layout     layout
+	depth      map[string]int // the tree: how deep each task sits
+	cols       [][]*task.Task // the board: the tasks of each column; list holds them column after column
+	split      int            // the home: list[:split] wait for you, the rest run
 	cursor     int
 	scroll     int
 	out        map[string]runOutput // by run id
 	ticking    bool
 	polling    bool
-	feed       *feed     // journal pushes of the current connection
-	subscribed bool      // the state follows the pushes; a full read is needed only after a gap
-	machinesAt time.Time // when the machines were last read
+	feed       *feed             // journal pushes of the current connection
+	subscribed bool              // the state follows the pushes; a full read is needed only after a gap
+	machinesAt time.Time         // when the machines were last read
+	editing    *editing          // what $EDITOR has open
+	anchor     string            // where a range of marked tasks started
+	watch      string            // a run shown under the detail, whichever task is selected
+	marked     map[string]bool   // the range: tasks an action applies to together
+	unsaved    map[string][]byte // edited text the coordinator did not take, by edit key; the next edit starts from it
 }
 
 // feed carries the coordinator's journal pushes from the connection to the model; lost is set when it overflowed.
@@ -189,7 +198,10 @@ func (m *Model) pollTasks() tea.Cmd {
 		return nil
 	}
 	var cmds []tea.Cmd
-	if r := m.selectedRun(); r != nil {
+	for _, r := range []*task.Run{m.selectedRun(), m.watchedRun()} {
+		if r == nil {
+			continue
+		}
 		if o, ok := t.out[r.ID]; !ok || !o.end {
 			cmds = append(cmds, readOutput(t.cl, r.ID, !task.Open(r.State)))
 		}
@@ -490,7 +502,7 @@ func (m *Model) filterTasks() {
 			closed = append(closed, x)
 		}
 	}
-	t.list = append(append(needs, open...), closed...)
+	m.arrange(needs, open, closed)
 	for i, x := range t.list {
 		if x.ID == cur {
 			t.cursor = i
@@ -568,7 +580,19 @@ func (m *Model) taskKey(a act) (tea.Cmd, bool) {
 		t.cursor = 0
 	case actBottom:
 		move(len(t.list))
+	case actSort:
+		m.cycleLayout()
+	case actLeft, actRight:
+		if t.layout == layoutBoard {
+			m.boardMove(map[act]int{actLeft: -1, actRight: 1}[a])
+		}
+	case actExtendDown, actExtendUp:
+		m.extendMarks(map[act]int{actExtendDown: 1, actExtendUp: -1}[a])
 	case actEnter, actResume:
+		if len(t.marked) > 1 {
+			m.openRunDialog()
+			return nil, true
+		}
 		m.openTask()
 	case actSpace:
 		m.viewRunSession()
@@ -581,11 +605,15 @@ func (m *Model) taskKey(a act) (tea.Cmd, bool) {
 	case actCloseTab:
 		m.askStopRun()
 	case actBack:
+		if len(t.marked) > 0 {
+			t.marked, t.anchor = nil, ""
+			return nil, true
+		}
 		if m.search.Value() != "" {
 			m.search.SetValue("")
 			m.filterTasks()
 		}
-	case actQuit, actHelp, actSettings, actNextView, actPrevView, actView, actSearch:
+	case actQuit, actHelp, actSettings, actNextView, actPrevView, actView, actSearch, actPalette, actUndo:
 		return nil, false
 	default:
 		if b := bindingOf(inList, a); b != nil && b.tier != tierNav {
@@ -596,15 +624,24 @@ func (m *Model) taskKey(a act) (tea.Cmd, bool) {
 }
 
 func (m *Model) toggleTaskDone() tea.Cmd {
+	if len(m.tasks.marked) > 1 {
+		return m.toggleMarkedDone()
+	}
 	x := m.selectedTask()
 	if x == nil {
 		return nil
 	}
+	id, was := x.ID, x.Status
 	status, note := task.StatusDone, i18n.F("tasks.done", render.Truncate(x.Title, 40))
 	if x.Status != task.StatusTodo {
 		status, note = task.StatusTodo, i18n.F("tasks.reopened", render.Truncate(x.Title, 40))
 	}
-	return m.write(coord.MTaskStatus, task.TaskStatus{ID: x.ID, Status: status}, note, nil)
+	return m.write(coord.MTaskStatus, task.TaskStatus{ID: id, Status: status}, "", func(mm *Model) tea.Cmd {
+		mm.offerUndo(note, func(mm *Model) tea.Cmd {
+			return mm.write(coord.MTaskStatus, task.TaskStatus{ID: id, Status: was}, i18n.F("undo.done", render.Truncate(x.Title, 40)), nil)
+		})
+		return nil
+	})
 }
 
 func (m *Model) askStopRun() {
@@ -697,8 +734,19 @@ func (m *Model) taskButtons() []btn {
 	if canSend(r) {
 		bs = append(bs, btn{i18n.T("tasks.btn_send"), false, (*Model).openSend})
 	}
+	draft := hasDraft(x)
+	if draft {
+		bs = append(bs, btn{keyed(enterKey, i18n.F("tasks.btn_draft", len(x.Draft.Plan.Tasks))), !waiting && !asks, (*Model).openDraft})
+	}
 	if !open && x.Status == task.StatusTodo {
-		bs = append(bs, btn{keyed(enterKey, i18n.T("tasks.btn_run")), !waiting, (*Model).openRunDialog})
+		label, primary := i18n.T("tasks.btn_run"), !waiting && !draft
+		if primary {
+			label = keyed(enterKey, label)
+		}
+		bs = append(bs, btn{label, primary, (*Model).openRunDialog})
+		if !draft && len(m.tasks.st.Children(x.ID)) == 0 {
+			bs = append(bs, btn{i18n.T("tasks.btn_plan"), false, func(mm *Model) { mm.closeOverlay(); mm.pending = mm.planTask() }})
+		}
 	}
 	if canReply(r) && !waiting {
 		bs = append(bs, btn{i18n.T("tasks.btn_reply"), false, (*Model).openReply})
@@ -713,6 +761,16 @@ func (m *Model) taskButtons() []btn {
 			mm.pending = mm.write(coord.MRunAbandon, task.RunRef{ID: id}, i18n.F("tasks.abandoned", id), nil)
 		}})
 	}
+	if r != nil && m.tasks.watch == r.ID {
+		bs = append(bs, btn{i18n.T("tasks.btn_unwatch"), false, func(mm *Model) { mm.tasks.watch = ""; mm.closeOverlay() }})
+	} else if r != nil {
+		id := r.ID
+		bs = append(bs, btn{i18n.T("tasks.btn_watch"), false, func(mm *Model) {
+			mm.tasks.watch = id
+			mm.closeOverlay()
+			mm.flash(i18n.F("tasks.watch_on", id))
+		}})
+	}
 	if r != nil && r.Session != "" {
 		bs = append(bs, btn{i18n.T("tasks.btn_take_over"), !open && x.Status != task.StatusTodo, (*Model).takeOver})
 		bs = append(bs, btn{keyed(keyName("space"), i18n.T("tasks.btn_view_session")), false, (*Model).viewRunSession})
@@ -721,6 +779,9 @@ func (m *Model) taskButtons() []btn {
 		mm.closeOverlay()
 		mm.pending = mm.editTask()
 	}})
+	if m.taskProject() != nil {
+		bs = append(bs, btn{i18n.T("tasks.btn_project"), false, func(mm *Model) { mm.pending = mm.editProject() }})
+	}
 	done := i18n.T("key.done")
 	if x.Status != task.StatusTodo {
 		done = i18n.T("tasks.btn_reopen")
@@ -910,7 +971,7 @@ func taskGlyph(m *Model, x *task.Task) (string, lipgloss.Style) {
 
 // tasksBody: the task list and, when wide enough, the selected task's details.
 func (m *Model) tasksBody(y0, h int) []string {
-	if m.w < compactCols || !m.twoColumn() {
+	if m.w < compactCols || !m.twoColumn() || m.tasks.layout == layoutBoard {
 		return m.taskList(y0, 0, m.w, h)
 	}
 	listW := m.listWidth()
@@ -932,8 +993,8 @@ func (m *Model) taskList(y0, x0, w, h int) []string {
 			title = i18n.F("tasks.title_needs_you", m.openTaskCount(), len(t.list), n)
 		}
 	}
+	title += " · " + i18n.T(layoutKeys[t.layout])
 	out := []string{fit(dimmed.Render(title), w)}
-	room := h - 1
 	switch {
 	case t.connect == nil:
 		return append(out, dimmed.Render(i18n.T("tasks.unavailable")))
@@ -942,36 +1003,13 @@ func (m *Model) taskList(y0, x0, w, h int) []string {
 		return append(out, dimmed.Render(render.Truncate(i18n.T("tasks.no_coordinator_hint"), w)))
 	case !t.loaded:
 		return append(out, dimmed.Render(i18n.T("tasks.loading")))
-	case len(t.list) == 0:
+	case len(t.st.Tasks) == 0 || len(t.list) == 0 && t.layout != layoutHome:
 		return append(out, dimmed.Render(render.Truncate(i18n.F("tasks.empty", keyOf(inList, actNew)), w)))
 	}
-	if t.cursor < t.scroll {
-		t.scroll = t.cursor
+	if t.layout == layoutBoard {
+		return m.board(out, y0, x0, w, h)
 	}
-	if t.cursor >= t.scroll+room {
-		t.scroll = t.cursor - room + 1
-	}
-	for i := t.scroll; i < len(t.list) && len(out) < h; i++ {
-		x, idx := t.list[i], i
-		glyph, sty := taskGlyph(m, x)
-		cell := ""
-		if r := m.lastRun(x.ID); r != nil {
-			cell = runStateText(r) + " · " + r.Machine
-		}
-		titleW := max(4, w-4-render.Width(cell)-2)
-		line := " " + sty.Render(glyph) + " " + render.Pad(render.Truncate(x.Title, titleW), titleW) + "  " + dimmed.Render(cell)
-		if i == t.cursor {
-			line = selTitle.Render(render.Pad(" "+glyph+" "+render.Pad(render.Truncate(x.Title, titleW), titleW)+"  "+cell, w))
-		}
-		m.mark(y0+len(out), x0, w, func(mm *Model) {
-			if mm.tasks.cursor == idx {
-				mm.openTask()
-			}
-			mm.tasks.cursor = idx
-		})
-		out = append(out, line)
-	}
-	return out
+	return m.taskRows(out, y0, x0, w, h)
 }
 
 func (m *Model) taskDetail(w, h int) []string {
@@ -979,6 +1017,35 @@ func (m *Model) taskDetail(w, h int) []string {
 	if x == nil {
 		return nil
 	}
+	if r := m.watchedRun(); r != nil && h >= 16 && (m.selectedRun() == nil || m.selectedRun().ID != r.ID) {
+		below := h / 2
+		return append(m.taskDetailIn(x, w, h-below), m.watchPanel(r, w, below)...)
+	}
+	return m.taskDetailIn(x, w, h)
+}
+
+// watchPanel follows the watched run: its task, how it stands and its output.
+func (m *Model) watchPanel(r *task.Run, w, h int) []string {
+	inner := w - 4
+	title := r.Task
+	if x := m.tasks.st.Tasks[r.Task]; x != nil {
+		title = x.Title
+	}
+	body := []string{boldSty.Foreground(cText).Render(render.Truncate(title, inner)), m.runLine(r, inner, false)}
+	if room := h - 2 - len(body); room > 0 {
+		body = append(body, m.outputLines(r, inner, room)...)
+	}
+	return panel(i18n.F("tasks.watching", r.ID), body, w, h)
+}
+
+func (m *Model) watchedRun() *task.Run {
+	if m.tasks.watch == "" || m.tasks.st == nil {
+		return nil
+	}
+	return m.tasks.st.Runs[m.tasks.watch]
+}
+
+func (m *Model) taskDetailIn(x *task.Task, w, h int) []string {
 	inner := w - 4
 	var body []string
 	body = append(body, boldSty.Foreground(cText).Render(render.Truncate(x.Title, inner)))
@@ -990,6 +1057,9 @@ func (m *Model) taskDetail(w, h int) []string {
 			lines = append(lines[:5], dimmed.Render(i18n.F("tasks.more_lines", len(lines)-5)))
 		}
 		body = append(body, lines...)
+	}
+	if hasDraft(x) {
+		body = append(body, "", accent.Render(render.Truncate(i18n.F("tasks.draft_line", len(x.Draft.Plan.Tasks), len(x.Draft.Plan.Questions)), inner)))
 	}
 	runs := m.tasks.st.RunsOf(x.ID)
 	if len(runs) > 0 {
@@ -1005,24 +1075,29 @@ func (m *Model) taskDetail(w, h int) []string {
 		room := h - 2 - len(body) - 2
 		if room > 2 {
 			body = append(body, "", accent.Render(i18n.F("tasks.output", r.ID)))
-			o, ok := m.tasks.out[r.ID]
-			var lines []string
-			for l := range strings.Lines(strings.TrimRight(o.text, "\n")) {
-				lines = append(lines, render.Wrap(strings.TrimRight(l, "\r\n"), inner)...)
-			}
-			switch {
-			case !ok:
-				lines = []string{dimmed.Render(i18n.T("tasks.loading"))}
-			case len(lines) == 0:
-				lines = []string{dimmed.Render(i18n.T("tasks.no_output"))}
-			}
-			if len(lines) > room {
-				lines = lines[len(lines)-room:]
-			}
-			body = append(body, lines...)
+			body = append(body, m.outputLines(r, inner, room)...)
 		}
 	}
 	return panel(i18n.T("tasks.detail"), body, w, h)
+}
+
+// outputLines are the last room lines of r's output, wrapped to inner.
+func (m *Model) outputLines(r *task.Run, inner, room int) []string {
+	o, ok := m.tasks.out[r.ID]
+	var lines []string
+	for l := range strings.Lines(strings.TrimRight(o.text, "\n")) {
+		lines = append(lines, render.Wrap(strings.TrimRight(l, "\r\n"), inner)...)
+	}
+	switch {
+	case !ok:
+		lines = []string{dimmed.Render(i18n.T("tasks.loading"))}
+	case len(lines) == 0:
+		lines = []string{dimmed.Render(i18n.T("tasks.no_output"))}
+	}
+	if len(lines) > room {
+		lines = lines[len(lines)-room:]
+	}
+	return lines
 }
 
 // tasksStatus replaces the filter chips in the Tasks view: who coordinates and how the machines stand.

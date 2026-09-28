@@ -113,6 +113,10 @@ const (
 	actTabPrev
 	actTabNext
 	actSave
+	actPalette
+	actUndo
+	actExtendDown
+	actExtendUp
 	// actViaDialog is not a key: an ime route meaning "a button in the resume dialog".
 	actViaDialog
 )
@@ -177,6 +181,10 @@ var bindings = []binding{
 	{act: actCloseIdle, in: inList, tier: tierHeavy, keys: []string{"Z"}},
 	{act: actHelp, in: inList, keys: []string{"?", "？"}},
 	{act: actSettings, in: inList, keys: []string{",", "，"}},
+	{act: actPalette, in: inList, keys: []string{":", "："}},
+	{act: actUndo, in: inList, keys: []string{"u", "ctrl+z"}},
+	{act: actExtendDown, in: inList, keys: []string{"shift+down"}},
+	{act: actExtendUp, in: inList, keys: []string{"shift+up"}},
 	{act: actBack, in: inList, keys: []string{"esc"}},
 	{act: actQuit, in: inList, keys: []string{"q", "ctrl+c"}},
 
@@ -397,6 +405,7 @@ func helpLayout() []helpSection {
 			{"help.done", inList, false, []act{actDone}},
 			{"help.archive", inList, false, []act{actArchive}},
 			{"help.edit", inList, false, []act{actEdit}},
+			{"help.undo", inList, false, []act{actUndo}},
 			{"help.move_project", inList, false, []act{actMove}},
 			{"help.delete", inList, false, []act{actDelete}},
 		}},
@@ -422,6 +431,8 @@ func helpLayout() []helpSection {
 		}},
 		{"help.group.tasks", []helpSpec{
 			{"help.task_view", inList, false, []act{actView}},
+			{"help.task_layout", inList, false, []act{actSort}},
+			{"help.task_range", inList, false, []act{actExtendDown, actExtendUp}},
 			{"help.task_new", inList, false, []act{actNew}},
 			{"help.task_open", inList, false, []act{actEnter}},
 			{"help.task_session", inList, false, []act{actSpace}},
@@ -430,6 +441,7 @@ func helpLayout() []helpSection {
 			{"help.task_stop", inList, false, []act{actCloseTab}},
 		}},
 		{"help.group.other", []helpSpec{
+			{"help.palette", inList, false, []act{actPalette}},
 			{"help.settings", inList, false, []act{actSettings}},
 			{"help.help", inList, false, []act{actHelp}},
 			{"help.esc", inList, false, []act{actBack}},
