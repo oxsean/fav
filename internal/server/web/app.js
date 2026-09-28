@@ -288,13 +288,23 @@ function utilities(loggedIn=true) {
     ${loggedIn?button('logout',icon('logout'),`aria-label="${t('logout')}" title="${t('logout')}"`,'quiet'):''}</div>`;
 }
 function renderLogin() {
+  const denied=Team.deniedPanel();
   app.innerHTML=`<div class="login-page"><header class="topbar"><div class="brand"><span class="brand-mark">&gt;_</span>tend</div>${utilities(false)}</header>
     <main id="main" class="login-main"><section class="login-card"><div class="eyebrow">TEND / PERSONAL OPERATIONS</div><h1>${t(ui.loggedOut?'loggedOut':'loginTitle')}</h1><p class="login-description">${t(ui.loggedOut?'logoutHelp':'loginDescription')}</p>
-    ${Team.loginExtras()}<form id="login-form" class="login-form"><div id="login-error" role="alert" hidden class="form-error"></div><label>${t('token')}<input type="password" name="token" id="token-input" autocomplete="off" spellcheck="false" placeholder="${t('tokenPlaceholder')}" required autofocus></label>
-    <div class="hint">${t('tokenHint')}<code>tend-server token add --client web</code></div><button class="primary" type="submit">${t('signIn')}</button></form></section></main></div>`;
+    ${denied || `${Team.loginExtras()}<form id="login-form" class="login-form"><div id="login-error" role="alert" hidden class="form-error"></div><label>${t('token')}<input type="password" name="token" id="token-input" autocomplete="off" spellcheck="false" placeholder="${t('tokenPlaceholder')}" required autofocus></label>
+    <div class="hint">${t('tokenHint')}<code>tend-server token add --client web</code></div><button class="primary" type="submit">${t('signIn')}</button></form>`}</section></main></div>`;
+}
+// renderDevice is the terminal-authorization page (`#device-<code>`): it loads the pending code once, then re-renders
+// from the cached answer as Allow / Deny decide it.
+function renderDevice(code) {
+  if(Team.deviceLoadedFor()!==code)Team.loadDevice(code).then(()=>{if(Team.deviceCodeFromHash()===code)renderShell();});
+  app.innerHTML=`<div class="login-page"><header class="topbar"><div class="brand"><span class="brand-mark">&gt;_</span>tend</div>${utilities(true)}</header>
+    <main id="main" class="login-main"><section class="login-card">${Team.devicePanel(code)}</section></main></div>`;
 }
 function renderShell() {
   if(!ui.authenticated){renderLogin();return;}
+  const device=Team.deviceCodeFromHash();
+  if(device){renderDevice(device);return;}
   app.innerHTML=`<header class="topbar"><div class="flex"><div class="brand"><span class="brand-mark">&gt;_</span>tend</div><span class="workspace-label">${t('workspace')}</span></div>${utilities()}</header>
     <div class="shell"><aside class="sidebar"><nav class="nav-section" aria-label="${t('workspace')}"><span class="nav-label">${t('operations')}</span>${Home.nav()}
       <button class="nav-item ${ui.page==='tasks'?'active':''}" data-action="page" data-page="tasks" ${ui.page==='tasks'?'aria-current="page"':''}>${icon('tasks')}${t('tasks')}<span class="count" id="count-tasks"></span></button>
@@ -313,7 +323,7 @@ function renderCounts() {
     const day=new Date();day.setHours(0,0,0,0);let used=0,usd=0;
     for(const r of Object.values(ui.state.runs)){if(!r.usage||new Date(r.ended_at||r.started_at||r.queued_at)<day)continue;used+=(r.usage.input||0)+(r.usage.cache_write||0)+(r.usage.output||0);usd+=r.usage.cost_usd||0;}
     const off=ui.machines.filter(m=>m.state==='offline').map(m=>m.name);
-    top.textContent=[n?t('agentsTop').replace('{0}',n):'',off.length?t('offlineTop').replace('{0}',off.join(', ')):'',used?t('todayTop').replace('{0}',tokens(used)+(money(usd)?' · '+money(usd):'')):''].filter(Boolean).join(' · ');
+    top.textContent=[n?t('agentsTop').replace('{0}',n):'',off.length?t('offlineTop').replace('{0}',off.join(', ')):'',used?t('todayTop').replace('{0}',tokens(used))+(money(usd)?' · '+money(usd):''):''].filter(Boolean).join(' · ');
     top.classList.toggle('warn',!!off.length);
   }
 }
@@ -947,10 +957,10 @@ setInterval(()=>{
 setInterval(()=>{if(ui.authenticated&&ui.online&&!document.hidden)refreshMachines();},5000);
 document.addEventListener('visibilitychange',()=>{if(!document.hidden&&ui.authenticated&&ui.online){refreshMachines();if(ui.tab==='output')fetchOutput();}});
 applyPreferences();renderShell();
-Team.loadLogins().then(()=>{if(!ui.authenticated)renderShell();});
+Promise.all([Team.loadLogins(),Team.loadInvite()]).then(()=>{if(!ui.authenticated)renderShell();});
 window.addEventListener('popstate',async()=>{if(!ui.authenticated)return;fromURL();renderShell();await enterPage();});
 window.addEventListener('hashchange',()=>{
   const linked=location.hash.match(/^#task-([\w-]+)$/)?.[1];
-  if(!ui.authenticated)renderShell();else if(linked){ui.page='tasks';renderShell();selectTask(linked);}
+  if(!ui.authenticated)renderShell();else if(linked){ui.page='tasks';renderShell();selectTask(linked);}else renderShell();
 });
 api.session().then(enter,()=>{});

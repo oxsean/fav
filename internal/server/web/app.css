@@ -200,6 +200,9 @@ button.metric:hover strong, button.metric:focus-visible strong { color: var(--ac
 .form-error { color: var(--danger); background: var(--danger-soft); border: 1px solid var(--danger); border-radius: 4px; padding: 10px 12px; font-size: 12px; margin-bottom: 12px; }
 .confirm-context { padding: 12px; border: 1px solid var(--border); background: var(--surface-alt); border-radius: 6px; margin: 14px 0; overflow-wrap: anywhere; }
 .notice { padding: 12px; border-radius: 6px; background: var(--warning-soft); color: var(--warning); font-size: 12px; line-height: 1.8; }
+.invite-card { color: var(--text); }
+.denied-panel .form-error p { margin: 6px 0 0; }
+.device-code { text-align: center; font-size: 22px; letter-spacing: 4px; }
 .preview { max-height: 180px; overflow: auto; padding: 12px; background: var(--surface-alt); border: 1px solid var(--border); border-radius: 4px; }
 .login-page { min-height: 100dvh; display: flex; flex-direction: column; }
 .login-main { flex: 1; display: grid; place-items: center; padding: 40px 20px; }

@@ -134,6 +134,8 @@ func run(args []string) error {
 		return cmdService(args)
 	case "server":
 		return cmdServer(args)
+	case "login":
+		return cmdLogin(args)
 	case "install-hook":
 		return cmdInstallHook(args)
 	case "uninstall-hook":

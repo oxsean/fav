@@ -394,6 +394,32 @@ func (t *Team) NewInvite(role, by string, ttl time.Duration) (string, error) {
 	return secret, err
 }
 
+// InviteInfo is an invitation's public facts: who sent it, what role it grants, and when it stops working.
+type InviteInfo struct {
+	Role      string    `json:"role"`
+	CreatedBy string    `json:"created_by"`
+	Created   time.Time `json:"created,omitzero"`
+	Expires   time.Time `json:"expires,omitzero"`
+	Used      bool      `json:"used,omitempty"`
+}
+
+// Invite looks up an invitation by its secret, used or not: the sign-in page shows it before anyone signs in.
+func (t *Team) Invite(secret string) (InviteInfo, error) {
+	var out InviteInfo
+	var created, expires, usedAt int64
+	err := t.r.QueryRow(`SELECT role, created_by, created, expires, used_at FROM invites WHERE sum = ?`, Sum(secret)).
+		Scan(&out.Role, &out.CreatedBy, &created, &expires, &usedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return InviteInfo{}, ErrNotFound
+	}
+	if err != nil {
+		return InviteInfo{}, err
+	}
+	out.Created, out.Expires = fromNanos(created), fromNanos(expires)
+	out.Used = usedAt != 0
+	return out, nil
+}
+
 // NewCredential makes a secret of kind for owner (a node token names its machine); ttl 0 never expires. The secret
 // is shown once: only its hash is kept.
 func (t *Team) NewCredential(kind, name, owner string, ttl time.Duration) (string, Credential, error) {

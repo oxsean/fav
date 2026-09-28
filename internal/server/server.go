@@ -78,17 +78,19 @@ type Options struct {
 
 // Server serves the coordinator over HTTP.
 type Server struct {
-	opt    Options
-	logins map[string]*auth.Provider
-	mu     sync.Mutex
-	conns  map[*wire.Conn]string // live connections by the credential they came with
-	flows  map[string]flow       // sign-ins in progress, by state
-	limit  *limiter
-	syncer *Syncer
+	opt     Options
+	logins  map[string]*auth.Provider
+	mu      sync.Mutex
+	conns   map[*wire.Conn]string // live connections by the credential they came with
+	flows   map[string]flow       // sign-ins in progress, by state
+	devices map[string]*deviceAuth
+	limit   *limiter
+	syncer  *Syncer
 }
 
 func New(opt Options) *Server {
-	s := &Server{opt: opt, logins: map[string]*auth.Provider{}, conns: map[*wire.Conn]string{}, flows: map[string]flow{}, limit: newLimiter(), syncer: opt.Syncer}
+	s := &Server{opt: opt, logins: map[string]*auth.Provider{}, conns: map[*wire.Conn]string{}, flows: map[string]flow{},
+		devices: map[string]*deviceAuth{}, limit: newLimiter(), syncer: opt.Syncer}
 	for _, l := range opt.Config.Logins {
 		p, err := auth.New(l)
 		if err != nil {
@@ -285,6 +287,7 @@ func (s *Server) Serve(ctx context.Context) error {
 			case <-t.C:
 				s.sweep()
 				s.expireFlows()
+				s.expireDevices()
 			}
 		}
 	}()

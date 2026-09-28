@@ -427,7 +427,7 @@ const Tree = (() => {
   function viewAgent(d) {
     showModal('tree-form', `${esc(d.name)}${d.rev ? ' · v' + d.rev : ''}`, `<div class="modal-body stack">
       <p class="muted">${usedBy(d.name)}</p>${(d.warnings || []).map(w => `<div class="notice">${esc(w)}</div>`).join('')}
-      <span class="meta-label">${t('launchPreview')}</span><pre class="mono launch-preview"><code>${esc((d.launch || []).join(' ') || '—')}</code></pre><p class="hint">${t('launchHelp')}</p>
+      <span class="meta-label">${t('launchPreview')}</span><pre class="mono launch-preview"><code>${esc((d.launch || []).join(' ') || '—')}</code></pre>${(d.launch || []).some(x => x.includes('<')) ? `<p class="hint">${esc(t('launchHelp'))}</p>` : ''}
       <span class="meta-label">${t('definition')}</span><pre class="mono launch-preview"><code>${esc(d.text)}</code></pre></div>
       <footer class="modal-footer">${button('close-modal', t('closeView'))}${button('tree-export-agent', t('exportAgent'), `data-name="${esc(d.name)}"`)}</footer>`, '', true);
     data.viewing = d;

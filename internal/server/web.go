@@ -60,6 +60,9 @@ func (s *Server) webRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /auth/logins", s.loginList)
 	mux.HandleFunc("GET /auth/{name}/start", s.limited(s.start))
 	mux.HandleFunc("GET /auth/{name}/callback", s.limited(s.callback))
+	mux.HandleFunc("GET /auth/invite", s.limited(s.inviteInfo))
+	mux.HandleFunc("POST /auth/device", s.limited(s.deviceStart))
+	mux.HandleFunc("POST /auth/device/token", s.limited(s.devicePoll))
 	mux.HandleFunc("GET /theme/{file}", theme)
 }
 
@@ -189,6 +192,21 @@ func (s *Server) loginList(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
+// inviteInfo is what the sign-in page shows for an invitation before anyone signs in: who sent it, the role, and
+// its expiry. An invitation carries no project; joining a project happens afterward, on the projects page.
+func (s *Server) inviteInfo(w http.ResponseWriter, r *http.Request) {
+	info, err := s.team().Invite(r.URL.Query().Get("code"))
+	if err != nil || info.Used || time.Now().After(info.Expires) {
+		apiError(w, http.StatusNotFound, "not_found")
+		return
+	}
+	inviter := info.CreatedBy
+	if u, ok, _ := s.team().User(info.CreatedBy); ok {
+		inviter = displayName(u)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"inviter": inviter, "role": info.Role, "expires": info.Expires})
+}
+
 // flow is a sign-in waiting for its callback.
 type flow struct {
 	auth.Flow
@@ -293,6 +311,13 @@ func (s *Server) callback(w http.ResponseWriter, r *http.Request) {
 		code := "not_admitted"
 		if errors.Is(err, store.ErrDisabled) {
 			code = "disabled"
+		} else {
+			// The refusal page (§10 "被拒绝") names the account so the person knows what to switch or ask about.
+			q := url.Values{"provider": {id.Provider}, "username": {id.Username}, "email": {id.Email}}
+			if id.EmailVerified {
+				q.Set("verified", "1")
+			}
+			code += "?" + q.Encode()
 		}
 		s.signinPage(w, http.StatusForbidden, code)
 		return

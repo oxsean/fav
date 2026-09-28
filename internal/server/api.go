@@ -85,6 +85,8 @@ func (s *Server) apiRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/me/webhook", s.api(s.getWebhook))
 	mux.HandleFunc("POST /api/me/webhook", s.api(s.setWebhook))
 	mux.HandleFunc("POST /api/users/offboard", s.api(s.adminOnly(s.offboard)))
+	mux.HandleFunc("GET /api/device", s.api(s.deviceLookup))
+	mux.HandleFunc("POST /api/device", s.api(s.deviceDecide))
 }
 
 // PublicUser is a user as other members see them.

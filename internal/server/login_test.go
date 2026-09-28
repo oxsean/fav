@@ -90,7 +90,7 @@ func TestSigningInWithAProviderNeedsAnAdmission(t *testing.T) {
 	_, login := idp(t, &who)
 	r := newRig(t, login)
 	c := browser(t)
-	if to := signIn(t, c, r.url, ""); to != "/#signin-not_admitted" {
+	if to := signIn(t, c, r.url, ""); !strings.HasPrefix(to, "/#signin-not_admitted?") || !strings.Contains(to, "username=ann") {
 		t.Fatalf("nobody let ann in: %s", to)
 	}
 	if err := r.team.AddAdmit(store.Admit{Kind: store.AdmitDomain, Value: "corp.example", Role: store.RoleMember}); err != nil {

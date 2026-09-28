@@ -505,7 +505,8 @@ tend node --connect ws://100.101.8.10:7788 --token-file ~/.config/tend/node-toke
 # or keep it running from login: a LaunchAgent (macOS), a systemd --user unit (Linux) or a scheduled task (Windows)
 tend node install-service --connect ws://100.101.8.10:7788 --token-file ~/.config/tend/node-token   # --print shows it first
 
-# on a client: config.json {"coordinator": {"url": "ws://100.101.8.10:7788", "token_file": "~/.config/tend/client-token"}}
+# on a client: sign in through the browser (a device code you confirm at the printed URL)
+tend login http://100.101.8.10:7788   # writes coordinator.token and config.json's coordinator on its own
 tend task list   # the CLI and the TUI's Tasks view now talk to the server
 ```
 
@@ -562,7 +563,9 @@ runs; creates, edits and dispatches tasks; previews a dispatch; follows a run's 
 ended or what it asks and takes a reply; stops or abandons runs; marks tasks done, reopens or cancels them; shows task
 trees and starts them; lists what needs you; edits and shares agent definitions and project settings; shows the
 machines, who owns them and whom they are shared with; manages projects and members; makes personal tokens for the CLI
-and TUI on the Account page; and, for admins, users, admission rules, invitations and the audit log. It follows the
+and TUI on the Account page, or confirms one from `tend login` on a terminal-authorization page (the code, the client's
+name, source address and time, Allow or Deny); and, for admins, users, admission rules, invitations and the audit log. It
+follows the
 journal live and reconnects on its own. **Home** puts what waits for you first, with the question or tool request
 right there to answer, allow or deny, then what runs and on which machines, each project's progress with links into the
 board, 7 days of tokens and cost, and the latest sessions. Tasks show as a list or as a board by where they stand, filtered by status,

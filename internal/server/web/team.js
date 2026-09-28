@@ -37,6 +37,22 @@ const teamWords = {
   audit: ['审计日志', 'Audit log'], actor: ['操作者', 'Actor'], event: ['事件', 'Event'], at: ['时间', 'Time'], copy: ['复制', 'Copy'], copied: ['已复制', 'Copied'],
   orToken: ['或使用 token', 'Or use a token'], signInWith: ['用 {0} 登录', 'Sign in with {0}'],
   invited: ['你收到了邀请：用下面任一方式登录即可加入。', 'You are invited: sign in any way below to join.'],
+  invitedBy: ['邀请你加入', 'invited you to join'], inviteExpires: ['链接失效', 'Link expires'], acceptWith: ['用 {0} 接受邀请', 'Accept with {0}'],
+  inviteOnlyNotice: ['这是邀请制实例：只有管理员加过的人，或邮箱在白名单里的人才能进来。', 'This is an invitation-only instance: only people an admin added, or an admitted email, may sign in.'],
+  'denied.title': ['这个账号还不能进入', 'This account cannot get in yet'],
+  'denied.notAdmittedDetail': ['{0} 账号 {1}{2} 不在管理员加过的名单里，邮箱和域名也不在白名单里。', 'The {0} account {1}{2} is not one an admin added, and its email and domain are not admitted either.'],
+  'denied.disabledDetail': ['这个账号已被停用。', 'This account has been disabled.'],
+  'denied.verified': ['，已验证', ', verified'], 'denied.unverified': ['，未验证', ', not verified'],
+  'denied.helpIntro': ['可以这样处理：', 'What you can do:'],
+  'denied.helpSwitch': ['· 换一个账号登录', '· Sign in with another account'],
+  'denied.helpAsk': ['· 请管理员把你加进来，或者发一个邀请链接给你', '· Ask an admin to add you, or to send an invitation link'],
+  'denied.switch': ['换个账号', 'Switch account'], 'denied.copy': ['复制我的账号信息给管理员', 'Copy my account details for an admin'],
+  'denied.copied': ['账号信息已复制', 'Account details copied'],
+  deviceTitle: ['允许终端登录？', 'Allow this sign-in?'], deviceHelp: ['核对终端上显示的设备码，一致再允许。', 'Check the code shown in the terminal, then allow it.'],
+  deviceClient: ['设备', 'Device'], deviceIP: ['来源地址', 'Source address'], deviceAt: ['请求于', 'Requested'],
+  deviceAllowed: ['已允许，回到终端继续', 'Allowed. Go back to the terminal.'], deviceDenied: ['已拒绝', 'Denied'], backToTend: ['回到 tend', 'Back to tend'],
+  'device.not_found': ['这个设备码已经用过或已过期。', 'This device code was already used, or has expired.'],
+  'device.internal': ['服务器出错。', 'The server failed.'],
   'signin.state': ['登录已过期或来自另一个浏览器，请重新开始。', 'The sign-in expired or began in another browser. Start again.'],
   'signin.provider': ['登录服务没有确认这次登录。', 'The sign-in service did not confirm this sign-in.'],
   'signin.not_admitted': ['这个账号还没有被允许加入。请管理员邀请你或添加准入规则。', 'This account is not admitted yet. Ask an admin for an invitation or a rule.'],
@@ -53,7 +69,7 @@ const teamWords = {
 
 const Team = (() => {
   const pages = ['projects', 'account', 'admin'];
-  const data = {users: [], logins: [], creds: [], tokens: [], identities: [], admits: [], audit: []};
+  const data = {users: [], logins: [], creds: [], tokens: [], identities: [], admits: [], audit: [], inviteInfo: null, device: null, deviceCode: '', deviceError: '', deviceResult: ''};
   const roles = ['participant', 'reader'];
 
   async function rest(method, path, body) {
@@ -80,17 +96,79 @@ const Team = (() => {
   async function loadLogins() {
     try { data.logins = await rest('GET', '/auth/logins'); } catch (_) { data.logins = []; }
   }
+  // parseSignin splits the "#signin-<code>?<details>" the callback leaves behind into the stable code words looks
+  // up, and, for a refusal, the identity details it carries.
+  function parseSignin() {
+    const raw = fromHash('signin-');
+    if (!raw) return null;
+    const [code, qs] = raw.split('?');
+    return {code, params: new URLSearchParams(qs || '')};
+  }
+  async function loadInvite() {
+    const invite = fromHash('invite-');
+    if (!invite) { data.inviteInfo = null; return; }
+    try { data.inviteInfo = await rest('GET', '/auth/invite?code=' + encodeURIComponent(invite)); }
+    catch (_) { data.inviteInfo = null; }
+  }
+  // deniedPanel is the refusal state (§10 the "被拒绝" board): who this account is, why it cannot in, what to do.
+  // It replaces the plain sign-in form; other problems (an expired flow, a provider error) stay a one-line banner.
+  function deniedPanel() {
+    const s = parseSignin();
+    if (!s || (s.code !== 'not_admitted' && s.code !== 'disabled')) return '';
+    const p = s.params, email = p.get('email') || '';
+    const detail = s.code === 'disabled' ? t('denied.disabledDetail')
+      : t('denied.notAdmittedDetail').replace('{0}', p.get('provider') || '').replace('{1}', p.get('username') || email)
+          .replace('{2}', email ? t(p.get('verified') === '1' ? 'denied.verified' : 'denied.unverified') : '');
+    return `<div class="stack denied-panel"><div class="form-error" role="alert"><strong>${t('denied.title')}</strong><p>${esc(detail)}</p></div>
+      <div class="stack hint"><span>${t('denied.helpIntro')}</span><span>${t('denied.helpSwitch')}</span><span>${t('denied.helpAsk')}</span></div>
+      <div class="flex">${button('denied-switch', t('denied.switch'), '', 'primary')}${button('denied-copy', t('denied.copy'))}</div></div>`;
+  }
   function loginExtras() {
-    const invite = fromHash('invite-'), problem = fromHash('signin-');
+    const invite = fromHash('invite-'), signin = parseSignin();
+    const problem = signin && !deniedPanel() ? signin.code : '';
     const q = invite ? '?invite=' + encodeURIComponent(invite) : '';
-    const providers = data.logins.map(l => `<a class="button primary provider" href="/auth/${encodeURIComponent(l.name)}/start${q}">${esc(t('signInWith').replace('{0}', l.display || l.name))}</a>`).join('');
-    return `${problem && words['signin.' + problem] ? `<div class="form-error" role="alert">${t('signin.' + problem)}</div>` : ''}${invite ? `<div class="notice">${t('invited')}</div>` : ''}${providers ? `<div class="stack providers">${providers}</div><div class="divider"><span>${t('orToken')}</span></div>` : ''}`;
+    const label = l => esc(t(invite ? 'acceptWith' : 'signInWith').replace('{0}', l.display || l.name));
+    const providers = data.logins.map(l => `<a class="button primary provider" href="/auth/${encodeURIComponent(l.name)}/start${q}">${label(l)}</a>`).join('');
+    const inviteCard = invite ? (data.inviteInfo
+      ? `<div class="notice invite-card"><strong>${esc(data.inviteInfo.inviter)}</strong> ${t('invitedBy')} <b>${t('role.' + data.inviteInfo.role)}</b><div class="muted">${t('inviteExpires')} ${when(data.inviteInfo.expires)}</div></div>`
+      : `<div class="notice">${t('invited')}</div>`) : '';
+    return `${problem && words['signin.' + problem] ? `<div class="form-error" role="alert">${t('signin.' + problem)}</div>` : ''}${inviteCard}
+      ${!invite ? `<p class="hint">${t('inviteOnlyNotice')}</p>` : ''}${providers ? `<div class="stack providers">${providers}</div><div class="divider"><span>${t('orToken')}</span></div>` : ''}`;
   }
   // afterSignIn handles what the sign-in left in the address: a linked account, or a refused link.
   function afterSignIn() {
-    const problem = fromHash('signin-');
-    if (location.hash) history.replaceState(null, '', location.pathname);
+    const problem = fromHash('signin-').split('?')[0];
+    if (location.hash && !/^#(device|task)-/.test(location.hash)) history.replaceState(null, '', location.pathname + location.search);
     if (problem && words['signin.' + problem]) { ui.page = 'account'; toast(t('signin.' + problem)); }
+  }
+
+  // Terminal authorization: confirming a `tend login` in this browser (§10 the "终端授权" board).
+  function deviceCodeFromHash() { const m = location.hash.match(/^#device-(.+)$/); return m ? decodeURIComponent(m[1]) : ''; }
+  function deviceLoadedFor() { return data.deviceCode; }
+  async function loadDevice(code) {
+    data.deviceCode = code; data.device = null; data.deviceError = ''; data.deviceResult = '';
+    try { data.device = await rest('GET', '/api/device?code=' + encodeURIComponent(code)); }
+    catch (error) { data.deviceError = error.code || 'internal'; }
+  }
+  function devicePanel(code) {
+    const back = `<div>${button('device-back', t('backToTend'))}</div>`;
+    if (data.deviceResult) return `<div class="stack"><h2>${t(data.deviceResult === 'allow' ? 'deviceAllowed' : 'deviceDenied')}</h2>${back}</div>`;
+    if (data.deviceError) return `<div class="stack"><h2>${t('deviceTitle')}</h2><div class="form-error" role="alert">${t('device.' + data.deviceError)}</div>${back}</div>`;
+    if (!data.device) return `<div class="stack"><h2>${t('deviceTitle')}</h2><p class="muted">${t('loading')}</p></div>`;
+    const d = data.device;
+    return `<div class="stack"><h2>${t('deviceTitle')}</h2><p class="muted">${t('deviceHelp')}</p>
+      <code class="secret device-code">${esc(d.code)}</code>
+      <div class="agent-row"><strong>${t('deviceClient')}</strong><span>${esc(d.name || '—')}</span></div>
+      <div class="agent-row"><strong>${t('deviceIP')}</strong><span class="mono">${esc(d.ip)}</span></div>
+      <div class="agent-row"><strong>${t('deviceAt')}</strong><span>${when(d.created)}</span></div>
+      <div class="flex">${button('device-allow', t('allow'), '', 'primary')}${button('device-deny', t('deny'))}</div></div>`;
+  }
+  async function decideDevice(allow) {
+    try {
+      await rest('POST', '/api/device', {code: data.deviceCode, allow});
+      data.deviceResult = allow ? 'allow' : 'deny';
+    } catch (error) { toast(errorText(error)); }
+    renderShell();
   }
 
   function nav() {
@@ -249,12 +327,21 @@ const Team = (() => {
       case 'team-disable': await rest('POST', '/api/users', {id: d.id, disabled: !!d.disabled}); await enter('admin'); break;
       case 'team-remove-admit': await rest('DELETE', '/api/admits', {kind: d.kind, value: d.value}); await enter('admin'); break;
       case 'team-copy': copy(d.value); break;
+      case 'device-allow': await decideDevice(true); break;
+      case 'device-deny': await decideDevice(false); break;
+      case 'device-back': history.replaceState(null, '', location.pathname); renderShell(); await enterPage(); break;
+      case 'denied-switch': location.hash = ''; renderShell(); break;
+      case 'denied-copy': {
+        const p = parseSignin()?.params;
+        copy(`${p?.get('provider') || ''}:${p?.get('username') || ''} ${p?.get('email') || ''}`.trim(), 'denied.copied');
+        break;
+      }
       default: return false;
     }
     return true;
   }
-  function copy(value) {
-    navigator.clipboard?.writeText(value).then(() => toast(t('copied')), () => {
+  function copy(value, message = 'copied') {
+    navigator.clipboard?.writeText(value).then(() => toast(t(message)), () => {
       const el = document.querySelector('#secret-value'); if (el) getSelection().selectAllChildren(el);
     });
   }
@@ -319,5 +406,6 @@ const Team = (() => {
     return `<label>${t('project')}<select name="project"><option value="">${t('noProject')}</option>${mine.map(p => `<option value="${esc(p.id)}" ${p.id === value ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}</select></label>`;
   }
 
-  return {pages, rest, name: userName, users: () => data.users, loadLogins, loginExtras, afterSignIn, nav, enter, render, machineHeader, machineCard, machineCreds, click, change, submit, projectField};
+  return {pages, rest, name: userName, users: () => data.users, loadLogins, loginExtras, afterSignIn, nav, enter, render, machineHeader, machineCard, machineCreds, click, change, submit, projectField,
+    loadInvite, deniedPanel, deviceCodeFromHash, deviceLoadedFor, loadDevice, devicePanel};
 })();
