@@ -343,7 +343,8 @@ func strictDecode(t *testing.T, where string, raw json.RawMessage, v any) {
 	}
 }
 
-// The writes, their answers and the machines and inbox lists in the frame files are the coordinator's shapes.
+// The writes, their answers, the machines and inbox lists and the affordances in the frame files are the coordinator's
+// shapes.
 func TestFrameWritesAndListsAreTheCoordinatorsShapes(t *testing.T) {
 	params := map[string]func() any{
 		coord.MTaskStatus: func() any { return new(task.TaskStatus) }, coord.MRunDispatch: func() any { return new(coord.Dispatch) },
@@ -354,6 +355,8 @@ func TestFrameWritesAndListsAreTheCoordinatorsShapes(t *testing.T) {
 		coord.MTaskPlanSave: func() any { return new(coord.PlanSave) }, coord.MTaskPlanApply: func() any { return new(coord.PlanApply) },
 		coord.MTaskGate: func() any { return new(coord.TaskGate) }, coord.MTaskSourceAck: func() any { return new(task.SourceAck) },
 		coord.MRunPreview: func() any { return new(coord.Dispatch) }, coord.MAgentList: func() any { return new(struct{}) },
+		coord.MTaskMessage: func() any { return new(coord.TaskMessage) }, coord.MTaskMessagePreview: func() any { return new(coord.MessagePreview) },
+		coord.MRunSend: func() any { return new(coord.SendMessage) }, coord.MRunInterrupt: func() any { return new(coord.Interrupt) },
 	}
 	results := map[string]func() any{
 		coord.MTaskStatus: func() any { return new(task.Task) }, coord.MRunDispatch: func() any { return new(task.Run) },
@@ -364,6 +367,8 @@ func TestFrameWritesAndListsAreTheCoordinatorsShapes(t *testing.T) {
 		coord.MTaskPlanSave: func() any { return new(task.Task) }, coord.MTaskPlanApply: func() any { return new(task.Task) },
 		coord.MTaskGate: func() any { return new(task.Task) }, coord.MTaskSourceAck: func() any { return new(task.Task) },
 		coord.MRunPreview: func() any { return new(coord.Preview) }, coord.MAgentList: func() any { return new(coord.Agents) },
+		coord.MTaskMessage: func() any { return new(coord.MessageResult) }, coord.MTaskMessagePreview: func() any { return new(coord.MessageRoute) },
+		coord.MRunSend: func() any { return new(task.Run) }, coord.MRunInterrupt: func() any { return new(task.Run) },
 	}
 	files, _ := filepath.Glob(filepath.Join("webtest", "frames", "*.jsonl"))
 	seen := map[string]int{}
@@ -388,6 +393,15 @@ func TestFrameWritesAndListsAreTheCoordinatorsShapes(t *testing.T) {
 					Items []coord.Machine `json:"items"`
 				}))
 				seen["machines"]++
+			case l.S != nil && l.S.Type == "push" && l.S.Method == coord.PushAffordances:
+				strictDecode(t, at, l.S.Params, new(coord.Affordances))
+				seen[coord.PushAffordances]++
+			case l.S != nil && l.S.Type == "push" && l.S.Method == "snapshot" && strings.Contains(string(l.S.Params), `"part":"affordances"`):
+				strictDecode(t, at, l.S.Params, new(struct {
+					Part  string            `json:"part"`
+					Items coord.Affordances `json:"items"`
+				}))
+				seen["affordances part"]++
 			case l.S != nil && l.S.Type == "push" && l.S.Method == "inbox":
 				strictDecode(t, at, l.S.Params, new(struct {
 					Items []coord.InboxItem `json:"items"`
@@ -398,7 +412,7 @@ func TestFrameWritesAndListsAreTheCoordinatorsShapes(t *testing.T) {
 	}
 	for _, m := range []string{coord.MTaskStatus, coord.MRunDispatch, coord.MRunStop, coord.MRunAnswer, coord.MRunOutputPage, coord.MTaskCreate,
 		coord.MTaskStart, coord.MTaskMerge, coord.MTaskMove, coord.MTaskPlanSave, coord.MTaskPlanApply, coord.MTaskGate, coord.MTaskSourceAck,
-		coord.MRunPreview, coord.MAgentList, "machines", "inbox"} {
+		coord.MRunPreview, coord.MAgentList, coord.MTaskMessage, coord.MRunInterrupt, "machines", "inbox", coord.PushAffordances, "affordances part"} {
 		if seen[m] == 0 {
 			t.Errorf("no frame file has %s", m)
 		}

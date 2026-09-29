@@ -12,6 +12,7 @@ import {conversation} from '../core/fold.js';
 import {readPlace, keepPlace} from '../core/follow.js';
 import {link} from '../core/router.js';
 import {unsure} from '../core/commands.js';
+import {code} from '../core/proto.js';
 import {register} from '../core/i18n.js';
 
 register('conversation', {
@@ -103,8 +104,8 @@ export function Conversation({store, commands, toasts, prefs, task, run = '', ta
   }, [shown[0]?.id, outputs.get(shown[0]?.id)]);
   if (!last) return html`<p class="empty">${t('conv.none')}</p>`;
 
-  const failed = e => toasts.show({text: unsure.includes(e.code) ? f('app.unsure', e.code) : e.code === 'route_changed' ? t('conv.routeChanged')
-    : e.code === 'cannot_send' ? f('conv.cannot', e.detail || e.code) : f('app.failed', e.code || String(e.message || e)), tone: 'danger'});
+  const failed = e => toasts.show({text: unsure.includes(e.code) ? f('app.unsure', e.code) : e.code === code.routeChanged ? t('conv.routeChanged')
+    : e.code === code.cannotSend ? f('conv.cannot', e.detail || e.code) : f('app.failed', e.code || String(e.message || e)), tone: 'danger'});
   const send = (method, params, key) => commands.send(method, params, {key}).catch(e => { failed(e); throw e; });
 
   const route = aff.tasks?.[task.id]?.route || null;

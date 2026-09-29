@@ -53,6 +53,8 @@ const conv = readFrames('output-conv');
 const pushed = conv.filter(l => l.s?.method === 'run.output').flatMap(l => l.s.params.events);
 const [r2Early, r1Page] = conv.filter(l => l.s?.type === 'res').map(l => l.s.result.events);
 const both = () => [{run: state.r1, events: r1Page, head: {start: true}}, {run: state.r2, events: [...r2Early, ...pushed], head: null}];
+// p4: a command the run asks leave for, which it may be allowed for the rest of the run
+const asked = readFrames('output-send').find(l => l.s?.method === 'journal').s.params.events[0].data.requests[0];
 const shape = rows => rows.map(r => (r.type === 'step' ? r.step.kind + (r.open ? '+' : '') : r.type));
 
 // Given events by name (the Go test's file), lay each out as output.Items does.
@@ -212,8 +214,7 @@ test('the timeline, the answer form and the composer draw in both forms and both
   for (const want of ['Turn 1', 'Run 2 · continued · mba', 'read 2 files · searched 1 times', 'Plan 1/3', 'Not delivered', 'Follow', 'Pause'].slice(0, 5))
     ok(en.includes(want), `en: no ${want}`);
   ok(en.includes('class="out out-phone"') && en.includes('composer-phone'), 'the phone form');
-  const perm = {id: 'p1', kind: 'permission', tool: 'Bash', summary: 'rm -rf ./out'};
-  const forRun = {...perm, allow_run: true};
+  const forRun = asked, perm = {...asked, allow_run: false};
   for (const f of ['desktop', 'phone']) for (const lang of ['zh', 'en']) styled(drawn(html`<${AnswerForm} req=${forRun} onAnswer=${() => {}} />`, f, lang), `permission ${f}/${lang}`);
   ok(drawn(html`<${AnswerForm} req=${forRun} onAnswer=${() => {}} />`, 'desktop', 'zh').includes('这次运行里这条命令都允许'), 'allow for the run when the request can be');
   ok(!drawn(html`<${AnswerForm} req=${perm} onAnswer=${() => {}} />`, 'desktop', 'zh').includes('这次运行里这条命令都允许'), 'not otherwise');
@@ -226,8 +227,8 @@ test('answers and routes: own words over picks, one press for one question, the 
     {'Which page size?': 'A4', 'Which parts go on the cover?': 'Logo, QR code'}, 'picks');
   eq(answersOf(qs, {'Which page size?': ['A4']}, {'Which page size?': 'A5'}), {'Which page size?': 'A5'}, 'own words win');
   const t = words.t;
-  eq(quickOf(t, {kind: 'permission', tool: 'Bash', allow_run: true}).map(q => q.params), [{allow: true}, {allow: true, decision: 'allow_run'}, {allow: false}], 'a permission');
-  eq(quickOf(t, {kind: 'permission', tool: 'Bash'}).map(q => q.params), [{allow: true}, {allow: false}], 'one the run cannot take for good');
+  eq(quickOf(t, asked).map(q => q.params), [{allow: true}, {allow: true, decision: 'allow_run'}, {allow: false}], 'a permission');
+  eq(quickOf(t, {...asked, allow_run: false}).map(q => q.params), [{allow: true}, {allow: false}], 'one the run cannot take for good');
   eq(quickOf(t, state.r2.requests[0]), [], 'two questions: no one press');
   eq(quickOf(t, {kind: 'question', questions: [{question: 'Q?', options: ['a', 'b']}]}).map(q => q.params.answers), [{'Q?': 'a'}, {'Q?': 'b'}], 'one question');
   eq(modesOf({to: 'run'}, ['steer', 'interrupt']), ['steer', 'after', 'interrupt'], 'a run that takes steering');
@@ -393,6 +394,12 @@ test('the task page\'s conversation: watched, paged back into the run before, th
       await click(buttonOf(root, words.t('conv.interrupt')));
       ok(root.one('.modal').textContent.includes(words.t('conv.confirmInterrupt')), 'asks first');
       await click(root.one('.modal').find('button').find(b => b.className.includes('danger') || b.className.includes('primary')));
+    },
+    async allow() {
+      await settled(); r.flush(); await settled();
+      const form = root.find('.answer').find(x => x.textContent.includes('go test ./internal/receipt/...'));
+      ok(form, 'the command asked about has its form');
+      await click(form.find('button').find(b => b.textContent.includes(words.t('ans.allowRun'))));
     },
     async done() { await settled(); },
   });
