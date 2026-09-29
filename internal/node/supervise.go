@@ -614,19 +614,20 @@ func closeAll(fs []*os.File) {
 }
 
 // copyOut writes the agent's stdout to the log and reads it as it goes: codex's thread id, the final message, errors
-// and denied permissions; a line longer than the buffer goes to the log in pieces and is not read. Claude's answer to
-// initialize stays out of the log.
+// and denied permissions; a line longer than the buffer goes to the log in pieces and is not read. What says who is
+// signed in stays out of the log (scrub).
 func (s *sup) copyOut(r io.Reader, w io.Writer) {
 	br := bufio.NewReaderSize(r, 64<<10)
 	piece, drop := false, false
 	for {
 		line, err := br.ReadSlice('\n')
 		full := err == nil && !piece
+		logged := line
 		if !piece {
-			drop = initAnswer(line, full)
+			logged, drop = scrub(line, full)
 		}
 		if len(line) > 0 && !drop {
-			w.Write(line)
+			w.Write(logged)
 			if full {
 				s.line(line)
 			}
@@ -638,23 +639,44 @@ func (s *sup) copyOut(r io.Reader, w io.Writer) {
 	}
 }
 
-// initAnswer tells claude's control_response to the initialize request, which carries the
-// signed-in account: from the whole line, or from the first piece of a longer one, where a quote inside a JSON string
-// is always escaped.
-func initAnswer(line []byte, full bool) bool {
-	if !bytes.Contains(line, []byte(`"control_response"`)) || !bytes.Contains(line, []byte(`"request_id":"`+initRequest+`"`)) {
-		return false
+// scrub is a line of the agent's output as the log keeps it, or drop: claude's answer to initialize (the account)
+// and codex's rate limits (the plan and its use) are dropped, codex's home directory is cut from its answer to
+// initialize. A line longer than the buffer is told from its first piece, where a quote inside a JSON string is always
+// escaped.
+func scrub(line []byte, full bool) (logged []byte, drop bool) {
+	claudeInit := bytes.Contains(line, []byte(`"control_response"`)) && bytes.Contains(line, []byte(`"request_id":"`+initRequest+`"`))
+	limits := bytes.Contains(line, []byte(`"method":"account/rateLimits/updated"`))
+	home := bytes.Contains(line, []byte(`"codexHome"`))
+	if !claudeInit && !limits && !home {
+		return line, false
 	}
 	if !full {
-		return bytes.Contains(line, []byte(`"type":"control_response"`))
+		return line, claudeInit && bytes.Contains(line, []byte(`"type":"control_response"`)) || limits
 	}
 	var m struct {
 		Type     string `json:"type"`
+		Method   string `json:"method"`
 		Response struct {
 			RequestID string `json:"request_id"`
 		} `json:"response"`
+		ID     json.RawMessage            `json:"id"`
+		Result map[string]json.RawMessage `json:"result"`
 	}
-	return json.Unmarshal(line, &m) == nil && m.Type == "control_response" && m.Response.RequestID == initRequest
+	if json.Unmarshal(line, &m) != nil {
+		return line, false
+	}
+	switch {
+	case m.Type == "control_response" && m.Response.RequestID == initRequest, m.Method == "account/rateLimits/updated":
+		return nil, true
+	case m.Type == "" && m.Method == "" && m.ID != nil && m.Result["codexHome"] != nil:
+		delete(m.Result, "codexHome")
+		b, err := json.Marshal(map[string]any{"id": m.ID, "result": m.Result})
+		if err != nil {
+			return nil, true
+		}
+		return append(b, '\n'), false
+	}
+	return line, false
 }
 
 // event is the part of a claude stream-json or codex exec --json line the supervisor reads.

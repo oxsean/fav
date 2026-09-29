@@ -16,7 +16,7 @@ func newProto(s *sup) proto {
 	return claudeProto{s}
 }
 
-// initRequest is the id of the initialize request; its answer carries the signed-in account (initAnswer).
+// initRequest is the id of the initialize request; its answer carries the signed-in account (scrub).
 const initRequest = "init"
 
 // claudeProto is claude's stream-json: user messages in, control requests (can_use_tool) out and answered with

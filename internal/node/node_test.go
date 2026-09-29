@@ -243,18 +243,23 @@ func TestAVeryLongLineIsLoggedInPieces(t *testing.T) {
 	}
 }
 
-func TestClaudesInitializeAnswerStaysOutOfTheLog(t *testing.T) {
+func TestTheAgentsAccountStaysOutOfTheLog(t *testing.T) {
 	account := `"account":{"email":"someone@example.com","organization":"Example"}`
 	short := `{"type":"control_response","response":{"subtype":"success","request_id":"init","response":{` + account + `}}}`
 	long := `{"type":"control_response","response":{"subtype":"success","request_id":"init","response":{` + account +
 		`,"commands":"` + strings.Repeat("x", 200<<10) + `"}}}`
 	other := `{"type":"control_response","response":{"subtype":"success","request_id":"stop","response":{}}}`
-	said := `{"type":"assistant","message":{"content":[{"type":"text","text":"the log says \"request_id\":\"init\""}]}}`
+	said := `{"type":"assistant","message":{"content":[{"type":"text","text":"the log says \"request_id\":\"init\" and \"codexHome\""}]}}`
+	limits := `{"method":"account/rateLimits/updated","params":{"rateLimits":{"limitId":"codex","primary":{"usedPercent":18},"planType":"pro"}}}`
+	longLimits := `{"method":"account/rateLimits/updated","params":{"rateLimits":{"planType":"pro","x":"` + strings.Repeat("y", 200<<10) + `"}}}`
+	home := `{"id":1,"result":{"userAgent":"tend/0.155.1","codexHome":"/home/someone/.codex","platformFamily":"unix"}}`
+	started := `{"method":"thread/started","params":{"thread":{"id":"th-1"}}}`
 	var out strings.Builder
 	s := &sup{dir: t.TempDir()}
-	s.copyOut(strings.NewReader(short+"\n"+long+"\n"+other+"\n"+said+"\n"), &out)
-	if want := other + "\n" + said + "\n"; out.String() != want {
-		t.Fatalf("logged %d bytes: %.300q", out.Len(), out.String())
+	s.copyOut(strings.NewReader(strings.Join([]string{short, long, other, said, limits, longLimits, home, started}, "\n")+"\n"), &out)
+	want := other + "\n" + said + "\n" + `{"id":1,"result":{"platformFamily":"unix","userAgent":"tend/0.155.1"}}` + "\n" + started + "\n"
+	if out.String() != want {
+		t.Fatalf("logged %d bytes: %.600q", out.Len(), out.String())
 	}
 }
 
