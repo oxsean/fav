@@ -132,11 +132,13 @@ function Facts({store, run, now, onTask}) {
 }
 
 // RunPage is one run: its output (the conversation it is in, at this run), its changes and its facts. tab and onTab
-// pick the pane; onStop asks to stop it; onClose leaves it (a desktop; a phone's drawer has its own).
-export function RunPage({store, commands, toasts, prefs, copy, changes, run, now, tab = 'output', onTab, onTask, onStop, onClose, target = ''}) {
+// pick the pane; onStop asks to stop it, onAbandon to abandon it once its machine lost it; onClose leaves it (a desktop;
+// a phone's drawer has its own).
+export function RunPage({store, commands, toasts, prefs, copy, changes, run, now, tab = 'output', onTab, onTask, onStop, onAbandon, onClose, target = ''}) {
   const w = useWords();
   const {t, f} = w;
   const phone = usePhone();
+  const aff = useSignalValue(store.affordances);
   const task = store.state.tasks[run.task];
   const tabs = ['output', ...(changes ? ['changes'] : []), 'facts'].map(id => ({id, label: t('runs.tab.' + id)}));
   const open = sel.openStates.includes(run.state);
@@ -144,12 +146,15 @@ export function RunPage({store, commands, toasts, prefs, copy, changes, run, now
     : tab === 'facts' ? html`<div class="run-scroll"><${Facts} store=${store} run=${run} now=${now} onTask=${onTask} /></div>`
     : task && prefs ? html`<${Conversation} store=${store} commands=${commands} toasts=${toasts} prefs=${prefs} task=${task} run=${run.id} target=${target} copy=${copy} />`
     : html`<p class="empty">${t('runs.noTask')}</p>`;
-  const stop = open && onStop && html`<${Button} kind="danger" keyName=${phone ? '' : 'x'} disabled=${commands.state('run:' + run.id) === 'pending'} onClick=${() => onStop(run)}>${t('home.stop')}<//>`;
+  const busy = commands.state('run:' + run.id) === 'pending';
+  const abandon = run.state === 'unknown' && onAbandon && (aff.runs?.[run.id] || []).includes('abandon')
+    && html`<${Button} kind="danger" disabled=${busy} onClick=${() => onAbandon(run)}>${t('do.abandon')}<//>`;
+  const stop = open && onStop && html`<${Button} kind="danger" keyName=${phone ? '' : 'x'} disabled=${busy} onClick=${() => onStop(run)}>${t('home.stop')}<//>`;
   if (phone) {
     return html`<article class="run run-phone" aria-label=${run.id}>
       <div class="run-tabs"><${Segmented} label=${t('runs.tabs')} value=${tab} onChange=${onTab} options=${tabs.map(x => ({value: x.id, label: x.label}))} /></div>
       <div class="run-pane">${pane}</div>
-      ${(stop || task) && html`<div class="run-acts">${stop}${task && html`<${Button} onClick=${() => onTask(run)}>${t('runs.inTask')}<//>`}</div>`}
+      ${(stop || task) && html`<div class="run-acts">${stop}${abandon}${task && html`<${Button} onClick=${() => onTask(run)}>${t('runs.inTask')}<//>`}</div>`}
     </article>`;
   }
   return html`<article class="run det-out" aria-label=${run.id}>
@@ -157,7 +162,7 @@ export function RunPage({store, commands, toasts, prefs, copy, changes, run, now
       <${Status} state=${run.state} word />
       <h2 class="det-bar-title ell" title=${f('runs.of', run.id, task?.title || run.task)}><span class="mono">${run.id}</span> · ${task?.title || run.task}</h2>
       <${Tabs} label=${t('runs.tabs')} value=${tab} onChange=${onTab} idPrefix=${'run-' + run.id} tabs=${tabs} />
-      <span class="det-bar-acts">${stop}${task && html`<${Button} onClick=${() => onTask(run)}>${t('runs.inTask')}<//>`}
+      <span class="det-bar-acts">${stop}${abandon}${task && html`<${Button} onClick=${() => onTask(run)}>${t('runs.inTask')}<//>`}
         ${onClose && html`<${Button} kind="quiet" icon="close" label=${t('ui.close')} onClick=${onClose} />`}</span>
     </header>
     <div class="det-pane" role="tabpanel" id=${'run-' + run.id + '-' + tab + '-pane'}>${pane}</div>
@@ -191,6 +196,8 @@ export function Runs({store, commands, toasts, router, prefs, copy, changes, sto
   const failed = e => toasts.show({text: unsure.includes(e.code) ? f('app.unsure', e.code) : f('app.failed', e.code || String(e.message || e)), tone: 'danger'});
   const askStop = r => setConfirm({title: t('home.confirmStop'), note: f('home.confirmStopNote', st.tasks[r.task]?.title || r.task, r.machine), label: t('home.stop'),
     go: () => commands.send('run.stop', {id: r.id}, {key: 'run:' + r.id}).then(() => toasts.show({text: f('runs.stopped', r.id)}), failed)});
+  const askAbandon = r => setConfirm({title: t('confirm.abandon'), note: f('confirm.abandonNote', r.machine), label: t('do.abandon'),
+    go: () => commands.send('run.abandon', {id: r.id}, {key: 'run:' + r.id}).then(() => toasts.show({text: f('toast.abandoned', st.tasks[r.task]?.title || r.task)}), failed)});
   const target = opened || st.runs[sel0];
   useActions('page', {
     stop: {run: () => target && askStop(target), when: () => !!target && sel.openStates.includes(target.state) && commands.state('run:' + target.id) !== 'pending'},
@@ -223,7 +230,7 @@ export function Runs({store, commands, toasts, router, prefs, copy, changes, sto
   const dialog = confirm && html`<${Modal} title=${confirm.title} onClose=${() => setConfirm(null)} actions=${[{label: t('confirm.keep'), onClick: () => setConfirm(null)},
     {label: confirm.label, kind: 'primary', keyName: 'Mod+Enter', onClick: () => { const c = confirm; setConfirm(null); c.go(); }}]}><p>${confirm.note}</p><//>`;
   const page = r => html`<${RunPage} store=${store} commands=${commands} toasts=${toasts} prefs=${prefs} copy=${copy} changes=${changes} run=${r} now=${at}
-    tab=${tab} onTab=${setTab} onTask=${toTask} onStop=${askStop} onClose=${phone ? null : closeRun} />`;
+    tab=${tab} onTab=${setTab} onTask=${toTask} onStop=${askStop} onAbandon=${askAbandon} onClose=${phone ? null : closeRun} />`;
 
   if (phone) {
     const i = opened ? ids.indexOf(opened.id) : -1;

@@ -290,8 +290,8 @@ export function planCheck(plan) {
 }
 
 // pageActs are the task actions the page draws, in its order: the coordinator's (task.Act*), sendBack (its last run's
-// continue) and copy, which is the page's own.
-const pageActs = ['pass', 'rework', 'ack', 'keep', 'merge', 'sendBack', 'done', 'dispatch', 'start', 'stop', 'review', 'plan', 'backlog',
+// continue), abandon (its open run's, once that run's machine lost it) and copy, which is the page's own.
+const pageActs = ['pass', 'rework', 'ack', 'keep', 'merge', 'sendBack', 'done', 'dispatch', 'start', 'stop', 'abandon', 'review', 'plan', 'backlog',
   'reopen', 'edit', 'move', 'child', 'copy', 'cancel'];
 
 // actionsOf is what the page offers for task: {primary, more}, ids of pageActs. Which may be done is only what the
@@ -301,12 +301,14 @@ export function actionsOf(state, aff, task) {
   const given = new Set(aff?.tasks?.[task.id]?.actions || []);
   const last = runsOf(state, task.id)[0];
   if (!task.flow && last && (aff?.runs?.[last.id] || []).includes('continue')) given.add('sendBack');
+  const open = openRun(state, task.id);
+  if (open?.state === 'unknown' && (aff?.runs?.[open.id] || []).includes('abandon')) given.add('abandon');
   given.add('copy');
   const sit = situation(state, task);
   const want = [
     [finished(task.status), 'reopen'],
     [task.status === 'backlog', 'start'],
-    [!!openRun(state, task.id), 'stop'],
+    [!!open, 'stop'],
     [sit.reason === 'draft', 'review'],
     [!!task.flow && sit.reason === 'accept', 'pass'],
     [sit.reason === 'source_changed', 'ack'],

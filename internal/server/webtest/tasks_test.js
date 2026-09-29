@@ -122,6 +122,12 @@ test('what can be done with each task: only what the affordances give, the prima
   eq(tk.actionsOf(st, {runs: {}, tasks: {}}, st.tasks.q9), {primary: '', more: ['copy']}, 'no affordances: only what the page does itself');
   eq(tk.actionsOf(st, {runs: {}, tasks: {q9: {actions: ['edit', 'done']}}}, st.tasks.q9), {primary: '', more: ['done', 'edit', 'copy']},
     'the one its situation asks for is not given: no primary, nothing in its place');
+  const open = tk.openRun(st, 'q3'), given = {...aff, runs: {...aff.runs, [open.id]: ['stop', 'abandon']}};
+  eq(tk.actionsOf(st, given, st.tasks.q3).more.includes('abandon'), false, 'a running run is stopped, not abandoned');
+  const lost = {...st, runs: {...st.runs, [open.id]: {...open, state: 'unknown'}}};
+  const lostActs = tk.actionsOf(lost, given, st.tasks.q3);
+  eq([lostActs.primary, lostActs.more.includes('abandon')], ['stop', true], 'a lost run may be abandoned; stopping it stays the primary');
+  eq(tk.actionsOf(lost, {...aff, runs: {...aff.runs, [open.id]: ['stop']}}, st.tasks.q3).more.includes('abandon'), false, 'not when its affordances leave it out');
 });
 
 await run();

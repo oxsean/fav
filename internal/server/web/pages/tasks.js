@@ -95,6 +95,8 @@ export function Tasks({store, commands, toasts, wire, router, session, clock = (
       case 'start': return quiet(send('task.start', {id: task.id}, 'task:' + task.id).then(() => toasts.show({text: f('toast.started', task.title)})));
       case 'stop': return run && setModal({kind: 'confirm', title: t('home.confirmStop'), note: f('home.confirmStopNote', task.title, run.machine), label: t('home.stop'),
         go: () => quiet(send('run.stop', {id: run.id}, 'run:' + run.id).then(() => toasts.show({text: f('toast.stopping', task.title)})))});
+      case 'abandon': return run && setModal({kind: 'confirm', title: t('confirm.abandon'), note: f('confirm.abandonNote', run.machine), label: t('do.abandon'),
+        go: () => quiet(send('run.abandon', {id: run.id}, 'run:' + run.id).then(() => toasts.show({text: f('toast.abandoned', task.title)})))});
       case 'review': return open({kind: 'plan', task});
       case 'pass': return setModal({kind: 'confirm', title: f('gate.confirmPass', task.title), note: t('gate.passNote'), label: t('gate.pass'),
         go: () => quiet(send('task.gate', {id: task.id, pass: true, expected_rev: task.rev}, 'task:' + task.id).then(() => toasts.show({text: f('toast.passed', task.title)})))});

@@ -92,7 +92,7 @@ export function Task({store, task, now, busy = false, offline = false, onAct, on
   const panes = ['overview', 'output', ...(changes ? ['changes'] : [])];
   const shown = tabs && panes.includes(pane) ? pane : 'overview';
   const close = onClose && html`<${Button} kind="quiet" icon="close" label=${t('ui.close')} onClick=${onClose} />`;
-  const menu = ids => ids.length > 0 && html`<${Menu} label=${t('do.more')} disabled=${grey} items=${ids.map(id => ({label: actLabel(w, id, sit), kind: id === 'cancel' ? 'danger' : '', onClick: () => onAct(id, task)}))} />`;
+  const menu = ids => ids.length > 0 && html`<${Menu} label=${t('do.more')} disabled=${grey} items=${ids.map(id => ({label: actLabel(w, id, sit), kind: id === 'cancel' || id === 'abandon' ? 'danger' : '', onClick: () => onAct(id, task)}))} />`;
   const tabBar = tabs && html`<${Tabs} label=${task.title} value=${shown} onChange=${onPane} idPrefix=${'det-' + task.id}
       tabs=${[{id: 'overview', label: t('det.overview')}, {id: 'output', label: t('det.output'), count: runs.length},
         ...(changes ? [{id: 'changes', label: t('det.changes')}] : [])]} />`;
