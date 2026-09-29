@@ -58,6 +58,15 @@ func readOnly(p *tend.AgentProfile) {
 	}
 }
 
+// reviewer is readOnly for a review run; on a throwaway copy (copy) a codex reviewer may write it, so it can build and
+// run the tests, which its read-only sandbox refuses.
+func reviewer(p *tend.AgentProfile, copy bool) {
+	readOnly(p)
+	if copy && p.Provider == tend.ProviderCodex {
+		p.Permission = "workspace-write"
+	}
+}
+
 // finish is what ends t's work: done, or first a merge of its branch into its parent's. The caller holds mu.
 func (c *Coord) finish(t *task.Task) []journal.Event {
 	if !c.st.NeedsMerge(t) {

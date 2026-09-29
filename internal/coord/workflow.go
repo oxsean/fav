@@ -122,7 +122,7 @@ func (c *Coord) stagePlan(who Principal, t *task.Task) (task.Run, error) {
 		run.Work.ReadOnly, run.Work.Setup = true, nil
 	}
 	if st.Role == "review" {
-		readOnly(&run.Profile)
+		reviewer(&run.Profile, run.Work != nil && run.Work.ReadOnly)
 	}
 	if pr := c.st.Projects[t.Project]; st.Check && pr != nil && len(pr.Hooks["check"]) > 0 {
 		run.Check = pr.Hooks["check"]

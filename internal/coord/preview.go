@@ -311,13 +311,16 @@ func (c *Coord) runContinue(who Principal, r *wire.Request) (string, []journal.E
 		run := task.Run{ID: node.NewRunID(), Task: prev.Task, Machine: prev.Machine, Agent: firstOf(p.Agent, prev.Agent), Profile: prof,
 			Dir: prev.Dir, From: prev.Machine, Brief: p.Text, Title: prev.Title, Runner: node.RunnerBackground, Resume: prev.Session,
 			Parent: prev.ID, Project: runTask(c.st, prev).Project, Dispatcher: who.User}
-		if t := runTask(c.st, prev); t.Flow != nil { // it goes on in the task's stage
-			run.Stage, run.Judge, run.Check = t.Stage, prev.Judge, prev.Check
-		}
 		if w := prev.Work; w != nil && w.Merge == "" { // in the same worktree (a read-only copy is made anew)
 			cp := *w
 			cp.Setup = nil
 			run.Work = &cp
+		}
+		if t := runTask(c.st, prev); t.Flow != nil { // it goes on in the task's stage
+			run.Stage, run.Judge, run.Check = t.Stage, prev.Judge, prev.Check
+			if st := t.Flow.StageOf(t.Stage); st != nil && st.Role == "review" {
+				reviewer(&run.Profile, run.Work != nil && run.Work.ReadOnly)
+			}
 		}
 		if prev.Planner {
 			run.Stage, run.Planner = task.StagePlan, true

@@ -94,7 +94,8 @@ func TestARequirementsPushedBranchBecomesOnePullRequest(t *testing.T) {
 				t.Fatalf("one pull request: %+v", pulls)
 			}
 			for _, p := range pulls {
-				if p.Head != task.BranchOf(x.ID) || p.Base != "main" || p.Title != "Export CSV" || !strings.Contains(p.Body, "#1") {
+				if p.Head != task.BranchOf(x.ID) || p.Base != "main" || p.Title != "Export CSV" || !strings.HasPrefix(p.Body, "For #1.") ||
+					!strings.Contains(p.Body, "from `"+task.BranchOf(x.ID)+"`") {
 					t.Fatalf("from the task's branch into the default branch, for the issue: %+v", p)
 				}
 			}

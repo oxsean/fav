@@ -449,7 +449,8 @@ issue it was made for.
 **Branches.** Mark a project's repository `worktrees` and each task works on its own branch, `tend/<task>`, in a
 worktree beside the checkout (`<checkout>-wt/<task>`); your own checkout is left alone. The project's `hooks.setup` runs
 once a worktree is made, and `hooks.before_run` in it before every run (a failing one fails the run). Whatever the agent leaves uncommitted is committed for it; a review or test runs on a read-only
-copy of the branch that is thrown away after (the run says how many files it changed there). Subtasks start from their
+copy of the branch that is thrown away after (the run says how many files it changed there); a codex reviewer may
+write that copy, so it can build and run the tests, while a claude reviewer has no edit tools. Subtasks start from their
 parent's branch and run side by side; each one done is merged into its parent's branch before it counts as done, so a
 task that comes after another starts with that work in. A merge that conflicts is undone and waits: merge it yourself in
 the parent's worktree, then `tend task merge <id>` (or **Merge again**). A top-level task done is **ready to merge**:

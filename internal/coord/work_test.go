@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -153,5 +154,25 @@ func TestAReviewLooksAtACopyOfTheBranch(t *testing.T) {
 	st = e.until("done", status(x.ID, task.StatusDone))
 	if st.Tasks[x.ID].Merged || st.Tasks[x.ID].Branch != "tend/"+x.ID {
 		t.Fatalf("a task without a parent keeps its branch for someone to merge: %+v", st.Tasks[x.ID])
+	}
+}
+
+func TestAReviewerOnACopyMayBuildButNeverEdits(t *testing.T) {
+	for _, c := range []struct {
+		provider, permission string
+		copy                 bool
+		want                 string
+		deny                 bool
+	}{
+		{tend.ProviderCodex, "danger-full-access", true, "workspace-write", false},
+		{tend.ProviderCodex, "danger-full-access", false, "read-only", false},
+		{tend.ProviderCodex, "", true, "workspace-write", false},
+		{tend.ProviderClaude, "acceptEdits", true, "acceptEdits", true},
+	} {
+		p := tend.AgentProfile{Provider: c.provider, Permission: c.permission}
+		reviewer(&p, c.copy)
+		if p.Permission != c.want || (c.deny && !slices.Contains(p.Deny, "Edit")) {
+			t.Errorf("%+v: %+v", c, p)
+		}
 	}
 }

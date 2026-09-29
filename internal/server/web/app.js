@@ -431,6 +431,11 @@ function renderTaskList() {
   const rows=filteredTasks();if(!rows.some(task=>task.id===ui.focusTask))ui.focusTask=rows[0]?.id||'';
   el.innerHTML=renderRows();document.querySelector('#result-count').textContent=`${rows.length} ${t('results')}`;
 }
+// nameOf is a user's name; the server host's own user (id local) is named in the viewer's language.
+const nameOf=u=>u.id==='local'?t('localUser'):u.name;
+const projectOf=task=>task.project?ui.state.projects?.[task.project]:null;
+// inherited is a task's own setting, else its project's default, marked as such.
+const inherited=(own,fromProject)=>own?esc(own):fromProject?`${esc(fromProject)} <span class="muted">· ${t('projectDefault')}</span>`:t('unspecified');
 function renderDetail() {
   const el=document.querySelector('#task-detail');if(!el)return;
   toURL();
@@ -441,7 +446,7 @@ function renderDetail() {
   el.innerHTML=`${button('back-tasks',`${icon('back')}${t('backTasks')}`,'','mobile-back')}<div class="detail-eyebrow"><span class="mono">${task.id}</span><span>·</span>${badge(task.status)}<span>· rev ${task.rev}</span></div>
     <div class="detail-header"><h2>${esc(task.title)}</h2><div class="detail-actions">${button('edit',`${icon('edit')}${t('edit')}`,writeDisabled)}${button('dispatch',`${icon('play')}${t('dispatch')}`,writeDisabled,'primary')}</div></div>
     <div class="task-actions">${task.flow&&openTask(task)?'':button(openTask(task)?'done':'reopen',`${icon(openTask(task)?'check':'refresh')}${t(openTask(task)?'markDone':'reopen')}`,writeDisabled,'quiet')}${task.status!=='canceled'?button('cancel-task',t('cancelTask'),writeDisabled,'quiet'):''}</div>${Tree.detail(task)}
-    <div class="metadata"><div><span class="meta-label">${t('directory')}</span><code class="meta-value">${esc(task.dir||'—')}</code></div><div><span class="meta-label">${t('defaultMachine')}</span><span class="meta-value mono">${esc(task.machine||t('unspecified'))}</span></div><div><span class="meta-label">${t('defaultAgent')}</span><span class="meta-value mono">${esc(task.agent||t('unspecified'))}</span></div>${usageText(runUsage(task.id))?`<div><span class="meta-label">${t('taskUsage')}</span><span class="meta-value">${usageText(runUsage(task.id))}${byProvider(task.id)}</span></div>`:''}</div>
+    <div class="metadata"><div><span class="meta-label">${t('directory')}</span><code class="meta-value">${esc(task.dir||'—')}</code></div><div><span class="meta-label">${t('defaultMachine')}</span><span class="meta-value mono">${inherited(task.machine,projectOf(task)?.defaults?.machine)}</span></div><div><span class="meta-label">${t('defaultAgent')}</span><span class="meta-value mono">${inherited(task.agent,projectOf(task)?.defaults?.agent||projectOf(task)?.defaults?.roles?.implement)}</span></div>${usageText(runUsage(task.id))?`<div><span class="meta-label">${t('taskUsage')}</span><span class="meta-value">${usageText(runUsage(task.id))}${byProvider(task.id)}</span></div>`:''}</div>
     <div class="tabs" role="tablist" aria-label="${t('viewDetails')}">${['output','conversation','brief','history'].map(tab=>`<button class="tab ${ui.tab===tab?'active':''}" role="tab" id="tab-${tab}" aria-selected="${ui.tab===tab}" aria-controls="detail-body" tabindex="${ui.tab===tab?'0':'-1'}" data-action="tab" data-tab="${tab}">${t(tab)}${tab==='history'?`<span class="count">${runs.length}</span>`:''}</button>`).join('')}</div>
     <div id="detail-body" role="tabpanel" aria-labelledby="tab-${ui.tab}"></div>`;
   const body=document.querySelector('#detail-body');
@@ -454,7 +459,7 @@ function renderDetail() {
     ${run.state==='unknown'?`<div class="run-alert">${t('unknownReason')} ${run.reason==='supervisor_gone'?t('reasonSupervisor'):t('reasonMissing')} · <code>${esc(run.reason)}</code></div>`:run.want==='stop'&&!terminal?`<div class="run-alert">${t('pendingStop')}</div>`:''}
     ${runFacts(run,terminal,writeDisabled)}
     ${ui.tab==='conversation'?renderChatPanel(run):renderOutputPanel(run)}
-    <details class="history-note"><summary>${t('snapshot')} · ${esc(run.id)}</summary><p class="hint mt-10">${t('frozenDir')} <code>${esc(run.dir)}</code><br>${t('profileModel')}: ${esc(run.profile?.model||'—')} · ${t('permissions')}: ${esc(run.profile?.permission||'—')}</p><article class="brief">${markdown(run.brief)}</article></details>`;
+    <details class="history-note"><summary>${t('snapshot')} · ${esc(run.id)}</summary><p class="hint mt-10">${t('frozenDir')} <code>${esc(run.worked?.dir||run.dir)}</code><br>${t('profileModel')}: ${esc(run.profile?.model||'—')} · ${t('permissions')}: ${esc(run.profile?.permission||'—')}</p><article class="brief">${markdown(run.brief)}</article></details>`;
   if(typing){const r=document.querySelector('#reply-text');if(r){r.focus();r.setSelectionRange(r.value.length,r.value.length);}}
   bindOutputScroll();
 }
@@ -711,7 +716,7 @@ async function login(token) {
 }
 // enter shows the workspace of the session the browser holds.
 async function enter() {
-  const who=await api.session();ui.who=who?.name||'';ui.me=who;Team.afterSignIn();
+  const who=await api.session();ui.who=who?nameOf(who):'';ui.me=who;Team.afterSignIn();
   fromURL();
   ui.authenticated=true;ui.online=true;ui.loggedOut=false;ui.loading=true;renderShell();await refreshData();
 }

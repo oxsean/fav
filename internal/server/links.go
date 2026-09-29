@@ -42,8 +42,8 @@ func (s *Syncer) links(ctx context.Context, x store.Tracker, tr tracker.Tracker,
 		id, title, brief string
 	}
 	type pull struct {
-		row               store.TrackerIssue
-		head, base, title string
+		row                     store.TrackerIssue
+		head, base, title, body string
 	}
 	var kids []kid
 	var pulls []pull
@@ -68,7 +68,7 @@ func (s *Syncer) links(ctx context.Context, x store.Tracker, tr tracker.Tracker,
 			}
 			if set.PR && r.Parent == 0 && r.PR == "" {
 				if head, base, ok := s.branch(st, t); ok {
-					pulls = append(pulls, pull{row: r, head: head, base: base, title: t.Title})
+					pulls = append(pulls, pull{row: r, head: head, base: base, title: t.Title, body: pullBody(st, t, r.Number, head, set.Detail)})
 				}
 			}
 		}
@@ -88,7 +88,7 @@ func (s *Syncer) links(ctx context.Context, x store.Tracker, tr tracker.Tracker,
 		if s.waiting(x, p.row.Number) {
 			continue
 		}
-		if err := s.pullRequest(ctx, x, tr, p.row, p.head, p.base, p.title); err != nil {
+		if err := s.pullRequest(ctx, x, tr, p.row, p.head, p.base, p.title, p.body); err != nil {
 			if isStop(err) {
 				return err
 			}
@@ -166,9 +166,35 @@ func (s *Syncer) subIssue(ctx context.Context, x store.Tracker, tr tracker.Track
 	return s.link(ctx, task.Linked{ID: id, Issue: made.URL})
 }
 
+// pullBody is the description of the pull request for requirement t, issue number: its acceptance criteria and, when
+// the binding lists them (detail), its subtasks.
+func pullBody(st *task.State, t *task.Task, number int64, head string, detail bool) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "For #%d.\n", number)
+	if len(t.Accept) > 0 {
+		b.WriteString("\nAcceptance:\n")
+		for _, a := range t.Accept {
+			b.WriteString("- " + oneLine(a) + "\n")
+		}
+	}
+	if detail {
+		var kids []string
+		for _, k := range st.Subtree(t.ID)[1:] {
+			if len(st.Children(k.ID)) == 0 {
+				kids = append(kids, "- "+oneLine(k.Title))
+			}
+		}
+		if len(kids) > 0 {
+			b.WriteString("\nSubtasks:\n" + strings.Join(kids, "\n") + "\n")
+		}
+	}
+	fmt.Fprintf(&b, "\nOpened by tend from `%s`; the progress comment on #%d follows the work.\n", head, number)
+	return b.String()
+}
+
 // pullRequest opens a pull request from head into base (default: the repository's default branch) for row's
 // requirement, or takes the one already open from head.
-func (s *Syncer) pullRequest(ctx context.Context, x store.Tracker, tr tracker.Tracker, row store.TrackerIssue, head, base, title string) error {
+func (s *Syncer) pullRequest(ctx context.Context, x store.Tracker, tr tracker.Tracker, row store.TrackerIssue, head, base, title, body string) error {
 	pr, err := tr.PullRequest(ctx, head)
 	if errors.Is(err, tracker.ErrNotFound) {
 		if base == "" {
@@ -178,7 +204,7 @@ func (s *Syncer) pullRequest(ctx context.Context, x store.Tracker, tr tracker.Tr
 			}
 			base = repo.DefaultBranch
 		}
-		pr, err = tr.OpenPullRequest(ctx, head, base, title, fmt.Sprintf("For #%d, from tend.\n", row.Number))
+		pr, err = tr.OpenPullRequest(ctx, head, base, title, body)
 	}
 	if err != nil {
 		return err

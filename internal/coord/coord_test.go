@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"slices"
@@ -85,7 +86,7 @@ func newEnv(t *testing.T, cfg tend.Config) *env {
 		tend.AgentProfile{Name: "slow", Provider: agent.ProviderFake, Args: []string{"--steps", "1", "--every", "50ms", "--ask"}})
 	e.cfg = cfg
 	t.Cleanup(e.stop)
-	t.Cleanup(func() { killRuns(e.home) })
+	t.Cleanup(func() { killRuns(e.home); clearRuns(e.home) })
 	return e
 }
 
@@ -95,7 +96,7 @@ func killRuns(home string) {
 	var killed []int
 	for _, d := range dirs {
 		var st node.State
-		if b, err := os.ReadFile(filepath.Join(d, "state.json")); err == nil && json.Unmarshal(b, &st) == nil {
+		if b, err := readState(filepath.Join(d, "state.json")); err == nil && json.Unmarshal(b, &st) == nil {
 			for _, pid := range []int{st.Pid, st.Sup} {
 				if pid > 0 {
 					proc.KillPID(pid)
@@ -108,6 +109,26 @@ func killRuns(home string) {
 		if !slices.ContainsFunc(killed, proc.Alive) {
 			return
 		}
+	}
+}
+
+// readState reads a run's state.json, which a supervisor may be replacing right then (⚠️ Windows refuses to open it
+// mid-rename).
+func readState(path string) (b []byte, err error) {
+	for range 20 {
+		if b, err = os.ReadFile(path); err == nil || errors.Is(err, fs.ErrNotExist) {
+			return b, err
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	return b, err
+}
+
+// clearRuns removes the run directories before the test's temporary directory goes: ⚠️ on Windows a process that just
+// ended still holds its files for a moment.
+func clearRuns(home string) {
+	dir := filepath.Join(home, "node", "runs")
+	for deadline := time.Now().Add(10 * time.Second); os.RemoveAll(dir) != nil && time.Now().Before(deadline); time.Sleep(50 * time.Millisecond) {
 	}
 }
 
@@ -325,7 +346,7 @@ type far struct {
 
 func newFar(t *testing.T) *far {
 	f := &far{home: t.TempDir()}
-	t.Cleanup(func() { killRuns(f.home) })
+	t.Cleanup(func() { killRuns(f.home); clearRuns(f.home) })
 	return f
 }
 

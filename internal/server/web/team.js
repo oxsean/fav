@@ -59,7 +59,7 @@ const teamWords = {
   'signin.disabled': ['这个用户已被停用。', 'This user is disabled.'],
   'signin.linked': ['这个账号已经属于另一个用户。', 'This account already belongs to another user.'],
   'signin.internal': ['服务器出错，请稍后再试。', 'The server failed. Try again later.'],
-  exists: ['名字已被占用。', 'That name is taken.'], name: ['名字不合法。', 'That name is not valid.'], self: ['不能改自己。', 'You cannot change yourself.'],
+  localUser: ['服务器管理员', 'Server admin'], exists: ['名字已被占用。', 'That name is taken.'], name: ['名字不合法。', 'That name is not valid.'], self: ['不能改自己。', 'You cannot change yourself.'],
   csrf: ['请求被拒绝，请刷新页面。', 'The request was refused. Reload the page.'], forbidden: ['你没有这个权限。', 'You are not allowed to do that.'],
   projectDir: ['代码目录', 'Checkout'], projectDirHint: ['可选：选一台机器上的目录，项目的任务在那里运行。', 'Optional: a directory on a machine where the project\'s tasks run.'],
   dirMachine: ['机器', 'Machine'], noDir: ['不选', 'None'], dirUp: ['上一级', 'Up'], dirRoots: ['可用目录', 'Allowed directories'],
@@ -89,7 +89,7 @@ const Team = (() => {
     return v;
   }
   const isAdmin = () => ui.me?.role === 'admin';
-  const userName = id => { const u = data.users.find(x => x.id === id); return u ? u.name : id === ui.me?.id ? ui.me.name : id; };
+  const userName = id => { const u = data.users.find(x => x.id === id); return u ? nameOf(u) : id === ui.me?.id ? nameOf(ui.me) : id; };
   const fromHash = prefix => location.hash.startsWith('#' + prefix) ? decodeURIComponent(location.hash.slice(prefix.length + 1)) : '';
   const when = v => v && !v.startsWith('0001') ? date(v) : '—';
   const projects = () => Object.values(ui.state.projects || {}).sort((a, b) => a.name.localeCompare(b.name));
@@ -233,7 +233,7 @@ const Team = (() => {
     const machinesOf = id => (ui.machines || []).filter(m => m.owner === id).map(m => m.name);
     const facts = u => [(u.logins || []).length ? `${t('logins')} ${u.logins.map(esc).join(', ')}` : '', inProjects(u.id).length ? `${t('inProjects')} ${inProjects(u.id).map(esc).join(', ')}` : '',
       machinesOf(u.id).length ? `${t('ownsMachines')} ${machinesOf(u.id).map(esc).join(', ')}` : '', u.seen ? `${t('seen')} ${when(u.seen)}` : ''].filter(Boolean).join(' · ');
-    const users = rows(data.users.map(u => `<div class="agent-row"><strong>${esc(u.name)}</strong><span class="mono">${esc(u.username || u.email || u.id)}</span><span class="muted user-facts">${facts(u)}</span>${u.id === ui.me?.id || u.id === 'local'
+    const users = rows(data.users.map(u => `<div class="agent-row"><strong>${esc(nameOf(u))}</strong><span class="mono">${esc(u.username || u.email || u.id)}</span><span class="muted user-facts">${facts(u)}</span>${u.id === ui.me?.id || u.id === 'local'
       ? `<span>${t('role.' + u.role)}</span>`
       : `<select data-team-user-role="${esc(u.id)}" aria-label="${t('role')}">${['member', 'admin'].map(r => `<option value="${r}" ${u.role === r ? 'selected' : ''}>${t('role.' + r)}</option>`).join('')}</select>${button('team-disable', t(u.disabled ? 'enable' : 'disable'), `data-id="${esc(u.id)}" data-disabled="${u.disabled ? '' : '1'}"`, u.disabled ? 'quiet' : 'quiet danger')}${u.disabled ? '' : button('tree-offboard', t('offboard'), `data-id="${esc(u.id)}"`, 'quiet danger')}`}${u.disabled ? `<span>${t('disabled')}</span>` : ''}</div>`), t('nobody'));
     const admits = rows(data.admits.map(a => `<div class="agent-row"><strong>${t('admit.' + a.kind)}</strong><span class="mono">${esc(a.value)}</span><span>${t('role.' + a.role)}</span>${button('team-remove-admit', t('removeMember'), `data-kind="${esc(a.kind)}" data-value="${esc(a.value)}"`, 'quiet danger')}</div>`), t('nobody'));
@@ -268,7 +268,7 @@ const Team = (() => {
 
   // Dialogs.
   const footer = label => `<footer class="modal-footer">${button('close-modal', t('cancel'))}<button type="submit" class="primary">${label}</button></footer>`;
-  const userOptions = (value, skip = []) => data.users.filter(u => !u.disabled && !skip.includes(u.id)).map(u => `<option value="${esc(u.id)}" ${u.id === value ? 'selected' : ''}>${esc(u.name)}${u.username ? ' · ' + esc(u.username) : ''}</option>`).join('');
+  const userOptions = (value, skip = []) => data.users.filter(u => !u.disabled && !skip.includes(u.id)).map(u => `<option value="${esc(u.id)}" ${u.id === value ? 'selected' : ''}>${esc(nameOf(u))}${u.username ? ' · ' + esc(u.username) : ''}</option>`).join('');
   function showSecret(title, body) {
     showModal('team-secret', title, `<div class="modal-body stack">${body}</div>`, `<footer class="modal-footer">${button('close-modal', t('close'), 'autofocus')}</footer>`, true);
   }
@@ -317,7 +317,7 @@ const Team = (() => {
   function share(machine) {
     const m = ui.machines.find(x => x.name === machine), s = ui.state.shares?.[machine] || {};
     const check = (name, value, label, on) => `<label class="choice"><input type="checkbox" name="${name}" value="${esc(value)}" ${on ? 'checked' : ''}>${esc(label)}</label>`;
-    const people = data.users.filter(u => !u.disabled && u.id !== m?.owner).map(u => check('users', u.id, u.name, (s.users || []).includes(u.id))).join('');
+    const people = data.users.filter(u => !u.disabled && u.id !== m?.owner).map(u => check('users', u.id, nameOf(u), (s.users || []).includes(u.id))).join('');
     const projs = projects().map(p => check('projects', p.id, p.name, (s.projects || []).includes(p.id))).join('');
     showModal('team-form', `${t('shareTitle')} · ${esc(machine)}`, `<form id="team-share-form" data-machine="${esc(machine)}" data-command="${commandID()}"><div class="modal-body stack"><div class="form-error" role="alert" hidden></div><p class="hint">${t('shareHelp')}</p><div class="notice">${t('shareTrust')}</div>
       <fieldset class="stack"><legend>${t('users')}</legend>${people || `<span class="muted">${t('nobody')}</span>`}</fieldset><fieldset class="stack"><legend>${t('projects')}</legend>${projs || `<span class="muted">${t('nobody')}</span>`}</fieldset>

@@ -697,7 +697,11 @@ func cmdRunShow(args []string) error {
 				reason += " (" + r.Reason + ")"
 			}
 		}
-		fmt.Print(i18n.F("cli.run.show", r.ID, r.Task, r.Machine, r.Agent, r.Dir, runState(r), took(r, time.Now()),
+		dir := r.Dir
+		if r.Worked != nil && r.Worked.Dir != "" {
+			dir = r.Worked.Dir
+		}
+		fmt.Print(i18n.F("cli.run.show", r.ID, r.Task, r.Machine, r.Agent, dir, runState(r), took(r, time.Now()),
 			orDash(r.Provider), orDash(r.Session), reason))
 		for _, l := range []struct{ key, v string }{{"cli.run.show_detail", r.Detail}, {"cli.run.show_parent", r.Parent},
 			{"cli.run.show_note", r.Note}, {"cli.run.show_last", r.Last}, {"cli.run.show_usage", render.RunUsage(r.Usage)},
