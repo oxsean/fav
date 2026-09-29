@@ -9,6 +9,7 @@ import * as ch from '../core/changes.js';
 import {clock} from '../core/format.js';
 import {openStates} from '../core/select.js';
 import {register} from '../core/i18n.js';
+import {code} from '../core/proto.js';
 
 register('changes', {
   'chg.label': ['改动', 'Changes'], 'chg.files': ['%d 个文件', 'Files: %d'], 'chg.filter': ['筛选改动', 'Filter the changes'],
@@ -40,7 +41,7 @@ function Counts({add, del}) {
 function FileBody({f, prev}) {
   const {t, f: fmt} = useWords();
   if (!prev || prev === 'loading') return html`<p class="chg-note t-muted">${t('chg.loading')}</p>`;
-  if (prev.error) return html`<p class="chg-note t-muted">${prev.error === 'gone' ? t('chg.hunkGone') : prev.error === 'snapshot_changed' ? t('chg.moved') : fmt('chg.failed', prev.error)}</p>`;
+  if (prev.error) return html`<p class="chg-note t-muted">${prev.error === code.gone ? t('chg.hunkGone') : prev.error === 'snapshot_changed' ? t('chg.moved') : fmt('chg.failed', prev.error)}</p>`;
   const lines = [prev.at, ...prev.lines].filter(Boolean);
   return html`<div class="chg-body">
     ${lines.length ? html`<${Diff} lines=${lines} />` : html`<p class="chg-note t-muted">${t('chg.noHunk')}</p>`}
@@ -78,7 +79,7 @@ export function Changes({data = null, error = '', unsupported = false, running =
     options=${runs.map(r => ({value: r.id, label: r.id}))} />`;
   const body = () => {
     if (unsupported) return html`<p class="empty">${t('chg.unsupported')}</p>`;
-    if (error) return html`<p class="empty">${error === 'gone' ? t('chg.gone') : error === 'not_started' ? t('chg.notYet') : f('chg.failed', error)}</p>`;
+    if (error) return html`<p class="empty">${error === code.gone ? t('chg.gone') : error === 'not_started' ? t('chg.notYet') : f('chg.failed', error)}</p>`;
     if (!data) return html`<p class="empty t-muted">${t('chg.loading')}</p>`;
     const c = ch.counts(data.files);
     const groups = ch.ordered(ch.filtered(data.files, filter));

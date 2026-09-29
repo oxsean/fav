@@ -40,6 +40,12 @@ test('a server of another Proto leaves the page outdated', async () => {
   eq(c.code, 'proto', 'a call');
 });
 
+test('a server back with other Web UI files leaves the page outdated', async () => {
+  const {srv, wire} = rig();
+  await srv.play('hello-build');
+  eq(wire.status.value, 'outdated', 'status');
+});
+
 test('calls are answered by id in any order', async () => {
   const {srv, wire} = rig();
   let a, b, c;

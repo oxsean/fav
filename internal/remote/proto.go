@@ -49,6 +49,8 @@ type Hello struct {
 	Features []string `json:"features,omitempty"`
 	NodeID   string   `json:"node_id,omitempty"` // a node's lasting identity (node.ID), which a server binds its token to
 	Role     string   `json:"role,omitempty"`
+	// Build: tend-server's Web UI, a hash of its files; a page that loaded other files reloads.
+	Build string `json:"build,omitempty"`
 }
 
 // Ref names a session on the machine that answers.

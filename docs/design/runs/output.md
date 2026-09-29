@@ -123,6 +123,14 @@
 - 最多 64 个 hub；常数在 `internal/coord/limits.go`。
 - 模式一换人持锁：游标是节点上的位置，和谁当协调器无关；新协调器上的 hub 按冷启动来。
 
+## 密度
+
+时间线的三档密度是 `output.Densities`（`brief`、`standard`、`detailed`，默认 `standard`），每种步骤在各档怎么显示是 `output.DensityShow`，截断的行数是 `BriefLines`、`SayFold`、`DiffCut`、`FailTail`、`DetailEnds`、`RunningTail`。这张表由 `tools/protogen` 写进网页的 `proto.js`，网页和以后的 TUI 读同一张表。
+
+- 步骤的种类：事件的 `kind`，工具调用取它的 family，连续的读和搜是 `group`，人说的话是 `you`，单独的结果是 `output`；表里没有的按 `other`。
+- 格子的取值：`hide` 不显示；`sum` 在简洁档并进这一轮的一行小结，出错的单独一行；`row` 单独一行、收起；`open` 单独一行、展开；`warn` 只显示警告；`hook` 只显示 hook 的标记；`note` 只在带错误、用量或花费时显示。
+- 不管哪一档，出错的步骤、还在跑的命令、没答的问题都自己展开；任务书在简洁和标准档只露前 `BriefLines` 行，agent 的话在标准档超过 `SayFold` 行时折起。
+
 ## 翻页：`run.output.page`
 
 `run.output.page{run, before, n, raw?, file?}` 回 `{events, from, to, earliest, file, prev?, turn?, raw?}`，权限和 `run.tail` 一样（能读这个 run 的任务就能读）。实现在 `internal/coord/output.go`。

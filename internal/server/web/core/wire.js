@@ -2,9 +2,8 @@
 // Calls are answered by id in any order; a watch is a request whose pushes carry its id until one res ends it. After a
 // dropped connection it reconnects with backoff and opens every watch again from the cursor its owner gives.
 import {signal} from '../vendor/signals-core.mjs';
-
-// ⚠️ wire.Proto; hello's shape is remote.HelloParams / remote.Hello.
-export const PROTO = 2;
+// hello's shape is remote.HelloParams / remote.Hello.
+import {PROTO, code, frame} from './proto.js';
 
 const backoffFirst = 1000, backoffMax = 30000, callWait = 30000;
 
@@ -20,9 +19,10 @@ export class WireError extends Error {
 // close, onopen, onmessage, onclose); timers and random are replaced by the tests.
 export function createWire({url, open = u => new WebSocket(u), timers = globalThis, random = Math.random, lang = '', wait = callWait} = {}) {
   // status: idle before start; connecting (the socket or its hello); open; offline (waiting to reconnect); outdated
-  // (the server speaks another Proto: the page must reload); closed (stopped).
+  // (the server speaks another Proto, or serves other files than the page loaded: the page must reload); closed
+  // (stopped). build is the server's Web UI as the first hello named it.
   const status = signal('idle');
-  let ws = null, nextID = 1, buffer = '', attempt = 0, retry = null, methods = null, visible = true;
+  let ws = null, nextID = 1, buffer = '', attempt = 0, retry = null, methods = null, visible = true, build = null;
   const calls = new Map(), streams = new Map(), watches = new Set(), waiting = [];
 
   const send = frame => ws.send(JSON.stringify(frame) + '\n');
@@ -53,7 +53,12 @@ export function createWire({url, open = u => new WebSocket(u), timers = globalTh
     if (lang) params.lang = lang;
     request('hello', params, {}).then(h => {
       if (h?.proto !== PROTO) {
-        stop('outdated', new WireError('proto', `the server speaks ${h?.proto}`));
+        stop('outdated', new WireError(code.proto, `the server speaks ${h?.proto}`));
+        return;
+      }
+      if (build === null) build = h.build || '';
+      else if ((h.build || '') !== build) {
+        stop('outdated', new WireError(code.proto, `the server's build is ${h.build}`));
         return;
       }
       methods = new Set(h.methods || []);
@@ -63,7 +68,7 @@ export function createWire({url, open = u => new WebSocket(u), timers = globalTh
       for (const w of watches) if (!w.paused()) w.start();
     }, e => {
       if (ws !== s) return;
-      if (e.code === 'proto') stop('outdated', e);
+      if (e.code === code.proto) stop('outdated', e);
       else { s.close(); dropped(); }
     });
   }
@@ -73,9 +78,9 @@ export function createWire({url, open = u => new WebSocket(u), timers = globalTh
     ws = null;
     buffer = '';
     methods = null;
-    const closed = new WireError('closed');
+    const closed = new WireError(code.closed);
     for (const [id, c] of calls) { timers.clearTimeout(c.timer); calls.delete(id); c.reject(closed); }
-    for (const w of waiting.splice(0)) w.fail(new WireError('offline'));
+    for (const w of waiting.splice(0)) w.fail(new WireError(code.offline));
     for (const w of watches) w.lost();
     status.value = 'offline';
     const d = Math.min(backoffMax, backoffFirst * 2 ** Math.min(attempt++, 5));
@@ -98,7 +103,7 @@ export function createWire({url, open = u => new WebSocket(u), timers = globalTh
   function receive(line) {
     let f;
     try { f = JSON.parse(line); } catch { return; }
-    if (f.type === 'res') {
+    if (f.type === frame.res) {
       const c = calls.get(f.id);
       if (c) {
         calls.delete(f.id);
@@ -108,10 +113,10 @@ export function createWire({url, open = u => new WebSocket(u), timers = globalTh
         return;
       }
       streams.get(f.id)?.finish(f);
-    } else if (f.type === 'push') {
+    } else if (f.type === frame.push) {
       streams.get(f.id)?.push(f.method, f.params);
-    } else if (f.type === 'req') {
-      send(f.method === 'ping' ? {type: 'res', id: f.id} : {type: 'res', id: f.id, error: {code: 'unknown_method', detail: f.method}});
+    } else if (f.type === frame.req) {
+      send(f.method === 'ping' ? {type: frame.res, id: f.id} : {type: frame.res, id: f.id, error: {code: code.unknownMethod, detail: f.method}});
     }
   }
 
@@ -120,13 +125,13 @@ export function createWire({url, open = u => new WebSocket(u), timers = globalTh
       const id = nextID++;
       const timer = timers.setTimeout(() => {
         calls.delete(id);
-        try { send({type: 'cancel', id}); } catch {}
-        reject(new WireError('timeout', method));
+        try { send({type: frame.cancel, id}); } catch {}
+        reject(new WireError(code.timeout, method));
       }, timeout);
       calls.set(id, {resolve, reject, timer});
-      const frame = {type: 'req', id, method, params: params ?? {}};
-      if (commandID) frame.command_id = commandID;
-      send(frame);
+      const f = {type: frame.req, id, method, params: params ?? {}};
+      if (commandID) f.command_id = commandID;
+      send(f);
     });
   }
 
@@ -136,9 +141,9 @@ export function createWire({url, open = u => new WebSocket(u), timers = globalTh
       case 'open': return request(method, params, options);
       case 'connecting':
         return new Promise((resolve, reject) => waiting.push({go: () => request(method, params, options).then(resolve, reject), fail: reject}));
-      case 'outdated': return Promise.reject(new WireError('proto'));
-      case 'offline': return Promise.reject(new WireError('offline'));
-      default: return Promise.reject(new WireError('closed'));
+      case 'outdated': return Promise.reject(new WireError(code.proto));
+      case 'offline': return Promise.reject(new WireError(code.offline));
+      default: return Promise.reject(new WireError(code.closed));
     }
   }
 
@@ -152,16 +157,16 @@ export function createWire({url, open = u => new WebSocket(u), timers = globalTh
       paused: () => pausable && !visible,
       start() {
         if (w.done || w.id || status.value !== 'open') return;
-        if (methods && !methods.has(method)) { w.end(new WireError('unsupported', method)); return; }
+        if (methods && !methods.has(method)) { w.end(new WireError(code.unsupported, method)); return; }
         w.id = nextID++;
         streams.set(w.id, w); // before the req goes out, so no push finds no one
-        send({type: 'req', id: w.id, method, params: params() ?? {}});
+        send({type: frame.req, id: w.id, method, params: params() ?? {}});
       },
       push(m, p) { if (!w.done) onPush(m, p); },
       finish(f) {
         streams.delete(w.id);
         w.id = 0;
-        if (f.error?.code === 'lagged') { w.start(); return; }
+        if (f.error?.code === code.lagged) { w.start(); return; }
         w.end(f.error ? new WireError(f.error.code, f.error.detail || '') : null);
       },
       // lost: the connection dropped; the watch opens again on the next one.
@@ -169,7 +174,7 @@ export function createWire({url, open = u => new WebSocket(u), timers = globalTh
       // pause: the page is hidden; the server stops sending, the watch opens again when it shows.
       pause() {
         if (!w.id) return;
-        try { send({type: 'cancel', id: w.id}); } catch {}
+        try { send({type: frame.cancel, id: w.id}); } catch {}
         streams.delete(w.id);
         w.id = 0;
       },
@@ -187,8 +192,8 @@ export function createWire({url, open = u => new WebSocket(u), timers = globalTh
     return {
       cancel() {
         if (w.done) return;
-        if (w.id) try { send({type: 'cancel', id: w.id}); } catch {}
-        w.end(new WireError('canceled'));
+        if (w.id) try { send({type: frame.cancel, id: w.id}); } catch {}
+        w.end(new WireError(code.canceled));
       },
       get open() { return w.id !== 0; },
     };
@@ -215,7 +220,7 @@ export function createWire({url, open = u => new WebSocket(u), timers = globalTh
       for (const w of watches) if (v) w.start(); else if (w.paused()) w.pause();
       if (v) reconnect();
     },
-    close() { stop('closed', new WireError('closed')); },
+    close() { stop('closed', new WireError(code.closed)); },
     has: method => !!methods?.has(method),
   };
 }

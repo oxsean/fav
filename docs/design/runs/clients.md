@@ -86,11 +86,12 @@ tend journal verify [--json] | repair [-y]
 - **分层**：`vendor` ← `core` ← `ui` ← `pages`，每层只 import 自己和下面的层，`ui` 不直接 import `core/wire.js`；入口 `main.js` 不受限制。所有 import 都是相对路径，不用 import map。`web/package.json` 的 `{"type":"module"}` 让 node 把这些 `.js` 当 ES 模块跑。
 - **`core/`**（不碰 DOM，全部在 node 里测）：
   - `wire.js`：`/client` 上的 wire 帧，按行拆帧。
-    - 连上后先发 `hello{proto: 2, role: "client"}`，形状就是 `remote.HelloParams`。回来的 `proto` 不是 2，状态记为 `outdated`，不再重连（页面要重新加载）；回来的 `methods` 决定哪些 `.watch` 可以开，没列出的方法在本地直接结束，报 `unsupported`。
+    - 连上后先发 `hello{proto: 2, role: "client"}`，形状就是 `remote.HelloParams`。回来的 `proto` 不是 2，或者重连后的 `build` 和第一次 hello 的不一样（server 换了一套页面文件，见 [wire.md](wire.md)「握手与版本」），状态记为 `outdated`，不再重连（页面要重新加载）；回来的 `methods` 决定哪些 `.watch` 可以开，没列出的方法在本地直接结束，报 `unsupported`。
     - `call`：30 s 超时后发 `cancel`，报 `timeout`；连接中的调用等 hello 完成再发，离线时立即报 `offline`，断线时报 `closed`。server 发来的 `ping` 照答，别的请求回 `unknown_method`。
     - `watch`：发 `req` 之前先登记接收者。推送按 `id` 交给这个流，第一条是 `open{cursor, mode}`；同一个 `id` 的 `res` 是最后一帧：`result` 表示正常结束，`lagged` 按游标立即重开，其它错误码就是流的终点。`cancel` 只发一次，之后到达的帧一律丢掉。
     - 断线后 1 s 起翻倍、最长 30 s、带抖动地重连（成功 hello 后回到 1 s），然后每个流用它的主人给的参数（带游标）重开。
     - `setVisible(false)` 结束可暂停的流（输出），`state.watch` 保留；`setVisible(true)` 按游标重开它们，离线时立即重连。连接状态放在一个 signal 里：`idle` / `connecting` / `open` / `offline` / `outdated` / `closed`。
+  - `proto.js`：由 `tools/protogen` 生成，不手改：`PROTO`、`frame`、`code`、`push`、`mode`、`methods`、`kind`、`family`、`tools`（工具名 → family）、`density`（[output.md](output.md)「密度」）。`core`、`ui`、`pages` 比较错误码、帧类型和密度都用它，只有 Go 还没有的错误码（`route_changed`、`cannot_send`、`snapshot_changed`）暂时写字面量。结构测试检查新界面 `call` / `watch` / `has` / `send` 的每个方法名都在 `coord.Methods` 里，协调器还没有的几个列在 `comingMethods`，各自标着补它的卡。
   - `fold.js`：旧 `fold.js` 的模块版，行为相同；`fold_test.go` 拿两份和 `task.State.Apply` 对照。`parts` 表列出每种事件改动状态里的哪几张表。
   - `store.js`：页面的状态。
     - `state.watch` 的推送：
@@ -116,7 +117,7 @@ tend journal verify [--json] | repair [-y]
   - `actions.js`：页面唯一的操作表。每个操作有 id、键、作用域层级、分组；`bar` 的进键栏，`palette: false` 的不进命令面板（移动、数字、面板自己）。键位就是设计稿 §6.6 的键表：`g h/t/b/r/m/a/p/s` 去各页，`Mod+K` 命令面板，`?` 快捷键，`/` 搜索，`n` 新建，`[` 侧栏，`Mod+Z` 撤销，`Shift+T/L/M` 主题 / 语言 / 密度（全局）；`v` `d` `e` `x` `Shift+D`（页面）；`j` `k`（别名方向键）`Space` `Enter` `1`–`9`（列表）；`End` `Home` `Shift+O` `Mod+F`（输出）。一个键只属于一个操作。
     - 组件不直接写键：用 `useActions(层级, {id: {run, when?, label?}})` 绑定自己能做的操作，键从表里来；`label` 让页面换一个更贴切的说法（首页的数字叫「作答」，`d` 叫「重试」）。哪些绑定生效（`when`）随页面变了，作用域就重新推入，键栏跟着变。
     - 命令面板列出此刻生效的操作（`runnable(keys.active())`），按中文名、英文名、id、键都能搜到，开头匹配的排前面；快捷键页按分组列出整张表。
-  - `commands.js`：页面的写操作。发出时按 key 记为 pending；可撤销的写（标记完成）在列表里先藏起来，应答之后等那张列表下一次变化再放出来，免得闪回；没收到应答（`timeout` / `offline` / `closed`）记为 `unknown`，`retry` 用同一个 command id 重发，coordinator 的回执保证不做两次。状态本身只来自 journal 的折叠。
+  - `commands.js`：页面的写操作。发出时按 key 记为 pending；可撤销的写（标记完成）在列表里先藏起来，应答之后等那张列表下一次变化再放出来，免得闪回；没收到应答（`unsure`：`timeout` / `offline` / `closed`，页面的出错提示也用它）记为 `unknown`，`retry` 用同一个 command id 重发，coordinator 的回执保证不做两次。状态本身只来自 journal 的折叠。
   - `http.js`：普通 HTTP：`/session`（未登录是 null）、`/login`（表单提交 token）、`/logout`、`/auth/logins`、`/auth/invite`、`/api/device`。写请求带 `X-Tend`，网络不通报 `offline`。
   - `prefs.js`：语言、主题（跟随系统 / 浅色 / 深色）、密度（紧凑 / 标准 / 宽松）和皮肤，沿用旧页面的存储键（`tend-lang`、`tend-theme`、`tend-look`），切换界面不丢；输出的密度（简洁 / 标准 / 详细，默认标准）记在 `tend-output-density`；存储不可用时用默认值。
   - `format.js`：数字的写法（`312k` tok、`$3.18`、`1h 04m`、`14:32`）。token 数是 input + cache_write + output，不含读缓存。
@@ -179,7 +180,7 @@ tend journal verify [--json] | repair [-y]
   - 对话是一串运行：最新的那次开 `run.output.watch`，更早的只在往上翻到时取它的最后一页，接着往前翻。每次运行之间一条分隔线（第几次运行、续接、在哪台机器）。
   - 事件除了 [output.md](output.md) 的种类，还认节点和协调器加上的：`you{input, text, by, mode, at}`（送到 agent 的一条消息，`input` 是它的发送 id）、`resolved{request, by, decision, at}`、`interrupt{id, n, by, at}`、`mark{event: "hook", name, phase}`、`gap`。运行的 `sends` 里还没被 `you` 事件认领、排队中或没送到的消息画在最后，没送到的可以重发。
   - 一步一行：命令写命令本身和状态、用时、行数；读和搜并成一行（「读了 2 个文件 · 搜了 1 次」）；改动写文件和 `+N −M`；计划写更新了第几步，最新的计划钉在时间线上方。说的话、你的消息、问题和出错总是展开；第一次运行的第一条消息是任务书，只露前三行。
-  - 三种密度：简洁把一轮里对话以外的步骤并成一行小结（出错的照样单独一行）；标准每步一行，agent 超过 `SAY_FOLD`（30）行的话折起；详细把思考、命令、改动、读和搜、计划都展开，输出只露头尾各 `DETAIL_ENDS`（10）行，diff 超过 `DIFF_CUT`（200）行截断。任何密度下，出错的步骤、还在跑的命令（露最后 `RUNNING_TAIL` 行）、没答的问题自己展开；出错的输出露最后 `FAIL_TAIL`（8）行，点开看全部。
+  - 三种密度按 `proto.js` 的 `density` 表画（[output.md](output.md)「密度」）：简洁把一轮里对话以外的步骤并成一行小结（出错的照样单独一行）；标准每步一行，agent 超过 30 行的话折起；详细把思考、命令、改动、读和搜、计划都展开，输出只露头尾各 10 行，diff 超过 200 行截断。任何密度下，出错的步骤、还在跑的命令（露最后 3 行）、没答的问题自己展开；出错的输出露最后 8 行，点开看全部。
   - 最新一轮以外的轮次折成一行：第几轮、工作了多久、几步、改了几个文件、最后一句话，点开展开。筛选：全部、只看对话、只看命令、只看改动、出错的；「下一处错误」按顺序跳。
   - 跟随（`follow.js`）：在底部时新内容把视图带到底部（增长不到一屏时平滑，超过一屏或手指按着时直接跳），程序自己的滚动不算离开。滚轮向上、手指向下拖、`↑` / `PageUp` / `Home`、点滚动条、跳到某一步都算离开：视图停住，底部的按钮数离开后新来的步骤（临时事件、还没送到的消息、标题行不算），有等你的（没答的问题、出错）时换警示色并能直接跳过去，运行在离开后结束时写「运行结束了 · 看结果」；新内容前面画一条「新的」线，滚过去就消失。滚动停下（`SETTLE_MS` 100 ms，触屏松手后 `TOUCH_MS` 150 ms）时离底部不到 `NEAR`（48 px）就恢复跟随。
   - 视图上方的缓冲：离开底部并且还在滚时，锚点（视野里第一行）以上的行保持画出时的样子，从锚点往下用最新的；滚动停下后一次换上，并按锚点的新位置补偿滚动距离，视野里的那一行不动。展开、收起一步时以它为锚点。超过 `KEEP_ROWS`（1500）行时，离视野 `SCREENS`（5）屏以外的每 `PAGE`（200）行换成等高的占位，有焦点、选中文字、正在写回答的那页不换；离顶部 `PREFETCH_SCREENS`（1.5）屏以内时往前取一页。

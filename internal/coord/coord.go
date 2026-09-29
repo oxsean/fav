@@ -97,6 +97,7 @@ var ErrLocked = filelock.ErrLocked
 type Options struct {
 	Home    string
 	Version string
+	Build   string // hello's build: tend-server's Web UI
 	Config  tend.Config
 	// Node is this machine's node; Sessions answers its session reads.
 	Node     *node.Node

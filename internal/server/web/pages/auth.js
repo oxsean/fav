@@ -5,6 +5,7 @@ import {html, useWords} from '../ui/base.js';
 import {Button} from '../ui/controls.js';
 import {TextInput} from '../ui/input.js';
 import {startURL} from '../core/http.js';
+import {code as codes} from '../core/proto.js';
 
 const when = (w, at) => new Date(at).toLocaleString(w.lang.value === 'zh' ? 'zh-CN' : 'en-GB', {dateStyle: 'medium', timeStyle: 'short'});
 import './words.js';
@@ -90,7 +91,7 @@ export function Login({http, auth, onSignedIn, onSwitch, copy = text => globalTh
   </div>`;
 }
 
-const gone404 = e => e.status === 404 || e.code === 'not_found';
+const gone404 = e => e.status === 404 || e.code === codes.notFound;
 
 // Device is a terminal's sign-in (#device-<code>): check the code it shows, then allow or deny it.
 export function Device({http, code, onBack}) {

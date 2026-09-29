@@ -11,6 +11,7 @@ import {AnswerForm} from '../ui/answer.js';
 import {conversation} from '../core/fold.js';
 import {readPlace, keepPlace} from '../core/follow.js';
 import {link} from '../core/router.js';
+import {unsure} from '../core/commands.js';
 import {register} from '../core/i18n.js';
 
 register('conversation', {
@@ -24,7 +25,6 @@ register('conversation', {
   'conv.none': ['这个任务还没有运行', 'This task has not run yet'],
 });
 
-const unsure = ['timeout', 'offline', 'closed'];
 
 // idOf numbers the event lists a store hands out: a new list is a change, the same one is not.
 const ids = new WeakMap();

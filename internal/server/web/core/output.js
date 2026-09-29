@@ -1,19 +1,11 @@
 // output turns a conversation's events (internal/output's, docs/design/runs/output.md) into what the timeline draws:
 // steps (a call with its result, a run of reads and searches, a message), turns, and at a density the rows to draw,
 // which are open, and the turns folded into one line. It also finds text in them and says where the errors are. Pure
-// functions, the same for the desktop, the phone and the tests.
+// functions, the same for the desktop, the phone and the tests. The densities, how each kind of step shows at them
+// and the lines they cut at are internal/output's table (proto.js).
+import {density as table} from './proto.js';
 
-export const densities = ['brief', 'standard', 'detailed'];
 export const filters = ['all', 'talk', 'shell', 'edit', 'error'];
-
-// ⚠️ An agent's text longer than this folds in the standard density; a diff longer than this is cut in the detailed one.
-export const SAY_FOLD = 30;
-export const DIFF_CUT = 200;
-// ⚠️ The lines of a failed output shown while it is open on its own; the head and tail of an output in the detailed
-// density; the last lines of a command that still runs.
-export const FAIL_TAIL = 8;
-export const DETAIL_ENDS = 10;
-export const RUNNING_TAIL = 3;
 
 const toolKinds = new Set(['tool', 'cmd', 'edit', 'mcp']);
 
@@ -184,25 +176,26 @@ const passes = (s, filter) => filter === 'all' || filter === 'talk' && talk(s) |
 // autoOpen: failures, the command that still runs and a question not yet answered open by themselves at any density.
 const autoOpen = s => !!s.failed || s.kind === 'shell' && s.state === 'running' || s.kind === 'ask' && s.pending;
 
-// openByDensity is whether a step starts open at a density, before failures and what the viewer did.
-function openByDensity(s, density) {
-  if (s.kind === 'ask') return true;
-  if (density !== 'detailed') return false;
-  return ['think', 'agent', 'mcp', 'web', 'other', 'edit', 'group', 'shell', 'output', 'plan'].includes(s.kind);
-}
+// showOf is how a step shows at a density, from the table; a kind it lacks shows as other.
+const showOf = (s, density) => {
+  const i = Math.max(0, table.names.indexOf(density));
+  return (table.show[s.kind] || table.show.other)[i];
+};
 
-// shownAt tells whether a step has its own row at a density: the rest go into the turn's one-line summary (brief) or
+// openByDensity is whether a step starts open at a density, before failures and what the viewer did.
+const openByDensity = (s, density) => showOf(s, density) === 'open';
+
+// shownAt tells whether a step has its own row at a density: the rest go into the turn's one-line summary (sum) or
 // are not shown.
 function shownAt(s, density) {
-  switch (s.kind) {
-    case 'think': return density !== 'brief';
-    case 'mark': return density !== 'brief' && s.event === 'hook';
-    case 'sys': case 'raw': return density === 'detailed' || density === 'standard' && !!s.warn;
-    case 'result': return density === 'detailed' || !!s.error || !!s.usage || !!s.cost;
-    case 'plan': return density !== 'brief';
-    case 'you': case 'say': case 'ask': case 'error': case 'interrupt': case 'gap': return true;
+  switch (showOf(s, density)) {
+    case 'row': case 'open': return true;
+    case 'sum': return !!s.failed;
+    case 'warn': return !!s.warn;
+    case 'hook': return s.event === 'hook';
+    case 'note': return !!s.error || !!s.usage || !!s.cost;
   }
-  return density !== 'brief' || !!s.failed;
+  return false;
 }
 
 // lay gives the rows to draw for a model at a density: {density, filter, open: Map key → bool (what the viewer set),
@@ -215,7 +208,7 @@ export function lay(m, {density = 'standard', filter = 'all', open = new Map(), 
   const lastTurn = [...m.runs].reverse().find(r => r.turns.length)?.turns.at(-1).key;
   const push = (s, depth) => {
     const o = isOpen(s.key, autoOpen(s) || openByDensity(s, density));
-    const clip = s.kind === 'say' && density === 'standard' && !o && lines(s.text).length > SAY_FOLD;
+    const clip = s.kind === 'say' && density === 'standard' && !o && lines(s.text).length > table.sayFold;
     const brief = s.kind === 'you' && s.brief && density !== 'detailed' && !o;
     rows.push({type: 'step', key: s.key, depth, step: s, open: o, auto: autoOpen(s), manual: open.get(s.key) === true || peek.has(s.key), clip, brief});
     if (s.kind === 'agent' && o) for (const k of s.kids || []) if (passes(k, filter) && shownAt(k, density)) push(k, depth + 1);
@@ -231,7 +224,7 @@ export function lay(m, {density = 'standard', filter = 'all', open = new Map(), 
       let summary = null;
       for (const s of t.steps) {
         if (shownAt(s, density) || peek.has(s.key)) { push(s, 0); continue; }
-        if (density !== 'brief' || ['think', 'mark', 'sys', 'raw', 'result'].includes(s.kind)) continue;
+        if (showOf(s, density) !== 'sum') continue;
         if (!summary) rows.push(summary = {type: 'summary', key: 'sum:' + t.key, steps: []});
         summary.steps.push(s);
       }

@@ -31,6 +31,8 @@
 - `proto` 是整数版本号，和 protobuf 无关，名字不改；它从 1 起，因为漏发 `proto` 的对端解出来是零值 0，从 0 起就会被当成版本一致。
 - 这套协议和日志格式还没进过任何发布版本（`v0.1.0` 早于它们）：进发布版本之前直接改，不给旧的一端留兼容；磁盘上已有的数据照样能读，例如 v1 日志信封照样回放（见 [coordinator.md](coordinator.md)「事件日志」）。
 - 模式二的认证在 HTTP 升级时做（`Authorization: Bearer`），不在 hello 里；hello 里的 `role` 必须和 token 的角色一致。节点另在 `hello.node_id` 里带自己的身份（见 [deployment.md](deployment.md)「模式二」）。
+- tend-server 的协调器在 hello 里另带 `build`：内嵌的 Web UI 文件（路径和内容）的 SHA-256 前 12 位（`server.Build`）。页面记下第一次 hello 的 `build`，重连后不一样就是 server 换了一套文件，页面进 `outdated`；模式一没有网页，不带它。旧的一端忽略这个字段，所以不 bump `Proto`，也不要 feature。
+- 网页一侧的协议常量由 `go run ./tools/protogen` 从 Go 源码生成：`web/core/proto.js`（`Proto`、帧类型、错误码、推送名、`open` 的模式、`coord.Methods`、输出事件的种类、family 表和密度表）和 `web/core/proto.schema.json`（帧、hello、`state.watch` 的参数和推送、输出事件的 JSON Schema）。常量按前缀读源码里的 const 块，所以新加的常量不用登记；`tools/protogen` 的测试在两个文件和生成结果不一致时失败。
 
 ## `Conn`
 

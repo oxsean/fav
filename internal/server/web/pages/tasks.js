@@ -15,6 +15,7 @@ import * as tk from '../core/tasks.js';
 import {views} from '../core/router.js';
 import {clock as hhmm, day, money} from '../core/format.js';
 import {dayStart} from '../core/select.js';
+import {unsure} from '../core/commands.js';
 import {Task, sitState, sitWord, who} from './task.js';
 import {TaskForm, Dispatch, Move, PlanReview, Gate, DRAFT_KEY} from './taskforms.js';
 import {Conversation} from './conversation.js';
@@ -27,7 +28,6 @@ export const FILTER_KEY = 'tend-task-filter';
 // ⚠️ Where this browser keeps which pane of a task the viewer last chose (overview or output).
 export const PANE_KEY = 'tend-task-pane';
 // ⚠️ The coordinator's codes for an answer that never came: the write may or may not have gone through.
-const unsure = ['timeout', 'offline', 'closed'];
 
 const readFilter = storage => { try { return {mine: false, project: '', column: '', ...JSON.parse(storage?.getItem(FILTER_KEY) || '{}'), q: ''}; } catch { return {mine: false, project: '', column: '', q: ''}; } };
 const keepFilter = (storage, {mine, project, column}) => { try { storage?.setItem(FILTER_KEY, JSON.stringify({mine, project, column})); } catch {} };

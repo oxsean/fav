@@ -14,6 +14,7 @@ import {useListKeys} from '../ui/table.js';
 import {AnswerForm, quickOf, isPermission} from '../ui/answer.js';
 import * as sel from '../core/select.js';
 import {tokens, money, duration, clock as hhmm, usageTokens} from '../core/format.js';
+import {unsure} from '../core/commands.js';
 import {why} from './words.js';
 
 // ⚠️ An item's waiting bar is full after two hours.
@@ -61,7 +62,7 @@ export function Home({store, commands, toasts, clock = () => Date.now(), fetchOu
   const ids = list.map(v => v.x.task);
   const current = list.find(v => v.x.task === selected) || null;
 
-  const failed = e => toasts.show({text: e.code === 'timeout' || e.code === 'offline' || e.code === 'closed'
+  const failed = e => toasts.show({text: unsure.includes(e.code)
     ? f('app.unsure', e.code) : f('app.failed', e.code || String(e.message || e)), tone: 'danger'});
   const send = (method, params, opts) => commands.send(method, params, opts).catch(e => { failed(e); throw e; });
 

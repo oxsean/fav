@@ -9,6 +9,7 @@ import {Button, Chip, Chips, Segmented} from './controls.js';
 import {Markdown} from './markdown.js';
 import {register} from '../core/i18n.js';
 import * as out from '../core/output.js';
+import {density as dt} from '../core/proto.js';
 import * as fl from '../core/follow.js';
 import {duration, tokens, money, clock, usageTokens} from '../core/format.js';
 
@@ -92,9 +93,9 @@ function Body({row, density, copy}) {
     case 'shell': case 'output': case 'mcp': case 'web': case 'other': {
       if (s.state === 'running' && !o) return null;
       let view;
-      if (s.state === 'running') view = {lines: out.tail(o, out.RUNNING_TAIL)};
-      else if (s.failed && !whole) view = {lines: out.tail(o, out.FAIL_TAIL)};
-      else if (density === 'detailed' && !whole) { const e = out.ends(o, out.DETAIL_ENDS); view = {lines: e.head, cut: e.cut, tail: e.tail}; }
+      if (s.state === 'running') view = {lines: out.tail(o, dt.runningTail)};
+      else if (s.failed && !whole) view = {lines: out.tail(o, dt.failTail)};
+      else if (density === 'detailed' && !whole) { const e = out.ends(o, dt.detailEnds); view = {lines: e.head, cut: e.cut, tail: e.tail}; }
       else view = {lines: o ? o.split('\n') : []};
       const input = s.kind !== 'shell' && s.input ? JSON.stringify(s.input, null, 2) : '';
       return html`<div class="out-body">
@@ -106,7 +107,7 @@ function Body({row, density, copy}) {
     case 'edit': {
       const ls = out.editLines(s);
       return html`<div class="out-body">${s.files.length > 1 && html`<ul class="out-files mono">${s.files.map(x => html`<li>~ ${x}</li>`)}</ul>`}
-        ${ls.length > 0 && html`<${Diff} lines=${ls} max=${density === 'detailed' && !whole ? out.DIFF_CUT : 0} />`}</div>`;
+        ${ls.length > 0 && html`<${Diff} lines=${ls} max=${density === 'detailed' && !whole ? dt.diffCut : 0} />`}</div>`;
     }
     case 'group':
       return html`<ul class="out-members mono">${s.members.map(m => html`<li key=${m.id}><span class="t-muted">${m.family === 'search' ? '?' : '+'}</span> ${m.title}</li>`)}</ul>`;
@@ -194,18 +195,18 @@ function Row({row, density, onToggle, onMore, onResend, renderAsk, copy, target,
   switch (s.kind) {
     case 'you': {
       const lines = s.text.split('\n');
-      const clipped = row.brief && lines.length > 3;
+      const clipped = row.brief && lines.length > dt.briefLines;
       return html`<div class=${base} data-key=${row.key} style=${depth}><div class="out-you">
         <span class="out-who">${s.brief ? t('out.brief') : s.by ? f('out.by', s.by) : t('out.you')}${s.at ? ' · ' + clock(s.at) : ''}</span>
-        <div class="out-text">${clipped ? lines.slice(0, 3).join('\n') : s.text}</div>
+        <div class="out-text">${clipped ? lines.slice(0, dt.briefLines).join('\n') : s.text}</div>
         ${clipped && html`<button type="button" class="out-link" onClick=${toggle}>${t('out.whole')}</button>`}
       </div></div>`;
     }
     case 'say': {
       const lines = s.text.split('\n');
-      const text = row.clip ? lines.slice(0, out.SAY_FOLD).join('\n') : s.text;
+      const text = row.clip ? lines.slice(0, dt.sayFold).join('\n') : s.text;
       return html`<div class=${base} data-key=${row.key} style=${depth}><div class="out-say"><${Markdown} text=${text} />
-        ${(row.clip || row.open && lines.length > out.SAY_FOLD && density === 'standard') && html`<button type="button" class="out-link" onClick=${toggle}>${row.clip ? t('out.whole') : t('out.fold')}</button>`}
+        ${(row.clip || row.open && lines.length > dt.sayFold && density === 'standard') && html`<button type="button" class="out-link" onClick=${toggle}>${row.clip ? t('out.whole') : t('out.fold')}</button>`}
       </div></div>`;
     }
     case 'result':
@@ -546,7 +547,7 @@ export function Output({bare = false, parts, density = 'standard', onDensity, on
     <${Chips} label=${t('out.filter')}>${out.filters.map(x => html`<${Chip} label=${t('out.f.' + x)} on=${filter === x} onClick=${() => setFilter(x)} />`)}<//>
     <span class="out-tools-end">
       <${Button} kind="quiet" disabled=${!errs.length} title=${errs.length ? undefined : t('out.noError')} onClick=${nextError}>${t('out.nextError')}<//>
-      ${onDensity && html`<${Segmented} label=${t('out.density')} value=${density} onChange=${onDensity} options=${out.densities.map(d => ({value: d, label: t('out.d.' + d)}))} />`}
+      ${onDensity && html`<${Segmented} label=${t('out.density')} value=${density} onChange=${onDensity} options=${dt.names.map(d => ({value: d, label: t('out.d.' + d)}))} />`}
       ${onRaw && html`<${Button} kind="quiet" on=${raw !== null} onClick=${onRaw}>${t('out.raw')}<//>`}
       ${linkOf && selStep && html`<${Button} kind="quiet" onClick=${() => { copy(linkOf(selStep)); }}>${t('out.copyLink')}<//>`}
       ${phone && html`<${Button} kind="quiet" icon="search" label=${t('out.find')} onClick=${() => setFinding(true)} />

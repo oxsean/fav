@@ -101,7 +101,7 @@ func cmdServe(args []string) error {
 	cfg := tend.LoadConfig()
 	var dir *server.Directory
 	notifier := server.NewNotifier()
-	c, err := coord.Open(coord.Options{Home: home, Version: version, Config: cfg, Remote: true, OpenLog: openLog, Notice: notifier.Send,
+	c, err := coord.Open(coord.Options{Home: home, Version: version, Build: server.Build(), Config: cfg, Remote: true, OpenLog: openLog, Notice: notifier.Send,
 		MachineOwner: func(m string) string {
 			if dir == nil {
 				return ""

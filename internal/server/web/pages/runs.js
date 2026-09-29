@@ -12,6 +12,7 @@ import {Output} from '../ui/output.js';
 import * as sel from '../core/select.js';
 import {tokens, money, duration, clock, day, usageTokens} from '../core/format.js';
 import {register} from '../core/i18n.js';
+import {unsure} from '../core/commands.js';
 import {Conversation} from './conversation.js';
 import {RunChanges} from './changes.js';
 import './taskwords.js';
@@ -40,7 +41,6 @@ export const RUNS_FILTER_KEY = 'tend-runs-filter';
 export const runFilters = ['all', 'open', 'failed', 'ended'];
 const tests = {all: () => true, open: r => sel.openStates.includes(r.state), failed: r => r.state === 'failed' || r.state === 'abandoned',
   ended: r => sel.endStates.includes(r.state)};
-const unsure = ['timeout', 'offline', 'closed'];
 const caps = ['steer', 'interrupt', 'answer_scope', 'questions', 'continue', 'takeover'];
 
 function readFilter(storage) {

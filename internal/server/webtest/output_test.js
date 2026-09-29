@@ -16,6 +16,7 @@ import {createCommands} from '../web/core/commands.js';
 import {createPrefs} from '../web/core/prefs.js';
 import {words} from '../web/core/i18n.js';
 import * as out from '../web/core/output.js';
+import {density as dt} from '../web/core/proto.js';
 import * as fl from '../web/core/follow.js';
 import {html, KeysContext} from '../web/ui/base.js';
 import {Output} from '../web/ui/output.js';
@@ -195,7 +196,7 @@ test('the timeline, the answer form and the composer draw in both forms and both
     <${Composer} route=${{to: 'run', run: 'r2'}} acts=${['steer', 'interrupt']} machine="mba" sends=${state.r2.sends} onSend=${() => {}} onResend=${() => {}} /><//>`;
   const sizes = {};
   for (const f of ['desktop', 'phone']) for (const lang of ['zh', 'en']) {
-    for (const density of out.densities) {
+    for (const density of dt.names) {
       const s = drawn(html`<${Output} parts=${both()} density=${density} />`, f, lang);
       styled(s, `${density} ${f}/${lang}`);
     }

@@ -147,7 +147,7 @@ func (c *Coord) HandlerFor(p Principal) wire.Handler {
 		case wire.MPing:
 			return nil, nil
 		case remote.MHello:
-			return remote.Hello{Proto: wire.Proto, Version: c.opt.Version, Role: "coordinator", Methods: Methods}, nil
+			return remote.Hello{Proto: wire.Proto, Version: c.opt.Version, Build: c.opt.Build, Role: "coordinator", Methods: Methods}, nil
 		case MStateGet:
 			var sp StateParams
 			if err := r.Decode(&sp); err != nil {

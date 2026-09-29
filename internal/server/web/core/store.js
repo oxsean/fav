@@ -3,6 +3,7 @@
 // replaced whole. Run output is watched only while something holds it.
 import {signal, batch} from '../vendor/signals-core.mjs';
 import * as fold from './fold.js';
+import {code} from './proto.js';
 
 // tables are task.State's maps by their JSON names: what state.watch's snapshot parts carry.
 export const tables = ['tasks', 'runs', 'projects', 'shares', 'agent_defs'];
@@ -125,7 +126,7 @@ export function createStore({wire, frame = fn => globalThis.requestAnimationFram
           watchState();
         }
       },
-      onEnd: err => { if (err && err.code !== 'canceled') onError(err); },
+      onEnd: err => { if (err && err.code !== code.canceled) onError(err); },
     });
     watches.push(w);
   }
@@ -133,7 +134,7 @@ export function createStore({wire, frame = fn => globalThis.requestAnimationFram
   const whole = (method, into) => {
     watches.push(wire.watch(method, {
       onPush: (m, p) => { if (m !== 'open') into.value = p.items || []; },
-      onEnd: err => { if (err && err.code !== 'canceled') onError(err); },
+      onEnd: err => { if (err && err.code !== code.canceled) onError(err); },
     }));
   };
 
@@ -170,7 +171,7 @@ export function createStore({wire, frame = fn => globalThis.requestAnimationFram
           params: () => (o.cursor ? {run, from: o.cursor} : {run}),
           onPush: apply,
           onEnd: err => {
-            if (err?.code === 'unsupported') { o.watched = false; if (!o.events.value.length) more(o, run); return; }
+            if (err?.code === code.unsupported) { o.watched = false; if (!o.events.value.length) more(o, run); return; }
             o.done.value = err ? err.code : 'done';
           },
         });
@@ -213,8 +214,8 @@ export function createStore({wire, frame = fn => globalThis.requestAnimationFram
       o.back = atStart && p?.prev ? {run, file: p.prev, before: -1} : atStart ? null : {run, before: p.from, file: p.file};
       o.head.value = atStart && !p?.prev ? {start: true} : {more: true};
     }, e => {
-      if (e.code === 'stale') { o.back = null; o.head.value = {more: true}; return; }
-      o.head.value = e.code === 'gone' || e.code === 'not_found' ? {gone: true} : {more: true, failed: e.code || 'error'};
+      if (e.code === code.stale) { o.back = null; o.head.value = {more: true}; return; }
+      o.head.value = e.code === code.gone || e.code === code.notFound ? {gone: true} : {more: true, failed: e.code || 'error'};
     });
   }
 

@@ -4,9 +4,10 @@
 // which the coordinator's receipts answer without doing it twice.
 
 import {signal} from '../vendor/signals-core.mjs';
+import {code} from './proto.js';
 
 // ⚠️ The coordinator never saw an answer's fate for these codes: the command may or may not have run.
-const unsure = ['timeout', 'offline', 'closed'];
+export const unsure = [code.timeout, code.offline, code.closed];
 
 const commandID = () => (globalThis.crypto?.randomUUID?.() || Math.random().toString(36).slice(2) + Date.now().toString(36));
 
