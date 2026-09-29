@@ -229,11 +229,12 @@ func TestReplayAsOpener(t *testing.T) {
 				case f.Type == TypeReq && strings.HasSuffix(f.Method, ".watch"):
 					r := &watchRec{w: make(chan *Watch, 1), live: true, ended: make(chan error, 1)}
 					watches[f.ID] = r
+					next := bounded(t)
 					go func() {
 						w := c.Watch(context.Background(), f.Method, json.RawMessage(orEmpty(f.Params)))
 						r.w <- w
 						for {
-							push, err := w.Next(context.Background())
+							push, err := w.Next(next)
 							if err != nil {
 								r.ended <- err
 								return
@@ -258,7 +259,7 @@ func TestReplayAsOpener(t *testing.T) {
 					r := watches[f.ID]
 					waitFor(t, "pushes before the cancel", func() bool { return r.seen() == len(r.want) })
 					r.live, r.wantEnd = false, CodeCanceled
-					w := <-r.w
+					w := recv(t, r.w, "the watch did not open")
 					r.w <- w
 					w.Cancel()
 				}
@@ -300,7 +301,7 @@ func TestReplayAsOpener(t *testing.T) {
 				r.mu.Unlock()
 			}
 			for id, r := range calls {
-				<-r.done
+				recv(t, r.done, "the call did not return")
 				switch {
 				case r.gaveUp:
 					if Code(r.err) != CodeTimeout {
@@ -407,6 +408,7 @@ func TestReplayAsProvider(t *testing.T) {
 					want := f
 					calls.Add(1)
 					sent := make(chan int64, 1)
+					call := bounded(t)
 					go func() {
 						defer calls.Done()
 						sent <- c.next.Load() + 1
@@ -414,9 +416,9 @@ func TestReplayAsProvider(t *testing.T) {
 						if len(want.Params) > 0 {
 							params = want.Params
 						}
-						c.Call(context.Background(), want.Method, params, nil)
+						c.Call(call, want.Method, params, nil)
 					}()
-					own := <-sent
+					own := recv(t, sent, "the call was not sent")
 					served[f.ID] = own
 					f.ID = own
 				case isWatch[f.ID]:

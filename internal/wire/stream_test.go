@@ -56,28 +56,50 @@ func streamer(opened chan *Stream) Handler {
 
 func within(t *testing.T, ch <-chan struct{}, what string) {
 	t.Helper()
+	recv(t, ch, what)
+}
+
+// recv is the next value from ch; a test never waits without a deadline.
+func recv[T any](t *testing.T, ch <-chan T, what string) T {
+	t.Helper()
 	select {
-	case <-ch:
+	case v := <-ch:
+		return v
 	case <-time.After(3 * time.Second):
 		t.Fatal(what)
 	}
+	var zero T
+	return zero
+}
+
+// bounded is the context for a test's calls and Next: it ends with the test and after 5 s.
+func bounded(t *testing.T) context.Context {
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	t.Cleanup(cancel)
+	return ctx
+}
+
+func streamsOf(c *Conn) int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return len(c.streams)
 }
 
 func TestAStreamHandsOutItsPushesInOrderUntilDone(t *testing.T) {
 	c, _ := pair(t, Options{}, Options{Handler: streamer(nil)})
 	w := c.Watch(context.Background(), "count", num{50})
-	p, err := w.Next(context.Background())
+	p, err := w.Next(bounded(t))
 	if err != nil || p.Method != PushOpen {
 		t.Fatalf("the first push: %v %v", p, err)
 	}
 	for i := range 50 {
-		p, err := w.Next(context.Background())
+		p, err := w.Next(bounded(t))
 		var n num
 		if err != nil || p.Method != "n" || p.Decode(&n) != nil || n.N != i {
 			t.Fatalf("push %d: %s %s %v", i, p.Method, p.Params, err)
 		}
 	}
-	if _, err := w.Next(context.Background()); !errors.Is(err, io.EOF) || w.Err() != nil {
+	if _, err := w.Next(bounded(t)); !errors.Is(err, io.EOF) || w.Err() != nil {
 		t.Fatalf("the end: %v %v", err, w.Err())
 	}
 	var e Ended
@@ -89,7 +111,7 @@ func TestAStreamHandsOutItsPushesInOrderUntilDone(t *testing.T) {
 func TestAStreamItsProviderEndsWithAnErrorStaysEnded(t *testing.T) {
 	c, _ := pair(t, Options{}, Options{Handler: streamer(nil)})
 	w := c.Watch(context.Background(), "fail", nil)
-	if _, err := w.Next(context.Background()); Code(err) != CodeGone {
+	if _, err := w.Next(bounded(t)); Code(err) != CodeGone {
 		t.Fatal(err)
 	}
 	if Code(w.Err()) != CodeGone {
@@ -102,10 +124,10 @@ func TestCancellingAStreamEndsItOnBothEnds(t *testing.T) {
 	c, _ := pair(t, Options{}, Options{Handler: streamer(opened)})
 	ctx, cancel := context.WithCancel(context.Background())
 	w := c.Watch(ctx, "hold", nil)
-	s := <-opened
+	s := recv(t, opened, "the stream did not open")
 	cancel()
 	within(t, s.Context().Done(), "the provider's stream stayed open")
-	if _, err := w.Next(context.Background()); Code(err) != CodeCanceled {
+	if _, err := w.Next(bounded(t)); Code(err) != CodeCanceled {
 		t.Fatal(err)
 	}
 	if err := s.Push("n", num{1}); Code(err) != CodeCanceled {
@@ -122,14 +144,10 @@ func TestOpeningAndCancellingAtOnceLeavesNoStreamOpen(t *testing.T) {
 		c.Watch(ctx, "hold", nil)
 		c.Watch(context.Background(), "hold", nil).Cancel()
 	}
-	if err := c.Call(context.Background(), MPing, nil, nil); err != nil {
+	if err := c.Call(bounded(t), MPing, nil, nil); err != nil {
 		t.Fatal(err)
 	}
-	waitFor(t, "streams left open", func() bool {
-		d.mu.Lock()
-		defer d.mu.Unlock()
-		return len(d.streams) == 0
-	})
+	waitFor(t, "streams left open", func() bool { return streamsOf(d) == 0 })
 }
 
 func TestStreamsTakeNoHandlerSlotButOpeningOneDoes(t *testing.T) {
@@ -169,15 +187,12 @@ func TestPastMaxStreamsTheAnswerIsBusy(t *testing.T) {
 	c, d := pair(t, Options{}, Options{Handler: streamer(nil), MaxStreams: 2})
 	a := c.Watch(context.Background(), "hold", nil)
 	c.Watch(context.Background(), "hold", nil)
-	if _, err := c.Watch(context.Background(), "hold", nil).Next(context.Background()); Code(err) != CodeBusy {
+	waitFor(t, "two streams open", func() bool { return streamsOf(d) == 2 })
+	if _, err := c.Watch(context.Background(), "hold", nil).Next(bounded(t)); Code(err) != CodeBusy {
 		t.Fatal(err)
 	}
 	a.Cancel()
-	waitFor(t, "a cancelled stream still counts", func() bool {
-		d.mu.Lock()
-		defer d.mu.Unlock()
-		return len(d.streams) < 2
-	})
+	waitFor(t, "a cancelled stream still counts", func() bool { return streamsOf(d) < 2 })
 	w := c.Watch(context.Background(), "hold", nil)
 	select {
 	case <-w.Done():
@@ -186,14 +201,37 @@ func TestPastMaxStreamsTheAnswerIsBusy(t *testing.T) {
 	}
 }
 
+func TestTheStreamThatFindsNoRoomIsBusyWhicheverWasSentFirst(t *testing.T) {
+	late := make(chan struct{})
+	h := func(ctx context.Context, r *Request) (any, error) {
+		if r.Method == "late" {
+			select {
+			case <-late:
+			case <-ctx.Done():
+			}
+		}
+		_, err := r.Stream(StreamOptions{})
+		return nil, err
+	}
+	c, d := pair(t, Options{}, Options{Handler: h, MaxStreams: 2})
+	first := c.Watch(context.Background(), "late", nil)
+	c.Watch(context.Background(), "hold", nil)
+	c.Watch(context.Background(), "hold", nil)
+	waitFor(t, "two streams open", func() bool { return streamsOf(d) == 2 })
+	close(late)
+	if _, err := first.Next(bounded(t)); Code(err) != CodeBusy {
+		t.Fatal(err)
+	}
+}
+
 func TestTheEndOfTheConnectionEndsEveryStream(t *testing.T) {
 	opened := make(chan *Stream, 2)
 	c, d := pair(t, Options{}, Options{Handler: streamer(opened)})
 	w1, w2 := c.Watch(context.Background(), "hold", nil), c.Watch(context.Background(), "hold", nil)
-	s1, s2 := <-opened, <-opened
+	s1, s2 := recv(t, opened, "the stream did not open"), recv(t, opened, "the stream did not open")
 	d.Close()
 	for _, w := range []*Watch{w1, w2} {
-		if _, err := w.Next(context.Background()); Code(err) != CodeClosed {
+		if _, err := w.Next(bounded(t)); Code(err) != CodeClosed {
 			t.Fatal(err)
 		}
 	}
@@ -205,7 +243,7 @@ func TestAWatchWhoseReaderFallsBehindEndsAsLagged(t *testing.T) {
 	opened := make(chan *Stream, 1)
 	c, _ := pair(t, Options{WatchQueue: 4}, Options{Handler: streamer(opened)})
 	w := c.Watch(context.Background(), "hold", nil)
-	s := <-opened
+	s := recv(t, opened, "the stream did not open")
 	for i := range 10 {
 		s.Push("n", num{i})
 	}
@@ -229,7 +267,7 @@ func stalled(t *testing.T, opt StreamOptions) (*Stream, *peer) {
 	t.Cleanup(func() { c.Close() })
 	b, _ := json.Marshal(Frame{Type: TypeReq, ID: 1, Method: "w"})
 	y.Write(append(b, '\n'))
-	s := <-opened
+	s := recv(t, opened, "the stream did not open")
 	if err := s.Push(PushOpen, Open{Mode: ModeResume}); err != nil {
 		t.Fatal(err)
 	}
@@ -320,9 +358,9 @@ func TestASlowStreamDoesNotHoldBackAnswersPingsOrState(t *testing.T) {
 	defer c.Close()
 	p := &peer{t: t, nc: y}
 	p.write(Frame{Type: TypeReq, ID: 1, Method: "run.output.watch"})
-	out := <-opened
+	out := recv(t, opened, "the stream did not open")
 	p.write(Frame{Type: TypeReq, ID: 2, Method: "state.watch"})
-	state := <-opened
+	state := recv(t, opened, "the stream did not open")
 	big := strings.Repeat("x", 8<<10)
 	for range 200 {
 		out.Push("run.output", text{big})
@@ -349,9 +387,10 @@ func TestASlowStreamDoesNotHoldBackAnswersPingsOrState(t *testing.T) {
 func TestPushWaitWaitsForRoomInsteadOfLagging(t *testing.T) {
 	s, p := stalled(t, StreamOptions{Full: FullLag, Queue: 100})
 	done := make(chan error, 1)
+	ctx := bounded(t)
 	go func() {
 		for i := range 20 {
-			if err := s.PushWait(context.Background(), "n", num{i}); err != nil {
+			if err := s.PushWait(ctx, "n", num{i}); err != nil {
 				done <- err
 				return
 			}
@@ -365,7 +404,7 @@ func TestPushWaitWaitsForRoomInsteadOfLagging(t *testing.T) {
 	}
 	p.start()
 	got := p.methods(21)
-	if err := <-done; err != nil || got[20] != `n{"n":19}` {
+	if err := recv(t, done, "PushWait did not return"); err != nil || got[20] != `n{"n":19}` {
 		t.Fatal(err, got)
 	}
 }

@@ -51,16 +51,16 @@ func pair(t *testing.T, a, b Options) (*Conn, *Conn) {
 func TestCallRoundTripsAndErrorsKeepTheConnection(t *testing.T) {
 	c, _ := pair(t, Options{}, Options{Handler: echo(nil, nil)})
 	var got text
-	if err := c.Call(context.Background(), "echo", text{"中文 ✓ \"q\" 'x' %PATH%\n$HOME"}, &got); err != nil || got.Text != "中文 ✓ \"q\" 'x' %PATH%\n$HOME" {
+	if err := c.Call(bounded(t), "echo", text{"中文 ✓ \"q\" 'x' %PATH%\n$HOME"}, &got); err != nil || got.Text != "中文 ✓ \"q\" 'x' %PATH%\n$HOME" {
 		t.Fatalf("echo: %q %v", got.Text, err)
 	}
-	if err := c.Call(context.Background(), "nope", nil, nil); Code(err) != CodeUnknownMethod {
+	if err := c.Call(bounded(t), "nope", nil, nil); Code(err) != CodeUnknownMethod {
 		t.Fatalf("unknown method: %v", err)
 	}
-	if err := c.Call(context.Background(), "boom", nil, nil); Code(err) != CodeInternal {
+	if err := c.Call(bounded(t), "boom", nil, nil); Code(err) != CodeInternal {
 		t.Fatalf("a panic answers internal: %v", err)
 	}
-	if err := c.Call(context.Background(), MPing, nil, nil); err != nil || c.Err() != nil {
+	if err := c.Call(bounded(t), MPing, nil, nil); err != nil || c.Err() != nil {
 		t.Fatalf("errors from the other end must not close the connection: %v %v", err, c.Err())
 	}
 }
@@ -68,10 +68,10 @@ func TestCallRoundTripsAndErrorsKeepTheConnection(t *testing.T) {
 func TestBothEndsCallEachOther(t *testing.T) {
 	a, b := pair(t, Options{Handler: echo(nil, nil)}, Options{Handler: echo(nil, nil)})
 	var x, y text
-	if err := a.Call(context.Background(), "echo", text{"a"}, &x); err != nil || x.Text != "a" {
+	if err := a.Call(bounded(t), "echo", text{"a"}, &x); err != nil || x.Text != "a" {
 		t.Fatal(x, err)
 	}
-	if err := b.Call(context.Background(), "echo", text{"b"}, &y); err != nil || y.Text != "b" {
+	if err := b.Call(bounded(t), "echo", text{"b"}, &y); err != nil || y.Text != "b" {
 		t.Fatal(y, err)
 	}
 }
@@ -81,8 +81,8 @@ func TestASlowCallDoesNotHoldBackOthers(t *testing.T) {
 	defer close(block)
 	started := make(chan string, 1)
 	c, _ := pair(t, Options{}, Options{Handler: echo(block, started)})
-	go c.Call(context.Background(), "slow", text{"s"}, nil)
-	<-started
+	go c.Call(bounded(t), "slow", text{"s"}, nil)
+	recv(t, started, "the slow call did not start")
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 	var got text
@@ -113,7 +113,7 @@ func TestATimedOutCallCancelsOnTheOtherEnd(t *testing.T) {
 		t.Fatal("the other end kept working on a call nobody waits for")
 	}
 	var got text
-	if err := c.Call(context.Background(), "echo", nil, &got); err != nil || got.Text != "ok" {
+	if err := c.Call(bounded(t), "echo", nil, &got); err != nil || got.Text != "ok" {
 		t.Fatalf("the connection stays: %v", err)
 	}
 }
@@ -124,11 +124,12 @@ func TestCloseReturnsEveryWaitingCall(t *testing.T) {
 	c, _ := pair(t, Options{}, Options{Handler: echo(block, nil)})
 	var wg sync.WaitGroup
 	errs := make(chan error, 5)
+	ctx := bounded(t)
 	for i := 0; i < 5; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			errs <- c.Call(context.Background(), "slow", nil, nil)
+			errs <- c.Call(ctx, "slow", nil, nil)
 		}()
 	}
 	time.Sleep(50 * time.Millisecond)
@@ -148,7 +149,7 @@ func TestCloseReturnsEveryWaitingCall(t *testing.T) {
 			t.Fatalf("a waiting call ends as closed: %v", err)
 		}
 	}
-	if err := c.Call(context.Background(), "echo", nil, nil); Code(err) != CodeClosed {
+	if err := c.Call(bounded(t), "echo", nil, nil); Code(err) != CodeClosed {
 		t.Fatalf("after Close: %v", err)
 	}
 }
@@ -158,7 +159,7 @@ func TestTheOtherEndGoingAwayEndsTheConnection(t *testing.T) {
 	defer close(block)
 	c, d := pair(t, Options{}, Options{Handler: echo(block, nil)})
 	errc := make(chan error, 1)
-	go func() { errc <- c.Call(context.Background(), "slow", nil, nil) }()
+	go func() { errc <- c.Call(bounded(t), "slow", nil, nil) }()
 	time.Sleep(20 * time.Millisecond)
 	d.Close()
 	select {
@@ -169,7 +170,7 @@ func TestTheOtherEndGoingAwayEndsTheConnection(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("the call kept waiting on a dead connection")
 	}
-	<-c.Done()
+	within(t, c.Done(), "the connection stayed open")
 }
 
 func TestHandlersRunAtMostMaxInflightAtOnce(t *testing.T) {
@@ -189,9 +190,10 @@ func TestHandlersRunAtMostMaxInflightAtOnce(t *testing.T) {
 	}
 	c, _ := pair(t, Options{}, Options{Handler: h, MaxInflight: 3})
 	var wg sync.WaitGroup
+	ctx := bounded(t)
 	for i := 0; i < 10; i++ {
 		wg.Add(1)
-		go func() { defer wg.Done(); c.Call(context.Background(), "x", nil, nil) }()
+		go func() { defer wg.Done(); c.Call(ctx, "x", nil, nil) }()
 	}
 	time.Sleep(100 * time.Millisecond)
 	close(release)
@@ -241,7 +243,7 @@ func TestNoiseLinesAndNULsAreSkipped(t *testing.T) {
 	c := New(rw{strings.NewReader(in), io.Discard}, Options{})
 	defer c.Close()
 	var got text
-	if err := c.Call(context.Background(), "echo", nil, &got); err != nil || got.Text != "x" {
+	if err := c.Call(bounded(t), "echo", nil, &got); err != nil || got.Text != "x" {
 		t.Fatalf("%q %v", got.Text, err)
 	}
 }
@@ -266,7 +268,7 @@ func TestAnAnswerJustBeforeTheEndIsKept(t *testing.T) {
 		}()
 		c := New(lastWords{resR, reqW}, Options{})
 		var got text
-		if err := c.Call(context.Background(), "echo", nil, &got); err != nil || got.Text != "last" {
+		if err := c.Call(bounded(t), "echo", nil, &got); err != nil || got.Text != "last" {
 			t.Fatalf("run %d: %q %v", i, got.Text, err)
 		}
 	}
@@ -292,7 +294,7 @@ func (stuck) Close() error                { return nil }
 func TestAWriteThatHangsEndsTheConnection(t *testing.T) {
 	pr, _ := io.Pipe()
 	c := New(stuck{pr}, Options{WriteTimeout: 50 * time.Millisecond})
-	err := c.Call(context.Background(), "echo", nil, nil)
+	err := c.Call(bounded(t), "echo", nil, nil)
 	if Code(err) != CodeTimeout || c.Err() == nil {
 		t.Fatalf("%v %v", err, c.Err())
 	}
@@ -322,8 +324,9 @@ func TestPastTheQueueTheAnswerIsBusyAndPingsStillWork(t *testing.T) {
 		return nil, nil
 	}
 	c, _ := pair(t, Options{}, Options{Handler: h, MaxInflight: 1, MaxQueued: 2})
+	queued := bounded(t)
 	for i := 0; i < 3; i++ { // one handled, two queued
-		go c.Call(context.Background(), "x", nil, nil)
+		go c.Call(queued, "x", nil, nil)
 	}
 	time.Sleep(100 * time.Millisecond)
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
