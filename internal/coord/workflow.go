@@ -196,7 +196,7 @@ func (c *Coord) taskGate(who Principal, r *wire.Request) (string, []journal.Even
 		return "", nil, conflict("no gate")
 	case p.ExpectedRev != 0 && p.ExpectedRev != t.Rev:
 		return "", nil, conflict("rev")
-	case p.Pass && who.User != firstOf(t.Approver, t.Owner) && !who.Admin && c.team():
+	case p.Pass && who.User != t.Accepter() && !who.Admin && c.team():
 		return "", nil, forbidden("only its approver passes it")
 	case len(p.Notes) > maxMessage:
 		return "", nil, bad("notes")

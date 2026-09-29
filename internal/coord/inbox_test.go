@@ -83,3 +83,18 @@ func TestTheNotifyCommandHearsTaskEventsItNames(t *testing.T) {
 		t.Fatalf("%+v", ev)
 	}
 }
+
+func TestATaskWithoutAnApproverIsItsOwnersToAccept(t *testing.T) {
+	st := &task.State{}
+	accept := task.Situation{Kind: task.SitWaiting, Reason: task.WhyAccept}
+	if got := roles(st, &task.Task{Owner: bob.User}, accept, bob.User); !slices.Equal(got, []string{AsOwner, AsApprover}) {
+		t.Fatalf("the owner accepts a task nobody else approves: %v", got)
+	}
+	named := &task.Task{Owner: bob.User, Approver: ann.User}
+	if got := roles(st, named, accept, bob.User); !slices.Equal(got, []string{AsOwner}) {
+		t.Fatalf("a named approver takes it from the owner: %v", got)
+	}
+	if got := roles(st, named, accept, ann.User); !slices.Equal(got, []string{AsApprover}) {
+		t.Fatalf("the named approver: %v", got)
+	}
+}

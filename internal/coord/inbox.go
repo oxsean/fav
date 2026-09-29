@@ -52,13 +52,13 @@ const (
 	AsAdmin      = "admin" // its run is still open on a retired machine
 )
 
-// roles are why task t's situation sit is for user: owner, approver, dispatcher; the owner when nobody else is named.
+// roles are why task t's situation sit is for user: owner, approver (its Accepter), dispatcher; the owner when nobody else is named.
 func roles(st *task.State, t *task.Task, sit task.Situation, user string) []string {
 	var out []string
 	if t.Owner == user {
 		out = append(out, AsOwner)
 	}
-	if sit.Reason == task.WhyAccept && t.Approver == user {
+	if sit.Reason == task.WhyAccept && t.Accepter() == user {
 		out = append(out, AsApprover)
 	}
 	if r := st.Runs[sit.Run]; r != nil && r.Dispatcher == user {
@@ -85,7 +85,7 @@ func concerns(st *task.State, t *task.Task, sit task.Situation) []string {
 	}
 	add(t.Owner)
 	if sit.Reason == task.WhyAccept {
-		add(t.Approver)
+		add(t.Accepter())
 	}
 	if r := st.Runs[sit.Run]; r != nil {
 		add(r.Dispatcher)

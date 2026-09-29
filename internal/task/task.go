@@ -92,6 +92,14 @@ type Task struct {
 	UpdatedAt time.Time `json:"updated_at,omitzero"`
 }
 
+// Accepter is who accepts t's work: its approver, else its owner.
+func (t *Task) Accepter() string {
+	if t.Approver != "" {
+		return t.Approver
+	}
+	return t.Owner
+}
+
 type Run struct {
 	ID         string             `json:"id"`
 	Task       string             `json:"task"`
