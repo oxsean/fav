@@ -33,42 +33,153 @@ const (
 	maxSendIn      = 64 << 10
 )
 
-// streamIn is the agent's stdin.
+// streamIn is the agent's stdin. One goroutine writes it, in the order things were sent: whoever sends never waits
+// for the agent to read, since the agent may itself wait for its output to be read.
 type streamIn struct {
 	mu     sync.Mutex
+	cond   sync.Cond
 	w      *os.File
-	closed bool
+	queue  []*inItem
+	queued int     // bytes in queue
+	flight *inItem // being written
+	closed bool    // takes nothing more
+	told   int     // items with a done not called yet
+	ended  chan struct{}
 }
 
-var errClosed = errors.New("the agent's input is closed")
+type inItem struct {
+	b       []byte
+	done    func(error) // told once whether b reached the agent's input
+	settled bool
+}
 
-func (in *streamIn) send(v any) error {
+var (
+	errClosed    = errors.New("the agent's input is closed")
+	errInputFull = errors.New("too much waits for the agent's input")
+)
+
+func newStreamIn(w *os.File) *streamIn {
+	in := &streamIn{w: w, ended: make(chan struct{})}
+	in.cond.L = &in.mu
+	go in.write()
+	return in
+}
+
+func (in *streamIn) send(v any) error { return in.sendThen(v, nil) }
+
+// sendThen queues v for the agent's input; done, unless nil, is told once it was written or could not be. An error
+// means it was not queued, and done is not told.
+func (in *streamIn) sendThen(v any, done func(error)) error {
 	b, err := json.Marshal(v)
 	if err != nil {
 		return err
 	}
 	in.mu.Lock()
 	defer in.mu.Unlock()
-	if in.closed {
+	switch {
+	case in.closed:
 		return errClosed
+	case in.queued > 0 && in.queued+len(b) >= maxQueuedIn:
+		return errInputFull
 	}
-	_, err = in.w.Write(append(b, '\n'))
-	return err
+	it := &inItem{b: append(b, '\n'), done: done}
+	in.queue, in.queued = append(in.queue, it), in.queued+len(it.b)
+	if done != nil {
+		in.told++
+	}
+	in.cond.Signal()
+	return nil
 }
 
+func (in *streamIn) write() {
+	defer close(in.ended)
+	for {
+		in.mu.Lock()
+		for len(in.queue) == 0 && !in.closed {
+			in.cond.Wait()
+		}
+		if len(in.queue) == 0 {
+			in.mu.Unlock()
+			in.w.Close()
+			return
+		}
+		it := in.queue[0]
+		in.queue, in.queued, in.flight = in.queue[1:], in.queued-len(it.b), it
+		in.mu.Unlock()
+		_, err := in.w.Write(it.b)
+		in.settle([]*inItem{it}, err)
+		if err != nil { // the agent is gone
+			in.mu.Lock()
+			rest := in.queue
+			in.queue, in.queued, in.closed = nil, 0, true
+			in.mu.Unlock()
+			in.w.Close()
+			in.settle(rest, err)
+			return
+		}
+	}
+}
+
+// settle tells items' done what became of them, once each.
+func (in *streamIn) settle(items []*inItem, err error) {
+	var tell []*inItem
+	in.mu.Lock()
+	for _, it := range items {
+		if it == in.flight {
+			in.flight = nil
+		}
+		if !it.settled {
+			it.settled = true
+			if it.done != nil {
+				in.told--
+				tell = append(tell, it)
+			}
+		}
+	}
+	in.mu.Unlock()
+	for _, it := range tell {
+		it.done(err)
+	}
+}
+
+// close takes nothing more; what is queued is still written, then the input closes.
 func (in *streamIn) close() {
 	in.mu.Lock()
 	defer in.mu.Unlock()
-	if !in.closed {
-		in.closed = true
-		in.w.Close()
-	}
+	in.closed = true
+	in.cond.Broadcast()
 }
 
 func (in *streamIn) isClosed() bool {
 	in.mu.Lock()
 	defer in.mu.Unlock()
 	return in.closed
+}
+
+// waiting: something sent with a done has not reached the agent's input yet.
+func (in *streamIn) waiting() bool {
+	in.mu.Lock()
+	defer in.mu.Unlock()
+	return in.told > 0
+}
+
+// finish closes the input and waits up to d for what is queued; what is still not written then (a child the agent
+// left holds its input and does not read) is told it failed.
+func (in *streamIn) finish(d time.Duration) {
+	in.close()
+	select {
+	case <-in.ended:
+		return
+	case <-time.After(d):
+	}
+	in.mu.Lock()
+	left := in.queue
+	if in.flight != nil {
+		left = append([]*inItem{in.flight}, left...)
+	}
+	in.queue, in.queued = nil, 0
+	in.mu.Unlock()
+	in.settle(left, errClosed)
 }
 
 func userMessage(text string) any {
@@ -95,11 +206,11 @@ func ownReport(command string) bool {
 
 // proto is how a stream run's agent speaks on stdin and stdout.
 type proto interface {
-	begin(brief string)                     // send the brief
-	line(text []byte) bool                  // take a line of output it knows; false leaves it to the common reading
-	answer(p pending, a agent.Answer) error // answer a request
-	message(text string) error              // a message while it runs
-	interrupt()                             // end the current turn
+	begin(brief string)                          // send the brief
+	line(text []byte) bool                       // take a line of output it knows; false leaves it to the common reading
+	answer(p pending, a agent.Answer) error      // answer a request
+	message(text string, done func(error)) error // a message while it runs; done is told once it reached the agent
+	interrupt()                                  // end the current turn
 }
 
 // startStream sends the agent its brief.
@@ -109,7 +220,7 @@ func (s *sup) startStream() {
 		s.in.close()
 		return
 	}
-	go s.proto.begin(string(brief)) // ⚠️ a brief larger than the pipe waits for the agent to read it
+	s.proto.begin(string(brief))
 }
 
 // request records what the agent now waits on, and how to answer it.
@@ -217,24 +328,43 @@ func (s *sup) takeAnswers() {
 	}
 }
 
-// takeInbox writes the messages that came since the last look to the agent; once its input is closed they fail.
+// takeInbox queues the messages that came since the last look for the agent; each is sent once it reached the
+// agent's input (delivered), and fails when that input is closed.
 func (s *sup) takeInbox() {
 	ms, next := linesFrom(filepath.Join(s.dir, inboxFile), s.inboxAt, func(m agent.Send) bool { return m.ID != "" && m.Text != "" })
 	s.inboxAt = next
 	if len(ms) == 0 {
 		return
 	}
+	texts := make([]string, len(ms))
 	for i := range ms {
-		ms[i].State = agent.SendFailed
-		if s.proto.message(ms[i].Text) == nil {
-			ms[i].State = agent.SendSent
-			s.mu.Lock()
-			s.out.turnDone, s.seen, s.sent = time.Time{}, time.Now(), true // it starts a turn, or joins the one running
-			s.mu.Unlock()
-		}
-		ms[i].Text = clip(ms[i].Text, maxSendText)
+		texts[i], ms[i].State, ms[i].Text = ms[i].Text, agent.SendQueued, clip(ms[i].Text, maxSendText)
 	}
 	s.keep(func(st *State) { st.Sends = keepSends(append(slices.Clone(st.Sends), ms...)) })
+	for i, m := range ms {
+		if err := s.proto.message(texts[i], func(err error) { s.delivered(m.ID, err) }); err != nil {
+			s.delivered(m.ID, err)
+		}
+	}
+}
+
+// delivered records whether message id reached the agent's input.
+func (s *sup) delivered(id string, err error) {
+	state := agent.SendFailed
+	if err == nil {
+		state = agent.SendSent
+		s.mu.Lock()
+		s.out.turnDone, s.seen, s.sent = time.Time{}, time.Now(), true // it starts a turn, or joins the one running
+		s.mu.Unlock()
+	}
+	s.keep(func(st *State) {
+		st.Sends = slices.Clone(st.Sends)
+		for i := range st.Sends {
+			if st.Sends[i].ID == id {
+				st.Sends[i].State = state
+			}
+		}
+	})
 }
 
 func keepSends(ss []agent.Send) []agent.Send {
@@ -251,14 +381,15 @@ func (s *sup) streamTick() {
 	s.mu.Lock()
 	done, sent := s.out.turnDone, s.sent
 	s.mu.Unlock()
-	if !done.IsZero() && (!sent || time.Since(done) > turnGrace) { // only a message it was sent can start another turn
+	// only a message it was sent can start another turn, and one on its way may be about to
+	if !done.IsZero() && (!sent || time.Since(done) > turnGrace) && !s.in.waiting() {
 		s.in.close()
 	}
 }
 
 // endStream closes the agent's input for good: messages still waiting fail, requests no one answered go.
 func (s *sup) endStream() {
-	s.in.close()
+	s.in.finish(drainWait)
 	s.takeInbox()
 }
 

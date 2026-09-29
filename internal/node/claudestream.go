@@ -83,7 +83,9 @@ func (c claudeProto) answer(p pending, a agent.Answer) error {
 	return c.s.in.send(controlResponse(a.Request, resp))
 }
 
-func (c claudeProto) message(text string) error { return c.s.in.send(userMessage(text)) }
+func (c claudeProto) message(text string, done func(error)) error {
+	return c.s.in.sendThen(userMessage(text), done)
+}
 
 func (c claudeProto) interrupt() {
 	c.s.in.send(controlRequest("stop", map[string]any{"subtype": "interrupt"}))

@@ -30,12 +30,18 @@ type codexCall struct {
 
 var errNotReady = errors.New("the agent has no thread yet")
 
-func (c *codexProto) send(v map[string]any) error {
+func (c *codexProto) send(v map[string]any) error { return c.sendThen(v, nil) }
+
+func (c *codexProto) sendThen(v map[string]any, done func(error)) error {
 	v["jsonrpc"] = "2.0"
-	return c.s.in.send(v)
+	return c.s.in.sendThen(v, done)
 }
 
 func (c *codexProto) call(method string, params any, text string) error {
+	return c.callThen(method, params, text, nil)
+}
+
+func (c *codexProto) callThen(method string, params any, text string, done func(error)) error {
 	c.mu.Lock()
 	c.next++
 	id := c.next
@@ -44,7 +50,7 @@ func (c *codexProto) call(method string, params any, text string) error {
 	}
 	c.calls[id] = codexCall{method, text}
 	c.mu.Unlock()
-	return c.send(map[string]any{"id": id, "method": method, "params": params})
+	return c.sendThen(map[string]any{"id": id, "method": method, "params": params}, done)
 }
 
 func (c *codexProto) reply(id json.RawMessage, result any) error {
@@ -306,7 +312,7 @@ func (c *codexProto) answer(p pending, a agent.Answer) error {
 	return c.reply(p.id, map[string]any{"decision": decision})
 }
 
-func (c *codexProto) message(text string) error {
+func (c *codexProto) message(text string, done func(error)) error {
 	c.mu.Lock()
 	thread, turn := c.thread, c.turn
 	c.mu.Unlock()
@@ -314,9 +320,9 @@ func (c *codexProto) message(text string) error {
 	case thread == "":
 		return errNotReady
 	case turn != "":
-		return c.call("turn/steer", map[string]any{"threadId": thread, "expectedTurnId": turn, "input": textInput(text)}, text)
+		return c.callThen("turn/steer", map[string]any{"threadId": thread, "expectedTurnId": turn, "input": textInput(text)}, text, done)
 	}
-	return c.call("turn/start", map[string]any{"threadId": thread, "input": textInput(text)}, "")
+	return c.callThen("turn/start", map[string]any{"threadId": thread, "input": textInput(text)}, "", done)
 }
 
 func (c *codexProto) interrupt() {

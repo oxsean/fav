@@ -5,6 +5,7 @@ package proc
 import (
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"syscall"
 	"unsafe"
@@ -116,4 +117,17 @@ func CheckArgs(argv []string) error {
 		return ErrBatchArgs
 	}
 	return nil
+}
+
+// pipeBuffer is the buffer of a child's output pipe. ⚠️ os.Pipe gives 4 KiB, and Node writes a pipe synchronously
+// here: a claude whose supervisor pauses reading for a moment stops whole, stdin and timers too.
+const pipeBuffer = 8 << 20
+
+// Pipe is a pipe for a child's output, with a buffer that takes up a pause of its reader.
+func Pipe() (r, w *os.File, err error) {
+	var rh, wh windows.Handle
+	if err := windows.CreatePipe(&rh, &wh, nil, pipeBuffer); err != nil {
+		return nil, nil, os.NewSyscallError("CreatePipe", err)
+	}
+	return os.NewFile(uintptr(rh), "|0"), os.NewFile(uintptr(wh), "|1"), nil
 }

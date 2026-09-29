@@ -3,6 +3,7 @@
 package proc
 
 import (
+	"os"
 	"os/exec"
 	"syscall"
 
@@ -51,3 +52,6 @@ func KillPID(pid int) error { return syscall.Kill(pid, syscall.SIGKILL) }
 
 // CheckArgs: argv goes to the program as it is; nothing to refuse.
 func CheckArgs([]string) error { return nil }
+
+// Pipe is a pipe for a child's output.
+func Pipe() (r, w *os.File, err error) { return os.Pipe() }

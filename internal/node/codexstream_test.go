@@ -27,7 +27,7 @@ func newCodexRig(t *testing.T, session string) *codexRig {
 	t.Cleanup(func() { r.Close(); w.Close() })
 	s := &sup{dir: t.TempDir(), spec: Spec{Agent: tend.ProviderCodex, Stream: true, Thread: true, Dir: "/work", Session: session},
 		st: State{State: StateRunning, Stream: true}, inputs: map[string]pending{}, userDenied: map[string]bool{}}
-	s.in = &streamIn{w: w}
+	s.in = newStreamIn(w)
 	s.proto = newProto(s)
 	return &codexRig{s: s, out: bufio.NewReader(r)}
 }
@@ -119,7 +119,7 @@ func TestCodexApprovalsQuestionsAndSteering(t *testing.T) {
 	if m := g.sent(t); mustJSON(m["result"]) != `{"answers":{"q1":{"answers":["pg"]}}}` {
 		t.Fatalf("%v", m)
 	}
-	if g.s.proto.message("use tabs") != nil {
+	if g.s.proto.message("use tabs", nil) != nil {
 		t.Fatal("message")
 	}
 	m := g.sent(t)

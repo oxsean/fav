@@ -15,7 +15,7 @@ import (
 
 type fakeOpts struct {
 	sid, dir, final, stderr, note, askReport, permission, question, verdicts, write, plan string
-	steps, exit                                                                           int
+	steps, exit, flood                                                                    int
 	every, leave                                                                          time.Duration
 	ask                                                                                   bool
 }
@@ -89,6 +89,17 @@ func fakeStream(o fakeOpts) error {
 		return err
 	}
 	emit(map[string]any{"type": "system", "subtype": "init", "session_id": o.sid})
+	if o.flood > 0 { // requests tend answers as it reads them, sent before any answer is read
+		pad := strings.Repeat("x", 2<<10)
+		for i := range o.flood {
+			emit(controlRequest(fmt.Sprint("flood-", i), map[string]any{"subtype": fmt.Sprint("flood-", i, "-", pad)}))
+		}
+		for i := range o.flood {
+			if next(fmt.Sprint("flood-", i)) == nil {
+				return nil
+			}
+		}
+	}
 	if o.note != "" {
 		AddReport(os.Getenv(EnvRunDir), ReportNote, o.note)
 	}

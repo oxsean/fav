@@ -41,6 +41,7 @@
 - agent 的环境多了 `TEND_RUN` 和 `TEND_RUN_DIR`（run 目录）。
 - stdout 逐行解析（JSON 才解析）：claude `result`（最后一条消息、`is_error`、`permission_denials`），codex `thread.started`（会话 id）、`item.completed` 的 `agent_message`（最后一条消息）、`error` / `turn.failed`（错误）；claude / codex 以外的 agent，最后一行普通输出当最后一条消息。
 - 运行中每秒：读 `reports.jsonl` 新增（ask → `attention=asked` + `ask`；note → `note`，并清掉 stalled）；background 方式下 stdout / stderr 超过 `spec.stall_after`（节点 `node.stall_after`，默认 15 分钟，`off` 关闭）没有字节 → `attention=stalled`，再有输出就清掉；只标记，不停。herdr 方式每 3 s 看 agent 是否在等人：Herdr 里它的 pane 是 `blocked`，或（claude）会话 transcript 末尾是没回答的 `AskUserQuestion` / `ExitPlanMode`，或最新的 Claude hook 事件是 `Notification` / `PermissionRequest` 且 transcript 之后没再长（`tend install-hook`）→ `attention=asked`（没有 `ask` 原文）；不再等时清掉，但只清自己标的，`tend run ask` 的提问留着。Herdr pane 状态和 Claude hook 这两个来源只用于 herdr 方式。
+- 读写管线：读 agent stdout 和 stderr 管道的 goroutine 只读，把字节放进内存里按字节计的有界缓冲（stdout 64 MiB，stderr 16 MiB，常数在 `internal/node/limits.go`），满了才等；写盘、解析、写 `state.json`、往 stdin 发消息都在另外的 goroutine 里做。Windows 上 agent 的这两个管道由 `proc.Pipe` 建（`CreatePipe`，缓冲 8 MiB；`os.Pipe` 只有 4 KiB，而 Node 在 Windows 上同步写管道，读的一方停一下，claude 整个就停下）。stream run 的 stdin 只由一个写 goroutine 按发送顺序写，谁发都不等 agent 读（agent 可能正等着自己的输出被读），排队超过 16 MiB 的发送失败；关 stdin 时先写完已排队的。
 - 输出按 64 KiB 块写盘，超长行不解析；账号、套餐用量和 agent 自己配置所在的路径不写进 `output.log`：整行丢掉的有 claude 对 `initialize` 的回应（`request_id` 为 `init`，里面有 email、organization 和订阅类型）、claude 的 `rate_limit_event`、codex 的 `account/rateLimits/updated` 和 `hook/*`（hook 的 id 里也有配置文件的路径）；去掉字段再写的有 codex 回应里的 `codexHome`、`instructionSources`、`thread.path`（rollout 文件），`thread/started` 的 `thread.path`，claude `system init` 的 `memory_paths`。要改写的超长行先整行读进来（最多 32 MiB，再长就整行不写）；判断先按字节预筛，JSON 字符串里的引号一定带转义，只是提到这些词的文字不会误中；`output.log` 轮转改名失败（Windows 上有读者开着）就继续追加，下次再轮转。
 
 runner 方式：
@@ -75,6 +76,7 @@ runner 方式：
 - 请求进 `state.requests`，同时标 attention：有问题 → `asked`（`ask` 是第一个问题），否则 `permission`；请求都答完就清掉自己标的。等请求时不算沉默（回答或送出消息后沉默计时重置）。
 - 一轮结束（claude `result`、codex `turn/completed`）后：从没送过消息就立即关 stdin，agent 随之退出；送过消息则等 2 s，期间没有新输出、也没有新消息才关（新消息会开下一轮）。
 - 停止：先中断当前这一轮（claude `interrupt` 控制请求、codex `turn/interrupt`）并关 stdin，3 s 后还没退出再结束进程树，之后照常 10 s 强杀。
-- 结束时：还没送出的消息记 failed，没回答的请求清掉；用户拒绝过的工具不算「等你批准」（只有权限模式没问就拒的才算）。
+- 消息从 `inbox.jsonl` 取出时在 `state.sends` 里是 queued，写 goroutine 真的写进管道后才改成 sent（同时算作开了下一轮、沉默计时重置），写失败（agent 已退出）改成 failed；一轮结束后还有消息在排队时不关 stdin。
+- 结束时：关 stdin，等排队的写完，最多 2 s，还没写进去的（agent 留下的子进程拿着 stdin 不读）记 failed；还没送出的消息记 failed，没回答的请求清掉；用户拒绝过的工具不算「等你批准」（只有权限模式没问就拒的才算）。
 - 节点 `run.answer`：请求不在 `state.requests` 里 → `conflict request_gone`；同一请求已在 `answers.jsonl` 里 → 直接回快照。`run.send`：不是 stream run 或已不在 starting / running → `conflict cannot_send`；同 id 已有 → 直接回快照。快照的 `sends` = `state.sends` 加上 `inbox.jsonl` 里监督进程还没取的（queued；run 已结束或 unknown 时算 failed）。
 - 最后一句话（`last`，500 字节内）和用量（`usage{input, cache_read, cache_write, output, cost_usd, turns}`）：claude 取 assistant 文本和每个 `result` 的 usage 累加、`total_cost_usd` 取最新；codex exec 取 `turn.completed` 的 usage；普通命令行取最后一行。每秒最多写一次 state。

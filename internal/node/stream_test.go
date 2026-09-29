@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/oxsean/fav/internal/agent"
+	"github.com/oxsean/fav/internal/proc"
 	"github.com/oxsean/fav/internal/wire"
 )
 
@@ -141,5 +142,20 @@ func TestMessagesARunNeverTookFailOnceItEnded(t *testing.T) {
 	st.State = StateExited
 	if got := withQueued(dir, st); got[1].State != agent.SendFailed {
 		t.Fatalf("%+v", got)
+	}
+}
+
+func TestAnAgentFloodingItsOutputWhileAnswersPileUpDoesNotDeadlock(t *testing.T) {
+	n := New(t.TempDir())
+	s := start(t, n, StartParams{Task: "t_1", Profile: fake("--steps", "1", "--every", "1ms", "--flood", "1000"), Brief: "b"})
+	t.Cleanup(func() {
+		if got, err := n.Snapshot(s.Run); err == nil && !Terminal(got.State.State) {
+			proc.KillTree(got.Pid)
+			proc.KillPID(got.Sup)
+		}
+	})
+	end := wait(t, n, s.Run, func(s Snapshot) bool { return Terminal(s.State.State) })
+	if end.State.State != StateExited || !strings.Contains(logOf(t, n, s.Run), `"type":"result"`) {
+		t.Fatalf("%+v", end)
 	}
 }

@@ -443,7 +443,7 @@ func (s *sup) run() error {
 			return err
 		}
 		defer r.Close()
-		c.Stdin, s.in = r, &streamIn{w: w}
+		c.Stdin, s.in = r, newStreamIn(w)
 		s.proto = newProto(s)
 		defer s.in.close()
 	} else if interactive {
@@ -459,12 +459,12 @@ func (s *sup) run() error {
 		out := activity{log, s}
 		// ⚠️ os.Pipe, not StdoutPipe: Wait then returns when the agent exits, not when every child it left closes
 		// the output
-		or, ow, err := os.Pipe()
+		or, ow, err := proc.Pipe()
 		if err != nil {
 			s.end(StateFailed, err.Error(), nil)
 			return err
 		}
-		er, ew, err := os.Pipe()
+		er, ew, err := proc.Pipe()
 		if err != nil {
 			or.Close()
 			ow.Close()
@@ -473,9 +473,12 @@ func (s *sup) run() error {
 		}
 		c.Stdout, c.Stderr = ow, ew
 		readEnds, writeEnds = []*os.File{or, er}, []*os.File{ow, ew}
+		// ⚠️ the pipes are only read here: logging and reading the output wait for the disk and for the agent's input,
+		// and the agent waits whenever its output is not read
+		outs, errs := spooled(&pipes, or, maxSpoolOut), spooled(&pipes, er, maxSpoolErr)
 		pipes.Add(2)
-		go func() { defer pipes.Done(); s.copyOut(or, out) }()
-		go func() { defer pipes.Done(); io.Copy(out, er) }()
+		go func() { defer pipes.Done(); s.copyOut(outs, out) }()
+		go func() { defer pipes.Done(); io.Copy(out, errs) }()
 	}
 	tree, err := proc.StartTree(c, interactive)
 	closeAll(writeEnds) // the agent has its own copies

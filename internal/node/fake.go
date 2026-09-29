@@ -38,6 +38,7 @@ func FakeAgent(args []string) error {
 	verdicts := fs.String("verdicts", "", "report these verdicts in turn, one per run of its task (rework,pass)")
 	write := fs.String("write", "", "append a line naming its run to this file in its directory")
 	plan := fs.String("plan", "", "hand in this plan (JSON) to its run")
+	flood := fs.Int("flood", 0, "stream: first send this many requests of about 2 KiB, then wait for all their answers")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -48,7 +49,7 @@ func FakeAgent(args []string) error {
 	if *stream {
 		return fakeStream(fakeOpts{sid: *sid, dir: *dir, steps: *steps, every: *every, exit: *exit, ask: *ask, final: *final,
 			stderr: *stderr, note: *note, askReport: *askReport, permission: *permission, question: *question, leave: *leave,
-			verdicts: *verdicts, write: *write, plan: *plan})
+			verdicts: *verdicts, write: *write, plan: *plan, flood: *flood})
 	}
 	brief := ""
 	if *promptFile != "" {
