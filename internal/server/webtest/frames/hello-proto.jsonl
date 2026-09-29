@@ -1,0 +1,6 @@
+{"note":"a server of another Proto: the client closes and does not dial again"}
+{"connect":true}
+{"c":{"type":"req","id":1,"method":"hello","params":{"proto":2,"role":"client"}}}
+{"s":{"type":"res","id":1,"result":{"proto":1,"version":"old","role":"coordinator","methods":["hello"]}}}
+{"wait_ms":60000}
+{"dialing":false}

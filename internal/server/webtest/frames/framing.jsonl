@@ -1,0 +1,9 @@
+{"connect":true}
+{"c":{"type":"req","id":1,"method":"hello","params":{"proto":2,"role":"client"}}}
+{"s":{"type":"res","id":1,"result":{"proto":2,"version":"test","role":"coordinator","methods":["hello","state.get","task.get","task.create","state.watch","run.output.watch","machines.watch","inbox.watch"]}}}
+{"note":"two frames in one message, one frame across two, a line that is not JSON"}
+{"raw":"{\"type\":\"req\",\"id\":5,\"method\":\"ping\"}\n{\"type\":\"req\",\"id\":6,\"method\":\"ping\"}\n{\"type\":\"req\",\"id\""}
+{"raw":":7,\"method\":\"ping\"}\nnot json\n"}
+{"c":{"type":"res","id":5}}
+{"c":{"type":"res","id":6}}
+{"c":{"type":"res","id":7}}

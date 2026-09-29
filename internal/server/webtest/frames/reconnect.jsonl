@@ -1,0 +1,26 @@
+{"connect":true}
+{"c":{"type":"req","id":1,"method":"hello","params":{"proto":2,"role":"client"}}}
+{"s":{"type":"res","id":1,"result":{"proto":2,"version":"test","role":"coordinator","methods":["hello","state.get","task.get","task.create","state.watch","run.output.watch","machines.watch","inbox.watch"]}}}
+{"step":"start"}
+{"c":{"type":"req","id":2,"method":"state.get","params":{}}}
+{"c":{"type":"req","id":3,"method":"run.output.watch","params":{"run":"r1"}}}
+{"s":{"type":"push","id":3,"method":"open","params":{"cursor":{"file":"a1:9","off":0},"mode":"resume"}}}
+{"s":{"type":"push","id":3,"method":"run.output","params":{"events":[{"id":"a1:9:0:0","off":0,"kind":"say","text":"one"}],"cursor":{"file":"a1:9","off":50}}}}
+{"note":"the connection drops: the call fails as closed, a call while offline fails at once"}
+{"drop":true}
+{"step":"offline"}
+{"note":"backoff: 1 s, then 2 s after a refused attempt"}
+{"wait_ms":999}
+{"dialing":false}
+{"wait_ms":1}
+{"dialing":true}
+{"refuse":true}
+{"wait_ms":1999}
+{"dialing":false}
+{"wait_ms":1}
+{"connect":true}
+{"c":{"type":"req","id":4,"method":"hello","params":{"proto":2,"role":"client"}}}
+{"s":{"type":"res","id":4,"result":{"proto":2,"version":"test","role":"coordinator","methods":["hello","state.get","run.output.watch"]}}}
+{"note":"the stream opens again from its cursor"}
+{"c":{"type":"req","id":5,"method":"run.output.watch","params":{"run":"r1","from":{"file":"a1:9","off":50}}}}
+{"s":{"type":"push","id":5,"method":"open","params":{"cursor":{"file":"a1:9","off":50},"mode":"resume"}}}

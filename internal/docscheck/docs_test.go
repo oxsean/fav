@@ -26,7 +26,7 @@ var notCode = []string{"Width", "Height", "TestName", "RESULT", "tend.sh", "tend
 
 var (
 	backtick = regexp.MustCompile("`([^`\n]+)`")
-	pathLike = regexp.MustCompile(`^(internal|cmd|tools|scripts|skills|docs)/[\w./-]*$|^[\w.-]+\.(go|sh|py|toml|yml|yaml|md)$`)
+	pathLike = regexp.MustCompile(`^(internal|cmd|tools|scripts|skills|docs)/[\w./-]*$|^[\w.-]+\.(go|sh|py|toml|yml|yaml|md|js|mjs|css)$`)
 	// external: package qualifiers and builtins that are not this module's
 	external = regexp.MustCompile(`^(t|tea|syscall|lipgloss|os|filepath|strings|exec|time|json|testing)\.|^len\(`)
 	goFile   = regexp.MustCompile(`[\w-]+\.go\b`)

@@ -1,0 +1,12 @@
+{"connect":true}
+{"c":{"type":"req","id":1,"method":"hello","params":{"proto":2,"role":"client"}}}
+{"s":{"type":"res","id":1,"result":{"proto":2,"version":"test","role":"coordinator","methods":["hello","state.get","task.get","task.create","state.watch","run.output.watch","machines.watch","inbox.watch"]}}}
+{"note":"shown again while offline, the client dials at once"}
+{"drop":true}
+{"step":"hide"}
+{"wait_ms":500}
+{"dialing":false}
+{"step":"show"}
+{"dialing":true}
+{"connect":true}
+{"c":{"type":"req","id":2,"method":"hello","params":{"proto":2,"role":"client"}}}

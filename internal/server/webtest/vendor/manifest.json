@@ -1,0 +1,26 @@
+{
+  "packages": [
+    {
+      "name": "preact-render-to-string",
+      "version": "6.7.0",
+      "integrity": "sha512-Z4WR8fmLMRpdYqJ9i7vrlXSsSrxVJydwrkEXHapexfARbWfGb7vGcnvNQnIzN0cXciMVOlz/XLoiMCi9gUsy9Q==",
+      "license": {
+        "from": "LICENSE",
+        "to": "LICENSES/preact-render-to-string.txt",
+        "upstream": "f1f6a1f3170072992cfdbbd59b125a04b9e810f6d1e08bb459741f54904a3460",
+        "sha256": "f1f6a1f3170072992cfdbbd59b125a04b9e810f6d1e08bb459741f54904a3460"
+      },
+      "files": [
+        {
+          "from": "dist/index.mjs",
+          "to": "render-to-string.mjs",
+          "imports": {
+            "preact": "../../web/vendor/preact.mjs"
+          },
+          "upstream": "619dd7d8058ec9f9d5dec610023f51b80493b28228c16c9e275d815e412675be",
+          "sha256": "d07bdcda966d10713433c84a91ad75c237ab90960381f9773531a0f869e41107"
+        }
+      ]
+    }
+  ]
+}

@@ -204,15 +204,29 @@ func TestThePageFoldsEnvelopesAsTheCoordinatorDoes(t *testing.T) {
 	dir := t.TempDir()
 	b, _ := json.Marshal(envs)
 	os.WriteFile(filepath.Join(dir, "envs.json"), b, 0o600)
-	fold, _ := filepath.Abs(filepath.Join("web", "fold.js"))
-	script := `const fs=require('fs'),vm=require('vm');vm.runInThisContext(fs.readFileSync(process.argv[1],'utf8'));
-let s={seq:0,tasks:{},runs:{},projects:{},shares:{}};for(const e of JSON.parse(fs.readFileSync(process.argv[2],'utf8')))s=Fold.apply(s,e);
+	envFile := filepath.Join(dir, "envs.json")
+	body := `let s={seq:0,tasks:{},runs:{},projects:{},shares:{}};for(const e of JSON.parse(fs.readFileSync(process.argv[2],'utf8')))s=Fold.apply(s,e);
 const sits={};for(const t of Object.values(s.tasks))sits[t.id]=Fold.situation(s,t);
 process.stdout.write(JSON.stringify({state:s,sits}));`
-	out, err := exec.Command(nodeBin, "-e", script, fold, filepath.Join(dir, "envs.json")).Output()
-	if err != nil {
-		t.Fatalf("node: %v", err)
+	// the page's classic script and the new UI's module fold the same way until the switch removes the first
+	scripts := map[string][]string{
+		"web/fold.js": {"-e", `const fs=require('fs'),vm=require('vm');vm.runInThisContext(fs.readFileSync(process.argv[1],'utf8'));` + body},
+		"web/core/fold.js": {"--input-type=module", "-e", `import fs from 'node:fs';import {pathToFileURL} from 'node:url';
+const Fold=await import(pathToFileURL(process.argv[1]));` + body},
 	}
+	for file, script := range scripts {
+		t.Run(file, func(t *testing.T) {
+			fold, _ := filepath.Abs(filepath.FromSlash(file))
+			out, err := exec.Command(nodeBin, append(script, fold, envFile)...).Output()
+			if err != nil {
+				t.Fatalf("node: %v", err)
+			}
+			sameFold(t, out, st)
+		})
+	}
+}
+
+func sameFold(t *testing.T, out []byte, st *task.State) {
 	var both struct {
 		State any
 		Sits  map[string]task.Situation

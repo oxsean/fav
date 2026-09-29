@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"io"
+	"io/fs"
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
@@ -84,18 +85,24 @@ func TestSkinsAreServedAsStylesheets(t *testing.T) {
 	}
 }
 
-// Every custom property the page uses is one it defines or one a skin gives.
+// Every custom property the page uses, in any of its directories but the vendored files, is one it defines or one a
+// skin gives.
 func TestThePageUsesOnlyTokensItHas(t *testing.T) {
 	defined := map[string]bool{}
 	for _, k := range skin.Tokens {
 		defined[k] = true
 	}
-	entries, _ := webFiles.ReadDir("web")
 	var all string
-	for _, e := range entries {
-		b, _ := webFiles.ReadFile("web/" + e.Name())
-		all += string(b)
-	}
+	fs.WalkDir(webFiles, "web", func(p string, d fs.DirEntry, err error) error {
+		if d.IsDir() && d.Name() == "vendor" {
+			return fs.SkipDir
+		}
+		if err == nil && !d.IsDir() {
+			b, _ := webFiles.ReadFile(p)
+			all += string(b)
+		}
+		return err
+	})
 	for _, m := range regexp.MustCompile(`--([a-z0-9-]+)\s*:`).FindAllStringSubmatch(all, -1) {
 		defined[m[1]] = true
 	}

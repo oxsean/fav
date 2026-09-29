@@ -52,7 +52,7 @@ tend journal verify [--json] | repair [-y]
 
 页面的合并和改名（计划）见 [ui.md](../tasks/ui.md)「页面结构与用词（计划）」。
 
-- 文件：`internal/server/web/`（`index.html`、`app.css`、`api.js`、`fold.js`、`team.js`、`tree.js`、`home.js`、`look.js`、`palette.js`、`app.js`），`go:embed` 进二进制，无构建步骤、无外部依赖。
+- 文件：`internal/server/web/`（`index.html`、`app.css`、`api.js`、`fold.js`、`team.js`、`tree.js`、`home.js`、`look.js`、`palette.js`、`app.js`），`go:embed` 进二进制，无构建步骤、无外部依赖。新界面的底座（`core/`、`vendor/`）见下文「新界面的底座」。
   - `api.js` 是唯一的通信层（wire 帧走 `/client` WebSocket，每条请求 30 s 超时后发 `cancel`，应答 server 的 `ping`）。
   - `fold.js` 把推送的信封折进页面的状态（照搬 `task.State.Apply`，`fold_test.go` 用 Go 生成的信封对照）。
   - `team.js` 是团队相关的页面（登录方式、项目与成员、机器的主人与分享、账号、管理）。
@@ -73,3 +73,45 @@ tend journal verify [--json] | repair [-y]
 - 任务树：列表按父子缩进（最多三层），行上有处境徽章（`Fold.situation`，没开始的手动任务不标）；详情有处境、父任务、前置任务、子任务、验收标准、负责人与验收人，「开始」和「调整位置」；新建任务可以选父任务、前置任务、验收标准，或放进待办。地址 `#task-<id>` 打开对应任务（webhook 里的链接就是它）。「等你」计数在每次推送后 300 ms 去抖重读 `inbox.list`。
 - 工单同步（见 [tasks/trackers.md](../tasks/trackers.md)「工单同步」）：项目卡片的「工单同步」列出绑定和状态，能绑定 Gitea 仓库、重新同步、换凭据、解绑（`/api/trackers*`）；需求任务在列表里标「需求」，详情显示来源 issue 和版本，有新版本时可以「采用新版本 / 维持本轮范围」，issue 在外面关掉后可以「继续做」或取消。
 - 布局：任务列表 + 详情（输出 / 对话 / 任务书 / 运行记录）、「等你」页、agent 定义页、机器页（主人、分享、添加机器、机器凭据）、项目页、账号页、管理页（只有管理员）；新建任务可以选项目；键全部来自 `palette.js` 的操作表（`?` 列出全部）；850 px 以下侧栏变横条，680 px 以下列表和详情分屏、隐藏键帽。
+
+### 新界面的底座
+
+新界面（Preact + htm + signals，原生 ES 模块，无构建链）的底座和旧页面放在同一个目录里，被一起 embed，但旧的 `index.html` 不加载它。页面接上以后，旧文件一次删掉。
+
+- **内嵌的第三方文件**：`web/vendor/`，放 npm 上的 `preact.mjs`、`hooks.mjs`、`htm.mjs`、`signals-core.mjs`，许可证在 `LICENSES/`。只给测试用的 `preact-render-to-string` 放在 `webtest/vendor/`，不进二进制。
+  - `tools/vendorweb` 按各自的 `manifest.json` 下载 tarball，核对 npm 的 `integrity`，取出文件和 LICENSE，把上游和写出后的 sha256 记回 manifest。
+  - 只允许一种改写：manifest 里某个文件的 `imports` 声明「裸模块名 → 相对路径」，比如 `hooks.mjs` 的 `preact` → `./preact.mjs`。render-to-string 指向 `../../web/vendor/preact.mjs`，这样它和组件用的是同一个 preact 实例，hooks 才挂得上。
+  - 文件里出现没有声明的裸 import，或者声明的改写一处都没命中，工具就报错。
+  - 版本升级：改 manifest 里的 `version`、清掉 `integrity`，再运行 `go run ./tools/vendorweb`。
+- **分层**：`vendor` ← `core` ← `ui` ← `pages`，每层只 import 自己和下面的层，`ui` 不直接 import `core/wire.js`；入口 `main.js` 不受限制。所有 import 都是相对路径，不用 import map。`web/package.json` 的 `{"type":"module"}` 让 node 把这些 `.js` 当 ES 模块跑。
+- **`core/`**（不碰 DOM，全部在 node 里测）：
+  - `wire.js`：`/client` 上的 wire 帧，按行拆帧。
+    - 连上后先发 `hello{proto: 2, role: "client"}`，形状就是 `remote.HelloParams`。回来的 `proto` 不是 2，状态记为 `outdated`，不再重连（页面要重新加载）；回来的 `methods` 决定哪些 `.watch` 可以开，没列出的方法在本地直接结束，报 `unsupported`。
+    - `call`：30 s 超时后发 `cancel`，报 `timeout`；连接中的调用等 hello 完成再发，离线时立即报 `offline`，断线时报 `closed`。server 发来的 `ping` 照答，别的请求回 `unknown_method`。
+    - `watch`：发 `req` 之前先登记接收者。推送按 `id` 交给这个流，第一条是 `open{cursor, mode}`；同一个 `id` 的 `res` 是最后一帧：`result` 表示正常结束，`lagged` 按游标立即重开，其它错误码就是流的终点。`cancel` 只发一次，之后到达的帧一律丢掉。
+    - 断线后 1 s 起翻倍、最长 30 s、带抖动地重连（成功 hello 后回到 1 s），然后每个流用它的主人给的参数（带游标）重开。
+    - `setVisible(false)` 结束可暂停的流（输出），`state.watch` 保留；`setVisible(true)` 按游标重开它们，离线时立即重连。连接状态放在一个 signal 里：`idle` / `connecting` / `open` / `offline` / `outdated` / `closed`。
+  - `fold.js`：旧 `fold.js` 的模块版，行为相同；`fold_test.go` 拿两份和 `task.State.Apply` 对照。`parts` 表列出每种事件改动状态里的哪几张表。
+  - `store.js`：页面的状态。
+    - `state.watch` 的推送：
+      - `open{mode: snapshot}` 或 `reset` 开始一份新快照；
+      - `snapshot{part, items}` 的 `part` 是 `task.State` 那几张表的 JSON 名（`tasks`、`runs`、`projects`、`shares`、`agent_defs`），`items` 是 id → 对象，同一张表可以分几批，累加起来；
+      - `live{seq}` 结束快照，整份换上；
+      - 之后是 `journal{信封}`，seq 不大于已应用的就跳过。
+      - `open{mode: resume}` 表示接着已应用的 seq 继续。`affordances` 这个 part 按人计算，store 收下但不折叠。
+    - 状态原地折叠，每张表一个版本号 signal，一帧最多加一次（页面上用 `requestAnimationFrame`）。
+    - 折叠遇到自己没有的对象，或者不认识的 part：结束这个流，不带 `after_seq` 重开。重开时的参数：已经 live 过就带 `after_seq`；`no_briefs` 时任务不带任务书，由 `brief(id)` 用 `task.get` 按需取回并填进状态。
+    - `machines.watch` 推 `machines{items}`，`inbox.watch` 推 `inbox{items}`，都是整份替换。
+    - `output(run)` 按运行引用计数：第一个持有者开 `run.output.watch`（可暂停，续传带 `from`），最后一个释放时 `cancel`。`run.output{events, cursor}` 里带 `key` 的事件替换前一条同 `key` 的；`open{mode: gap}` 在事件里插一条 `gap{from, to}`。
+  - `keys.js`：作用域栈，顺序是 `modal` → `drawer` → `list` → `page` → `global`，同一层里后推入的先查；`blocks` 的作用域挡住下面各层，`when` 为假的绑定让给下一层。
+    - 键名的写法和操作表一致：`n`、`Shift+D`、`Mod+K`（⌘ 或 Ctrl）、`g h`（先按 g，1.2 s 内按 h）、`Esc`、`Space`；`Alt` 组合不认。
+    - 正在组字的按键不处理。输入框里只有 `Esc` 和 `Mod+Enter` 会交给作用域。`；` `，` `？` `、` 当作 `;` `,` `?` `/`。
+    - 同一个作用域里一个键只能绑一次，一个键也不能同时是另一个序列的开头。
+  - `router.js`：地址 ↔ `{page, task?, view?, auth?}`。页面有 `home`、`tasks`（`view` 取 `list` / `board` / `tree`）、`runs`、`machines`、`agents`、`team`、`me`。旧的 `inbox` → 首页，`settings` → 我，`projects` → 团队；`#task-<id>` 打开任务页并选中它；`#device-`、`#invite-`、`#signin-<结果>[?参数]` 解析成 `auth`，生成地址时不带它们。
+  - `i18n.js`：每个模块用 `register(模块, {键: [zh, en]})` 注册自己的词表。两个模块用了同一个键、缺一种语言、两种语言的 `%s` / `%d` 顺序不同，都会报错。
+- **测试**（`webtest/`，不在 `web/` 下）：
+  - Go 用 `runModule` 在 node 里跑 `*_test.js`，每个 JS 用例是一个子测试。
+  - 假 server（`fake.js`）在进程内模拟 WebSocket 和时钟，回放 `webtest/frames/*.jsonl`：一行一个动作。`c` 是客户端应该发出的帧，`s` 是 server 发的帧，`raw` 是原样发出的一段文字，另外还有 `connect` / `refuse` / `drop` / `dialing` / `wait_ms` / `step` / `note`。
+  - 第 3 期 wire 流和 `state.watch` 的 Go 测试也读这批文件：取 `c` 当输入，拿 `s` 对照输出，其余的行属于客户端，跳过。
+  - store 回放 `state-snapshot.jsonl` 得到的状态，和 Go 按同样规则折叠同一文件的结果对照；快照里的对象严格按 `task.State` 的类型解码，多出的字段算失败。
+  - 结构测试：vendor 的校验和，改写只出现在声明过的地方；import 只用相对路径并且合乎分层；每个帧文件都被某个测试回放；皮肤 token 递归检查（跳过 `vendor/`）。
