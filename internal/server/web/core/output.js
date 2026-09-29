@@ -128,7 +128,7 @@ function runModel(run, events, {first = true, head = null, taken = []} = {}) {
     if (!turn || n !== turn.n) turns.push(turn = {key: `${ctx.run}:t${n}`, run: ctx.run, n, steps: []});
     turn.steps.push(s);
   }
-  const temps = events.filter(e => e.temp).map(e => ({key: 'temp:' + e.key, kind: 'temp', text: e.text || '', run: ctx.run}));
+  const temps = events.filter(e => e.temp && e.text).map(e => ({key: 'temp:' + e.key, kind: 'temp', text: e.text, run: ctx.run}));
   const shown = new Set(events.filter(e => e.kind === 'you' && e.input).map(e => e.input));
   const sends = (run?.sends || []).filter(m => !shown.has(m.id) && (m.state === 'queued' || m.state === 'failed'))
     .map(m => ({key: 'send:' + m.id, kind: 'send', id: m.id, text: m.text, state: m.state, run: ctx.run}));

@@ -154,6 +154,8 @@ test('follow: sticks until the viewer moves up, then counts what is new and what
   const rows = out.lay(m);
   const withTemp = out.model([both()[0], {...both()[1], events: [...both()[1].events, {off: 900, kind: 'say', temp: true, key: 'x:900', text: 'more'}]}]);
   eq(out.counted(out.lay(withTemp)), out.counted(rows), 'a temp event is not new');
+  const emptied = out.model([both()[0], {...both()[1], events: [...both()[1].events, {off: 900, kind: 'say', temp: true, key: 'x:900'}]}]);
+  eq(out.lay(emptied).filter(r => r.type === 'temp').length, out.lay(m).filter(r => r.type === 'temp').length, 'a temp event without text draws no row');
 });
 
 test('follow: scrolling to the bottom, the anchor, what is held above, placeholders, the place', () => {

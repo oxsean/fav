@@ -85,7 +85,7 @@ tend journal verify [--json] | repair [-y]
     - 状态原地折叠，每张表一个版本号 signal，一帧最多加一次（页面上用 `requestAnimationFrame`）。
     - 折叠遇到自己没有的对象，或者不认识的 part：结束这个流，不带 `after_seq` 重开。重开时的参数：已经 live 过就带 `after_seq`；`no_briefs` 时任务不带任务书，由 `brief(id)` 用 `task.get` 按需取回并填进状态；`briefOf(id)` 同步地说有没有：有就是任务书，开着 `no_briefs` 但还没取回是 `undefined`，没开 `no_briefs` 而任务没有任务书是空字符串。
     - `machines.watch` 推 `machines{items}`，`inbox.watch` 推 `inbox{items}`，都是整份替换。
-    - `output(run)` 按运行引用计数：第一个持有者开 `run.output.watch`（可暂停，续传带 `from`），最后一个释放时 `cancel`。`run.output{events, cursor}` 里带 `key` 的事件替换前一条同 `key` 的；`open{mode: gap}` 在事件里插一条 `gap{from, to}`。
+    - `output(run)` 按运行引用计数：第一个持有者开 `run.output.watch`（可暂停，续传带 `from`），最后一个释放时 `cancel`。`run.output{events, cursor}` 里带 `key` 的事件替换前一条同 `key` 的（按事件本身找，前面补进的页不影响），没有 `text` 的临时事件删掉同 `key` 的临时事件，`output.js` 也不画没有文字的临时事件；`open{mode: gap}` 在事件里插一条 `gap{from, to}`。
     - `more()` 取最早一个事件之前的一页：`run.output.page{before, file, n: 200}`，一个都没有时 `before: -1`，按 id 去重；翻到这一代日志的开头而有 `prev` 时，下一页从上一代的末尾取。`head` 这个 signal 说前面还有什么：`{more}`、`{start}`（运行的开头）、`{gone}`（`gone` / `not_found`，已清理），取页时带 `loading`，失败带 `failed`，`stale` 时从最后一页重新找。`output(run, {watch: false})` 只翻页不开流；server 没有 `run.output.watch`（`unsupported`）时也改成 `more()` 取最后一页。往前取的页加起来超过 `OUTPUT_BYTES`（32 MiB）时，`trim()` 丢掉最早的几页。`raw(run)` 取最后一页的原始行。
   - `keys.js`：作用域栈，顺序是 `modal` → `drawer` → `list` → `page` → `global`，同一层里后推入的先查；`blocks` 的作用域挡住下面各层，`when` 为假的绑定让给下一层。
     - 键名的写法和操作表一致：`n`、`Shift+D`、`Mod+K`（⌘ 或 Ctrl）、`g h`（先按 g，1.2 s 内按 h）、`Esc`、`Space`；`Alt` 组合不认。

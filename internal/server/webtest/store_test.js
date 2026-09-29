@@ -67,15 +67,34 @@ test('no_briefs: a brief is fetched when asked for; the watch resumes after the 
 test('run output: one watch per run, keyed events replaced, a gap marked, the last release cancels', async () => {
   const {srv, store} = rig();
   const held = [];
-  let seen, r2;
+  let seen, writing, r2;
   await srv.play('output', {
     hold() { held.push(store.output('r1'), store.output('r1')); },
+    writing() { writing = held[0].events.value.filter(e => e.temp).map(e => [e.key, e.text]); },
     gap() { seen = held[0].events.value.map(e => [e.id || '', e.key || '', e.text || e.tool]); r2 = store.output('r2'); },
     release() { held.pop().release(); },
   });
-  eq(seen, [['a1:9:0:0', '', '先跑一遍测试。'], ['a1:9:40:0', 'item_7', '正在写这一句。'], ['a1:9:90:0', '', 'Bash']], 'r1');
+  eq(writing, [['item_7', '正在写这一句'], ['item_8', '想一下']], 'two being written');
+  eq(seen, [['a1:9:0:0', '', '先跑一遍测试。'], ['a1:9:40:0', 'item_7', '正在写这一句。'], ['a1:9:90:0', '', 'Bash']], 'r1: the one without text is gone');
   eq(r2.events.value, [{kind: 'gap', from: {file: 'b2:1', off: 0}, to: {file: 'b2:1', off: 900}}], 'r2');
   eq([store.open('r1'), store.open('r2')], [0, 1], 'holders');
+});
+
+test('a keyed event replaces or removes its own after earlier pages came in before it', async () => {
+  let push;
+  const wire = {has: () => true, watch: (m, o) => { push = o.onPush; return {cancel() {}}; },
+    call: () => Promise.resolve({events: [{id: 'a:1:0:0', off: 0, kind: 'say', text: 'earlier'}], from: 0, earliest: 0})};
+  const store = createStore({wire, frame: fn => fn(), onError: () => {}});
+  const o = store.output('r1');
+  push('run.output', {events: [{id: 'a:1:10:0', off: 10, kind: 'say', text: 'first'}, {kind: 'say', temp: true, key: 'k', text: 'writ'}]});
+  await o.more();
+  push('run.output', {events: [{kind: 'say', temp: true, key: 'k', text: 'writing'}]});
+  const texts = () => o.events.value.map(e => e.text);
+  eq(texts(), ['earlier', 'first', 'writing'], 'replaced in place');
+  push('run.output', {events: [{kind: 'say', temp: true, key: 'k'}]});
+  eq(texts(), ['earlier', 'first'], 'removed');
+  push('run.output', {events: [{kind: 'say', temp: true, key: 'k', text: 'again'}]});
+  eq(texts(), ['earlier', 'first', 'again'], 'a key removed can come back');
 });
 
 test('a push the state cannot take starts over from a snapshot', async () => {
