@@ -47,26 +47,64 @@ func TestThePageDrawsTheEventsOfARun(t *testing.T) {
 	}
 }
 
+// While the page is paused, the count of new events is what a newer page adds to the timeline: not a result its call,
+// already shown, carries, nor the usage the result after it shows.
+func TestPausedOutputCountsTheEventsItWillShow(t *testing.T) {
+	call := `{"type":"assistant","message":{"content":[{"type":"text","text":"listing"},{"type":"tool_use","id":"toolu_1","name":"Bash","input":{"command":"ls"}}]}}` + "\n"
+	rest := `{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_1","content":"main.go"}]}}
+{"method":"thread/tokenUsage/updated","params":{"tokenUsage":{"total":{"inputTokens":10,"outputTokens":5}}}}
+{"type":"assistant","message":{"content":[{"type":"text","text":"done"}]}}
+{"method":"turn/completed","params":{"turn":{"id":"tu1","status":"completed","error":null}}}
+`
+	held, _, heldTo := output.Parse("f", 0, call, output.State{})
+	all, _, allTo := output.Parse("f", 0, call+rest, output.State{})
+	page := func(evs []output.Event, to int64) string {
+		b, _ := json.Marshal(map[string]any{"events": evs, "from": 0, "to": to, "earliest": 0, "file": "f"})
+		return string(b)
+	}
+	script := `const ui={online:true,authenticated:true,busy:new Set(),outputs:new Map(),raw:false,follow:false,pending:0,frozenOutput:null};
+const selectedRun=()=>({id:'r1'}),renderOutput=()=>{},updateFollowLabel=()=>{},toast=()=>{},errorText=String;
+ui.outputs.set('r1',` + page(held, heldTo) + `);
+const api={runOutputPage:async()=>(` + page(all, allTo) + `)};
+` + webCode(t, "async function fetchOutput(", "\nasync function fetchChat(") + webCode(t, "function renderEvents(", "\n// toast says message") + `
+fetchOutput().then(()=>process.stdout.write(String(ui.pending)));`
+	if got := runNode(t, script, ""); got != "2" {
+		t.Fatalf("paused, the new events are the reply and the result: counted %s", got)
+	}
+}
+
 // drawEvents runs app.js's renderEvents on evs.
 func drawEvents(t *testing.T, evs []output.Event) string {
+	t.Helper()
+	in, _ := json.Marshal(evs)
+	script := `const words={usageTokens:'{0} in, {1} cached, {2} out'};const t=k=>words[k]||k;
+const esc=s=>String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+const tokens=n=>n>=1e6?(n/1e6).toFixed(1)+'M':n>=1000?Math.floor(n/1000)+'k':String(n||0);
+` + webCode(t, "function renderEvents(", "\n// toast says message") + `
+process.stdout.write(renderEvents(JSON.parse(require('fs').readFileSync(0,'utf8'))));`
+	return runNode(t, script, string(in))
+}
+
+// webCode is app.js from the line starting with start up to end.
+func webCode(t *testing.T, start, end string) string {
 	t.Helper()
 	b, err := os.ReadFile(filepath.Join("web", "app.js"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	src := string(b)
-	start, end := strings.Index(src, "function renderEvents("), strings.Index(src, "\n// toast says message")
-	if start < 0 || end < start {
-		t.Fatal("app.js has no renderEvents before toast")
+	i := strings.Index(src, start)
+	j := strings.Index(src[max(i, 0):], end)
+	if i < 0 || j < 0 {
+		t.Fatalf("app.js has no %q before %q", start, end)
 	}
-	in, _ := json.Marshal(evs)
-	script := `const words={usageTokens:'{0} in, {1} cached, {2} out'};const t=k=>words[k]||k;
-const esc=s=>String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-const tokens=n=>n>=1e6?(n/1e6).toFixed(1)+'M':n>=1000?Math.floor(n/1000)+'k':String(n||0);
-` + src[start:end] + `
-process.stdout.write(renderEvents(JSON.parse(require('fs').readFileSync(0,'utf8'))));`
+	return src[i:i+j] + "\n"
+}
+
+func runNode(t *testing.T, script, stdin string) string {
+	t.Helper()
 	cmd := exec.Command(nodeJS(t), "-e", script)
-	cmd.Stdin = strings.NewReader(string(in))
+	cmd.Stdin = strings.NewReader(stdin)
 	out, err := cmd.Output()
 	if err != nil {
 		t.Fatalf("node: %v", err)

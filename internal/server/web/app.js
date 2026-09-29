@@ -211,17 +211,22 @@ function markdown(source) {
   }
   endList();if(code)html+=`<pre>${esc(codeLines.join('\n'))}</pre>`;return html;
 }
-// renderEvents lays out a page of run.output.page events: a call and its result as one card, the usage codex reports
-// apart on the result after it.
+// renderEvents lays out a page of run.output.page events.
 function renderEvents(events) {
-  const results=new Map(),calls=new Set();let usage;
+  return drawn(events).map(([e,result])=>renderEvent(e,result)).join('');
+}
+// drawn is what renderEvents draws of events, each with its call's result: a call and its result are one card, the
+// usage codex reports apart goes on the result after it.
+function drawn(events) {
+  const results=new Map(),calls=new Set(),out=[];let usage;
   for(const e of events){if(e.call)calls.add(e.call);if(e.kind==='tool_result'&&e.ref)results.set(e.ref,e);}
-  return events.map(e=>{
-    if(e.kind==='sys'&&e.name==='usage'){usage=e.usage;return '';}
-    if(e.kind==='tool_result'&&calls.has(e.ref))return '';
+  for(let e of events){
+    if(e.kind==='sys'&&e.name==='usage'){usage=e.usage;continue;}
+    if(e.kind==='tool_result'&&calls.has(e.ref))continue;
     if(e.kind==='result'&&!e.usage&&usage)e={...e,usage};
-    return renderEvent(e,results.get(e.call));
-  }).join('');
+    out.push([e,results.get(e.call)]);
+  }
+  return out;
 }
 const eventLabels={user:'user',say:'assistant',think:'think',tool:'tool',tool_result:'tool',cmd:'tool',edit:'tool',mcp:'tool',sys:'systemEvent',result:'result',error:'outputError'};
 function renderEvent(e,result) {
@@ -442,7 +447,7 @@ function renderDetail() {
   bindOutputScroll();
 }
 function renderOutputPanel(run) {
-  return `<section class="output-panel mt-12" aria-label="${t('output')}"><div class="output-toolbar"><span class="flex">${icon('tasks')}<strong>${t('outputSource')}</strong></span><div class="flex">${button('toggle-raw',t(ui.raw?'timeline':'raw'),`aria-pressed="${ui.raw}"`)}${button('toggle-follow',`${icon(ui.follow?'pause':'play')}${t(ui.follow?'pause':'resume')}`,`id="follow-button" aria-pressed="${ui.follow}"`)}</div></div><div class="output-view" id="output-view" tabindex="0" aria-label="${t('output')}">${outputContents(run)}</div><div class="output-footer"><span>${esc(run.provider)} · output.log</span><span id="output-status">${t(ui.follow?'follow':'paused')}${ui.pending?` · ${ui.pending} ${t('newEvents')}`:''}</span></div></section>`;
+  return `<section class="output-panel mt-12" aria-label="${t('output')}"><div class="output-toolbar"><span class="flex">${icon('tasks')}<strong>${t('outputSource')}</strong></span><div class="flex">${button('toggle-raw',t(ui.raw?'timeline':'raw'),`aria-pressed="${ui.raw}"`)}${button('toggle-follow',`${icon(ui.follow?'pause':'play')}${t(ui.follow?'pause':'resume')}`,`id="follow-button" aria-pressed="${ui.follow}"`)}</div></div><div class="output-view" id="output-view" tabindex="0" aria-label="${t('output')}">${outputContents(run)}</div><div class="output-footer"><span>${esc([run.provider||run.profile?.provider,'output.log'].filter(Boolean).join(' · '))}</span><span id="output-status">${t(ui.follow?'follow':'paused')}${ui.pending?` · ${ui.pending} ${t('newEvents')}`:''}</span></div></section>`;
 }
 function outputContents(run) {
   const data=!ui.follow&&ui.frozenOutput?.id===run.id?ui.frozenOutput.data:ui.outputs.get(run.id);
@@ -797,7 +802,7 @@ async function fetchOutput(older=false) {
       if(held){
         let attempts=0;
         while(p.from>held.to&&p.from>p.earliest&&attempts++<20)p=join(await page({before:p.from,file:p.file}),p);
-        const kept=held.events.filter(e=>!e.temp&&e.off<p.from),fresh=p.events.filter(e=>!e.temp&&e.off>=held.to).length;
+        const kept=held.events.filter(e=>!e.temp&&e.off<p.from),fresh=drawn([...kept,...p.events]).filter(([e])=>!e.temp&&e.off>=held.to).length;
         const keptRaw=raw?new TextDecoder().decode(new TextEncoder().encode(held.raw).slice(0,Math.max(0,p.from-held.from))):undefined;
         result=p.from>=held.from&&p.from<=held.to?{...p,events:[...kept,...p.events],from:held.from,raw:raw?keptRaw+(p.raw||''):undefined}:p;
         if(fresh&&!ui.follow)ui.pending+=fresh;

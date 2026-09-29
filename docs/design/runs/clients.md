@@ -66,7 +66,7 @@ tend journal verify [--json] | repair [-y]
 - 响应头：CSP `default-src 'self'`（不允许内联脚本和 `style` 属性，宽度等动态样式由脚本经 CSSOM 设置）、`frame-ancestors 'none'`、`nosniff`、`no-referrer`、`Cache-Control: no-cache`。
 - 数据：进入时 `state.get{no_briefs}` + `machine.list` + `agent.list`，然后 `subscribe{after_seq}`；推送的信封由 `fold.js` 折进状态，50 ms 去抖后重绘；seq 断档、折叠遇到不认识的对象、或收到 `refetch` 推送时，100 ms 去抖后重新 `state.get{no_briefs}`（`refetch` 另外重读机器）。改过任务书的 task 丢掉缓存；任务书用 `task.get` 按需取。机器每 5 s `machine.list`；选中 run 的输出每 2 s `run.output.page`（最后 200 个事件，同一份日志时从上次的 `to` 接上，一页装不下就往前补页；「原始行」时带 `raw`）；对话用 `run.messages`（每页 40 条，按时间正序显示，往前翻页）。
 - run 详情：等着的请求各一个表单（权限：工具和摘要，「允许」/「拒绝」；提问：每个问题一组单选，「回答」/「不回答」；选中的选项在重新渲染时保留），running 的 stream run 有发消息框（草稿按 run 存），最近三条消息和状态；运行中显示最后一句话，有用量就显示用量。其余：attention 徽章、原因和原话、提问（Markdown）或进展、下一步；已结束且有会话、任务没有未结束 run 时有回复框（草稿按 run 存在内存里，重新渲染不丢、保持焦点），发 `run.continue`。列表行多一个 attention 徽章。「待处理」计数 = 需要你的 task 数（同上文「CLI」里的定义），点它把 run 筛选设为「等你处理」；需要你的 task 排在列表最前、等得最久的在前。
-- run 的输出是 `run.output.page` 给的事件（[output.md](output.md)「运行输出」），`app.js` 的 `renderEvents` 画成时间线：调用和它的结果（按 `ref`）合成一张卡，失败的卡默认展开；codex 单独报的用量显示在它后面的结果上；思考和认不出的行收在「思考」「原始行」里。`output_test.go` 用 node 跑 `renderEvents`，事件由 `internal/output` 生成。
+- run 的输出是 `run.output.page` 给的事件（[output.md](output.md)「运行输出」），`app.js` 的 `renderEvents` 画成时间线：调用和它的结果（按 `ref`）合成一张卡，失败的卡默认展开；codex 单独报的用量显示在它后面的结果上；思考和认不出的行收在「思考」「原始行」里。暂停跟随时，状态栏的「N 条新事件」数的是新一页会在时间线上多画出的项（`drawn`），不含并进已有卡片的结果和单独的用量。`output_test.go` 用 node 跑 `renderEvents` 和暂停时的 `fetchOutput`，事件由 `internal/output` 生成。
 - 派发框：选好机器和档案后调 `run.preview`，列出 blockers 和 notes（不禁用提交）。
 - 写操作都带 `command_id`（每次打开对话框生成一个，重试沿用）：新建、编辑（先 `task.get`，只提交改过的字段）、派发（`runner=background`）、停止、放弃（只对 unknown 的 run 提供）、完成（有进行中的 run 时先确认）、重开、取消。
 - 断线：横幅提示、写操作禁用，1 s 起翻倍到 30 s 带抖动重连，重连后重新取全量；401 回登录页。
