@@ -4,7 +4,7 @@
 // holds back changes above the view while scrolling, finds text in what is loaded and earlier, and answers questions
 // where they are asked (the page's renderAsk). On a phone it fills the screen with its tools on top.
 import {useState, useRef, useEffect, useLayoutEffect, useMemo} from '../vendor/hooks.mjs';
-import {html, cx, usePhone, useWords, useActions} from './base.js';
+import {html, cx, usePhone, useWords, useActions, useName} from './base.js';
 import {Button, Chip, Chips, Segmented} from './controls.js';
 import {Markdown} from './markdown.js';
 import {register} from '../core/i18n.js';
@@ -149,10 +149,14 @@ function StepMeta({s}) {
   </span>`;
 }
 
-function decided(w, r) {
+// ⚠️ The tools that ask the viewer a question (claude's, codex's): the agent is told "allow" with the answers.
+const questionTools = new Set(['AskUserQuestion', 'question']);
+
+function decided(w, name, s) {
+  const r = s.resolved;
   if (!r) return w.t('out.handled');
-  const who = r.by || w.t('out.whoYou');
-  const what = w.t('out.d.' + (r.decision || 'answered')) || '';
+  const who = r.by ? name(r.by) : w.t('out.whoYou');
+  const what = w.t('out.d.' + (questionTools.has(s.tool) ? 'answered' : r.decision || 'answered')) || '';
   return w.f('out.decided', who + ' ' + what, r.at ? clock(r.at) : '').replace(/ · $/, '');
 }
 
@@ -160,6 +164,7 @@ function decided(w, r) {
 function Row({row, density, onToggle, onMore, onResend, renderAsk, copy, target, selected}) {
   const w = useWords();
   const {t, f} = w;
+  const name = useName();
   const base = cx('out-row', 'out-' + row.type, row.depth > 0 && 'out-nested', row.key === target && 'out-flash', row.key === selected && 'sel');
   const depth = row.depth ? {paddingLeft: 12 + row.depth * 16 + 'px'} : undefined;
   switch (row.type) {
@@ -197,7 +202,7 @@ function Row({row, density, onToggle, onMore, onResend, renderAsk, copy, target,
       const lines = s.text.split('\n');
       const clipped = row.brief && lines.length > dt.briefLines;
       return html`<div class=${base} data-key=${row.key} style=${depth}><div class="out-you">
-        <span class="out-who">${s.brief ? t('out.brief') : s.by ? f('out.by', s.by) : t('out.you')}${s.at ? ' · ' + clock(s.at) : ''}</span>
+        <span class="out-who">${s.brief ? t('out.brief') : s.by ? f('out.by', name(s.by)) : t('out.you')}${s.at ? ' · ' + clock(s.at) : ''}</span>
         <div class="out-text">${clipped ? lines.slice(0, dt.briefLines).join('\n') : s.text}</div>
         ${clipped && html`<button type="button" class="out-link" onClick=${toggle}>${t('out.whole')}</button>`}
       </div></div>`;
@@ -223,11 +228,11 @@ function Row({row, density, onToggle, onMore, onResend, renderAsk, copy, target,
     case 'gap':
       return html`<div class=${base} data-key=${row.key}><button type="button" class="out-link" onClick=${onMore}>${f('out.gap', kib(s.bytes))}</button></div>`;
     case 'interrupt':
-      return html`<div class=${base} data-key=${row.key} role="separator"><span>${s.by ? f('out.interruptBy', s.by) : t('out.interrupt')}</span></div>`;
+      return html`<div class=${base} data-key=${row.key} role="separator"><span>${s.by ? f('out.interruptBy', name(s.by)) : t('out.interrupt')}</span></div>`;
     case 'ask':
       return html`<div class=${base} data-key=${row.key} style=${depth}><div class=${cx('out-ask', s.pending && 'pending')}>
         <div class="out-ask-head"><span class="out-glyph mono t-unknown">?</span><span class="out-ask-title">${s.title || s.tool}</span>
-          ${!s.pending && html`<span class="out-meta">${decided(w, s.resolved)}</span>`}</div>
+          ${!s.pending && html`<span class="out-meta">${decided(w, name, s)}</span>`}</div>
         ${s.pending && renderAsk?.(s)}
       </div></div>`;
   }

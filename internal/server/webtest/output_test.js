@@ -18,7 +18,8 @@ import {words} from '../web/core/i18n.js';
 import * as out from '../web/core/output.js';
 import {density as dt} from '../web/core/proto.js';
 import * as fl from '../web/core/follow.js';
-import {html, KeysContext} from '../web/ui/base.js';
+import {html, KeysContext, NamesContext} from '../web/ui/base.js';
+import {signal} from '../web/vendor/signals-core.mjs';
 import {Output} from '../web/ui/output.js';
 import {Composer, modesOf} from '../web/ui/composer.js';
 import {AnswerForm, answersOf, quickOf, allowsRun} from '../web/ui/answer.js';
@@ -227,6 +228,19 @@ test('the timeline, the answer form and the composer draw in both forms and both
   ok(drawn(html`<${AnswerForm} req=${forRun} scope onAnswer=${() => {}} />`, 'desktop', 'zh').includes('这次运行里这条命令都允许'), 'allow for the run when offered');
   ok(!drawn(html`<${AnswerForm} req=${perm} onAnswer=${() => {}} />`, 'desktop', 'zh').includes('这次运行里这条命令都允许'), 'not otherwise');
   return sizes;
+});
+
+test('who decided: a person by name, a question answered even though its agent was told allow', () => {
+  const ev = (id, more) => ({id, off: 0, turn: 1, ...more});
+  const events = [ev('e1', {kind: 'tool', tool: 'AskUserQuestion', family: 'ask', request: 'q1', title: 'Which database?'}),
+    ev('e2', {kind: 'resolved', request: 'q1', by: 'u_b', decision: 'allow'}),
+    ev('e3', {kind: 'tool', tool: 'Bash', family: 'ask', request: 'p1', title: 'rm -rf ./out'}),
+    ev('e4', {kind: 'resolved', request: 'p1', by: 'local', decision: 'allow'})];
+  const names = signal({u_b: 'Bob'});
+  const s = drawn(html`<${NamesContext.Provider} value=${names}><${Output} parts=${[{run: state.r1, events, head: {start: true}}]} density="standard" /><//>`, 'desktop', 'en');
+  ok(s.includes('Bob answered'), 'the question, by name');
+  ok(s.includes('Server admin allowed'), 'the permission, by the server admin');
+  ok(!s.includes('u_b'), 'no id');
 });
 
 test('answers and routes: own words over picks, one press for one question, the modes a route offers', () => {

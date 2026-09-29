@@ -12,7 +12,7 @@ register('ui', {
   'shell.spent': ['今天 %s tok%s', 'Today %s tok%s'],
   'banner.offline': ['连接断开，正在重连…', 'Connection lost, reconnecting…'], 'banner.retry': ['立即重连', 'Reconnect now'],
   'banner.outdated': ['服务器已经更新，刷新页面后继续。', 'The server was updated: reload the page to go on.'], 'banner.reload': ['刷新', 'Reload'],
-  'ui.close': ['关闭', 'Close'], 'ui.back': ['返回', 'Back'], 'ui.undo': ['撤销', 'Undo'], 'ui.dismiss': ['知道了', 'Dismiss'],
+  'ui.close': ['关闭', 'Close'], 'ui.serverAdmin': ['服务器管理员', 'Server admin'], 'ui.back': ['返回', 'Back'], 'ui.undo': ['撤销', 'Undo'], 'ui.dismiss': ['知道了', 'Dismiss'],
   'ui.expand': ['展开', 'Expand'], 'ui.collapse': ['收起', 'Collapse'], 'ui.sortBy': ['按%s排序', 'Sort by %s'], 'ui.empty': ['没有内容', 'Nothing here'],
   'status.queued': ['排队', 'Queued'], 'status.starting': ['启动中', 'Starting'], 'status.running': ['运行中', 'Running'],
   'status.unknown': ['状态不明', 'Unknown'], 'status.exited': ['已结束', 'Exited'], 'status.stopped': ['已停止', 'Stopped'],

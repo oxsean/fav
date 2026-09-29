@@ -37,6 +37,21 @@ export const cx = (...names) => names.filter(Boolean).join(' ');
 // KeysContext carries the page's keys (core/keys.js); the shell provides it.
 export const KeysContext = createContext(null);
 
+// ⚠️ The built-in user a server's own tokens act as.
+const LOCAL_USER = 'local';
+
+// NamesContext carries a signal of user id → name; the signed-in app provides it.
+export const NamesContext = createContext(null);
+
+// useName is how a user id reads: the person's name when the server gave it, the server admin for local, else the id.
+export function useName() {
+  const {t} = useWords();
+  const names = useContext(NamesContext);
+  const known = useSignalValue(names || noNames);
+  return id => (id === LOCAL_USER ? t('ui.serverAdmin') : known[id] || id);
+}
+const noNames = {peek: () => ({}), subscribe: () => () => {}};
+
 // useKeys pushes a scope of bindings while the component is mounted and active. The bindings may change on every draw;
 // the scope is pushed again only when their keys or labels change.
 export function useKeys(level, bindings, {blocks = false, active = true} = {}) {

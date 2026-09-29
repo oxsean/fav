@@ -3,7 +3,7 @@
 // board); on a phone it takes the screen, with the previous and next task of the list at its top. What each button
 // does is the task page's (onAct): this only says which ones there are.
 import {useEffect} from '../vendor/hooks.mjs';
-import {html, cx, usePhone, useWords, useSignalValue} from '../ui/base.js';
+import {html, cx, usePhone, useWords, useSignalValue, useName} from '../ui/base.js';
 import {Button, Tabs} from '../ui/controls.js';
 import {Status} from '../ui/status.js';
 import {Markdown} from '../ui/markdown.js';
@@ -70,6 +70,7 @@ export function Task({store, task, now, busy = false, offline = false, onAct, on
   const w = useWords();
   const {t, f} = w;
   const phone = usePhone();
+  const name = useName();
   const st = store.state;
   const aff = useSignalValue(store.affordances);
   const brief = task ? store.briefOf(task.id) : undefined;
@@ -125,8 +126,8 @@ export function Task({store, task, now, busy = false, offline = false, onAct, on
     ${task.source?.closed && !task.source.closed_acked && html`<div class="det-note">${t('det.sourceClosed')}</div>`}
     ${task.draft && html`<div class="det-note">${f('det.draft', task.draft.plan?.tasks?.length || 0)}</div>`}
     <dl class="facts det-facts">
-      ${task.owner && html`<dt>${t('det.owner')}</dt><dd class="mono">${task.owner}</dd>`}
-      ${(task.approver || task.owner) && html`<dt>${t('det.approver')}</dt><dd class="mono">${task.approver || task.owner}</dd>`}
+      ${task.owner && html`<dt>${t('det.owner')}</dt><dd>${name(task.owner)}</dd>`}
+      ${(task.approver || task.owner) && html`<dt>${t('det.approver')}</dt><dd>${name(task.approver || task.owner)}</dd>`}
       <dt>${t('det.runsOn')}</dt><dd class="mono">${[def.agent && (def.fromProject.agent ? f('det.projectDefault', def.agent) : def.agent),
         def.machine && (def.fromProject.machine ? f('det.projectDefault', def.machine) : def.machine)].filter(Boolean).join(' @ ') || '—'}</dd>
       ${task.dir && html`<dt>${t('det.dir')}</dt><dd class="mono">${task.dir}</dd>`}
@@ -144,7 +145,7 @@ export function Task({store, task, now, busy = false, offline = false, onAct, on
         const past = task.status === 'done' || task.flow.stages.findIndex(x => x.name === task.stage) > task.flow.stages.indexOf(s);
         return html`<li class=${cx(at && 'at', past && 'past')}><span class="mono">${s.name}</span><small>${s.gate === 'human' ? t('det.gateHuman') : s.agent || s.role || ''}</small></li>`;
       })}</ol>
-      ${stage?.gate === 'human' && !tk.finished(task.status) && html`<p class="t-muted">${f('gate.waits', task.approver || task.owner || '')}</p>`}
+      ${stage?.gate === 'human' && !tk.finished(task.status) && html`<p class="t-muted">${f('gate.waits', name(task.approver || task.owner || ''))}</p>`}
     <//>`}
     ${(task.parent || task.after?.length > 0) && html`<${Section} title=${t('det.parent')}>
       ${task.parent && html`<${TaskLink} state=${st} id=${task.parent} onGo=${onGo} />`}

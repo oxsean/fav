@@ -2,7 +2,7 @@
 // the palette, the shortcuts, theme, language, density) and the user's menu.
 import {useState, useMemo} from '../vendor/hooks.mjs';
 import {signal} from '../vendor/signals-core.mjs';
-import {html, useWords, useSignalValue, useActions} from '../ui/base.js';
+import {html, useWords, useSignalValue, useActions, NamesContext} from '../ui/base.js';
 import {Shell} from '../ui/shell.js';
 import {Palette, Help} from '../ui/palette.js';
 import {Panel} from '../ui/panel.js';
@@ -40,8 +40,8 @@ function finder(store, machines, go) {
 
 // App: router, keys, nav and toasts are core's; prefs core/prefs.js's; session is who signed in; fetchOutput(run) the
 // last events of a run; storage is the browser's (the task page keeps its filter and draft there); onLogout signs out;
-// changes reads what runs changed (core/changes.js; one over wire when not given).
-export function App({store, commands, toasts, wire, router, keys, nav, prefs, session, clock, fetchOutput, storage, onLogout, copy, changes: given}) {
+// changes reads what runs changed (core/changes.js; one over wire when not given); names is a signal of user id → name.
+export function App({store, commands, toasts, wire, router, keys, nav, prefs, session, clock, fetchOutput, storage, onLogout, copy, changes: given, names = null}) {
   const {t, f} = useWords();
   const route = useSignalValue(router.route);
   const machines = useSignalValue(store.machines);
@@ -87,7 +87,7 @@ export function App({store, commands, toasts, wire, router, keys, nav, prefs, se
         ? html`<${Runs} store=${store} commands=${commands} toasts=${toasts} router=${router} prefs=${prefs} copy=${copy} changes=${changes} storage=${storage} clock=${clock} />`
         : html`<${Soon} page=${route.page} />`;
 
-  return html`<${Shell} keys=${keys} wire=${wire} nav=${nav} toasts=${toasts} page=${route.page} onNavigate=${onNavigate}
+  return html`<${NamesContext.Provider} value=${names}><${Shell} keys=${keys} wire=${wire} nav=${nav} toasts=${toasts} page=${route.page} onNavigate=${onNavigate}
     counts=${counts} spent=${{tokens: day.tokens, usd: day.usd}} user=${session} userMenu=${userMenu}
     navCounts=${{tasks: Object.values(st.tasks).filter(x => x.status === 'todo').length, runs: sel.openRuns(st).length, machines: machines.length}}
     onSearch=${() => setModal({kind: 'palette', entries: runnable(keys.active())})} onNew=${() => toTasks('new')}
@@ -95,5 +95,5 @@ export function App({store, commands, toasts, wire, router, keys, nav, prefs, se
     ${page}
     ${modal?.kind === 'palette' && html`<${Palette} entries=${modal.entries} find=${finder(store, machines, go)} onClose=${() => setModal(null)} />`}
     ${modal?.kind === 'help' && html`<${Help} onClose=${() => setModal(null)} />`}
-  <//>`;
+  <//><//>`;
 }

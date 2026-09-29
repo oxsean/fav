@@ -1,5 +1,5 @@
 // http is the page's plain HTTP: the browser session (/session, /login, /logout), the sign-in methods and invitation
-// (/auth/*) and a terminal's sign-in to allow (/api/device). Writes carry X-Tend, which the server asks of a browser.
+// (/auth/*), a terminal's sign-in to allow (/api/device) and who is who (/api/users). Writes carry X-Tend, which the server asks of a browser.
 
 export class HTTPError extends Error {
   constructor(status, code) {
@@ -46,6 +46,8 @@ export function createHTTP({fetch = (...a) => globalThis.fetch(...a)} = {}) {
     // device is a terminal's pending sign-in: {code, name, ip, created}.
     device: code => ask('GET', '/api/device?code=' + encodeURIComponent(code)),
     decideDevice: (code, allow) => ask('POST', '/api/device', {code, allow}),
+    // users are the people on this server: [{id, name, username, role, disabled}].
+    users: async () => (await ask('GET', '/api/users')) || [],
   };
 }
 

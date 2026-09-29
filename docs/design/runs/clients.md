@@ -100,7 +100,7 @@ tend journal verify [--json] | repair [-y]
     - 组件不直接写键：用 `useActions(层级, {id: {run, when?, label?}})` 绑定自己能做的操作，键从表里来；`label` 让页面换一个更贴切的说法（首页的数字叫「作答」，`d` 叫「重试」）。哪些绑定生效（`when`）随页面变了，作用域就重新推入，键栏跟着变。
     - 命令面板列出此刻生效的操作（`runnable(keys.active())`），按中文名、英文名、id、键都能搜到，开头匹配的排前面；快捷键页按分组列出整张表。
   - `commands.js`：页面的写操作。发出时按 key 记为 pending；可撤销的写（标记完成）在列表里先藏起来，应答之后等那张列表下一次变化再放出来，免得闪回；没收到应答（`unsure`：`timeout` / `offline` / `closed`，页面的出错提示也用它）记为 `unknown`，`retry` 用同一个 command id 重发，coordinator 的回执保证不做两次。状态本身只来自 journal 的折叠。
-  - `http.js`：普通 HTTP：`/session`（未登录是 null）、`/login`（表单提交 token）、`/logout`、`/auth/logins`、`/auth/invite`、`/api/device`。写请求带 `X-Tend`，网络不通报 `offline`。
+  - `http.js`：普通 HTTP：`/session`（未登录是 null）、`/login`（表单提交 token）、`/logout`、`/auth/logins`、`/auth/invite`、`/api/device`、`/api/users`（页面上的人按名字显示，项目成员变了重读；`local` 显示为服务器管理员）。写请求带 `X-Tend`，网络不通报 `offline`。
   - `prefs.js`：语言、主题（跟随系统 / 浅色 / 深色）、密度（紧凑 / 标准 / 宽松）和皮肤，存在 `tend-lang`、`tend-theme`、`tend-look`；输出的密度（简洁 / 标准 / 详细，默认标准）记在 `tend-output-density`；存储不可用时用默认值。
   - `format.js`：数字的写法（`312k` tok、`$3.18`、`1h 04m`、`14:32`）。token 数是 input + cache_write + output，不含读缓存。
   - `select.js`：页面上的数，全是纯函数，输入是 store 的状态、机器、inbox 和当前时间。首页每个数的来源见下面「首页」。

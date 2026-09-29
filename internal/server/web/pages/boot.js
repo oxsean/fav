@@ -3,7 +3,7 @@
 // storage, the clock) comes in as options, so the preview and the tests run it on fakes.
 import {render} from '../vendor/preact.mjs';
 import {useState, useEffect} from '../vendor/hooks.mjs';
-import {effect} from '../vendor/signals-core.mjs';
+import {signal, effect} from '../vendor/signals-core.mjs';
 import {html, KeysContext} from '../ui/base.js';
 import {createKeys} from '../core/keys.js';
 import {createRouter} from '../core/router.js';
@@ -20,17 +20,22 @@ import {App} from './app.js';
 
 const localStore = () => { try { return globalThis.localStorage; } catch { return null; } };
 
-// connect is what a signed-in page runs on: the wire to /client, the store fed by its watches, writes and notices.
-function connect({open, location, clock, doc}) {
+// connect is what a signed-in page runs on: the wire to /client, the store fed by its watches, writes and notices, and
+// the people's names, read again when a project's members change.
+function connect({open, location, clock, doc, http}) {
   const url = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/client`;
   const wire = createWire({url, ...(open ? {open} : {}), lang: words.lang.value});
   const store = createStore({wire});
   const commands = createCommands({wire});
   const toasts = createToasts();
+  const names = signal({});
+  let asked = 0;
+  const readNames = () => { const n = ++asked; http.users().then(us => { if (n === asked) names.value = Object.fromEntries(us.map(u => [u.id, u.name || u.username || u.id])); }, () => {}); };
+  const stopNames = effect(() => { void store.rev.projects.value; readNames(); });
   store.start();
   wire.start();
   doc.addEventListener('visibilitychange', () => wire.setVisible(doc.visibilityState !== 'hidden'));
-  return {wire, store, commands, toasts, clock, fetchOutput: run => wire.call('run.output.page', {run, before: -1, n: 20})};
+  return {wire, store, commands, toasts, clock, names, stopNames, fetchOutput: run => wire.call('run.output.page', {run, before: -1, n: 20})};
 }
 
 function Root({http, router, keys, nav, prefs, first, open, location, history, clock, doc, storage}) {
@@ -41,10 +46,10 @@ function Root({http, router, keys, nav, prefs, first, open, location, history, c
   const dropAuth = () => { history.replaceState(null, '', location.pathname + location.search); router.popped(); };
   useEffect(() => {
     if (!session) return;
-    const c = connect({open, location, clock, doc});
+    const c = connect({open, location, clock, doc, http});
     setLive(c);
     if (auth && auth.kind !== 'device') dropAuth();
-    return () => { c.store.stop(); c.wire.close(); };
+    return () => { c.stopNames(); c.store.stop(); c.wire.close(); };
   }, [session?.id]);
   const lang = () => prefs.toggleLang();
   if (!session) {
