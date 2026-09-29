@@ -1109,12 +1109,12 @@ func (m *Model) taskDetailIn(x *task.Task, w, h int) []string {
 	return panel(i18n.T("tasks.detail"), body, w, h)
 }
 
-// outputLines are the last room lines of r's output, wrapped to inner.
+// outputLines are the last room lines of r's output as render.RunOutput reads it, wrapped to inner.
 func (m *Model) outputLines(r *task.Run, inner, room int) []string {
 	o, ok := m.tasks.out[r.ID]
 	var lines []string
-	for l := range strings.Lines(strings.TrimRight(o.text, "\n")) {
-		lines = append(lines, render.Wrap(strings.TrimRight(l, "\r\n"), inner)...)
+	for _, l := range render.RunOutput(o.text) {
+		lines = append(lines, render.Wrap(render.Sanitize(l), inner)...)
 	}
 	switch {
 	case !ok:
