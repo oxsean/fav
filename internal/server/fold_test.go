@@ -138,6 +138,11 @@ func foldScenario() []journal.Envelope {
 	add(ev(task.EPlanDrafted, task.PlanDraft{ID: "t14", Plan: &task.Plan{Tasks: plan.Tasks[:1]}, By: "u1"}))
 	add(ev(task.ETaskCreated, task.Task{ID: "t15", Title: "A", Parent: "t14", Status: task.StatusBacklog}),
 		ev(task.EPlanApplied, task.PlanApplied{ID: "t14"}))
+	add(ev(task.ETaskCreated, task.Task{ID: "td1", Title: "d1", Dir: "/d", Status: task.StatusTodo}),
+		ev(task.ETaskCreated, task.Task{ID: "td2", Title: "d2", Dir: "/d", Status: task.StatusTodo}),
+		ev(task.ERunQueued, task.Run{ID: "rd1", Task: "td1", Machine: "mba", Agent: "fake", Dir: "/d"}),
+		ev(task.ERunQueued, task.Run{ID: "rd2", Task: "td2", Machine: "mba", Agent: "fake", Dir: "/d"}))
+	add(ev(task.ERunObserved, task.Observation{ID: "rd1", State: task.Running, NodeRev: 1}))
 	add(ev("some_future_event", map[string]string{"id": "t1"}))
 	return envs
 }
@@ -224,7 +229,7 @@ process.stdout.write(JSON.stringify({state:s,sits}));`
 	var goState any
 	gb, _ := json.Marshal(st)
 	json.Unmarshal(gb, &goState)
-	if runs, _ := page.(map[string]any)["runs"].(map[string]any); len(runs) != 14 || len(st.Runs) != 14 {
+	if runs, _ := page.(map[string]any)["runs"].(map[string]any); len(runs) != 16 || len(st.Runs) != 16 {
 		t.Fatalf("the page folded %d runs: %s", len(runs), out)
 	}
 	for id, x := range st.Tasks {

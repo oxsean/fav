@@ -321,13 +321,17 @@ globalThis.Fold = (() => {
     return '';
   }
 
+  // dirHeld: queued run q waits for another run of its machine working in the same directory, as task.State.dirHeld.
+  const dirHeld = (s, q) => !!q.dir && !q.work && Object.values(s.runs).some(r => r.id !== q.id && r.machine === q.machine &&
+    r.dir === q.dir && !r.work && openStates.has(r.state) && r.state !== 'queued');
+
   // situation says how task t stands, as task.State.Situation does: {kind, reason, run}.
   function situation(s, t) {
     if (t.status === 'backlog' || t.status === 'done' || t.status === 'canceled') return {kind: t.status};
     const runs = Object.values(s.runs).filter(r => r.task === t.id);
     const open = runs.find(r => openStates.has(r.state));
     if (open) {
-      if (open.state === 'queued') return {kind: 'queued', reason: 'slot', run: open.id};
+      if (open.state === 'queued') return {kind: 'queued', reason: dirHeld(s, open) ? 'dir' : 'slot', run: open.id};
       if (open.attention === 'asked' || open.attention === 'permission') return {kind: 'waiting', reason: open.attention, run: open.id};
       if (open.state === 'unknown') return {kind: 'waiting', reason: 'unknown', run: open.id};
       return {kind: 'running', reason: open.state, run: open.id};

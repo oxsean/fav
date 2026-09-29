@@ -11,7 +11,7 @@ const treeWords = {
   backlog: ['待办', 'Backlog'], inbox: ['等你', 'Needs you'], agents: ['Agent 定义', 'Agents'],
   'sit.running': ['运行中', 'Running'], 'sit.queued': ['排队', 'Queued'], 'sit.waiting': ['等你', 'Needs you'],
   'why.after': ['等前置任务', 'Waits for what comes first'], 'why.children': ['等子任务', 'Waits for its subtasks'],
-  'why.slot': ['等机器空位', 'Waits for a machine slot'], 'why.ready': ['即将派发', 'About to be dispatched'],
+  'why.slot': ['等机器接手', 'Waits for its machine'], 'why.dir': ['等同一目录的运行结束', 'Waits for the run in its directory'], 'why.ready': ['即将派发', 'About to be dispatched'],
   'why.completing': ['即将完成', 'About to be done'], 'why.accept': ['等验收', 'To be accepted'],
   'why.dispatch': ['等派发', 'To be dispatched'], 'why.after_canceled': ['前置任务已取消', 'A task it comes after was canceled'],
   'why.held': ['派不出去', 'Cannot be dispatched'], 'why.ended': ['运行结束，待确认完成', 'Its run ended; mark it done'],

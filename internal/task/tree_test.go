@@ -417,3 +417,22 @@ func TestAWorkflowGoesStageByStageAndBackOnRework(t *testing.T) {
 	w.settle(nil)
 	stage("accept", WhyAccept)
 }
+
+func TestAQueuedRunSaysWhenAnotherRunHoldsItsDirectory(t *testing.T) {
+	w := newWorld(t)
+	a, b, c := w.task("", nil, StatusTodo), w.task("", nil, StatusTodo), w.task("", nil, StatusTodo)
+	w.do(journal.NewEvent(ERunQueued, Run{ID: "r_a", Task: a, Machine: "m", Dir: "/w/app"}),
+		journal.NewEvent(ERunQueued, Run{ID: "r_b", Task: b, Machine: "m", Dir: "/w/app"}),
+		journal.NewEvent(ERunQueued, Run{ID: "r_c", Task: c, Machine: "m", Dir: "/w/other"}))
+	w.do(journal.NewEvent(ERunObserved, Observation{ID: "r_a", State: Running}))
+	if sit := w.s.Situation(w.s.Tasks[b]); sit != (Situation{Kind: SitQueued, Reason: WhyDir, Run: "r_b"}) {
+		t.Fatal("same directory:", sit)
+	}
+	if sit := w.s.Situation(w.s.Tasks[c]); sit != (Situation{Kind: SitQueued, Reason: WhySlot, Run: "r_c"}) {
+		t.Fatal("another directory:", sit)
+	}
+	w.do(journal.NewEvent(ERunObserved, Observation{ID: "r_a", State: Exited}))
+	if sit := w.s.Situation(w.s.Tasks[b]); sit.Reason != WhySlot {
+		t.Fatal("the directory is free:", sit)
+	}
+}

@@ -384,7 +384,7 @@ and the terminal title counts what waits for you.
 `--backlog` keeps it aside until it is started. `tend task start <id>` starts a task and everything under it: each one is
 dispatched as soon as what it comes after is done, a task whose run succeeds is marked done, and a parent never runs —
 once its subtasks are done it waits for someone to accept it. Every open task says where it stands: running, queued (and
-for what: tasks before it, its subtasks, a machine slot) or waiting for someone (and why). A task that could not be
+for what: tasks before it, its subtasks, its machine, another run in its directory) or waiting for someone (and why). A task that could not be
 dispatched says why and waits; start it again to retry. `tend task move <id> --parent … --after …` changes its place.
 
 **Agents.** Built in: `claude` (headless `claude -p` talking stream-json both ways, or an interactive Claude in a new Herdr

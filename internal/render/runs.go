@@ -194,7 +194,7 @@ func Why(code, detail string) string {
 }
 
 var sitReasons = map[string]string{
-	task.WhyAfter: "sit.after", task.WhyChildren: "sit.children", task.WhySlot: "sit.slot", task.WhyReady: "sit.ready",
+	task.WhyAfter: "sit.after", task.WhyChildren: "sit.children", task.WhySlot: "sit.slot", task.WhyDir: "sit.dir", task.WhyReady: "sit.ready",
 	task.WhyCompleting: "sit.completing", task.WhyAccept: "sit.accept", task.WhyDispatch: "sit.dispatch",
 	task.WhyAfterCanceled: "sit.after_canceled", task.WhyHeld: "sit.held", task.WhyEnded: "sit.ended",
 	task.AttentionAsked: "sit.asked", task.AttentionPermission: "sit.permission", task.Unknown: "sit.unknown",

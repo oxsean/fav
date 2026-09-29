@@ -185,7 +185,8 @@ const (
 const (
 	WhyAfter         = "after"          // queued: tasks it comes after are not done
 	WhyChildren      = "children"       // queued: its subtasks are not done
-	WhySlot          = "slot"           // queued: its run waits for its machine, a slot or its directory
+	WhySlot          = "slot"           // queued: its run waits for its machine or a slot
+	WhyDir           = "dir"            // queued: another run of the same machine works in its directory
 	WhyReady         = "ready"          // queued: the coordinator dispatches it next
 	WhyCompleting    = "completing"     // queued: its run succeeded; the coordinator marks it done next
 	WhyAccept        = "accept"         // waiting: its subtasks are done; its approver accepts it
@@ -223,6 +224,8 @@ func (s *State) Situation(t *Task) Situation {
 	}
 	if r := s.OpenRun(t.ID); r != nil {
 		switch {
+		case r.State == Queued && s.dirHeld(r):
+			return Situation{Kind: SitQueued, Reason: WhyDir, Run: r.ID}
 		case r.State == Queued:
 			return Situation{Kind: SitQueued, Reason: WhySlot, Run: r.ID}
 		case r.Attention == AttentionAsked || r.Attention == AttentionPermission:
@@ -276,6 +279,20 @@ func (s *State) Situation(t *Task) Situation {
 		return sit
 	}
 	return Situation{Kind: SitQueued, Reason: WhyReady}
+}
+
+// dirHeld: queued run q waits for another run of its machine working in the same directory, as the node refuses it.
+// Runs on their own branch or copy (Work) never share a directory this way.
+func (s *State) dirHeld(q *Run) bool {
+	if q.Dir == "" || q.Work != nil {
+		return false
+	}
+	for _, r := range s.Runs {
+		if r.ID != q.ID && r.Machine == q.Machine && r.Dir == q.Dir && r.Work == nil && Open(r.State) && r.State != Queued {
+			return true
+		}
+	}
+	return false
 }
 
 // held is what keeps started task t from going on before its own work: a failed dispatch, or tasks it comes after.
