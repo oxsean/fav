@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"net"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -384,5 +385,29 @@ func TestAnAnswerOverTheFrameLimitIsAnErrorNotABrokenConnection(t *testing.T) {
 	}
 	if err := c.Call(ctx, "x", text{big}, nil); Code(err) != CodeBadRequest {
 		t.Fatalf("a request over the limit: %v", err)
+	}
+}
+
+func TestARequestCancelledWhileItWaitsForASlotIsAnswered(t *testing.T) {
+	release := make(chan struct{})
+	defer close(release)
+	started := make(chan struct{}, 1)
+	x, y := net.Pipe()
+	c := New(x, Options{MaxInflight: 1, Handler: func(ctx context.Context, r *Request) (any, error) {
+		started <- struct{}{}
+		select {
+		case <-release:
+		case <-ctx.Done():
+		}
+		return nil, ctx.Err()
+	}})
+	defer c.Close()
+	p := newPeer(t, y)
+	p.write(Frame{Type: TypeReq, ID: 1, Method: "x"})
+	recv(t, started, "the first request took no slot")
+	p.write(Frame{Type: TypeReq, ID: 2, Method: "x"})
+	p.write(Frame{Type: TypeCancel, ID: 2})
+	if f := p.read(func(f Frame) bool { return f.ID == 2 }); f.Type != TypeRes || f.Error == nil || f.Error.Code != CodeCanceled {
+		t.Fatalf("%+v", f)
 	}
 }

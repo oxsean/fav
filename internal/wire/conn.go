@@ -419,6 +419,9 @@ func (c *Conn) handle(f *Frame) {
 			c.queued.Add(-1)
 		case <-ctx.Done():
 			c.queued.Add(-1)
+			if c.Err() == nil {
+				c.reply(&Frame{Type: TypeRes, ID: f.ID, Error: &Error{Code: CodeCanceled}})
+			}
 			return
 		}
 		defer func() { <-c.sem }() // held until the answer is written: a peer that does not read holds the slots
