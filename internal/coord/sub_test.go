@@ -167,6 +167,8 @@ func TestTheWebClientsStateFramesAreTheCoordinators(t *testing.T) {
 				err = strict(f.Params, &Live{})
 			case PushJournal:
 				err = strict(f.Params, &journal.Envelope{})
+			case PushAffordances:
+				err = strict(f.Params, &Affordances{})
 			case PushSnapshot:
 				var sn Snapshot
 				if err = strict(f.Params, &sn); err == nil && sn.Part != "nope" { // state-restart: a part no one knows
@@ -183,7 +185,7 @@ func TestTheWebClientsStateFramesAreTheCoordinators(t *testing.T) {
 }
 
 func strictTake(sn Snapshot) error {
-	for _, b := range sn.Items {
+	for id, b := range sn.Items {
 		var v any
 		switch sn.Part {
 		case task.PartProjects:
@@ -197,7 +199,10 @@ func strictTake(sn Snapshot) error {
 		case task.PartAgentDefs:
 			v = &task.AgentDef{}
 		case task.PartAffordances:
-			v = &[]string{}
+			v = map[string]any{"runs": &map[string][]string{}, "tasks": &map[string]TaskAffordance{}}[id]
+			if v == nil {
+				return errors.New("affordances of " + id)
+			}
 		default:
 			return errors.New("part " + sn.Part)
 		}
@@ -381,8 +386,11 @@ func TestWhatAViewerMaySeeChangingResetsTheirCopy(t *testing.T) {
 	var f StateFold
 	f.St = task.New()
 	f.St.Seq = before
-	if _, err := f.Apply(w.next()); err != nil {
-		t.Fatal(err)
+	for _, want := range []string{wire.PushOpen, PushAffordances} { // a resumed copy is sent all its affordances again
+		p := w.next()
+		if _, err := f.Apply(p); err != nil || p.Method != want {
+			t.Fatalf("%s: %v", p.Method, err)
+		}
 	}
 	if err := callAs(e.as(ann), MProjectMember, "m-dee", task.MemberSet{Project: "p1", User: dee.User}, nil); err != nil {
 		t.Fatal(err)

@@ -93,10 +93,44 @@ run `state` 转移表（终态单调，重复事件无副作用）：
 - `state.watch{after_seq?, no_briefs?}` 是一个流（[wire.md](wire.md)「流」），跟随状态的客户端（TUI、Web UI、CLI 的 `--wait`）都用它，流在 `ClassState` 一级：
   - 锁内登记实时通道并记下日志的尾 seq H；锁外决定怎么开始，再接上实时通道，丢掉 seq ≤ 已发出部分的。
   - 能续传就续传：带 `after_seq`、它不超过 H、`(after_seq, H]` 不多于 `maxReplay`（10000）条、其中没有 `reshapes` 的事件。推 `open{mode: resume}`，回放这一段，再接实时信封。
-  - 否则推 `open{mode: snapshot}`，然后按表推 `snapshot{part, items}`（`part` 是 `task.State` 的 JSON 名：`projects`、`tasks`、`runs`、`shares`、`agent_defs`，`items` 按 id；每批不超过 `snapshotBatch`（1 MiB），每张表至少推一次，空表也推），最后 `live{seq}`，之后是实时信封。另预留 `affordances` 这个 part（按人计算，客户端收下不折叠）。
+  - 否则推 `open{mode: snapshot}`，然后按表推 `snapshot{part, items}`（`part` 是 `task.State` 的 JSON 名：`projects`、`tasks`、`runs`、`shares`、`agent_defs`，`items` 按 id；每批不超过 `snapshotBatch`（1 MiB），每张表至少推一次，空表也推），接着是 `affordances` 这个 part（这个人能做的事，见下面「能做什么、等谁」），最后 `live{seq}`，之后是实时信封。
   - 实时信封是 `journal`，按人过滤（`visibleEnv`），每个 seq 都到，没有可见事件时是空的。`reshapes` 的信封不单独推：推 `reset{}`，接着推新的快照和 `live`，这个信封只体现在新快照里。所以客户端的副本停在它的 seq 上时一定是它之后做的快照，断线续传不会跳过撤权。
   - 推送用 `PushWait`：客户端读得慢时协调器等，不丢；实时通道积压超过 `stateQueue`（256）条，流以 `lagged` 结束，客户端按自己的 seq 重开。协调器关闭时流以 `gone` 结束。常数在 `internal/coord/limits.go`。
-  - 客户端这边的折叠是 `coord.StateFold`：`open` 为 snapshot 或收到 `reset` 时开始一份新副本，`live` 时换上，`journal` 按 seq 折进去；遇到不认识的 part、seq 断档或折叠出错，丢掉副本，不带 `after_seq` 重开。
+  - 每推一个实时信封之后，协调器为它碰到的任务（`touched`）和这些任务的运行，按这个人重算 `affordances`，只推变了的：`affordances{runs: {id: [动作] | null}, tasks: {id: {actions, route} | null}}`，`null` 是这一项没了（没有可做的也算没了）。每个流记着自己发过什么。续传的流在回放之后推一次全量（看得见的每一项，空的推 `null`），因为不知道客户端手里的那份。`affordances` 不经 journal 折叠，也不带 seq。
+  - journal 之外的变化也会改动作：机器主人、用户停用（`tend-server` 的 `sweep`）、节点连上换了版本（`hello` 的 feature）。这时调 `Coord.Reaffirm()`，每个流全部重算一遍，只推差异。
+  - 客户端这边的折叠是 `coord.StateFold`：`open` 为 snapshot 或收到 `reset` 时开始一份新副本，`live` 时换上，`journal` 按 seq 折进去，`affordances` 的 part 和推送收进 `Aff`；遇到不认识的 part、seq 断档或折叠出错，丢掉副本，不带 `after_seq` 重开。
+
+## 能做什么、等谁
+
+规则只写一份：状态加能力给出候选，协调器按人筛。Web、TUI、手机和通知都用这一份，客户端只显示，不推导。
+
+- **能力**：`Run.CapsNow()`：有节点报上来的实际能力（`Run.caps`）就用它，没有就按 provider 和 runner 算计划中的（herdr 的运行、`command` 这类不开双向流的 provider 不能插话；没报能力的旧节点以 `stream` 为准）。
+- **候选动作**：`internal/task` 里的纯函数，只看状态和能力。
+  - 运行：`State.RunActions(r)`，取 `steer`（运行中的双向流，能插话）、`answer`（有没答的请求，或回答没送到的）、`allow_run`（有带 `allow_run` 的权限请求，并且能力里有 `answer_scope`）、`stop`、`abandon`、`continue`（已结束、有会话、能续接、任务没有开着的运行）、`takeover`（已结束、有会话、能在终端恢复）。
+  - 任务：`State.TaskActions(t)`，取 `dispatch` `start` `stop` `pass` `rework` `ack` `keep` `merge` `done` `backlog` `cancel` `reopen` `plan` `review` `edit` `move` `child` `message`，名字和 Web 的操作表一致。
+- **按人筛**（`internal/coord/afford.go`）：每个候选拿对应方法的判断试跑一遍，只判不提交（`dry`），所以筛的规则就是方法本身的规则（项目角色、`canUse`、`canApprove`、机器主人、审批人、节点有没有需要的方法）。`answer` 试每个没答的请求，有一个能答就给；`takeover` 没有方法，只给机器主人。
+- **消息去哪里**：`State.Route(t)`，按顺序取第一条成立的：
+  1. 有运行在跑并且收消息（能插话，或者能在这一轮后续接）：`{to: run, run}`；
+  2. 当前阶段（没有 workflow 就是整个任务）的上一次运行已结束、有会话、能续接：`{to: reply, run}`；
+  3. 有 workflow：`{to: workpad, stage}`，下一阶段带上；
+  4. 都不行：`{to: none, why}`，`why` 取 `finished`、`starting`（运行还没开始）、`busy`（运行在跑但不收消息）、`no_session`。
+
+  `version` 是这条去向从哪个 seq 起成立：接收的运行排队时的 seq（`run.seq`），workpad 是阶段的 `stage_seq`。
+- **待处理项**：`State.Pending(t)`，只在 Go 里算。
+  - 形状：`Pending{id, kind, reason?, task, run?, request?, version}`。
+  - 开着的运行有没答的请求：每个请求一项，`kind` 为 `permission` 或 `question`，`id` 是 `<run>/<request>`。
+  - 否则按处境给一项（`id` 是 `<task>/<kind>`）：
+    - 验收（人工闸门，或子任务都完成）是 `gate`；
+    - 运行中在终端里提问或等批准，是 `question` 或 `permission`，不带 `request`；
+    - 运行结束时留下的提问或被拒的工具，是 `continue`，要续接回答；
+    - 运行顺利结束，是 `ended`；
+    - 运行失败、停止或状态未知，是 `failed`；
+    - 其余等人的原因（草稿、需求变化、合并冲突、打回太多次、预算、没交计划、派发不了、前置任务取消）是 `waiting`，带 `reason`。
+  - 只等派发（`dispatch`）的不算。
+  - `version`：运行上的项取 `run.seq`（一次运行只结束一次，请求 id 在一次运行里不重复），`gate` 取 `stage_seq`（打回后再次来到验收，版本就变了）。
+  - `inbox.list` 的每一项带 `pending`：这个人能处理的那些，权限请求只给能批准的人（`canApprove`）。
+- **对话**：`State.Conversation(run)` 是这个运行所在的对话：先沿 `Parent` 找到根（父运行不在状态里的那个），再取同一个任务里根相同的所有运行，按 `seq`、排队时间、`id` 排序。只看状态、不涉及权限，`fold.js` 照抄一份（`conversation`），`fold_test` 对照。
+- **测试**：`TestEveryActionGivenIsTakenAndNoneWithheldIs` 在团队模式（机器主人、派发人、只读成员、项目外的人、没拿到机器共享的管理员）和模式一下，对每种状态的每个候选动作真的去执行，检查「给了 ⇔ 协调器接受」。`TestThePageFoldsRandomJournalsAsTheCoordinatorDoes` 用随机日志（协调器写得出的信封，有的结尾再加一个会被拒的）对照 Go 和 `fold.js`：在哪个信封上拒收、状态、处境、对话都要一致。
 
 ## 通知
 

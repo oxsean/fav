@@ -125,6 +125,7 @@ func (c *Coord) dial(m *machine) {
 	c.mu.Unlock()
 	c.poke()
 	if err == nil {
+		c.Reaffirm() // what its node can do is what the actions rest on
 		c.checkSoon(m)
 	}
 }
@@ -178,6 +179,7 @@ func (c *Coord) Attach(name string, conn Conn, check func(remote.Hello) error) e
 	m.attached, m.conn, m.hello, m.err = true, conn, h, nil
 	c.mu.Unlock()
 	c.poke()
+	c.Reaffirm()
 	c.checkSoon(m)
 	return nil
 }

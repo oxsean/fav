@@ -14,7 +14,7 @@
 {"s":{"type":"push","id":2,"method":"snapshot","params":{"part":"shares","items":{"mba":{"machine":"mba","projects":["p1"],"approve":true}}}}}
 {"s":{"type":"push","id":2,"method":"snapshot","params":{"part":"agent_defs","items":{"coder":{"name":"coder","provider":"claude","owner":"u_a","rev":1,"updated_at":"2026-09-29T09:00:00Z"}}}}}
 {"note":"affordances are the viewer's own; the store takes them without folding"}
-{"s":{"type":"push","id":2,"method":"snapshot","params":{"part":"affordances","items":{"t1":["dispatch","edit"]}}}}
+{"s":{"type":"push","id":2,"method":"snapshot","params":{"part":"affordances","items":{"runs":{"r1":["steer","answer","stop"]},"tasks":{"t1":{"actions":["stop","edit","message"],"route":{"to":"run","run":"r1","version":3}}}}}}}
 {"step":"parts"}
 {"s":{"type":"push","id":2,"method":"live","params":{"seq":10}}}
 {"s":{"type":"push","id":2,"method":"journal","params":{"v":2,"seq":11,"at":"2026-09-29T10:00:11Z","events":[{"type":"task_edited","data":{"id":"t1","title":"Pay timeout on retry"}}]}}}

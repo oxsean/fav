@@ -32,7 +32,9 @@ type Live struct {
 type sub struct {
 	p      Principal
 	ch     chan journal.Envelope
-	closed bool // the coordinator is closing; under mu
+	closed bool              // the coordinator is closing; under mu
+	again  chan struct{}     // Reaffirm: count the affordances again
+	aff    map[string]string // the affordances sent, by key (see affordances); only the feed touches it
 }
 
 // watchState opens a state stream: the live feed is registered under mu with the journal's end, then the snapshot or
@@ -46,7 +48,7 @@ func (c *Coord) watchState(p Principal, r *wire.Request) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	sb := &sub{p: p, ch: make(chan journal.Envelope, stateQueue)}
+	sb := &sub{p: p, ch: make(chan journal.Envelope, stateQueue), again: make(chan struct{}, 1)}
 	c.mu.Lock()
 	c.subs[s] = sb
 	end := c.log.Seq()
@@ -65,15 +67,20 @@ func (c *Coord) feed(s *wire.Stream, sb *sub, wp WatchParams, end int64) {
 	var err error
 	if c.replayable(wp.AfterSeq, end) {
 		if err = s.PushWait(ctx, wire.PushOpen, wire.Open{Mode: wire.ModeResume}); err == nil {
-			err = c.replay(ctx, s, sb.p, wp.AfterSeq, end)
+			if err = c.replay(ctx, s, sb.p, wp.AfterSeq, end); err == nil {
+				sb.aff = map[string]string{} // what the copy holds of them is not known: all of them, nulls too
+				err = c.pushAfford(ctx, s, sb, nil)
+			}
 		}
 	} else if err = s.PushWait(ctx, wire.PushOpen, wire.Open{Mode: wire.ModeSnapshot}); err == nil {
-		end, err = c.snapshot(ctx, s, sb.p, wp.NoBriefs)
+		end, err = c.snapshot(ctx, s, sb, wp.NoBriefs)
 	}
 	for err == nil {
 		select {
 		case <-ctx.Done():
 			return
+		case <-sb.again:
+			err = c.pushAfford(ctx, s, sb, nil)
 		case env, ok := <-sb.ch:
 			if !ok {
 				c.mu.Lock()
@@ -89,10 +96,17 @@ func (c *Coord) feed(s *wire.Stream, sb *sub, wp WatchParams, end int64) {
 				continue
 			}
 			if !reshapes(env) {
-				err = c.pushEnv(ctx, s, sb.p, env)
+				if err = c.pushEnv(ctx, s, sb.p, env); err == nil {
+					c.mu.Lock()
+					ids := c.touched(env.Events)
+					c.mu.Unlock()
+					if len(ids) > 0 {
+						err = c.pushAfford(ctx, s, sb, ids)
+					}
+				}
 			} else if err = s.PushWait(ctx, PushReset, struct{}{}); err == nil {
 				// the envelope itself only as part of the new snapshot: a copy at its seq is always one made after it
-				end, err = c.snapshot(ctx, s, sb.p, wp.NoBriefs)
+				end, err = c.snapshot(ctx, s, sb, wp.NoBriefs)
 			}
 		}
 	}
@@ -135,9 +149,21 @@ func (c *Coord) pushEnv(ctx context.Context, s *wire.Stream, p Principal, env jo
 	return s.PushWait(ctx, PushJournal, v)
 }
 
-// snapshot sends what p may see of the state now, table by table in batches of at most snapshotBatch bytes, each
-// table at least once, then live; it returns the seq the snapshot is at.
-func (c *Coord) snapshot(ctx context.Context, s *wire.Stream, p Principal, noBriefs bool) (int64, error) {
+// pushAfford pushes what changed in sb's viewer's affordances of tasks ids and their runs (nil: all they may see).
+func (c *Coord) pushAfford(ctx context.Context, s *wire.Stream, sb *sub, ids []string) error {
+	c.mu.Lock()
+	now := c.affordances(sb.p, ids)
+	c.mu.Unlock()
+	if push, ok := affordDiff(sb.aff, now); ok {
+		return s.PushWait(ctx, PushAffordances, push)
+	}
+	return nil
+}
+
+// snapshot sends what sb's viewer may see of the state now, table by table in batches of at most snapshotBatch bytes,
+// each table at least once, then their affordances, then live; it returns the seq the snapshot is at.
+func (c *Coord) snapshot(ctx context.Context, s *wire.Stream, sb *sub, noBriefs bool) (int64, error) {
+	p := sb.p
 	st := c.visibleState(p, c.state(!noBriefs))
 	parts := []struct {
 		name  string
@@ -174,7 +200,29 @@ func (c *Coord) snapshot(ctx context.Context, s *wire.Stream, p Principal, noBri
 			}
 		}
 	}
+	c.mu.Lock()
+	sb.aff = c.affordances(p, nil) // counted after the copy: never older than it
+	c.mu.Unlock()
+	items := map[string]json.RawMessage{}
+	for k, v := range affordPart(sb.aff) {
+		b, _ := json.Marshal(v)
+		items[k] = b
+	}
+	if err := s.PushWait(ctx, PushSnapshot, Snapshot{Part: task.PartAffordances, Items: items}); err != nil {
+		return 0, err
+	}
 	return st.Seq, s.PushWait(ctx, PushLive, Live{Seq: st.Seq})
+}
+
+// affordPart is the affordances by key as the snapshot part's items: runs and tasks, those with nothing to do left out.
+func affordPart(aff map[string]string) map[string]map[string]json.RawMessage {
+	out := map[string]map[string]json.RawMessage{"runs": {}, "tasks": {}}
+	for k, v := range aff {
+		if v != "" {
+			out[map[byte]string{'t': "tasks", 'r': "runs"}[k[0]]][k[2:]] = json.RawMessage(v)
+		}
+	}
+	return out
 }
 
 func anyMap[V any](m map[string]V) map[string]any {
@@ -200,8 +248,44 @@ func (c *Coord) publish(env journal.Envelope) {
 
 // StateFold is a client's copy of the state, folded from what state.watch pushes.
 type StateFold struct {
-	St   *task.State // nil until the first snapshot is live
-	next *task.State // the snapshot being received
+	St      *task.State // nil until the first snapshot is live
+	Aff     Affordances // what the viewer may do, as last pushed
+	next    *task.State // the snapshot being received
+	nextAff Affordances
+}
+
+// take merges an affordances push or part into a: a null entry takes one out.
+func (a *Affordances) take(runs, tasks json.RawMessage) error {
+	if a.Runs == nil {
+		a.Runs, a.Tasks = map[string][]string{}, map[string]*TaskAffordance{}
+	}
+	var rs map[string][]string
+	var ts map[string]*TaskAffordance
+	if len(runs) > 0 {
+		if err := json.Unmarshal(runs, &rs); err != nil {
+			return err
+		}
+	}
+	if len(tasks) > 0 {
+		if err := json.Unmarshal(tasks, &ts); err != nil {
+			return err
+		}
+	}
+	for id, v := range rs {
+		if v == nil {
+			delete(a.Runs, id)
+		} else {
+			a.Runs[id] = v
+		}
+	}
+	for id, v := range ts {
+		if v == nil {
+			delete(a.Tasks, id)
+		} else {
+			a.Tasks[id] = v
+		}
+	}
+	return nil
 }
 
 // Params opens (or opens again) the stream from what the fold holds.
@@ -224,12 +308,21 @@ func (f *StateFold) Apply(p wire.Push) (changed bool, err error) {
 		}
 		f.next = nil
 		if o.Mode != wire.ModeResume || f.St == nil {
-			f.next = task.New()
+			f.next, f.nextAff = task.New(), Affordances{}
 		}
 		return false, nil
 	case PushReset:
-		f.next = task.New()
+		f.next, f.nextAff = task.New(), Affordances{}
 		return false, nil
+	case PushAffordances:
+		var a struct{ Runs, Tasks json.RawMessage }
+		if err := p.Decode(&a); err != nil {
+			return false, err
+		}
+		if f.next != nil {
+			return false, f.nextAff.take(a.Runs, a.Tasks)
+		}
+		return true, f.Aff.take(a.Runs, a.Tasks)
 	case PushSnapshot:
 		var sn Snapshot
 		if err := p.Decode(&sn); err != nil {
@@ -237,6 +330,9 @@ func (f *StateFold) Apply(p wire.Push) (changed bool, err error) {
 		}
 		if f.next == nil {
 			return false, &wire.Error{Code: wire.CodeBadRequest, Detail: "snapshot outside a snapshot"}
+		}
+		if sn.Part == task.PartAffordances {
+			return false, f.nextAff.take(sn.Items["runs"], sn.Items["tasks"])
 		}
 		return false, f.next.Take(sn.Part, sn.Items)
 	case PushLive:
@@ -248,6 +344,7 @@ func (f *StateFold) Apply(p wire.Push) (changed bool, err error) {
 			return false, &wire.Error{Code: wire.CodeBadRequest, Detail: "live outside a snapshot"}
 		}
 		f.St, f.next = f.next, nil
+		f.Aff, f.nextAff = f.nextAff, Affordances{}
 		f.St.Seq = l.Seq
 		return true, nil
 	case PushJournal:
@@ -270,4 +367,4 @@ func (f *StateFold) Apply(p wire.Push) (changed bool, err error) {
 }
 
 // Reset forgets the copy: the next opening asks for a snapshot.
-func (f *StateFold) Reset() { f.St, f.next = nil, nil }
+func (f *StateFold) Reset() { f.St, f.next, f.Aff = nil, nil, Affordances{} }

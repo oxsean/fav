@@ -112,6 +112,7 @@ func (s *Server) sweep() {
 	for _, name := range s.opt.Dir.NodeNames() {
 		s.opt.Coord.Expect(name)
 	}
+	s.opt.Coord.Reaffirm() // who owns a machine, who is disabled
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for c, h := range s.conns {

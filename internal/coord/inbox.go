@@ -34,13 +34,14 @@ type Notice struct {
 
 // InboxItem is a task waiting for the caller.
 type InboxItem struct {
-	Task    string    `json:"task"`
-	Title   string    `json:"title"`
-	Project string    `json:"project,omitempty"`
-	Reason  string    `json:"reason"`
-	Run     string    `json:"run,omitempty"`
-	Since   time.Time `json:"since"`
-	As      []string  `json:"as,omitempty"`
+	Task    string         `json:"task"`
+	Title   string         `json:"title"`
+	Project string         `json:"project,omitempty"`
+	Reason  string         `json:"reason"`
+	Run     string         `json:"run,omitempty"`
+	Since   time.Time      `json:"since"`
+	As      []string       `json:"as,omitempty"`
+	Pending []task.Pending `json:"pending,omitempty"` // what exactly waits: the requests the viewer may answer, else the one thing
 }
 
 // Roles in InboxItem.As: why an item waits for the viewer.
@@ -221,8 +222,16 @@ func (c *Coord) inbox(p Principal) Inbox {
 			since = r.Since()
 		}
 		out.Items = append(out.Items, InboxItem{Task: t.ID, Title: t.Title, Project: t.Project, Reason: sit.Reason, Run: sit.Run, Since: since,
-			As: roles(c.st, t, sit, p.User)})
+			As: roles(c.st, t, sit, p.User), Pending: c.pendingFor(p, t)})
 	}
 	sort.Slice(out.Items, func(i, j int) bool { return out.Items[i].Since.Before(out.Items[j].Since) })
 	return out
+}
+
+// pendingFor is what waits on p about t: a permission only for those who may grant it. The caller holds mu.
+func (c *Coord) pendingFor(p Principal, t *task.Task) []task.Pending {
+	return slices.DeleteFunc(c.st.Pending(t), func(x task.Pending) bool {
+		r := c.st.Runs[x.Run]
+		return x.Kind == task.PendPermission && x.Request != "" && r != nil && !c.canApprove(p, r)
+	})
 }

@@ -47,8 +47,8 @@ globalThis.Fold = (() => {
         break;
       case 'task_edited': {
         const t = need(s.tasks, d.id, 'task');
-        for (const k of ['title', 'brief', 'dir', 'machine', 'agent', 'project', 'owner', 'approver', 'kind', 'acceptance', 'tags']) if (d[k] !== undefined) t[k] = d[k];
-        if (d.workflow !== undefined) {
+        for (const k of ['title', 'brief', 'dir', 'machine', 'agent', 'project', 'owner', 'approver', 'kind', 'acceptance', 'tags']) if (d[k] != null) t[k] = d[k];
+        if (d.workflow != null) {
           t.workflow = d.workflow || undefined; t.flow = d.flow; t.loops = undefined; t.stage_seq = seq;
           t.stage = d.flow && d.flow.stages && d.flow.stages.length ? d.flow.stages[0].name : undefined;
         }
@@ -156,8 +156,8 @@ globalThis.Fold = (() => {
       }
       case 'task_moved': {
         const t = need(s.tasks, d.id, 'task');
-        if (d.parent !== undefined) t.parent = d.parent;
-        if (d.after !== undefined) t.after = d.after;
+        if (d.parent != null) t.parent = d.parent;
+        if (d.after != null) t.after = d.after;
         t.held = undefined; t.rev = (t.rev || 0) + 1; t.updated_at = at;
         break;
       }
@@ -178,7 +178,7 @@ globalThis.Fold = (() => {
         break;
       case 'project_edited': {
         const p = need(s.projects, d.id, 'project');
-        for (const k of ['name', 'owner', 'repos', 'links', 'context', 'defaults', 'hooks', 'fetch', 'workflows']) if (d[k] !== undefined) p[k] = d[k];
+        for (const k of ['name', 'owner', 'repos', 'links', 'context', 'defaults', 'hooks', 'fetch', 'workflows']) if (d[k] != null) p[k] = d[k];
         p.rev = (p.rev || 0) + 1; p.updated_at = at;
         break;
       }
@@ -360,5 +360,24 @@ globalThis.Fold = (() => {
     return held(s, t) || {kind: 'queued', reason: 'ready'};
   }
 
-  return {apply, situation, stageOf, nextStage};
+  // conversation is the runs of the conversation run id is in: its root (the run no parent of which the state holds) and
+  // every run that goes on from it, by seq, then queue time, then id (task.State.Conversation).
+  function conversation(s, id) {
+    const rootOf = r => {
+      const seen = new Set();
+      while (r.parent && s.runs[r.parent] && !seen.has(r.id)) { seen.add(r.id); r = s.runs[r.parent]; }
+      return r.id;
+    };
+    const r = s.runs[id];
+    if (!r) return [];
+    const root = rootOf(r);
+    const cmp = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
+    // ⚠️ Go orders by the nanosecond: Date.parse keeps the millisecond, the fraction's digits past it come on top
+    const sub = t => { const m = /\.(\d+)/.exec(t || ''); return m ? Number((m[1] + '000000000').slice(3, 9)) : 0; };
+    const at = (a, b) => (Date.parse(a.queued_at || 0) - Date.parse(b.queued_at || 0)) || sub(a.queued_at) - sub(b.queued_at);
+    return Object.values(s.runs).filter(x => x.task === r.task && rootOf(x) === root)
+      .sort((a, b) => (a.seq || 0) - (b.seq || 0) || at(a, b) || cmp(a.id, b.id));
+  }
+
+  return {apply, situation, stageOf, nextStage, conversation};
 })();
