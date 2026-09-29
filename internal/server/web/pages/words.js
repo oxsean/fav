@@ -32,7 +32,7 @@ register('pages', {
   'theme.system': ['跟随系统', 'System'], 'theme.light': ['浅色', 'Light'], 'theme.dark': ['深色', 'Dark'],
   'density.default': ['标准', 'Standard'], 'density.compact': ['紧凑', 'Compact'], 'density.comfortable': ['宽松', 'Comfortable'],
   'app.density': ['密度：%s', 'Density: %s'], 'app.soon': ['这一页还在做', 'This page is on its way'],
-  'app.soonNote': ['新界面先做了首页；这一页做好之前，请用旧界面。', 'The new interface has its home first; until this page is done, use the old one.'],
+  'app.soonNote': ['在那之前：用户和凭据用 tend-server admin / token，agent 定义用 tend agent，项目设置用 TUI。', 'Until then: people and credentials through tend-server admin / token, agent definitions through tend agent, project settings in the TUI.'],
   'app.failed': ['没有办成：%s', 'That did not work: %s'], 'app.unsure': ['不知道成没成（%s）', 'Not known whether it went through (%s)'],
   'app.retry': ['重试', 'Retry'],
   'home.title': ['首页', 'Home'], 'home.waiting': ['等你', 'Waiting on you'], 'home.longest': ['最久一条等了 %s', 'The oldest has waited %s'],
