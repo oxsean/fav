@@ -286,6 +286,20 @@ func TestEachFamilyHasItsTitle(t *testing.T) {
 	}
 }
 
+// Parse leaves a long output's middle out of the event; Whole keeps all of it.
+func TestWholeKeepsWhatParseLeavesOut(t *testing.T) {
+	out, _ := json.Marshal(strings.Repeat("line\n", 200))
+	l := `{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"t1","content":` + string(out) + `}]}}`
+	cut, _, _ := Parse("f", 0, l+"\n", State{})
+	all := Whole("f", 0, l)
+	if len(cut) != 1 || cut[0].Truncated["output"] == 0 {
+		t.Fatalf("Parse: %+v", cut)
+	}
+	if len(all) != 1 || all[0].Output != strings.Repeat("line\n", 200) || all[0].Truncated != nil || all[0].ID != cut[0].ID {
+		t.Fatalf("Whole: %+v", all)
+	}
+}
+
 // A long output keeps its first and last lines, says how long it was and how much it left out.
 func TestALongOutputKeepsItsEnds(t *testing.T) {
 	var b strings.Builder

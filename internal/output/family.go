@@ -256,6 +256,14 @@ const (
 	keepBytes = 16 << 10
 )
 
+// shown is output as an event carries it: headTail's, or all of it for a whole line.
+func shown(s string, whole bool) (out string, lines, size int, truncated map[string]int) {
+	if whole {
+		return s, Lines(s), len(s), nil
+	}
+	return headTail(s)
+}
+
 // headTail is output as an event carries it: whole when short, else its first and last lines joined by a line "…",
 // with the lines and bytes it had and the bytes left out.
 func headTail(s string) (out string, lines, size int, truncated map[string]int) {

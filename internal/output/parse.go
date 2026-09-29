@@ -11,13 +11,24 @@ import (
 // events, the state after the last whole line and where that line ends; a last line without its newline is not
 // consumed: plain text becomes a temp event, a JSON line waits for the rest.
 func Parse(file string, off int64, text string, st State) ([]Event, State, int64) {
+	return parse(file, off, text, st, false)
+}
+
+// Whole reads one whole line, which starts at off in the log file, as Parse does but with nothing left out of it: a
+// tool's output is all there.
+func Whole(file string, off int64, line string) []Event {
+	evs, _, _ := parse(file, off, strings.TrimSuffix(line, "\n")+"\n", State{}, true)
+	return evs
+}
+
+func parse(file string, off int64, text string, st State, whole bool) ([]Event, State, int64) {
 	if st.Turn < 1 {
 		st.Turn = 1
 	}
 	var out []Event
 	for len(text) > 0 {
-		line, rest, whole := strings.Cut(text, "\n")
-		if !whole {
+		line, rest, ended := strings.Cut(text, "\n")
+		if !ended {
 			if l := strings.TrimRight(line, "\r"); strings.TrimSpace(l) != "" && !strings.HasPrefix(l, "{") {
 				out = append(out, Event{Off: off, Kind: KindSay, Temp: true, Key: file + ":" + strconv.FormatInt(off, 10), Text: l, Turn: st.Turn})
 			}
@@ -25,7 +36,7 @@ func Parse(file string, off int64, text string, st State) ([]Event, State, int64
 		}
 		if l := strings.TrimRight(line, "\r"); strings.TrimSpace(l) != "" {
 			at := emittedAt(l)
-			for n, e := range lineEvents(l) {
+			for n, e := range lineEvents(l, whole) {
 				e.At = at
 				e.ID, e.Off = file+":"+strconv.FormatInt(off, 10)+":"+strconv.Itoa(n), off
 				if opens(e) && st.Closed {
@@ -72,7 +83,7 @@ func opens(e Event) bool {
 }
 
 // lineEvents reads one whole line by its shape, whichever provider wrote it.
-func lineEvents(l string) []Event {
+func lineEvents(l string, whole bool) []Event {
 	if !strings.HasPrefix(l, "{") {
 		return []Event{{Kind: KindSay, Text: l}}
 	}
@@ -90,13 +101,13 @@ func lineEvents(l string) []Event {
 	known := true
 	switch {
 	case claudeTypes[head.Type] || strings.HasPrefix(head.Type, "control_"):
-		evs, known = claudeLine(l)
+		evs, known = claudeLine(l, whole)
 	case head.Type == "" && head.Method != "":
-		evs, known = codexNotice(l, head.Method)
+		evs, known = codexNotice(l, head.Method, whole)
 	case head.Type == "" && head.ID != nil && (head.Result != nil || head.Error != nil):
 		evs = codexAnswer(head.Error)
 	case strings.Contains(head.Type, ".") || head.Type == "error":
-		evs, known = codexExec(l, head.Type)
+		evs, known = codexExec(l, head.Type, whole)
 	default:
 		known = false
 	}
@@ -129,7 +140,7 @@ type claudeBlock struct {
 	IsError   bool            `json:"is_error"`
 }
 
-func claudeLine(l string) ([]Event, bool) {
+func claudeLine(l string, whole bool) ([]Event, bool) {
 	var m struct {
 		Type    string `json:"type"`
 		Subtype string `json:"subtype"`
@@ -158,7 +169,7 @@ func claudeLine(l string) ([]Event, bool) {
 	}
 	switch m.Type {
 	case "assistant", "user":
-		evs := claudeContent(m.Type, m.Message.Content)
+		evs := claudeContent(m.Type, m.Message.Content, whole)
 		for i := range evs {
 			evs[i].Parent = m.Parent
 			if m.IsReplay && evs[i].Kind == KindUser {
@@ -191,7 +202,7 @@ func claudeLine(l string) ([]Event, bool) {
 	return nil, true // stream_event and the rest of the control traffic
 }
 
-func claudeContent(role string, raw json.RawMessage) []Event {
+func claudeContent(role string, raw json.RawMessage, whole bool) []Event {
 	var text string
 	if json.Unmarshal(raw, &text) == nil {
 		if strings.TrimSpace(text) == "" {
@@ -220,7 +231,7 @@ func claudeContent(role string, raw json.RawMessage) []Event {
 			e.Call = b.ID
 			evs = append(evs, e)
 		case "tool_result":
-			e := resultEvent(claudeResultText(b.Content))
+			e := resultEvent(claudeResultText(b.Content), whole)
 			e.Ref, e.Error = b.ToolUseID, b.IsError
 			evs = append(evs, e)
 		default:
@@ -264,9 +275,9 @@ func toolEvent(name string, input json.RawMessage) Event {
 }
 
 // resultEvent is a tool's result: the output's first and last lines, how long it was, what was left out.
-func resultEvent(output string) Event {
+func resultEvent(output string, whole bool) Event {
 	e := Event{Kind: KindToolResult}
-	e.Output, e.Lines, e.Bytes, e.Truncated = headTail(output)
+	e.Output, e.Lines, e.Bytes, e.Truncated = shown(output, whole)
 	return e
 }
 
@@ -306,7 +317,7 @@ type codexItem struct {
 	Message string          `json:"message"`
 }
 
-func codexNotice(l, method string) ([]Event, bool) {
+func codexNotice(l, method string, whole bool) ([]Event, bool) {
 	var m struct {
 		ID     json.RawMessage `json:"id"`
 		Params json.RawMessage `json:"params"`
@@ -343,7 +354,7 @@ func codexNotice(l, method string) ([]Event, bool) {
 	json.Unmarshal(m.Params, &p)
 	switch {
 	case method == "item/completed" && p.Item != nil:
-		return codexItemEvents(*p.Item)
+		return codexItemEvents(*p.Item, whole)
 	case method == "item/completed", method == "item/started", method == "item/updated", strings.HasSuffix(strings.ToLower(method), "delta"):
 		return nil, true
 	case strings.HasPrefix(method, "item/") && (strings.HasSuffix(method, "/requestApproval") || method == "item/tool/requestUserInput"):
@@ -423,7 +434,7 @@ func codexAnswer(errRaw json.RawMessage) []Event {
 	return []Event{{Kind: KindError, Text: firstOf(e.Message, string(errRaw))}}
 }
 
-func codexExec(l, typ string) ([]Event, bool) {
+func codexExec(l, typ string, whole bool) ([]Event, bool) {
 	var m struct {
 		Item  *codexItem `json:"item"`
 		Usage *struct {
@@ -458,7 +469,7 @@ func codexExec(l, typ string) ([]Event, bool) {
 		return nil, true
 	case "item.completed":
 		if m.Item != nil {
-			return codexItemEvents(*m.Item)
+			return codexItemEvents(*m.Item, whole)
 		}
 		return nil, true
 	}
@@ -466,7 +477,7 @@ func codexExec(l, typ string) ([]Event, bool) {
 }
 
 // codexItemEvents reads a finished item, in the app-server's camelCase or exec's snake_case.
-func codexItemEvents(it codexItem) ([]Event, bool) {
+func codexItemEvents(it codexItem, whole bool) ([]Event, bool) {
 	switch it.Type {
 	case "userMessage":
 		var texts []string
@@ -500,7 +511,7 @@ func codexItemEvents(it codexItem) ([]Event, bool) {
 	case "commandExecution", "command_execution":
 		e := Event{Kind: KindCmd, Tool: it.Type, Call: it.ID, Family: FamilyOf(it.Type), Input: commandInput(it.Command), DurMS: it.DurationMS}
 		e.Title, e.More = shellTitle(it.Command)
-		e.Output, e.Lines, e.Bytes, e.Truncated = headTail(deref(firstPtr(it.AggregatedOutput, it.AggregatedOut2)))
+		e.Output, e.Lines, e.Bytes, e.Truncated = shown(deref(firstPtr(it.AggregatedOutput, it.AggregatedOut2)), whole)
 		e.Exit = firstPtr(it.ExitCode, it.ExitCode2)
 		e.Error = e.Exit != nil && *e.Exit != 0 || it.Status == "failed" || it.Status == "declined"
 		return []Event{e}, true
@@ -536,7 +547,7 @@ func codexItemEvents(it codexItem) ([]Event, bool) {
 			e.Error = true
 			out = append(out, it.Error.Message)
 		}
-		e.Output, e.Lines, e.Bytes, e.Truncated = headTail(strings.Join(out, "\n"))
+		e.Output, e.Lines, e.Bytes, e.Truncated = shown(strings.Join(out, "\n"), whole)
 		return []Event{e}, true
 	case "webSearch", "web_search":
 		b, _ := json.Marshal(map[string]string{"query": it.Query})
