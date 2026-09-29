@@ -129,7 +129,7 @@ export function Conversation({store, commands, toasts, prefs, task, run = '', ta
   const renderAsk = s => {
     const r = st.runs[s.run];
     const req = (r?.requests || []).find(q => q.id === s.request);
-    return html`<${AnswerForm} req=${req} scope=${(aff.runs?.[s.run] || []).includes('allow_run')} busy=${commands.state('run:' + s.run) === 'pending'}
+    return html`<${AnswerForm} req=${req} busy=${commands.state('run:' + s.run) === 'pending'}
       onAnswer=${p => answer(s, p)} />`;
   };
   const toggleRaw = () => {

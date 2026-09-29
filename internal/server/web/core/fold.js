@@ -22,7 +22,7 @@ function observe(r, o) {
   if (o.detail) r.detail = o.detail;
   if ((o.node_rev || 0) > 0) {
     r.attention = o.attention; r.ask = o.ask; r.note = o.note; r.last = o.last; r.usage = o.usage;
-    r.stream = o.stream; r.requests = o.requests; r.verdict = o.verdict; r.checked = o.check; r.worked = o.work; r.plan = o.plan;
+    r.stream = o.stream; r.requests = o.requests; r.caps = o.caps; r.doing = o.doing; r.verdict = o.verdict; r.checked = o.check; r.worked = o.work; r.plan = o.plan;
     const node = o.sends || [];
     r.sends = [...node, ...(r.sends || []).filter(m => !node.some(x => x.id === m.id))];
     r.answers = (r.answers || []).filter(a => (r.requests || []).some(q => q.id === a.request));
