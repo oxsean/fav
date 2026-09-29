@@ -147,7 +147,7 @@
 .plan-edit, .plan-item { display: grid; gap: 10px; min-width: 0; }
 .plan-reply { display: grid; gap: 6px; }
 .plan-reply > .btn { justify-self: start; }
-.gate-quick { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.gate-quick { display: grid; gap: 8px; }
 [data-form="phone"] .plan-row { min-height: 52px; padding: 8px 12px; font-size: 14px; }
 [data-form="phone"] .dir-pick { min-height: 44px; font-size: 14px; }
 .tasks-board { min-height: 0; overflow: auto; }

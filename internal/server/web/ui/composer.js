@@ -2,7 +2,7 @@
 // will go, as the coordinator routes it (task.message's route): into the running turn, after it, in place of it, on in
 // a new run of the session, or to the workflow's next stage. It shows how the last messages got on, and sends with
 // Mod+Enter.
-import {useState} from '../vendor/hooks.mjs';
+import {useState, useEffect} from '../vendor/hooks.mjs';
 import {html, cx, usePhone, useWords} from './base.js';
 import {Button, Segmented} from './controls.js';
 import {register} from '../core/i18n.js';
@@ -53,6 +53,7 @@ export function Composer({route, acts = [], machine = '', sends = [], busy = fal
   const setText = v => (onDraft ? onDraft(v) : setOwn(v));
   const modes = modesOf(route, acts);
   const [picked, setMode] = useState('');
+  useEffect(() => { setMode(''); }, [route?.run]); // a way picked for one run's turn is not the next run's
   const mode = modes.includes(picked) ? picked : modes[0] || '';
   const blocked = route && !['run', 'reply', 'workpad'].includes(route.to);
   const canSend = !!text.trim() && !busy && !disabled && !blocked;

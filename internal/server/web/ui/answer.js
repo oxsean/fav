@@ -51,8 +51,8 @@ export function quickOf(t, req, {scope = false} = {}) {
 }
 
 // AnswerForm: onAnswer(params) sends run.answer's params (without run and request); scope offers allow_run (allowsRun);
-// gone, once an answer came back request_gone, is who answered first ('' when nobody did): what was asked stays, the
-// ways to answer go.
+// gone, once an answer came back request_gone, is who answered first ('' when nobody did): the form says so in place of
+// the ways to answer (the row or item it is in already says what was asked).
 export function AnswerForm({req, scope = false, busy = false, onAnswer, detail = '', gone}) {
   const {t, f} = useWords();
   const phone = usePhone();
@@ -61,10 +61,7 @@ export function AnswerForm({req, scope = false, busy = false, onAnswer, detail =
   const [why, setWhy] = useState('');
   if (!req) return null;
   if (gone !== undefined) {
-    return html`<div class="answer answer-gone" role="status">
-      ${isPermission(req) ? req.tool && html`<div class="answer-q">${f('ans.asks', req.tool)}</div>` : (req.questions || []).map(q => html`<div class="answer-q" key=${q.question}>${q.question}</div>`)}
-      <p class="answer-note">${gone ? f('ans.goneBy', gone) : t('ans.gone')}</p>
-    </div>`;
+    return html`<div class="answer answer-gone" role="status"><p class="answer-note">${gone ? f('ans.goneBy', gone) : t('ans.gone')}</p></div>`;
   }
   const submitKey = e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && !e.isComposing) { e.preventDefault(); e.currentTarget.form?.requestSubmit?.(); } };
 

@@ -421,6 +421,7 @@ test('the task page\'s conversation: watched, paged back into the run before, wr
       ok(you.textContent.includes(words.f('out.by', 'u_b')) && you.textContent.includes('Then add a footer'), `r3's prompt is u_b's message: ${you.textContent}`);
       ok(!you.textContent.includes(words.t('out.you')), 'not a prompt of nobody');
       eq(root.find('[data-key]').filter(x => x.getAttribute('data-key') === 'send:m_a1').length, 0, 'the message is not left waiting in r2');
+      ok(root.one('.cmp-where').textContent.includes(words.t('cmp.to.steer')), 'what is typed next goes into r3, the way picked for r2 forgotten');
     },
   });
   eq(r.errors, [], 'errors');
@@ -473,7 +474,8 @@ test('the home answers a waiting item\'s two questions together', async () => {
 test('an answer someone gave first: said where it was asked, on the home and in the conversation, with no failure', async () => {
   const saysGone = (root, what) => {
     const form = root.one('.answer-gone');
-    ok(form.textContent.includes(words.f('ans.goneBy', 'u_a')) && form.textContent.includes('Which page size?'), `${what}: who answered first, and what was asked`);
+    ok(form.textContent.includes(words.f('ans.goneBy', 'u_a')), `${what}: who answered first`);
+    ok(root.textContent.includes('Which page size?'), `${what}: what was asked stays`);
     eq([root.find('.answer-gone button').length, root.find('.answer-gone input').length], [0, 0], `${what}: no way to answer it`);
     ok(!root.find('.toast-text').some(x => x.textContent.includes('request_gone')), `${what}: no failure`);
   };
