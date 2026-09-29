@@ -614,69 +614,145 @@ func closeAll(fs []*os.File) {
 }
 
 // copyOut writes the agent's stdout to the log and reads it as it goes: codex's thread id, the final message, errors
-// and denied permissions; a line longer than the buffer goes to the log in pieces and is not read. What says who is
-// signed in stays out of the log (scrub).
+// and denied permissions; a line longer than the buffer is not read. What says who is signed in, how much of their
+// plan is used or where the agent's own configuration lives stays out of the log (scrub).
 func (s *sup) copyOut(r io.Reader, w io.Writer) {
 	br := bufio.NewReaderSize(r, 64<<10)
-	piece, drop := false, false
 	for {
 		line, err := br.ReadSlice('\n')
-		full := err == nil && !piece
-		logged := line
-		if !piece {
-			logged, drop = scrub(line, full)
-		}
-		if len(line) > 0 && !drop {
-			w.Write(logged)
-			if full {
+		if errors.Is(err, bufio.ErrBufferFull) {
+			err = copyLong(br, line, w)
+		} else if len(line) > 0 {
+			if logged, keep := scrub(line); keep {
+				w.Write(logged)
+			}
+			if err == nil {
 				s.line(line)
 			}
 		}
-		piece = errors.Is(err, bufio.ErrBufferFull)
-		if err != nil && !piece {
+		if err != nil {
 			return
 		}
 	}
 }
 
-// scrub is a line of the agent's output as the log keeps it, or drop: claude's answer to initialize (the account)
-// and codex's rate limits (the plan and its use) are dropped, codex's home directory is cut from its answer to
-// initialize. A line longer than the buffer is told from its first piece, where a quote inside a JSON string is always
-// escaped.
-func scrub(line []byte, full bool) (logged []byte, drop bool) {
-	claudeInit := bytes.Contains(line, []byte(`"control_response"`)) && bytes.Contains(line, []byte(`"request_id":"`+initRequest+`"`))
-	limits := bytes.Contains(line, []byte(`"method":"account/rateLimits/updated"`))
-	home := bytes.Contains(line, []byte(`"codexHome"`))
-	if !claudeInit && !limits && !home {
-		return line, false
+// maxScrub is the longest line scrub reads whole; a longer one that might need it is left out of the log.
+const maxScrub = 32 << 20
+
+// copyLong logs a line longer than br's buffer, of which first is the start: in pieces, or whole through scrub when
+// it might need it. It answers the error that ended the line.
+func copyLong(br *bufio.Reader, first []byte, w io.Writer) error {
+	whole := mayScrub(first)
+	var buf []byte
+	if whole {
+		buf = append(buf, first...)
+	} else {
+		w.Write(first)
 	}
-	if !full {
-		return line, claudeInit && bytes.Contains(line, []byte(`"type":"control_response"`)) || limits
+	for {
+		piece, err := br.ReadSlice('\n')
+		switch {
+		case !whole:
+			w.Write(piece)
+		case buf != nil && len(buf)+len(piece) <= maxScrub:
+			buf = append(buf, piece...)
+		default:
+			buf = nil
+		}
+		if errors.Is(err, bufio.ErrBufferFull) {
+			continue
+		}
+		if whole && buf != nil {
+			if logged, keep := scrub(buf); keep {
+				w.Write(logged)
+			}
+		}
+		return err
 	}
-	var m struct {
+}
+
+var (
+	// dropPatterns mark the lines that stay out of the log whole: claude's answer to initialize (the account) and its rate
+	// limits, codex's rate limits (the plan and its use) and hooks (their files, in their ids too).
+	dropPatterns = [][]byte{[]byte(`"request_id":"` + initRequest + `"`), []byte(`"type":"rate_limit_event"`),
+		[]byte(`"method":"account/rateLimits/updated"`), []byte(`"method":"hook/`)}
+	// cuts are fields left out of the lines they appear in: where the agent keeps its configuration and sessions.
+	cuts = [][]string{{"result", "codexHome"}, {"result", "instructionSources"}, {"result", "thread", "path"},
+		{"params", "thread", "path"}, {"memory_paths"}}
+	cutPatterns = [][]byte{[]byte(`"codexHome"`), []byte(`"instructionSources"`), []byte(`"thread":{`), []byte(`"memory_paths"`)}
+)
+
+// mayScrub tells a line scrub might change; a quote inside a JSON string is always escaped, so text that only
+// mentions these never matches.
+func mayScrub(line []byte) bool {
+	for _, p := range slices.Concat(dropPatterns, cutPatterns) {
+		if bytes.Contains(line, p) {
+			return true
+		}
+	}
+	return false
+}
+
+// scrub is a line of the agent's output as the log keeps it, or keep false to leave it out (dropPatterns, cuts).
+func scrub(line []byte) (logged []byte, keep bool) {
+	if !mayScrub(line) {
+		return line, true
+	}
+	var m map[string]json.RawMessage
+	if json.Unmarshal(line, &m) != nil {
+		for _, p := range dropPatterns {
+			if bytes.Contains(line, p) {
+				return nil, false
+			}
+		}
+		return line, true
+	}
+	var head struct {
 		Type     string `json:"type"`
 		Method   string `json:"method"`
 		Response struct {
 			RequestID string `json:"request_id"`
 		} `json:"response"`
-		ID     json.RawMessage            `json:"id"`
-		Result map[string]json.RawMessage `json:"result"`
 	}
-	if json.Unmarshal(line, &m) != nil {
-		return line, false
+	json.Unmarshal(line, &head)
+	if head.Type == "control_response" && head.Response.RequestID == initRequest || head.Type == "rate_limit_event" ||
+		head.Method == "account/rateLimits/updated" || strings.HasPrefix(head.Method, "hook/") {
+		return nil, false
 	}
-	switch {
-	case m.Type == "control_response" && m.Response.RequestID == initRequest, m.Method == "account/rateLimits/updated":
-		return nil, true
-	case m.Type == "" && m.Method == "" && m.ID != nil && m.Result["codexHome"] != nil:
-		delete(m.Result, "codexHome")
-		b, err := json.Marshal(map[string]any{"id": m.ID, "result": m.Result})
-		if err != nil {
-			return nil, true
-		}
-		return append(b, '\n'), false
+	changed := false
+	for _, c := range cuts {
+		changed = cut(m, c) || changed
 	}
-	return line, false
+	if !changed {
+		return line, true
+	}
+	b, err := json.Marshal(m)
+	if err != nil {
+		return nil, false
+	}
+	return append(b, '\n'), true
+}
+
+// cut removes the field at path from m, answering whether it was there.
+func cut(m map[string]json.RawMessage, path []string) bool {
+	v, ok := m[path[0]]
+	if !ok {
+		return false
+	}
+	if len(path) == 1 {
+		delete(m, path[0])
+		return true
+	}
+	var inner map[string]json.RawMessage
+	if json.Unmarshal(v, &inner) != nil || !cut(inner, path[1:]) {
+		return false
+	}
+	b, err := json.Marshal(inner)
+	if err != nil {
+		return false
+	}
+	m[path[0]] = b
+	return true
 }
 
 // event is the part of a claude stream-json or codex exec --json line the supervisor reads.

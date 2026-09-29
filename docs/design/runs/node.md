@@ -41,7 +41,7 @@
 - agent 的环境多了 `TEND_RUN` 和 `TEND_RUN_DIR`（run 目录）。
 - stdout 逐行解析（JSON 才解析）：claude `result`（最后一条消息、`is_error`、`permission_denials`），codex `thread.started`（会话 id）、`item.completed` 的 `agent_message`（最后一条消息）、`error` / `turn.failed`（错误）；claude / codex 以外的 agent，最后一行普通输出当最后一条消息。
 - 运行中每秒：读 `reports.jsonl` 新增（ask → `attention=asked` + `ask`；note → `note`，并清掉 stalled）；background 方式下 stdout / stderr 超过 `spec.stall_after`（节点 `node.stall_after`，默认 15 分钟，`off` 关闭）没有字节 → `attention=stalled`，再有输出就清掉；只标记，不停。herdr 方式每 3 s 看 agent 是否在等人：Herdr 里它的 pane 是 `blocked`，或（claude）会话 transcript 末尾是没回答的 `AskUserQuestion` / `ExitPlanMode`，或最新的 Claude hook 事件是 `Notification` / `PermissionRequest` 且 transcript 之后没再长（`tend install-hook`）→ `attention=asked`（没有 `ask` 原文）；不再等时清掉，但只清自己标的，`tend run ask` 的提问留着。Herdr pane 状态和 Claude hook 这两个来源只用于 herdr 方式。
-- 输出按 64 KiB 块写盘，超长行不解析；说明谁登录着的行不写进 `output.log`：claude 对 `initialize` 请求的回应（`request_id` 为 `init` 的 `control_response`，里面有账号的 email、organization 和订阅类型）和 codex 的 `account/rateLimits/updated`（套餐和用量）整行丢掉，超长时按第一块认；codex 对 `initialize` 的回应去掉 `codexHome`（家目录）再写；`output.log` 轮转改名失败（Windows 上有读者开着）就继续追加，下次再轮转。
+- 输出按 64 KiB 块写盘，超长行不解析；账号、套餐用量和 agent 自己配置所在的路径不写进 `output.log`：整行丢掉的有 claude 对 `initialize` 的回应（`request_id` 为 `init`，里面有 email、organization 和订阅类型）、claude 的 `rate_limit_event`、codex 的 `account/rateLimits/updated` 和 `hook/*`（hook 的 id 里也有配置文件的路径）；去掉字段再写的有 codex 回应里的 `codexHome`、`instructionSources`、`thread.path`（rollout 文件），`thread/started` 的 `thread.path`，claude `system init` 的 `memory_paths`。要改写的超长行先整行读进来（最多 32 MiB，再长就整行不写）；判断先按字节预筛，JSON 字符串里的引号一定带转义，只是提到这些词的文字不会误中；`output.log` 轮转改名失败（Windows 上有读者开着）就继续追加，下次再轮转。
 
 runner 方式：
 

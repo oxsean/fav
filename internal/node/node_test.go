@@ -263,6 +263,30 @@ func TestTheAgentsAccountStaysOutOfTheLog(t *testing.T) {
 	}
 }
 
+func TestTheAgentsConfigPathsStayOutOfTheLog(t *testing.T) {
+	home := "/home/someone"
+	limits := `{"type":"rate_limit_event","rate_limit_info":{"status":"allowed","overageDisabledReason":"org_level_disabled","unifiedWindows":{"five_hour":{"utilization":0.34}}},"uuid":"u1"}`
+	initLine := `{"type":"system","subtype":"init","cwd":"/work","session_id":"s1","memory_paths":{"auto":"` + home + `/.claude/projects/-work/memory/"}}`
+	start := `{"id":2,"result":{"thread":{"id":"th-1","path":"` + home + `/.codex/sessions/rollout-1.jsonl","cwd":"/work"},"instructionSources":["` + home + `/.codex/AGENTS.md"]}}`
+	resumed := `{"id":3,"result":{"thread":{"id":"th-2","path":"` + home + `/.codex/sessions/rollout-2.jsonl","turns":["` + strings.Repeat("t", 200<<10) + `"]}}}`
+	started := `{"method":"thread/started","params":{"thread":{"id":"th-1","path":"` + home + `/.codex/sessions/rollout-1.jsonl"}}}`
+	hook := `{"method":"hook/started","params":{"run":{"id":"session-start:6:` + home + `/.codex/hooks.json","sourcePath":"` + home + `/.codex/hooks.json"}}}`
+	said := `{"type":"assistant","message":{"content":[{"type":"text","text":"a \"path\" in \"thread\""}]}}`
+	var out strings.Builder
+	s := &sup{dir: t.TempDir()}
+	s.copyOut(strings.NewReader(strings.Join([]string{limits, initLine, start, resumed, started, hook, said}, "\n")+"\n"), &out)
+	logged := out.String()
+	lines := strings.Split(strings.TrimSuffix(logged, "\n"), "\n")
+	if strings.Contains(logged, home) || strings.Contains(logged, "rate_limit") || len(lines) != 5 || lines[4] != said {
+		t.Fatalf("logged %d lines: %.800q", len(lines), logged)
+	}
+	for _, want := range []string{`"cwd":"/work"`, `"session_id":"s1"`, `"id":"th-1"`, `"id":"th-2"`, strings.Repeat("t", 200<<10)} {
+		if !strings.Contains(logged, want) {
+			t.Errorf("the rest of the lines stays: %s missing", want[:min(len(want), 40)])
+		}
+	}
+}
+
 func TestAnUnknownRunCanBeAcknowledged(t *testing.T) {
 	n := New(t.TempDir())
 	n.Launch = noLaunch
