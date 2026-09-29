@@ -341,6 +341,27 @@ type far struct {
 	conns []*wire.Conn
 	dials int
 	hide  string // a run run.list leaves out, as when its snapshot cannot be read
+	asked []asked
+	lacks []string // methods it answers as a node that has none
+}
+
+// asked is a call far answered.
+type asked struct {
+	method string
+	params json.RawMessage
+}
+
+// asked are the calls of method far answered.
+func (f *far) calls(method string) []json.RawMessage {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var out []json.RawMessage
+	for _, a := range f.asked {
+		if a.method == method {
+			out = append(out, a.params)
+		}
+	}
+	return out
 }
 
 func newFar(t *testing.T) *far {
@@ -359,6 +380,13 @@ func (f *far) dial(h tend.Host, opt wire.Options) (Conn, error) {
 	n := node.New(f.home)
 	handle := n.Handler(remote.NewLocal("far"))
 	a, b := wire.Pipe(opt, wire.Options{Handler: func(ctx context.Context, r *wire.Request) (any, error) {
+		f.mu.Lock()
+		f.asked = append(f.asked, asked{r.Method, slices.Clone(r.Params)})
+		lacks := slices.Contains(f.lacks, r.Method)
+		f.mu.Unlock()
+		if lacks {
+			return nil, &wire.Error{Code: wire.CodeUnknownMethod, Detail: r.Method}
+		}
 		res, err := handle(ctx, r)
 		f.mu.Lock()
 		hide := f.hide

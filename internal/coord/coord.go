@@ -39,6 +39,12 @@ const (
 	MRunTail            = "run.tail"
 	MRunOutputPage      = "run.output.page"
 	MRunOutputWatch     = "run.output.watch" // a run's output as it comes (OutputWatchParams): PushOutput pushes
+	MRunOutputItem      = "run.output.item"  // one event with nothing left out (OutputItemParams)
+	MRunOutputFind      = node.MRunOutputFind
+	MRunChanges         = node.MRunChanges
+	MRunDiff            = node.MRunDiff
+	MRunBlob            = node.MRunBlob
+	MProjectDirs        = "project.dirs" // a directory on a machine, for whom may run a project's tasks there (ProjectDirsParams)
 	MAgentList          = "agent.list"
 	MMachineList        = "machine.list"
 	MStateWatch         = "state.watch"

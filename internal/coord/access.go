@@ -65,6 +65,12 @@ var methodAccess = map[string]access{
 	MRunOutputPage:      reader,
 	MRunOutputWatch:     reader,
 	MRunMessages:        reader,
+	MRunOutputItem:      reader,
+	MRunOutputFind:      reader,
+	MRunChanges:         reader, // a directory run's other changes: its machine's owner only (runChanges)
+	MRunDiff:            reader,
+	MRunBlob:            reader,
+	MProjectDirs:        reader, // who may run the project's tasks on the machine (projectDirs)
 	MRunPreview:         reader,
 	MNodeCall:           reader, // a machine's own sessions: its owner and admins (nodeCall)
 	MTaskCreate:         writer,

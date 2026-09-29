@@ -121,11 +121,18 @@ var readMethods = []string{remote.MHello, remote.MList, remote.MMessages, remote
 var Methods = []string{MStateGet, MTaskGet, MTaskCreate, MTaskEdit, MTaskStatus, MRunDispatch, MRunStop, MRunAbandon, MRunTail, MRunOutputPage, MRunOutputWatch,
 	MAgentList, MMachineList, MStateWatch, MNodeCall, MRunPreview, MRunContinue, MRunAnswer, MRunSend, MRunMessages,
 	MProjectCreate, MProjectEdit, MProjectMember, MMachineShare, MTaskStart, MTaskMove,
-	MAgentDefList, MAgentDefGet, MAgentDefSave, MAgentDefRemove, MAgentDefShare, MInboxList, MUserOffboard, MTaskSync, MTaskLink, MTaskSourceAck, MTaskGate, MTaskMerge, MTaskPlan, MTaskPlanSave, MTaskPlanApply, MTaskMessage, MTaskMessagePreview, MRunInterrupt, MMachinesWatch, MInboxWatch}
+	MAgentDefList, MAgentDefGet, MAgentDefSave, MAgentDefRemove, MAgentDefShare, MInboxList, MUserOffboard, MTaskSync, MTaskLink, MTaskSourceAck, MTaskGate, MTaskMerge, MTaskPlan, MTaskPlanSave, MTaskPlanApply, MTaskMessage, MTaskMessagePreview, MRunInterrupt, MMachinesWatch, MInboxWatch,
+	MRunOutputItem, MRunOutputFind, MRunChanges, MRunDiff, MRunBlob, MProjectDirs}
 
 // Bulk marks the methods whose answers are large pieces fetched on demand: a connection writes them after everything
 // else (wire.Options.Bulk).
-func Bulk(method string) bool { return method == MRunOutputPage }
+func Bulk(method string) bool {
+	switch method {
+	case MRunOutputPage, MRunOutputItem, MRunDiff, MRunBlob:
+		return true
+	}
+	return false
+}
 
 // Handler answers this machine's user.
 func (c *Coord) Handler() wire.Handler { return c.HandlerFor(Owner) }
@@ -212,6 +219,18 @@ func (c *Coord) HandlerFor(p Principal) wire.Handler {
 			return c.outputPage(ctx, p, r)
 		case MRunMessages:
 			return c.runMessages(ctx, p, r)
+		case MRunOutputItem:
+			return c.outputItem(ctx, p, r)
+		case MRunOutputFind:
+			return c.outputFind(ctx, p, r)
+		case MRunChanges:
+			return c.runChanges(ctx, p, r)
+		case MRunDiff:
+			return c.runDiff(ctx, p, r)
+		case MRunBlob:
+			return c.runBlob(ctx, p, r)
+		case MProjectDirs:
+			return c.projectDirs(ctx, p, r)
 		case MNodeCall:
 			var np NodeCall
 			if err := r.Decode(&np); err != nil {
