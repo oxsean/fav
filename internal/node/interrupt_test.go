@@ -1,6 +1,7 @@
 package node
 
 import (
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -18,7 +19,12 @@ func streamRig(t *testing.T, provider string) *codexRig {
 	g := newCodexRig(t, "")
 	g.s.spec.Agent, g.s.spec.Provider, g.s.spec.Run = provider, provider, "r_0123456789ab"
 	g.s.log = &rolling{path: filepath.Join(g.s.dir, "output.log")}
-	t.Cleanup(func() { g.s.log.Close() })
+	g.s.log.turns.doing = g.s.doing
+	t.Cleanup(func() {
+		go io.Copy(io.Discard, g.out)
+		g.s.in.finish(2 * time.Second) // what it was told is written before the directory goes
+		g.s.log.Close()
+	})
 	g.s.proto = newProto(g.s)
 	return g
 }

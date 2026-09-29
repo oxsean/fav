@@ -62,11 +62,12 @@ func turnAt(dir, file string, off int64) *output.State {
 // turns follows the log's turns as output.Parse counts them, a line at a time as the log is written, and marks
 // where each begins and ends.
 type turns struct {
-	st   output.State
-	line []byte // the line so far, unless it is past what is sent whole (over)
-	over bool
-	at   int64 // where it starts
-	n    int64 // its length so far
+	st    output.State
+	doing func(title string) // told the tool call each turn is at, "" once it ends
+	line  []byte             // the line so far, unless it is past what is sent whole (over)
+	over  bool
+	at    int64 // where it starts
+	n     int64 // its length so far
 }
 
 // took reads p, written at off; mark gets what to add.
@@ -93,7 +94,8 @@ func (t *turns) took(file string, off int64, p []byte, mark func(Mark)) {
 			continue
 		}
 		if sent, head := clipLine(bytes.TrimSuffix(t.line, []byte("\n"))); !head {
-			_, st, _ := output.Parse(file, t.at, string(sent)+"\n", t.st)
+			evs, st, _ := output.Parse(file, t.at, string(sent)+"\n", t.st)
+			t.did(evs)
 			if st.Turn != t.st.Turn {
 				mark(Mark{Event: markTurn, N: st.Turn, Off: t.at})
 			}
@@ -101,6 +103,23 @@ func (t *turns) took(file string, off int64, p []byte, mark func(Mark)) {
 				mark(Mark{Event: markTurn, N: st.Turn, Phase: phaseEnd, Off: off})
 			}
 			t.st = st
+		}
+	}
+}
+
+// did tells doing what evs say the turn is at.
+func (t *turns) did(evs []output.Event) {
+	if t.doing == nil {
+		return
+	}
+	for _, e := range evs {
+		switch e.Kind {
+		case output.KindTool, output.KindCmd, output.KindEdit, output.KindMCP:
+			if e.Title != "" {
+				t.doing(e.Title)
+			}
+		case output.KindResult:
+			t.doing("")
 		}
 	}
 }

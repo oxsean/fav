@@ -131,6 +131,8 @@ type Run struct {
 	Requests   []agent.Request    `json:"requests,omitempty"` // what it waits on, as its node last said
 	Answers    []agent.Answer     `json:"answers,omitempty"`  // given, not yet taken by the node
 	Sends      []agent.Send       `json:"sends,omitempty"`    // messages for it and how far they got
+	Caps       *agent.RunCaps     `json:"caps,omitempty"`     // what it can do, as its node found it once it started
+	Doing      string             `json:"doing,omitempty"`    // the tool call its turn is at
 	Provider   string             `json:"provider,omitempty"`
 	Session    string             `json:"session,omitempty"`
 	Pane       string             `json:"pane,omitempty"`
@@ -217,6 +219,8 @@ type Observation struct {
 	Stream    bool               `json:"stream,omitempty"`
 	Requests  []agent.Request    `json:"requests,omitempty"`
 	Sends     []agent.Send       `json:"sends,omitempty"`
+	Caps      *agent.RunCaps     `json:"caps,omitempty"`
+	Doing     string             `json:"doing,omitempty"`
 	Verdict   *agent.Verdict     `json:"verdict,omitempty"`
 	Check     *agent.CheckResult `json:"check,omitempty"`
 	Work      *agent.Work        `json:"work,omitempty"`
@@ -503,7 +507,7 @@ func (r *Run) observe(o Observation) {
 	}
 	if o.NodeRev > 0 { // what the node says now; the coordinator's own observations carry none of it
 		r.Attention, r.Ask, r.Note, r.Last, r.Usage = o.Attention, o.Ask, o.Note, o.Last, o.Usage
-		r.Stream, r.Requests = o.Stream, o.Requests
+		r.Stream, r.Requests, r.Caps, r.Doing = o.Stream, o.Requests, o.Caps, o.Doing
 		r.Verdict, r.Checked, r.Worked, r.Plan = o.Verdict, o.Check, o.Work, o.Plan
 		r.Sends = mergeSends(r.Sends, o.Sends)
 		r.Answers = slices.DeleteFunc(slices.Clone(r.Answers), func(a agent.Answer) bool { // taken, or no longer asked

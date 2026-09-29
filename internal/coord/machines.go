@@ -594,7 +594,7 @@ func observation(s node.Snapshot) task.Observation {
 	}
 	return task.Observation{Plan: plan, ID: s.Run, State: s.State.State, ExitCode: s.ExitCode, Reason: s.Reason, Detail: s.Detail,
 		Attention: s.Attention, Ask: s.Ask, Note: s.Note, Last: s.Last, Usage: s.Usage, Stream: s.Stream, Requests: s.Requests,
-		Sends: s.Sends, Verdict: s.Verdict, Check: s.Check, Work: s.Work, Provider: s.Provider, Session: s.Session, Pane: s.Pane, NodeRev: s.Rev,
+		Sends: s.Sends, Caps: s.Caps, Doing: s.Doing, Verdict: s.Verdict, Check: s.Check, Work: s.Work, Provider: s.Provider, Session: s.Session, Pane: s.Pane, NodeRev: s.Rev,
 		StartedAt: s.StartedAt, EndedAt: s.EndedAt}
 }
 

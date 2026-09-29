@@ -191,9 +191,9 @@ func (c *codexProto) request(m rpcMessage) {
 			c.reply(m.ID, map[string]any{"decision": "accept"}, nil)
 			return
 		}
-		req.Tool, req.Summary = "shell", clip(firstOf(p.Command, p.Reason), maxSummary)
+		req.Tool, req.Summary, req.AllowRun = "shell", clip(firstOf(p.Command, p.Reason), maxSummary), true
 	case "item/fileChange/requestApproval":
-		req.Tool, req.Summary = "apply_patch", clip(firstOf(p.Reason, p.GrantRoot), maxSummary)
+		req.Tool, req.Summary, req.AllowRun = "apply_patch", clip(firstOf(p.Reason, p.GrantRoot), maxSummary), true
 	case "item/permissions/requestApproval":
 		req.Tool, req.Summary, pd.input = "permissions", clip(firstOf(p.Reason, string(p.Permissions)), maxSummary), p.Permissions
 	case "item/tool/requestUserInput":
@@ -306,7 +306,10 @@ func (c *codexProto) notification(m rpcMessage, at logPos) {
 
 func (c *codexProto) answer(p pending, a agent.Answer, done func(error)) error {
 	decision := "decline"
-	if a.Allow {
+	switch {
+	case a.ForRun(): // ⚠️ not acceptWithExecpolicyAmendment: that one stays in the execpolicy for good
+		decision = "acceptForSession"
+	case a.Allow:
 		decision = "accept"
 	}
 	switch p.method {

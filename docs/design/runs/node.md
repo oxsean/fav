@@ -19,7 +19,7 @@
 | `marks.jsonl` | 监督进程 | 只追加 `{type:"tend", event, id?, n?, phase?, name?, code?, file, off, at}`，`file` 是 `output.log` 这一代的 `fileio.ID`、`off` 是写这一行时它的位置。`event`：`roll`（日志从这一代的 `off` 接着写，每代打开时一条）、`start`（agent 启动前）、`exit{code}`（agent 退出、输出读完之后；这两条只在 background 方式）、`hook{name, phase begin\|end, code}`（setup、before_run、check、cleanup）、`turn{n}`（开始第 n 轮的那一行的开头）和 `turn{n, phase:"end"}`（带这一轮 result 的那一行的末尾）、`input{id}`（agent 把 send `id` 交回来的那一行的开头，见「双向流」）、`resolved{id}`（请求 `id` 被答掉：claude 是回答写进 stdin 的那一刻，codex 是 `serverRequest/resolved` 那一行的开头）、`interrupt{id, n}`（打断第 n 轮的请求发出的那一刻）。只用来在输出里定位和翻页：run 目录 agent 写得了，谁问谁答以 journal 为准 |
 | `settings.json` / `mcp.json`（0600） | `run.start` | agent 定义的 claude hooks 和 MCP 服务器（feature `files`） |
 | `reports.jsonl` | agent（`tend run ask\|note\|verdict\|plan`、`note --pr`） | 只追加 `{at, kind ask\|note\|verdict\|pr\|plan, text, verdict}`；监督进程每秒读新增的整行，verdict（pass / rework / blocked）进 `state.json` 的 `verdict` |
-| `answers.jsonl` | `run.answer` | 只追加 `{request, allow, message, answers}`；监督进程每 250 ms 读新增的整行 |
+| `answers.jsonl` | `run.answer` | 只追加 `{request, allow, decision?, message, answers}`；监督进程每 250 ms 读新增的整行 |
 | `inbox.jsonl` | `run.send` | 只追加 `{id, text, state, at}`；监督进程每 250 ms 读新增的整行 |
 | `interrupts.jsonl` | `run.interrupt` | 只追加 `{id, turn, at}`；监督进程每 250 ms 读新增的整行 |
 
@@ -86,8 +86,14 @@ runner 方式：
 - agent 已接收（`seen`）：claude 回放 `isReplay:true` 的 user 消息，按 `uuid` 对上 send；codex 的 userMessage `item/started` 按 `item.clientId` 对上。第一次对上时 send 改成 `seen`，在这一行的开头记 `input{id}` 标记；再出现就忽略（claude 连发几条时各回放一次，最后一条的回放里是拼起来的全文，所以文字以 journal 为准）。回放行照旧进 `output.log`，是一个 user 事件。对不上的（进程被杀、崩溃）停在 sent。一轮结束时还有 sent 的消息，stdin 最多多开 30 s 等它（claude 在纯文字回复中收到的消息要等 `result` 之后另起一轮）。
 - codex 的 `serverRequest/resolved{requestId}` 记 `resolved{rpc-<id>}`；这个请求还在等回答（codex 自己撤回了它）就从 `state.requests` 里去掉。
 - 结束时：关 stdin，等排队的写完，最多 2 s，还没写进去的（agent 留下的子进程拿着 stdin 不读）记 failed；还没送出的消息记 failed，没回答的请求清掉；用户拒绝过的工具不算「等你批准」（只有权限模式没问就拒的才算）。
-- 节点 feature：`input_marks`（`input`、`resolved` 标记和 `seen`）、`interrupt`（`run.interrupt`，方法名同时进 `hello.methods`）。
-- 节点 `run.answer`：请求不在 `state.requests` 里 → `conflict request_gone`；同一请求已在 `answers.jsonl` 里 → 直接回快照。`run.send`：不是 stream run 或已不在 starting / running → `conflict cannot_send`；同 id 已有 → 直接回快照。快照的 `sends` = `state.sends` 加上 `inbox.jsonl` 里监督进程还没取的（queued；run 已结束或 unknown 时算 failed）。
+- 节点 feature：`input_marks`（`input`、`resolved` 标记和 `seen`）、`interrupt`（`run.interrupt`，方法名同时进 `hello.methods`）、`answer_scope`（`run.answer` 的 `decision`）。
+- 回答的 `decision`：`allow`（这一次）、`allow_run`（这次运行里这条命令都允许）、`deny`；`allow` 跟着 `decision` 定，不认识 `decision` 的一端照 `allow` 读，`allow_run` 在那里就是允许一次；别的值 → `bad_request decision`。`allow_run` 只对 `requests[].allow_run` 的请求生效，其余照允许一次：
+  - claude：请求的 `permission_suggestions` 里有 `addRules`（`behavior: allow`）才算。回答的 `updatedPermissions` 只有一条 `{type: addRules, rules, behavior: allow, destination: session}`，`rules` 只取 `toolName`、`ruleContent`（Bash 是这一条命令）；`destination` 写死 `session`，建议里的 `localSettings` 会把规则写进仓库的 `.claude/settings.local.json`；`setMode`、`addDirectories` 一律不转发。规则只活在这个进程里，续接以后就没了。
+  - codex：`item/commandExecution/requestApproval`、`item/fileChange/requestApproval` 回 `acceptForSession`（不用长期写进 execpolicy 的 `acceptWithExecpolicyAmendment`）；`item/permissions/requestApproval` 仍只授予这一轮。
+- 回答写进 stdin 之后请求才从 `state.requests` 去掉；没写进去（输入已关、排队已满、写失败）就留着，标 `failed`，可以再答一次。
+- 实际能力 `state.caps{steer, after, interrupt, answer_scope, questions, continue, takeover}`：agent 启动时写一次。stream run 有 `steer`、`interrupt`、`answer_scope`、`questions`，provider 能续会话时还有 `after`；`continue` 是 provider 能续会话、而且不是 herdr 方式；`takeover` 是 provider 能在终端里续（claude、codex）。协调器照搬到 `Run.caps`。
+- 正在做 `state.doing`：`rolling` 数轮次时，每个工具事件（`tool`、`cmd`、`edit`、`mcp`）的 `title` 记成 `doing`，这一轮的 result 清空，run 结束也清空；和 `last` 一起每秒最多写一次 state，随 `run_observed` 进 `Run.doing`。
+- 节点 `run.answer`：请求不在 `state.requests` 里 → `conflict request_gone`；同一请求已在 `answers.jsonl` 里、而且没标 `failed` → 直接回快照。`run.send`：不是 stream run 或已不在 starting / running → `conflict cannot_send`；同 id 已有 → 直接回快照。快照的 `sends` = `state.sends` 加上 `inbox.jsonl` 里监督进程还没取的（queued；run 已结束或 unknown 时算 failed）。
 - 最后一句话（`last`，500 字节内）和用量（`usage{input, cache_read, cache_write, output, cost_usd, turns}`）：claude 取 assistant 文本和每个 `result` 的 usage 累加、`total_cost_usd` 取最新；codex exec 取 `turn.completed` 的 usage；普通命令行取最后一行。每秒最多写一次 state。
 
 ## 读输出

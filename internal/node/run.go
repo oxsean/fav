@@ -154,6 +154,8 @@ type State struct {
 	Stream    bool               `json:"stream,omitempty"`   // it takes answers and messages while it runs
 	Requests  []agent.Request    `json:"requests,omitempty"` // what it waits on
 	Sends     []agent.Send       `json:"sends,omitempty"`    // messages for it and how far they got
+	Caps      *agent.RunCaps     `json:"caps,omitempty"`     // what it can do, once started
+	Doing     string             `json:"doing,omitempty"`    // the tool call it is at in its turn
 	StartedAt *time.Time         `json:"started_at,omitzero"`
 	EndedAt   *time.Time         `json:"ended_at,omitzero"`
 }

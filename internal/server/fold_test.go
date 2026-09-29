@@ -48,8 +48,8 @@ func foldScenario() []journal.Envelope {
 	add(ev(task.ERunSent, task.RunSend{ID: "r1", Send: agent.Send{ID: "m1", Text: "hi", State: agent.SendQueued}}))
 	add(ev(task.ERunSent, task.RunSend{ID: "r1", Send: agent.Send{ID: "m2", Text: "late", State: agent.SendQueued}}))
 	add(ev(task.ERunObserved, task.Observation{ID: "r1", State: task.Starting, NodeRev: 1})) // late: ignored
-	add(ev(task.ERunObserved, task.Observation{ID: "r1", State: task.Running, NodeRev: 3, Last: "working",
-		Sends: []agent.Send{{ID: "m1", Text: "hi", State: agent.SendSent}}}))
+	add(ev(task.ERunObserved, task.Observation{ID: "r1", State: task.Running, NodeRev: 3, Last: "working", Doing: "go test ./...",
+		Caps: &agent.RunCaps{Steer: true, Interrupt: true, AnswerScope: true}, Sends: []agent.Send{{ID: "m1", Text: "hi", State: agent.SendSeen}}}))
 	add(ev(task.ERunStopAsked, task.RunRef{ID: "r1"}))
 	add(ev(task.ERunObserved, task.Observation{ID: "r1", State: task.Stopped, NodeRev: 4, ExitCode: &exit0, EndedAt: &started}))
 	add(ev(task.ERunQueued, task.Run{ID: "r2", Task: "t1", Machine: "mba", Agent: "fake", Dir: "/w"}))

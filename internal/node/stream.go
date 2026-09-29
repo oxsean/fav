@@ -259,6 +259,7 @@ type pending struct {
 	id     json.RawMessage   // codex: the JSON-RPC id to answer
 	method string            // codex: what it asked
 	qids   map[string]string // codex: question → its id
+	rules  []claudeRule      // claude: what allowing it for the run adds to its session
 }
 
 // markRequests sets the attention from the waiting requests: a question first, else a permission; with none it clears
@@ -317,11 +318,13 @@ func summaryOf(input json.RawMessage, description string) string {
 	return clip(string(input), maxSummary)
 }
 
-// takeAnswers writes the answers that came since the last look to the agent.
+// takeAnswers writes the answers that came since the last look to the agent; a request goes once its answer reached
+// the agent, and waits to be answered again when it did not.
 func (s *sup) takeAnswers() {
 	as, next := linesFrom(filepath.Join(s.dir, answersFile), s.answersAt, func(a agent.Answer) bool { return a.Request != "" })
 	s.answersAt = next
 	for _, a := range as {
+		a = a.Settled()
 		s.mu.Lock()
 		p, ok := s.inputs[a.Request]
 		delete(s.inputs, a.Request)
@@ -334,15 +337,34 @@ func (s *sup) takeAnswers() {
 			s.userDenied[p.tool] = true
 			s.mu.Unlock()
 		}
-		s.proto.answer(p, a, nil)
+		if err := s.proto.answer(p, a, func(err error) { s.answered(a.Request, p, err) }); err != nil {
+			s.answered(a.Request, p, err)
+		}
 		s.mu.Lock()
 		s.seen = time.Now() // it waited on the user, not stalled
 		s.mu.Unlock()
-		s.keep(func(st *State) {
-			st.Requests = slices.DeleteFunc(slices.Clone(st.Requests), func(r agent.Request) bool { return r.ID == a.Request })
-			s.markRequests(st)
-		})
 	}
+}
+
+// answered records whether the answer to request id reached the agent.
+func (s *sup) answered(id string, p pending, err error) {
+	if err != nil {
+		s.mu.Lock()
+		s.inputs[id] = p
+		s.mu.Unlock()
+	}
+	s.keep(func(st *State) {
+		st.Requests = slices.Clone(st.Requests)
+		if err == nil {
+			st.Requests = slices.DeleteFunc(st.Requests, func(r agent.Request) bool { return r.ID == id })
+		}
+		for i := range st.Requests {
+			if st.Requests[i].ID == id {
+				st.Requests[i].Failed = true
+			}
+		}
+		s.markRequests(st)
+	})
 }
 
 // takeInbox queues the messages that came since the last look for the agent; each is sent once it reached the
@@ -525,10 +547,17 @@ type SendParams struct {
 	Send agent.Send `json:"send"`
 }
 
-// Answer passes an answer to the run's supervisor. Answering again is a no-op; a request the run no longer waits on
-// is a conflict.
+// Answer passes an answer to the run's supervisor. Answering again is a no-op, unless the answer did not reach the
+// agent; a request the run no longer waits on is a conflict. A decision says what Allow does.
 func (n *Node) Answer(p AnswerParams) (Snapshot, error) {
-	if !runID.MatchString(p.Run) || p.Answer.Request == "" || len(p.Answer.Message) > maxAnswerText {
+	a := &p.Answer
+	switch a.Decision {
+	case "", agent.DecisionAllow, agent.DecisionAllowRun, agent.DecisionDeny:
+		*a = a.Settled()
+	default:
+		return Snapshot{}, &wire.Error{Code: wire.CodeBadRequest, Detail: "decision"}
+	}
+	if !runID.MatchString(p.Run) || a.Request == "" || len(a.Message) > maxAnswerText {
 		return Snapshot{}, &wire.Error{Code: wire.CodeBadRequest, Detail: "answer"}
 	}
 	s, err := n.Snapshot(p.Run)
@@ -536,11 +565,12 @@ func (n *Node) Answer(p AnswerParams) (Snapshot, error) {
 		return Snapshot{}, err
 	}
 	path := filepath.Join(n.runDir(p.Run), answersFile)
+	i := slices.IndexFunc(s.Requests, func(r agent.Request) bool { return r.ID == p.Answer.Request })
 	done, _ := linesFrom(path, 0, func(a agent.Answer) bool { return a.Request == p.Answer.Request })
-	if len(done) > 0 {
+	if len(done) > 0 && (i < 0 || !s.Requests[i].Failed) {
 		return s, nil
 	}
-	if s.State.State != StateRunning || !slices.ContainsFunc(s.Requests, func(r agent.Request) bool { return r.ID == p.Answer.Request }) {
+	if s.State.State != StateRunning || i < 0 {
 		return Snapshot{}, &wire.Error{Code: wire.CodeConflict, Detail: "request_gone"}
 	}
 	if err := appendLine(path, p.Answer); err != nil {
@@ -552,8 +582,9 @@ func (n *Node) Answer(p AnswerParams) (Snapshot, error) {
 // Features of stream runs: FeatureInputMarks, marks.jsonl places where the agent took a message in (input) and
 // where a request was answered (resolved), and a message the agent took in is seen; FeatureInterrupt, run.interrupt.
 const (
-	FeatureInputMarks = "input_marks"
-	FeatureInterrupt  = "interrupt"
+	FeatureInputMarks  = "input_marks"
+	FeatureInterrupt   = "interrupt"
+	FeatureAnswerScope = "answer_scope" // run.answer takes a decision: allow_run allows the command for the run
 )
 
 // InterruptParams ends turn Turn of stream run Run, unless that turn is over by the time the run's supervisor reads it.

@@ -38,6 +38,8 @@ type Request struct {
 	Tool      string     `json:"tool,omitempty"`
 	Summary   string     `json:"summary,omitempty"` // what the tool would do: its command, file or description
 	Questions []Question `json:"questions,omitempty"`
+	AllowRun  bool       `json:"allow_run,omitempty"` // it can be allowed for the rest of the run (DecisionAllowRun)
+	Failed    bool       `json:"failed,omitempty"`    // an answer did not reach the agent: it waits to be answered again
 	At        time.Time  `json:"at"`
 }
 
@@ -48,12 +50,45 @@ type Question struct {
 	Multi    bool     `json:"multi,omitempty"`
 }
 
+// Decisions on a permission. Allow says the same for an end that knows no Decision: allow_run is an allow there.
+const (
+	DecisionAllow    = "allow"     // this once
+	DecisionAllowRun = "allow_run" // this command, for the rest of the run: never past its process, never into settings
+	DecisionDeny     = "deny"
+)
+
 // Answer is the user's answer to a Request.
 type Answer struct {
-	Request string            `json:"request"`
-	Allow   bool              `json:"allow"`
-	Message string            `json:"message,omitempty"` // why it was denied
-	Answers map[string]string `json:"answers,omitempty"` // question → the chosen option labels (", " between) or own words
+	Request  string            `json:"request"`
+	Allow    bool              `json:"allow"`
+	Decision string            `json:"decision,omitempty"` // "" is Allow's
+	Message  string            `json:"message,omitempty"`  // why it was denied
+	Answers  map[string]string `json:"answers,omitempty"`  // question → the chosen option labels (", " between) or own words
+}
+
+// Settled is a with Allow as its decision says.
+func (a Answer) Settled() Answer {
+	switch a.Decision {
+	case DecisionAllow, DecisionAllowRun:
+		a.Allow = true
+	case DecisionDeny:
+		a.Allow = false
+	}
+	return a
+}
+
+// ForRun: a allows its request for the rest of the run.
+func (a Answer) ForRun() bool { return a.Allow && a.Decision == DecisionAllowRun }
+
+// RunCaps is what a started run can do, as its node found it.
+type RunCaps struct {
+	Steer       bool `json:"steer,omitempty"`        // a message joins the running turn
+	After       bool `json:"after,omitempty"`        // a message after the turn continues its session
+	Interrupt   bool `json:"interrupt,omitempty"`    // a turn can be interrupted (run.interrupt)
+	AnswerScope bool `json:"answer_scope,omitempty"` // a permission can be allowed for the run (DecisionAllowRun)
+	Questions   bool `json:"questions,omitempty"`    // its questions are answered while it runs
+	Continue    bool `json:"continue,omitempty"`     // once ended, its session goes on in another run
+	Takeover    bool `json:"takeover,omitempty"`     // once ended, its session resumes in a terminal
 }
 
 // Send states.

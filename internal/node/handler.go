@@ -128,7 +128,7 @@ var Methods = []string{MRunStart, MRunStop, MRunList, MRunTail, MRunLine, MRunRe
 // Features lists what run.start and run.resume understand beyond their first shape; a coordinator that needs a feature
 // this node lacks fails the run as node_outdated instead of starting it without.
 var Features = []string{FeatureDispatcher, FeatureAgentDef, FeatureVerdict, FeatureCheck, FeatureWorktree, FeatureFiles, FeaturePlan, FeatureBeforeRun,
-	FeatureInputMarks, FeatureInterrupt}
+	FeatureInputMarks, FeatureInterrupt, FeatureAnswerScope}
 
 // watchEvery is how often Watch looks at the runs.
 const watchEvery = 3 * time.Second

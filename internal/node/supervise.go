@@ -174,7 +174,8 @@ type outcome struct {
 	denied   []string // tools a permission prompt denied (no one answers them in the background)
 	last     string   // the newest thing it said
 	usage    *agent.Usage
-	dirty    bool      // last or usage changed since the state was written
+	doing    string    // the tool call its turn is at
+	dirty    bool      // last, usage or doing changed since the state was written
 	turnDone time.Time // a stream run's turn ended then and nothing followed yet
 }
 
@@ -223,7 +224,7 @@ func (s *sup) finish(state, reason string, code *int) error {
 	now := time.Now()
 	return s.keep(func(st *State) {
 		st.State, st.Reason, st.ExitCode, st.EndedAt = state, reason, code, &now
-		st.Attention, st.Ask = "", ""
+		st.Attention, st.Ask, st.Doing = "", "", ""
 		s.settleRequests(st)
 	})
 }
@@ -241,7 +242,7 @@ func (s *sup) exited(code int) error {
 	now := time.Now()
 	return s.keep(func(st *State) {
 		st.State, st.ExitCode, st.EndedAt = StateExited, &code, &now
-		st.Last, st.Usage = o.last, o.usage
+		st.Last, st.Usage, st.Doing = o.last, o.usage, ""
 		s.settleRequests(st)
 		if st.Attention == AttentionStalled {
 			st.Attention = ""
@@ -419,6 +420,7 @@ const drainWait = 2 * time.Second
 
 func (s *sup) run() error {
 	s.log = &rolling{path: filepath.Join(s.dir, "output.log")}
+	s.log.turns.doing = s.doing
 	defer s.log.Close()
 	var from string
 	if w := s.spec.Work; w != nil {
@@ -507,6 +509,7 @@ func (s *sup) run() error {
 	crashAt("started")
 	s.keep(func(st *State) {
 		st.State, st.Pid, st.PidStart, st.StartedAt, st.Pane = StateRunning, c.Process.Pid, proc.StartTime(c.Process.Pid), &now, pane["pane"]
+		st.Caps = s.caps()
 	})
 	crashAt("running")
 	var fast <-chan time.Time
@@ -813,12 +816,32 @@ func (s *sup) spent(t agent.Usage) {
 // flushOut writes what the agent said and spent since the last write.
 func (s *sup) flushOut() {
 	s.mu.Lock()
-	dirty, last, usage := s.out.dirty, s.out.last, s.out.usage
+	dirty, last, usage, doing := s.out.dirty, s.out.last, s.out.usage, s.out.doing
 	s.out.dirty = false
 	s.mu.Unlock()
 	if dirty {
-		s.keep(func(st *State) { st.Last, st.Usage = last, usage })
+		s.keep(func(st *State) { st.Last, st.Usage, st.Doing = last, usage, doing })
 	}
+}
+
+// doing records the tool call the agent's turn is at.
+func (s *sup) doing(title string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.out.doing != title {
+		s.out.doing, s.out.dirty = title, true
+	}
+}
+
+// caps is what the run can do, from how it runs and what its agent supports.
+func (s *sup) caps() *agent.RunCaps {
+	var pc agent.Caps
+	if p, ok := agent.Get(s.spec.Agent); ok {
+		pc = p.Caps()
+	}
+	st := s.in != nil
+	return &agent.RunCaps{Steer: st, After: st && pc.Continue, Interrupt: st, AnswerScope: st, Questions: st,
+		Continue: pc.Continue && s.spec.Runner != RunnerHerdr, Takeover: pc.Resume}
 }
 
 func (s *sup) line(line []byte) { s.lineAt(line, logPos{}) }

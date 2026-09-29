@@ -26,7 +26,8 @@ Task { id t_…, title, brief, dir, machine, agent, status backlog|todo|done|can
 Run  { id r_…, task, machine, agent, profile(冻结), brief_sum, dir(映射后),
        resume(续的会话), parent(回复的 run),
        want run|stop, state, exit_code, reason, detail, attention asked|permission|stalled, ask, note, last, usage,
-       stream, requests[], answers[]（已给、节点还没取走）, sends[]{id, text, state queued|sent|failed},
+       stream, requests[], answers[]（已给、节点还没取走）, sends[]{id, text, state queued|sent|seen|failed},
+       caps{steer, after, interrupt, answer_scope, questions, continue, takeover}（节点说的实际能力）, doing（正在做的工具调用）,
        session{provider, sid}, node_rev, queued_at, started_at, ended_at }
 ```
 
@@ -60,7 +61,7 @@ run `state` 转移表（终态单调，重复事件无副作用）：
 
 ## 事件
 
-`task_created` `task_edited` `task_status_set` `run_queued` `run_starting` `run_observed{state, exit_code, reason, detail, attention, ask, note, last, usage, stream, requests, sends, session, node_rev}` `run_stop_requested` `run_canceled` `run_abandoned` `run_answered{id, answer}` `run_sent{id, send}`。
+`task_created` `task_edited` `task_status_set` `run_queued` `run_starting` `run_observed{state, exit_code, reason, detail, attention, ask, note, last, usage, stream, requests, sends, caps, doing, session, node_rev}` `run_stop_requested` `run_canceled` `run_abandoned` `run_answered{id, answer}` `run_sent{id, send}`。
 
 - `run_observed` 带节点的 `requests` 整体覆盖；`sends` 按 id 合并（节点说的为准，协调器排着的保留）；`answers` 里请求已不在 `requests` 的删掉（节点取走了，或不再等）。run 结束时 `requests`、`answers` 清空，还是 queued 的消息改 failed。
 

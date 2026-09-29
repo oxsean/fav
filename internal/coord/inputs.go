@@ -33,6 +33,12 @@ func (c *Coord) runAnswer(who Principal, r *wire.Request) (string, []journal.Eve
 	if err := r.Decode(&p); err != nil {
 		return "", nil, err
 	}
+	switch p.Decision {
+	case "", agent.DecisionAllow, agent.DecisionAllowRun, agent.DecisionDeny:
+		p.Answer = p.Answer.Settled() // a node that knows no decision reads allow
+	default:
+		return "", nil, bad("decision")
+	}
 	run, err := c.writableRun(who, p.Run)
 	if err != nil {
 		return "", nil, err
