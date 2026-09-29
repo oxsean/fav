@@ -11,9 +11,9 @@ const homeWords = {
   noRecent: ['还没有结束的会话。', 'No finished sessions yet.'], quickReply: ['回复…', 'Reply…'], send: ['发送', 'Send'],
   noProject: ['不属于项目', 'No project'], finishedOf: ['{0}/{1} 完成', '{0} of {1} done'], tokensDay: ['{0} token', '{0} tokens'],
   runs: ['运行', 'Runs'], runsHelp: ['每一次运行，选中一条看最近的输出。', 'Every run; pick one to see its latest output.'],
-  runsOpen: ['进行中', 'Open'], runsFailed: ['失败', 'Failed'], runsEnded: ['已结束', 'Ended'], anyMachine: ['任何机器', 'Any machine'],
+  runsOpen: ['未结束', 'Open'], runsFailed: ['失败', 'Failed'], runsEnded: ['已结束', 'Ended'], anyMachine: ['任何机器', 'Any machine'],
   noRuns: ['没有符合的运行', 'No runs match'], pickRun: ['选中一条运行看预览', 'Pick a run to preview it'], openRun: ['在任务里打开', 'Open in its task'],
-  agentsRunning: ['{0} 个 agent 在跑', 'Agents running: {0}'], queuedN: ['排队 {0}', '{0} queued'], openBoard: ['在看板里看', 'Open the board'],
+  queuedN: ['排队 {0}', '{0} queued'], openBoard: ['在看板里看', 'Open the board'],
 };
 
 const Home = (() => {
@@ -104,6 +104,7 @@ const Home = (() => {
 
   function runningBlock() {
     const runs = Object.values(ui.state.runs).filter(r => openStates.has(r.state)).sort((a, b) => a.queued_at.localeCompare(b.queued_at));
+    const queued = runs.filter(r => r.state === 'queued').length;
     const rows = runs.map(r => {
       const task = ui.state.tasks[r.task];
       const stop = r.want === 'stop' ? `<span class="muted">${t('stopping')}</span>` : button('home-stop', `${icon('stop')}<span class="sr-only">${t('stop')}</span>`, `data-id="${esc(r.task)}" data-run="${esc(r.id)}" title="${t('stop')}" ${ui.online ? '' : 'disabled'}`, 'quiet danger');
@@ -112,7 +113,7 @@ const Home = (() => {
         <span class="home-last muted">${esc(r.note || r.last || '')}</span><span class="mono num">${elapsed(r)}</span><span class="mono num">${r.usage ? tokens((r.usage.input || 0) + (r.usage.cache_write || 0) + (r.usage.output || 0)) : ''}</span>${stop}</div>`;
     });
     const machines = ui.machines.map(m => `<div class="home-machine">${badge(m.state)}<span class="mono">${esc(m.name)}</span>${m.os ? `<span class="muted">${esc(m.os)}</span>` : ''}<span class="mono num">${m.active ?? 0}/${m.slots ?? 0}${m.queued ? ' · ' + t('queuedN').replace('{0}', m.queued) : ''}</span>${m.state !== 'connected' && (m.error || m.detail) ? `<span class="muted home-machine-why">${esc(m.error || m.detail)}</span>` : ''}</div>`).join('');
-    return `<section class="home-block home-running"><h2>${icon('play')}${t('runningNow')}<span class="count">${runs.length}</span><span class="muted home-note">${t('agentsRunning').replace('{0}', runs.filter(r => r.state === 'running').length)}</span></h2>
+    return `<section class="home-block home-running"><h2>${icon('play')}${t('runningNow')}<span class="count">${runs.filter(r => r.state === 'running' || r.state === 'starting').length}</span>${queued ? `<span class="muted home-note">${t('queuedN').replace('{0}', queued)}</span>` : ''}</h2>
       <div class="home-runs">${rows.join('') || `<p class="muted">${t('noneRunning')}</p>`}</div></section>
       <section class="home-block home-machines"><h2>${icon('machine')}${t('machines')}</h2>${machines || `<p class="muted">—</p>`}</section>`;
   }
