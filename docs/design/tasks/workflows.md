@@ -59,7 +59,7 @@ max_loops: 2
 
 ### 处境与开始（实现）
 
-- `Situation{kind, reason, run}` 由 `task.State.Situation` 推导，网页的 `fold.js` 逐条照搬：
+- `Situation{kind, reason, run}` 由 `task.State.Situation` 推导，网页的 `core/fold.js` 逐条照搬：
   - `backlog`：还没开始，不算在不变式里，也不派发。
   - `running`：有未结束的 run。
   - `queued`：会自己往下走：`after`（前置任务没完成）、`children`（子任务没完成）、`slot`（run 在等机器接手：离线、连接中或并发槽满）、`dir`（同一台机器上另一个不在自己分支或副本上的 run 正在这个目录里跑；判断用的是 run 记下的目录，映射后不同就算作 `slot`）、`ready`（协调器马上派发）、`completing`（run 成功，协调器马上标完成）；workflow 的 `advance`、`rework`、`stale` 见下文「实现」。

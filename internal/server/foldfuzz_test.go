@@ -377,7 +377,7 @@ func goFold(envs []journal.Envelope) folded {
 	return out
 }
 
-// TestThePageFoldsRandomJournalsAsTheCoordinatorDoes: on random journals, fold.js refuses the same envelope Go does,
+// TestThePageFoldsRandomJournalsAsTheCoordinatorDoes: on random journals, core/fold.js refuses the same envelope Go does,
 // and up to it comes to the same state, the same situations and the same conversations. TEND_FOLD_SEEDS runs more.
 func TestThePageFoldsRandomJournalsAsTheCoordinatorDoes(t *testing.T) {
 	nodeBin := nodeJS(t)
@@ -400,9 +400,7 @@ const sits={},convs={};for(const t of Object.values(s.tasks))sits[t.id]=Fold.sit
 for(const id of Object.keys(s.runs))convs[id]=Fold.conversation(s,id).map(r=>r.id);
 out.push({state:s,fail_at,sits,convs});}
 fs.writeFileSync(process.argv[3],JSON.stringify(out));`
-	// the page's classic script and the new UI's module fold the same way until the switch removes the first
 	scripts := map[string][]string{
-		"web/fold.js": {"-e", `const fs=require('fs'),vm=require('vm');vm.runInThisContext(fs.readFileSync(process.argv[1],'utf8'));` + body},
 		"web/core/fold.js": {"--input-type=module", "-e", `import fs from 'node:fs';import {pathToFileURL} from 'node:url';
 const Fold=await import(pathToFileURL(process.argv[1]));` + body},
 	}

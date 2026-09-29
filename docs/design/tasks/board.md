@@ -1,6 +1,6 @@
 # 看板与视图的数据
 
-看板的列怎么从任务的处境推导、允许哪些拖动、分组与筛选，以及卡片和任务详情需要的字段。实现：`internal/task`（`Situation`、`NeedsYou`）、`internal/server/web`（`fold.js`、`app.js` 的看板）、`internal/ui/tui`（`taskviews.go`）。
+看板的列怎么从任务的处境推导、允许哪些拖动、分组与筛选，以及卡片和任务详情需要的字段。实现：`internal/task`（`Situation`、`NeedsYou`）、`internal/server/web`（`core/fold.js`、`core/tasks.js`、`pages/tasks.js` 的看板）、`internal/ui/tui`（`taskviews.go`）。
 
 ## 列
 

@@ -6,22 +6,18 @@
   <meta name="color-scheme" content="light dark">
   <meta name="referrer" content="no-referrer">
   <title>tend</title>
-  <link rel="stylesheet" href="app.css">
+  <link rel="stylesheet" href="css/base.css">
+  <link rel="stylesheet" href="css/components.css">
+  <link rel="stylesheet" href="css/pages.css">
   <link rel="stylesheet" href="theme/tend.css" id="skin">
-  <script src="api.js" defer></script>
-  <script src="fold.js" defer></script>
-  <script src="team.js" defer></script>
-  <script src="tree.js" defer></script>
-  <script src="look.js" defer></script>
-  <script src="home.js" defer></script>
-  <script src="palette.js" defer></script>
-  <script src="app.js" defer></script>
+  <link rel="modulepreload" href="vendor/preact.mjs">
+  <link rel="modulepreload" href="vendor/hooks.mjs">
+  <link rel="modulepreload" href="vendor/htm.mjs">
+  <link rel="modulepreload" href="vendor/signals-core.mjs">
+  <script type="module" src="main.js"></script>
 </head>
 <body>
-  <a class="skip-link" href="#main">Skip to content / 跳至内容</a>
   <div id="app"></div>
-  <dialog id="modal" class="modal" aria-labelledby="modal-title"></dialog>
-  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
   <noscript>tend 需要 JavaScript。tend needs JavaScript.</noscript>
 </body>
 </html>

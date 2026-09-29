@@ -1,5 +1,4 @@
-// prefs are how this viewer wants the page: language, theme, density and skin, kept in this browser under the keys
-// the old page used, so a switch keeps them.
+// prefs are how this viewer wants the page: language, theme, density and skin, kept in this browser.
 import {signal} from '../vendor/signals-core.mjs';
 import {pick} from './i18n.js';
 import {density as output} from './proto.js';
@@ -7,7 +6,7 @@ import {density as output} from './proto.js';
 export const themes = ['system', 'light', 'dark'];
 export const densities = ['compact', 'default', 'comfortable'];
 
-// ⚠️ Storage keys shared with the old page (app.js, look.js).
+// ⚠️ Storage keys browsers already hold these settings under.
 const keys = {lang: 'tend-lang', theme: 'tend-theme', look: 'tend-look'};
 // ⚠️ Where this browser keeps the output's density (proto.js), a setting of its own apart from the page's.
 export const OUTPUT_KEY = 'tend-output-density';

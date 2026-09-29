@@ -25,7 +25,7 @@
 | 客户端拨号（节点、TUI、CLI 连 server） | `internal/dial`（见 [storage.md](storage.md)「进程与代码划分」） |
 | `hello.features`：节点报告自己支持的执行语义 | `internal/remote`、`internal/coord`（下文） |
 
-Web 在客户端折叠信封（`fold.js`），规则逐条照搬 `task.State.Apply`，用 Go 生成的同一批信封对照测试（`internal/server/fold_test.go`，需要 node）。
+Web 在客户端折叠信封（`web/core/fold.js`），规则逐条照搬 `task.State.Apply`，用 Go 生成的同一批信封和随机日志对照测试（`internal/server/fold_test.go`、`foldfuzz_test.go`，需要 node）。
 
 ## 抽象原则
 

@@ -59,7 +59,7 @@ func TestThePageIsServedWithoutLogin(t *testing.T) {
 	}
 	defer resp.Body.Close()
 	b, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode != 200 || !strings.Contains(string(b), "<html") || !strings.Contains(resp.Header.Get("Content-Security-Policy"), "default-src 'self'") {
+	if resp.StatusCode != 200 || !strings.Contains(string(b), `<script type="module" src="main.js">`) || !strings.Contains(resp.Header.Get("Content-Security-Policy"), "default-src 'self'") {
 		t.Fatalf("%d %q %v", resp.StatusCode, b[:min(len(b), 80)], resp.Header)
 	}
 	if resp, _ := http.Get(r.url + "/nope.js"); resp.StatusCode != 404 {

@@ -208,9 +208,7 @@ func TestThePageFoldsEnvelopesAsTheCoordinatorDoes(t *testing.T) {
 	body := `let s={seq:0,tasks:{},runs:{},projects:{},shares:{}};for(const e of JSON.parse(fs.readFileSync(process.argv[2],'utf8')))s=Fold.apply(s,e);
 const sits={};for(const t of Object.values(s.tasks))sits[t.id]=Fold.situation(s,t);
 process.stdout.write(JSON.stringify({state:s,sits}));`
-	// the page's classic script and the new UI's module fold the same way until the switch removes the first
 	scripts := map[string][]string{
-		"web/fold.js": {"-e", `const fs=require('fs'),vm=require('vm');vm.runInThisContext(fs.readFileSync(process.argv[1],'utf8'));` + body},
 		"web/core/fold.js": {"--input-type=module", "-e", `import fs from 'node:fs';import {pathToFileURL} from 'node:url';
 const Fold=await import(pathToFileURL(process.argv[1]));` + body},
 	}

@@ -153,6 +153,28 @@ func TestImportsAreRelativeAndRunDownTheLayers(t *testing.T) {
 	}
 }
 
+// The page runs no interval: what it shows changes when a push arrives, and a timer it sets fires once (a debounce, a
+// backoff, a toast's time, a call's timeout).
+func TestThePageRunsNoInterval(t *testing.T) {
+	n := 0
+	filepath.WalkDir("web", func(p string, d fs.DirEntry, err error) error {
+		if d.IsDir() && d.Name() == "vendor" {
+			return fs.SkipDir
+		}
+		if err != nil || d.IsDir() || !strings.HasSuffix(p, ".js") {
+			return err
+		}
+		n++
+		if b, _ := os.ReadFile(p); strings.Contains(string(b), "setInterval") {
+			t.Errorf("%s calls setInterval", filepath.ToSlash(p))
+		}
+		return nil
+	})
+	if n < 20 {
+		t.Fatalf("%d scripts in web/", n)
+	}
+}
+
 func TestTheModulesAndStylesAreServedByType(t *testing.T) {
 	r := newRig(t)
 	for p, kind := range map[string]string{"/vendor/preact.mjs": "text/javascript", "/core/wire.js": "text/javascript", "/ui/shell.js": "text/javascript", "/css/base.css": "text/css"} {

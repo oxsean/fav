@@ -50,33 +50,15 @@ tend journal verify [--json] | repair [-y]
 
 ## Web UI（模式二）
 
-页面的合并和改名（计划）见 [ui.md](../tasks/ui.md)「页面结构与用词（计划）」。
+页面的合并和改名见 [ui.md](../tasks/ui.md)「页面结构与用词」。
 
-- 文件：`internal/server/web/`（`index.html`、`app.css`、`api.js`、`fold.js`、`team.js`、`tree.js`、`home.js`、`look.js`、`palette.js`、`app.js`），`go:embed` 进二进制，无构建步骤、无外部依赖。新界面的底座（`core/`、`ui/`、`css/`、`vendor/`）见下文「新界面的底座」。
-  - `api.js` 是唯一的通信层（wire 帧走 `/client` WebSocket，每条请求 30 s 超时后发 `cancel`，应答 server 的 `ping`）。
-  - `fold.js` 把推送的信封折进页面的状态（照搬 `task.State.Apply`，`fold_test.go` 用 Go 生成的信封对照）。
-  - `team.js` 是团队相关的页面（登录方式、项目与成员、机器的主人与分享、账号、管理）。
-  - `tree.js` 是任务树和它要用的页面（每个任务的处境、父子与依赖、开始和调整位置、「等你」收件箱、agent 定义、项目设置、个人 webhook 和浏览器通知、交接并停用）。
-  - `home.js` 是首页和 runs 页。
-  - `look.js` 是这位访客的皮肤、强调色、对比度、密度和改它们的设置页。
-  - `palette.js` 是唯一的操作表，`⌘K` 命令面板、按键、快捷键页和按钮上的键提示都来自它。
-  - `app.js` 是其余的页面。
-  - 界面文字在它们自己的 `zh` / `en` 表里（不走 Go 的 i18n）。
+- 文件：`internal/server/web/`，`go:embed` 进二进制。Preact + htm + signals，浏览器原生的 ES 模块，没有构建步骤。`index.html` 引入 `css/` 的三份样式、皮肤样式表（`theme/<皮肤>.css`，`id="skin"`，由 `pages/boot.js` 换成这位访客的皮肤）和入口 `main.js`，并预载 `vendor/` 的四个文件。界面文字在各模块自己的 `zh` / `en` 词表里（`core/i18n.js`，不走 Go 的 i18n）。
 - 认证：登录页列出 `/auth/logins` 给的登录方式（GitHub、OIDC），另有 token 表单。`POST /login`（表单 `token`）建一条网页会话，写 cookie `tend_session`（HttpOnly、SameSite=Strict、TLS 下 Secure、30 天）；`GET /session` 回 `{id, name, email, username, role, session}` 或 401；`POST /logout` 吊销这条会话。地址里的 `#invite-<secret>` 让登录按钮带上邀请，`#signin-<结果>` 显示登录失败的原因。`/client` 接受 header 里的 token 或这个 cookie；WebSocket 握手校验 Origin（同源）。会话被吊销或用户被停用，连接立即断开，页面回到登录页。
-- 响应头：CSP `default-src 'self'`（不允许内联脚本和 `style` 属性，宽度等动态样式由脚本经 CSSOM 设置）、`frame-ancestors 'none'`、`nosniff`、`no-referrer`、`Cache-Control: no-cache`。
-- 数据：进入时 `state.get{no_briefs}` + `machine.list` + `agent.list`，然后 `state.watch{after_seq, no_briefs}`（`api.watchState`）；推送的信封由 `fold.js` 折进状态，50 ms 去抖后重绘；seq 断档或折叠遇到不认识的对象时，100 ms 去抖后重新 `state.get{no_briefs}`。流推来一份新快照（续传不了，或 `reset`）时整份换上，并重读机器；`lagged` 时按当前 seq 重开。改过任务书的 task 丢掉缓存；任务书用 `task.get` 按需取。机器每 5 s `machine.list`；选中 run 的输出每 2 s `run.output.page`（最后 200 个事件，同一份日志时从上次的 `to` 接上，一页装不下就往前补页；「原始行」时带 `raw`）；对话用 `run.messages`（每页 40 条，按时间正序显示，往前翻页）。
-- run 详情：等着的请求各一个表单（权限：工具和摘要，「允许」/「拒绝」；提问：每个问题一组单选，「回答」/「不回答」；选中的选项在重新渲染时保留），running 的 stream run 有发消息框（草稿按 run 存），最近三条消息和状态；运行中显示最后一句话，有用量就显示用量。其余：attention 徽章、原因和原话、提问（Markdown）或进展、下一步；已结束且有会话、任务没有未结束 run 时有回复框（草稿按 run 存在内存里，重新渲染不丢、保持焦点），发 `run.continue`。列表行多一个 attention 徽章。「待处理」计数 = 需要你的 task 数（同上文「CLI」里的定义），点它把 run 筛选设为「等你处理」；需要你的 task 排在列表最前、等得最久的在前。
-- run 的输出是 `run.output.page` 给的事件（[output.md](output.md)「运行输出」），`app.js` 的 `renderEvents` 画成时间线：调用和它的结果（按 `ref`）合成一张卡，失败的卡默认展开；codex 单独报的用量显示在它后面的结果上；思考和认不出的行收在「思考」「原始行」里。暂停跟随时，状态栏的「N 条新事件」数的是新一页会在时间线上多画出的项（`drawn`），不含并进已有卡片的结果和单独的用量。`output_test.go` 用 node 跑 `renderEvents` 和暂停时的 `fetchOutput`，事件由 `internal/output` 生成。
-- 派发框：选好机器和档案后调 `run.preview`，列出 blockers 和 notes（不禁用提交）。
-- 写操作都带 `command_id`（每次打开对话框生成一个，重试沿用）：新建、编辑（先 `task.get`，只提交改过的字段）、派发（`runner=background`）、停止、放弃（只对 unknown 的 run 提供）、完成（有进行中的 run 时先确认）、重开、取消。
-- 断线：横幅提示、写操作禁用，1 s 起翻倍到 30 s 带抖动重连，重连后重新取全量；401 回登录页。
-- 任务树：列表按父子缩进（最多三层），行上有处境徽章（`Fold.situation`，没开始的手动任务不标）；详情有处境、父任务、前置任务、子任务、验收标准、负责人与验收人，「开始」和「调整位置」；新建任务可以选父任务、前置任务、验收标准，或放进待办。地址 `#task-<id>` 打开对应任务（webhook 里的链接就是它）。「等你」计数在每次推送后 300 ms 去抖重读 `inbox.list`。
-- 工单同步（见 [tasks/trackers.md](../tasks/trackers.md)「工单同步」）：项目卡片的「工单同步」列出绑定和状态，能绑定 Gitea 仓库、重新同步、换凭据、解绑（`/api/trackers*`）；需求任务在列表里标「需求」，详情显示来源 issue 和版本，有新版本时可以「采用新版本 / 维持本轮范围」，issue 在外面关掉后可以「继续做」或取消。
-- 布局：任务列表 + 详情（输出 / 对话 / 任务书 / 运行记录）、「等你」页、agent 定义页、机器页（主人、分享、添加机器、机器凭据）、项目页、账号页、管理页（只有管理员）；新建任务可以选项目；键全部来自 `palette.js` 的操作表（`?` 列出全部）；850 px 以下侧栏变横条，680 px 以下列表和详情分屏、隐藏键帽。
+- 响应头：CSP `default-src 'self'`（不允许内联脚本和 `style` 属性，宽度等动态样式经 CSSOM 设置）、`frame-ancestors 'none'`、`nosniff`、`no-referrer`、`Cache-Control: no-cache`。
+- 没有轮询：页面上的一切随 `state.watch`、`machines.watch`、`inbox.watch` 和 `run.output.watch` 的推送变化，首页的数每次重画时取当前时间。页面不调用 `setInterval`（`TestThePageRunsNoInterval`）；剩下的计时器都只响一次：防抖、重连的退避、调用超时、提示的停留、`g` 开头的两键序列。
+- 页面：首页、任务（列表、看板、树、详情、对话、改动）、运行，以及登录、终端授权、邀请。机器、Agent、团队、我四页在侧栏和标签栏里有位置，打开时写「这一页还在做」；在那之前，用户和准入、凭据、agent 定义、项目设置分别用 `tend-server admin`、`tend-server token`、`tend agent`、TUI 的项目设置完成，主题、语言、密度用快捷键和用户菜单。
 
-### 新界面的底座
-
-新界面（Preact + htm + signals，原生 ES 模块，无构建链）的底座和旧页面放在同一个目录里，被一起 embed，但旧的 `index.html` 不加载它。页面接上以后，旧文件一次删掉。
+### 结构
 
 - **内嵌的第三方文件**：`web/vendor/`，放 npm 上的 `preact.mjs`、`hooks.mjs`、`htm.mjs`、`signals-core.mjs`，许可证在 `LICENSES/`。只给测试用的 `preact-render-to-string` 和 preact 的 `test-utils` 放在 `webtest/vendor/`，不进二进制。
   - `tools/vendorweb` 按各自的 `manifest.json` 下载 tarball，核对 npm 的 `integrity`，取出文件和 LICENSE，把上游和写出后的 sha256 记回 manifest。
@@ -92,7 +74,7 @@ tend journal verify [--json] | repair [-y]
     - 断线后 1 s 起翻倍、最长 30 s、带抖动地重连（成功 hello 后回到 1 s），然后每个流用它的主人给的参数（带游标）重开。
     - `setVisible(false)` 结束可暂停的流（输出），`state.watch` 保留；`setVisible(true)` 按游标重开它们，离线时立即重连。连接状态放在一个 signal 里：`idle` / `connecting` / `open` / `offline` / `outdated` / `closed`。
   - `proto.js`：由 `tools/protogen` 生成，不手改：`PROTO`、`frame`、`code`、`push`、`mode`、`methods`、`kind`、`family`、`tools`（工具名 → family）、`density`（[output.md](output.md)「密度」）。`core`、`ui`、`pages` 比较错误码、帧类型和密度都用它，只有 Go 还没有的错误码（`snapshot_changed`）暂时写字面量。结构测试检查新界面 `call` / `watch` / `has` / `send` 的每个方法名都在 `coord.Methods` 里，协调器还没有的几个列在 `comingMethods`，各自标着补它的卡。
-  - `fold.js`：旧 `fold.js` 的模块版，行为相同；`fold_test.go` 拿两份和 `task.State.Apply` 对照。`parts` 表列出每种事件改动状态里的哪几张表。
+  - `fold.js`：把推送的信封折进状态，逐条照搬 `task.State.Apply`；`fold_test.go` 用 Go 生成的信封、`foldfuzz_test.go` 用随机日志和它对照。`parts` 表列出每种事件改动状态里的哪几张表。
   - `store.js`：页面的状态。
     - `state.watch` 的推送：
       - `open{mode: snapshot}` 或 `reset` 开始一份新快照；
@@ -112,14 +94,14 @@ tend journal verify [--json] | repair [-y]
     - `active()` 列出此刻按下会生效的绑定，每个键一次，按查找顺序；`changed` 这个 signal 在推入、弹出作用域时加一，键栏据此重画。
   - `layout.js`：宽度不到 `PHONE_BELOW`（720 px）是手机形态，否则是电脑形态，放在 `form` 这个 signal 里，由入口按 media query 设置；电脑上宽度不到 `NAV_OPEN_FROM`（1200 px）时侧栏默认收起。`createNav` 管侧栏开合：用户选过一次就记在浏览器里（`tend-nav`），之后不再随宽度变；存储不可用时照常工作，只是不记。`mac` 决定 `Mod` 显示成 ⌘ 还是 Ctrl。
   - `toasts.js`：底部的提示。带撤销的留 `UNDO_WAIT`（6 s），普通的 4 s；`undo()` 撤销最新一条可撤销的。
-  - `router.js`：地址 ↔ `{page, task?, run?, view?, event?, auth?}`。页面有 `home`、`tasks`（`view` 取 `list` / `board` / `tree`）、`runs`、`machines`、`agents`、`team`、`me`。旧的 `inbox` → 首页，`settings` → 我，`projects` → 团队；`#task-<id>` 打开任务页并选中它；`#task-<id>/r-<运行>/e-<事件>`（`link()` 生成）还打开那次运行的对话、滚到那一步，`event` 只用一次，生成地址时不带；`run` 写在查询里（`?page=tasks&task=…&run=…`，或 `?page=runs&run=…` 打开那次运行自己的页）；`#device-`、`#invite-`、`#signin-<结果>[?参数]` 解析成 `auth`，生成地址时不带它们。
+  - `router.js`：地址 ↔ `{page, task?, run?, view?, event?, auth?}`。页面有 `home`、`tasks`（`view` 取 `list` / `board` / `tree`）、`runs`、`machines`、`agents`、`team`、`me`。以前的 `inbox` → 首页，`settings` → 我，`projects` → 团队；`#task-<id>` 打开任务页并选中它；`#task-<id>/r-<运行>/e-<事件>`（`link()` 生成）还打开那次运行的对话、滚到那一步，`event` 只用一次，生成地址时不带；`run` 写在查询里（`?page=tasks&task=…&run=…`，或 `?page=runs&run=…` 打开那次运行自己的页）；`#device-`、`#invite-`、`#signin-<结果>[?参数]` 解析成 `auth`，生成地址时不带它们。
   - `i18n.js`：每个模块用 `register(模块, {键: [zh, en]})` 注册自己的词表。两个模块用了同一个键、缺一种语言、两种语言的 `%s` / `%d` 顺序不同，都会报错。
   - `actions.js`：页面唯一的操作表。每个操作有 id、键、作用域层级、分组；`bar` 的进键栏，`palette: false` 的不进命令面板（移动、数字、面板自己）。键位就是设计稿 §6.6 的键表：`g h/t/b/r/m/a/p/s` 去各页，`Mod+K` 命令面板，`?` 快捷键，`/` 搜索，`n` 新建，`[` 侧栏，`Mod+Z` 撤销，`Shift+T/L/M` 主题 / 语言 / 密度（全局）；`v` `d` `e` `x` `Shift+D`（页面）；`j` `k`（别名方向键）`Space` `Enter` `1`–`9`（列表）；`End` `Home` `Shift+O` `Mod+F`（输出）。一个键只属于一个操作。
     - 组件不直接写键：用 `useActions(层级, {id: {run, when?, label?}})` 绑定自己能做的操作，键从表里来；`label` 让页面换一个更贴切的说法（首页的数字叫「作答」，`d` 叫「重试」）。哪些绑定生效（`when`）随页面变了，作用域就重新推入，键栏跟着变。
     - 命令面板列出此刻生效的操作（`runnable(keys.active())`），按中文名、英文名、id、键都能搜到，开头匹配的排前面；快捷键页按分组列出整张表。
   - `commands.js`：页面的写操作。发出时按 key 记为 pending；可撤销的写（标记完成）在列表里先藏起来，应答之后等那张列表下一次变化再放出来，免得闪回；没收到应答（`unsure`：`timeout` / `offline` / `closed`，页面的出错提示也用它）记为 `unknown`，`retry` 用同一个 command id 重发，coordinator 的回执保证不做两次。状态本身只来自 journal 的折叠。
   - `http.js`：普通 HTTP：`/session`（未登录是 null）、`/login`（表单提交 token）、`/logout`、`/auth/logins`、`/auth/invite`、`/api/device`。写请求带 `X-Tend`，网络不通报 `offline`。
-  - `prefs.js`：语言、主题（跟随系统 / 浅色 / 深色）、密度（紧凑 / 标准 / 宽松）和皮肤，沿用旧页面的存储键（`tend-lang`、`tend-theme`、`tend-look`），切换界面不丢；输出的密度（简洁 / 标准 / 详细，默认标准）记在 `tend-output-density`；存储不可用时用默认值。
+  - `prefs.js`：语言、主题（跟随系统 / 浅色 / 深色）、密度（紧凑 / 标准 / 宽松）和皮肤，存在 `tend-lang`、`tend-theme`、`tend-look`；输出的密度（简洁 / 标准 / 详细，默认标准）记在 `tend-output-density`；存储不可用时用默认值。
   - `format.js`：数字的写法（`312k` tok、`$3.18`、`1h 04m`、`14:32`）。token 数是 input + cache_write + output，不含读缓存。
   - `select.js`：页面上的数，全是纯函数，输入是 store 的状态、机器、inbox 和当前时间。首页每个数的来源见下面「首页」。
   - `tasks.js`：任务页的纯函数：处境归到哪一列、筛选、列表 / 看板 / 树的行、看板上一次拖放对应的写、目录候选、默认的机器和 agent、派发前的判断、拆解草稿的编辑和检查、一个任务此刻能做哪些操作。规则见下面「任务页」。
@@ -171,7 +153,7 @@ tend journal verify [--json] | repair [-y]
   - 看板（只在电脑上）：五列卡片。拖放只有四种对应写操作：待办且没有未结束运行的拖到已结束是完成（带工作流的不行）；拖到未开始是「先不开始」（待办且没有未结束运行的，或已结束的）；从未开始拖到排队或在跑是开始（`task.start`）；从已结束拖到等你是重新打开。除开始以外都走可撤销的 `task.set_status`。别的组合不能放，放下时提示原因。
   - 树：父子关系缩进，兄弟按 `after` 再按创建时间排；搜到的任务连同它的上级一起显示，收起的节点记在页面里。
   - 详情：电脑上列表和树是右边的分栏，看板是右侧抽屉；手机上占满整屏，页头有上一个 / 下一个（按当前视图的顺序），不用滑动手势。内容：处境和工作流阶段；按钮只有观看者的 `affordances` 里这个任务的 `actions`（`core/tasks.js` 的 `actionsOf`），另加纯客户端的「照这个再建一个」，最后一次运行的操作有 `continue` 且任务没有工作流时加「退回意见」；主操作按处境选（重新打开、开始、停止、审拆解、验收通过、采用新版需求、合并、完成、派发），处境要的那个没给就没有主操作，不拿别的顶上；编辑和派发在电脑上直接显示，其余在「更多」里；断线时（`wire.status` 不是 `open`）按钮、「更多」和它们的键一律变灰；需求有新版、来源已关闭、有拆解草稿时各一条提示；负责人、验收人、在哪跑（项目默认的注明）、目录、分支、全部运行的花费、issue 链接；任务书（`Markdown`，按 `briefOf` 按需取回）、验收标准、工作流各阶段、父任务和前置任务、子任务、运行记录（状态、agent @ 机器、阶段、`doing` / `note` / `last`、结论、时长、用量）、工作记录。电脑上有运行的任务，详情分「概览 / 输出 / 改动」三个页签，默认是输出，选过的记在浏览器里（`tend-task-pane`）；概览以外的页签里头部收成一行（处境、标题、页签、主操作、「更多」、关闭，编号和项目在标题的提示里），任务详情这一栏从页顶起、列表的页头只在左栏，800 px 高时时间线留有约 520 px；概览里的运行记录不开 `run.output.watch`，点一次运行就在输出里打开它所在的对话（地址带 `run`）。手机上点运行，再叠一层整屏的运行页（见下面「运行页」）。
-  - 写操作都经 `commands.js`，按任务记 pending，操作中按钮变灰；完成、先不开始、重新打开和调整位置可以撤销；停止和取消先确认。失败时提示错误码，没收到应答时说明结果不明。
+  - 写操作都经 `commands.js`，按任务记 pending，操作中按钮变灰；完成、先不开始、重新打开和调整位置可以撤销；停止和取消先确认。进行中的运行失联（`unknown`）而它的 affordances 里有 `abandon` 时，「更多」里有「放弃这次运行」（先确认，说明那台机器上的进程可能还在跑，发 `run.abandon{id}`）。失败时提示错误码，没收到应答时说明结果不明。
   - 新建（`n`）：标题、任务书（写 / 预览两个标签）、验收标准、项目、机器、agent、目录、工作流、父任务、前置任务。目录候选先是项目在这台机器上的检出目录，再是最近用过的目录；手输的目录只在 server 支持 `project.dirs` 时去那台机器上检查（停手 400 ms 后），不支持时不检查。没写完的新建表单记在浏览器里（`tend-task-draft`），发出后清掉。三种建法：先不开始、建好后拆解（`task.plan`）、建好就开始（`task.start`，主操作，`Mod+Enter`）。编辑只发改过的字段；子任务带上父任务的项目和目录；复制带上原任务除标题和工作流以外的字段。
   - 派发（`d`）：选机器和 agent（手机上是一列可点的行），先按页面自己的规则判断（已有未结束的运行、状态不对、没有目录、没选、agent 限定了机器、CLI 没装或没登录挡住；机器离线、满载只提示），没被挡住时再问 `run.preview`，显示 CLI 版本、挡住的原因和提示。确认后 `run.dispatch`；也可以「先不开始」。
   - 审拆解：左边是草稿里的任务（按父子缩进），右边编辑选中的一条（标题、key、父任务、前置、大小、说明）；手机上编辑是再叠一层整屏。上面是拆解 agent 的问题，可以直接回复（`run.continue`）。提交前按 coordinator 的规则检查（最多 50 个、key 的写法、重复、父任务和前置存在、最多三层、不依赖自己或上级、没有环），有错不能保存。改过先保存（`task.plan_save`，带 `expected_rev`），没改过就是应用（`task.plan_apply`）；也可以丢弃草稿。
@@ -194,7 +176,7 @@ tend journal verify [--json] | repair [-y]
   - 列表是全部运行，排得晚的在前；筛选按状态（全部、未结束、失败、已结束，各带数目）和机器，记在浏览器里（`tend-runs-filter`）。列：状态、运行、任务、阶段、agent @ 机器、开始、耗时、用量。
   - 电脑上选中的一条在右边预览：状态、概况，和它的输出（简洁密度、`Output` 的 `bare`）；「打开运行」「在任务里打开」。`Enter` 打开运行自己的页（`?page=runs&run=<id>`），`x` 停止（先确认，发 `run.stop{id}`）。
   - 手机上是卡片，上面一行「N 台在线 · M 台离线」（退役的不算）；打开一条占满整屏，页头有上一个 / 下一个（按列表的顺序）。
-  - 运行自己的页：输出（这次运行所在的对话）、改动、概况三个页签；电脑上头部一行放状态、标题、页签、停止（还没结束时）、在任务里打开和关闭，手机上页签在上、按钮在下。概况写任务、状态、在哪跑、阶段、目录、分支、时间、用量、节点报的 `doing`、结论、退出码、会话，和运行的 `caps` 里它能做的事（插话、打断、整次运行都允许、运行中作答、接着会话再跑、在终端接管）。
+  - 运行自己的页：输出（这次运行所在的对话）、改动、概况三个页签；电脑上头部一行放状态、标题、页签、停止（还没结束时）、放弃（失联时，同任务页）、在任务里打开和关闭，手机上页签在上、按钮在下。概况写任务、状态、在哪跑、阶段、目录、分支、时间、用量、节点报的 `doing`、结论、退出码、会话，和运行的 `caps` 里它能做的事（插话、打断、整次运行都允许、运行中作答、接着会话再跑、在终端接管）。
 - **改动**（`pages/changes.js`，任务详情和运行页共用）：
   - 一个任务有几次运行时先选看哪一次，默认最新的。头部写文件数和 `+a −d`、筛选（全部、只看 agent 用工具改的、生成的文件，各带数目）；还在跑的运行写「截至 hh:mm」和刷新，状态变了也重读。
   - 文件按目录分组，根目录在前；每个文件一行：`+ ~ − →`（新增、修改、删除、改名，改名写 `旧 → 新`）、路径、生成的标记、`+a −d`。二进制写大小（有 `old_bytes` 时写 `旧 → 新`），不能展开；改动很大的和生成的先折起。
