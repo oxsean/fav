@@ -78,10 +78,10 @@ function Dir({state, wire, project, machine, value, onInput}) {
   }, [can, value, machine, project]);
   const note = {checking: t('form.dirChecking'), ok: t('form.dirOK'), missing: t('form.dirMissing')}[check] || t('form.dirNote');
   return html`<div class="field">
+    <${TextInput} label=${t('form.dir')} value=${value} onInput=${onInput} mono note=${check === 'missing' ? undefined : note} error=${check === 'missing' ? note : undefined} />
     ${candidates.length > 0 && html`<div class="dir-list" role="group" aria-label=${t('form.dir')}>${candidates.map(c => html`<button type="button"
       class=${cx('dir-pick', c.dir === value && 'on')} aria-pressed=${c.dir === value ? 'true' : 'false'} onClick=${() => onInput(c.dir)}>
       <span class="mono ell">${c.dir}</span><span class="dir-kind">${t(c.kind === 'project' ? 'form.dirProject' : 'form.dirRecent')}${c.machine ? ' · ' + c.machine : ''}</span></button>`)}</div>`}
-    <${TextInput} label=${t('form.dir')} value=${value} onInput=${onInput} mono note=${check === 'missing' ? undefined : note} error=${check === 'missing' ? note : undefined} />
   </div>`;
 }
 
