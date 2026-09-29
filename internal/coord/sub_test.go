@@ -43,7 +43,7 @@ func watchState(t *testing.T, cli *wire.Conn, wp WatchParams) *watched {
 			w.pushes <- p
 		}
 	}()
-	open := w.next() // the coordinator has the watch: what the test does next comes after its start
+	open := w.next() // the coordinator has the watch: what the test does next is in its snapshot or pushed after it
 	w.head = &open
 	return w
 }
@@ -228,19 +228,21 @@ func TestStateWatchSpeaksAsTheFrameFilesShow(t *testing.T) {
 		}
 		return shape(ms)
 	}
-	read := func(w *watched) string {
+	read := func(w *watched, live func()) string {
 		var ms []string
 		for {
 			p := w.next()
 			ms = append(ms, p.Method)
+			if p.Method == PushLive && live != nil {
+				live() // before live it could land in the snapshot and push no journal
+			}
 			if p.Method == PushJournal {
 				return shape(ms)
 			}
 		}
 	}
 	w := watchState(t, e.cli, WatchParams{})
-	e.task("after", "quick")
-	if got, w := read(w), want("state-snapshot", 2); got != w {
+	if got, w := read(w, func() { e.task("after", "quick") }), want("state-snapshot", 2); got != w {
 		t.Fatalf("from nothing: %s, the web client expects %s", got, w)
 	}
 	w = watchState(t, e.cli, WatchParams{NoBriefs: true})
@@ -252,7 +254,7 @@ func TestStateWatchSpeaksAsTheFrameFilesShow(t *testing.T) {
 		}
 	}
 	w = watchState(t, e.cli, WatchParams{AfterSeq: 5, NoBriefs: true})
-	if got, w := read(w), want("state-resume", 7); got != w {
+	if got, w := read(w, nil), want("state-resume", 7); got != w {
 		t.Fatalf("after_seq: %s, the web client expects %s", got, w)
 	}
 }
