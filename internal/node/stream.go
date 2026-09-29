@@ -195,8 +195,9 @@ func userMessage(text, uuid string) any {
 	return map[string]any{"type": "user", "message": map[string]any{"role": "user", "content": text}, "uuid": uuid}
 }
 
-// uuidFor is the uuid message id of run goes to claude with: the same id always gets the same one.
-func uuidFor(run, id string) string {
+// UUIDFor is the uuid message id of run goes to claude with, and its replay gives back: the same id always gets the
+// same one.
+func UUIDFor(run, id string) string {
 	h := sha256.Sum256([]byte(run + "/" + id))
 	h[6], h[8] = h[6]&0x0f|0x50, h[8]&0x3f|0x80
 	x := hex.EncodeToString(h[:16])
@@ -411,7 +412,7 @@ func (s *sup) sendOfUUID(uuid string) string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for _, m := range s.st.Sends {
-		if uuidFor(s.spec.Run, m.ID) == uuid {
+		if UUIDFor(s.spec.Run, m.ID) == uuid {
 			return m.ID
 		}
 	}

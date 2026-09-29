@@ -38,6 +38,7 @@ const (
 	MRunAbandon         = "run.abandon"
 	MRunTail            = "run.tail"
 	MRunOutputPage      = "run.output.page"
+	MRunOutputWatch     = "run.output.watch" // a run's output as it comes (OutputWatchParams): PushOutput pushes
 	MAgentList          = "agent.list"
 	MMachineList        = "machine.list"
 	MStateWatch         = "state.watch"
@@ -77,10 +78,11 @@ const (
 
 // state.watch pushes after open.
 const (
-	PushSnapshot = "snapshot" // a batch of one table (Snapshot)
-	PushLive     = "live"     // the snapshot is complete (Live)
-	PushJournal  = "journal"  // one envelope, the viewer's part of it
-	PushReset    = "reset"    // what the viewer may see changed: a new snapshot follows
+	PushSnapshot = "snapshot"   // a batch of one table (Snapshot)
+	PushLive     = "live"       // the snapshot is complete (Live)
+	PushJournal  = "journal"    // one envelope, the viewer's part of it
+	PushReset    = "reset"      // what the viewer may see changed: a new snapshot follows
+	PushOutput   = "run.output" // events of a run's output (OutputPush)
 )
 
 // ErrLocked: another process is the coordinator.
@@ -142,7 +144,9 @@ type Coord struct {
 	sent     map[string]time.Time // runs whose run.start went out, when
 	acked    map[string][]string  // per machine: ended runs recorded, to acknowledge
 	ackDone  map[string]bool
-	missing  map[string]int // open runs by how many lists of their node in a row lacked them
+	missing  map[string]int                     // open runs by how many lists of their node in a row lacked them
+	answered map[string]map[string]agent.Answer // by run and request: the answers given, which the state drops once taken
+	outs     map[string]*hub                    // the output hubs, by run
 	passMu   sync.Mutex
 	wake     chan struct{}
 	// localCalls are the calls this machine's node is answering in this process: Close lets them finish
@@ -161,7 +165,7 @@ func Open(opt Options) (*Coord, error) {
 	}
 	c := &Coord{opt: opt, unlock: unlock, st: task.New(), receipts: map[string]journal.Receipt{}, subs: map[*wire.Stream]*sub{},
 		ms: map[string]*machine{}, sent: map[string]time.Time{}, acked: map[string][]string{}, ackDone: map[string]bool{}, missing: map[string]int{},
-		wake: make(chan struct{}, 1)}
+		answered: map[string]map[string]agent.Answer{}, outs: map[string]*hub{}, wake: make(chan struct{}, 1)}
 	if c.id, err = coordID(dir); err != nil {
 		unlock()
 		return nil, err
@@ -174,6 +178,7 @@ func Open(opt Options) (*Coord, error) {
 		if env.Command != nil {
 			c.receipts[receiptKey(env.Who().ID, env.Command.ID)] = *env.Command
 		}
+		c.remember(env)
 		return c.st.Apply(env)
 	})
 	if err != nil {
@@ -272,12 +277,33 @@ func (c *Coord) commit(actor journal.Actor, cmd *journal.Receipt, events ...jour
 	if err := c.st.Apply(env); err != nil {
 		return err
 	}
+	c.remember(env)
 	c.notify(before)
 	if sits != nil {
 		c.deliver(c.notices(env, sits))
 	}
 	c.publish(env)
+	if reshapes(env) {
+		c.recheckOutputs()
+	}
 	return nil
+}
+
+// remember keeps what the output shows of env that the state does not keep: who answered a request, and how.
+func (c *Coord) remember(env journal.Envelope) {
+	for _, e := range env.Events {
+		if e.Type != task.ERunAnswered {
+			continue
+		}
+		var d task.RunAnswer
+		if json.Unmarshal(e.Data, &d) != nil {
+			continue
+		}
+		if c.answered[d.ID] == nil {
+			c.answered[d.ID] = map[string]agent.Answer{}
+		}
+		c.answered[d.ID][d.Answer.Request] = d.Answer
+	}
 }
 
 // Profiles are the agents one can run.

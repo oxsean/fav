@@ -12,4 +12,11 @@ const (
 	halfLineMax  = 64 << 10    // or grew this long
 	maxSentField = 16 << 10    // a longer string in a line of output is sent cut to this
 	maxSentLine  = 1 << 20     // a longer line is sent as only its first maxSentField bytes
+	maxMarksRead = 8 << 20     // what one read of marks.jsonl takes at most
+)
+
+// A follow of a run's output.
+const (
+	followEvery   = 200 * time.Millisecond // how often it looks at the log
+	maxFollowPush = 256 << 10              // the lines of one push, about
 )

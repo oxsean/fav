@@ -9,7 +9,7 @@ import (
 )
 
 // RunOutputLines are a run's events as lines to read. Prefixes: "> " the user, "+ " a tool call, "$ " a command,
-// "~ " changed files, "? " a question or approval, "- " a warning, "= " the result, "! " an error or what a failed
+// "~ " changed files, "? " a question or approval, "- " a warning, an answer or lost output, "= " the result, "! " an error or what a failed
 // call ended with; the agent's words as they are. Thoughts, system lines and a call's result that did not fail are
 // left out.
 func RunOutputLines(evs []output.Event) []string {
@@ -24,8 +24,14 @@ func RunOutputLines(evs []output.Event) []string {
 	}
 	for _, e := range evs {
 		switch e.Kind {
-		case output.KindUser:
+		case output.KindUser, output.KindYou:
 			add("> ", e.Text)
+		case output.KindResolved:
+			add("- ", i18n.T("tasks.output_resolved"))
+		case output.KindInterrupt:
+			add("! ", i18n.T("tasks.output_interrupted"))
+		case output.KindGap:
+			add("- ", i18n.T("tasks.output_gap"))
 		case output.KindSay, output.KindRaw:
 			add("", e.Text)
 		case output.KindTool, output.KindCmd, output.KindEdit, output.KindMCP:

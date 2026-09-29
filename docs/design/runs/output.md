@@ -34,8 +34,13 @@
 | `result` | claude 的 `result`；codex 的 `turn/completed`、`turn.completed`、`turn.failed` | `text` `error` `usage` `cost` `dur_ms` |
 | `error` | codex 不再重试的 `error` 通知、exec 的 `error`、JSON-RPC 的错误回应 | `text` |
 | `raw` | 认不出的 JSON 行，和 claude 消息里认不出的块 | `text`（原文） |
+| `you` | `Join`：agent 交回来的一条消息（见下） | `input`（send id） `text` `by` `mode` `at` |
+| `resolved` | `Join`：`marks.jsonl` 的 `resolved` | `request` `by` `decision` `at` |
+| `interrupt` | `Join`：`marks.jsonl` 的 `interrupt` | `n`（打断的那一轮） `by` `at` |
+| `mark` | `Join`：`marks.jsonl` 的 `hook` | `event`（`hook`） `name` `phase` `exit`（`end` 时） |
+| `gap` | 输出流：这一段取不回来了 | `from` `to`（`{file, off}`） |
 
-`gap`、`mark` 和 `stream` 字段由节点和协调器的输出流加上，不在解析器里。
+`you`、`resolved`、`interrupt`、`mark` 由 `Join` 合成，`gap` 由输出流加上，都不在 `Parse` 里；`Join` 合成的事件 `stream` 是 `tend`。
 
 **用量**：claude 在 `result` 上带 `usage`，是这一轮的；codex app-server 的 `thread/tokenUsage/updated` 是一条 `sys{name:"usage"}`，数是整个线程到这时为止的总数；codex exec 在 `turn.completed` 上带。`input` 不含缓存命中，命中的在 `cache_read`。
 
@@ -88,9 +93,35 @@
 - 同一个 `parent` 下，连续的 `read` / `search` 调用合成一组，别的事件一出现就断开。提问和审批不进组。
 - 项的 `id` 是第一条事件的 `id`；`Has(id)` 对组里任何一条的 `id` 都成立。往前翻一页、组的第一条变了以后，按原来的 `id` 记下的展开状态还能找到这一组。
 
+## 标记和 journal：`Join`
+
+`Join(events, marks, turn, said, seen)` 在协调器上把一段事件补全，翻页和输出流都用它（`internal/output/join.go`）：
+- **你的消息按行认，不按标记认**：claude 交回来的 user 行（`isReplay`）带着 `uuid`，codex 的 `userMessage` 条目带着 `clientId`，`Parse` 把它记在 user 事件上（`Echo`，不出现在 JSON 里）。协调器按这次运行在 journal 里的 `sends` 对上：codex 的 `clientId` 就是 send id，claude 的 `uuid` 是 `node.UUIDFor(run, send id)`。对上的 user 事件改成 `you`，`text`、`by`、`mode` 取 journal 的，`at` 行上没有就取发送的时间；同一条消息（`seen`）再出现就不再显示。对不上的（任务书、终端里打的字）照旧是 `user`。
+  - 为什么不按 `input` 标记认：监督进程先写行、后写标记，输出流正好读在两者之间时，这一行会先作为 `user` 推出去，标记晚到就改不回来。`input` 标记只表示位置和「agent 已接收」（`seen`）。
+- **其余标记按位置并进来**：`resolved`、`interrupt`、`hook` 成为事件，放在同一偏移上的行事件之前（`marks.jsonl` 里标记不按偏移排序，`Join` 自己排）；`turn` 取前一个事件的。`id` 是「标记所在的 `file`:偏移:`m`+它在 `marks.jsonl` 里的字节位置」，和行事件不会重号，客户端取 `file` 的办法（去掉最后两段）照常能用。`start`、`turn`、`exit`、`roll`、`input` 不出事件。
+- **谁做的以 journal 为准**：`resolved` 的 `by`、`decision` 取 journal 里这个请求的回答（协调器另记一张 `(run, request)` 的表，因为节点取走回答后 `Run.answers` 就不留了；agent 自己撤回的请求没有回答，`by` 为空）；`interrupt` 的 `by` 取 `Run.interrupt`，按 ask id 对上。
+
+## 实时：`run.output.watch`
+
+`run.output.watch{run, from?}` 是流（[wire.md](wire.md)「流」），权限和 `run.output.page` 一样，看不到的运行回 `not_found`。推送：
+- `open{cursor, mode}`：`resume` 从 `cursor` 接着来；`gap` 带 `from`、`to`，表示 `from` 之后到这一段开头取不回来了，客户端用翻页补。
+- `run.output{events, cursor?}`：`cursor` 是 `{file, off, marks}`，客户端原样存着，重开时作为 `from` 带回来；只有临时事件的推送不带它。临时事件带 `key`，整行到了以后，它的第一个事件带上同一个 `key` 替换掉临时事件。
+- 运行结束、输出读完，回 `result{reason: done}`；机器断开或节点上没有这个运行了回 `gone`；可见范围变了（`reshapes` 的信封、`Coord.Reaffirm`）以后看不到了回 `unauthorized`；节点太旧、没有 `run.follow.watch` 回 `unsupported`；hub 满了回 `busy`。
+
+协调器上每个运行一个 hub（`internal/coord/output.go`），所有订阅者共用：
+- **打开**：第一个订阅者来时，先用 `run.output.page` 的读法取最后一页（200 个事件）作为第一批，再从这一页的末尾（带 `run.tail` 回的 `marks_to`）在节点上开 `run.follow.watch`。已经结束的运行也这样开：节点读到末尾就回 `done`。
+- **解析一次、编码一次**：节点推来的行用 `Parse` 读、`Join` 补全，每 100 ms 合一批，编码一次，用 `wire.Stream.PushRaw` 发给所有订阅者；一条推送不超过 256 KiB。
+- **缓冲**：留最近 2000 个事件或 1 MiB 的批次。订阅者带的 `from` 是某一批的末尾，就从下一批给起；等于最新的游标就只接上实时的；比缓冲还早，推 `open{gap}` 再给整个缓冲。
+- **慢订阅者**：流用 `FullGap`，被丢的推送记下第一条的起点；下一批之前先推一个 `gap{from, to}` 事件，别的订阅者和节点那边不受影响。
+- **关闭**：最后一个订阅者走后留 10 s（又有人来就接着用），然后取消节点上的跟随。运行结束（节点回 `done`）、节点断开或跟随出错时，所有订阅者的流随之结束，hub 删掉；下一个订阅者重新冷启动。
+- **在用**：hub 每收到节点的一批就刷新机器的 `busyAt`，模式一不会在有人看输出时因空闲断开。
+- 最多 64 个 hub；常数在 `internal/coord/limits.go`。
+- 模式一换人持锁：游标是节点上的位置，和谁当协调器无关；新协调器上的 hub 按冷启动来。
+
 ## 翻页：`run.output.page`
 
 `run.output.page{run, before, n, raw?, file?}` 回 `{events, from, to, earliest, file, prev?, turn?, raw?}`，权限和 `run.tail` 一样（能读这个 run 的任务就能读）。实现在 `internal/coord/output.go`。
+- 页里的事件经 `Join` 补全，标记取自 `run.tail` 回的 `marks`。
 - 协调器转问节点的 `run.tail{clip}`（`raw` 时不带 `clip`）：第一次读 `before`（`-1` 是末尾）之前的 64 KiB，不够 `n` 个事件（默认 200，最多 1000）就接着往前读，每次加倍，读到日志开头、一共 1 MiB 或者读不动了为止；拼起来的行从节点给的轮次起逐行交给 `Parse`。只送开头的行（`head`）成一个 `raw` 事件；被截过的行（有 `size`），它的事件都带 `truncated.line`（原行长），要全文用 `run.line`。只回文字的旧节点，文字按行切开照样读。
 - 超过 `n` 个就只留最后 `n` 个，再往前补齐第一个事件所在那一行的其余事件：页从一行的开头切。`from` 是这一行的偏移，往前翻一页就用它作 `before`；`to` 是最后一个完整行的末尾；还没写完的最后一行作为临时事件放在最后。
 - `earliest` 是还能取到的最早位置，现在总是 0；`from` 等于它就是到了这一代日志的开头，这时 `prev` 给出上一代（`.1`）的 ID，往前翻就用 `{file: prev, before: -1}`。

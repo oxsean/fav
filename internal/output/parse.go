@@ -144,6 +144,8 @@ func claudeLine(l string) ([]Event, bool) {
 		DurationMS int64        `json:"duration_ms"`
 		Usage      *claudeUsage `json:"usage"`
 		RequestID  string       `json:"request_id"`
+		UUID       string       `json:"uuid"`
+		IsReplay   bool         `json:"isReplay"`
 		Request    struct {
 			Subtype     string          `json:"subtype"`
 			ToolName    string          `json:"tool_name"`
@@ -159,6 +161,9 @@ func claudeLine(l string) ([]Event, bool) {
 		evs := claudeContent(m.Type, m.Message.Content)
 		for i := range evs {
 			evs[i].Parent = m.Parent
+			if m.IsReplay && evs[i].Kind == KindUser {
+				evs[i].Echo = m.UUID
+			}
 		}
 		return evs, true
 	case "system":
@@ -266,10 +271,11 @@ func resultEvent(output string) Event {
 }
 
 type codexItem struct {
-	Type    string `json:"type"`
-	ID      string `json:"id"`
-	Text    string `json:"text"`
-	Content []struct {
+	Type     string `json:"type"`
+	ID       string `json:"id"`
+	ClientID string `json:"clientId"`
+	Text     string `json:"text"`
+	Content  []struct {
 		Text string `json:"text"`
 	} `json:"content"`
 	Summary          []json.RawMessage `json:"summary"`
@@ -467,7 +473,7 @@ func codexItemEvents(it codexItem) ([]Event, bool) {
 		for _, c := range it.Content {
 			texts = append(texts, c.Text)
 		}
-		return []Event{{Kind: KindUser, Text: strings.Join(texts, "\n")}}, true
+		return []Event{{Kind: KindUser, Text: strings.Join(texts, "\n"), Echo: it.ClientID}}, true
 	case "agentMessage", "agent_message":
 		return []Event{{Kind: KindSay, Text: it.Text}}, true
 	case "reasoning":

@@ -61,19 +61,19 @@ func TestClaudeGivingMessagesBackMarksEachSeenOnce(t *testing.T) {
 	g := streamRig(t, tend.ProviderClaude)
 	g.s.proto.begin("b")
 	g.sent(t)
-	if brief := g.sent(t); brief["uuid"] != uuidFor(g.s.spec.Run, briefInput) {
+	if brief := g.sent(t); brief["uuid"] != UUIDFor(g.s.spec.Run, briefInput) {
 		t.Fatalf("the brief goes with its uuid: %v", brief)
 	}
 	g.sends("m1", "m2", "m3")
 	for _, id := range []string{"m1", "m2", "m3"} {
 		g.s.proto.message(id, "P.S. "+id, nil)
-		if m := g.sent(t); m["uuid"] != uuidFor(g.s.spec.Run, id) || m["uuid"] == uuidFor(g.s.spec.Run+"x", id) {
+		if m := g.sent(t); m["uuid"] != UUIDFor(g.s.spec.Run, id) || m["uuid"] == UUIDFor(g.s.spec.Run+"x", id) {
 			t.Fatalf("%v", m)
 		}
 	}
 	replay := func(id, text string) string {
 		return `{"type":"user","message":{"role":"user","content":"` + text + `"},"session_id":"s","parent_tool_use_id":null,"uuid":"` +
-			uuidFor(g.s.spec.Run, id) + `","timestamp":"2026-09-29T13:57:24.465Z","isReplay":true}`
+			UUIDFor(g.s.spec.Run, id) + `","timestamp":"2026-09-29T13:57:24.465Z","isReplay":true}`
 	}
 	g.logLine(replay(briefInput, "b"))
 	g.logLine(`{"type":"result","subtype":"success","is_error":false,"result":"story","num_turns":1}`)

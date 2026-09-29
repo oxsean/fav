@@ -15,6 +15,9 @@ import (
 
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	mm, cmd := m.update(msg)
+	if m.tasks.cl != nil || len(m.tasks.out) > 0 {
+		cmd = tea.Batch(cmd, m.syncOutputs())
+	}
 	if m.hosts != nil {
 		cmd = tea.Batch(cmd, m.wakeHosts())
 	}

@@ -25,7 +25,7 @@ type claudeProto struct{ s *sup }
 
 func (c claudeProto) begin(brief string) {
 	c.s.in.send(controlRequest(initRequest, map[string]any{"subtype": "initialize", "hooks": nil}))
-	c.s.in.send(userMessage(brief, uuidFor(c.s.spec.Run, briefInput)))
+	c.s.in.send(userMessage(brief, UUIDFor(c.s.spec.Run, briefInput)))
 }
 
 func (c claudeProto) line(text []byte, at logPos) bool {
@@ -128,7 +128,7 @@ func claudeAnswer(p pending, a agent.Answer) any {
 }
 
 func (c claudeProto) message(id, text string, done func(error)) error {
-	return c.s.in.sendThen(userMessage(text, uuidFor(c.s.spec.Run, id)), done)
+	return c.s.in.sendThen(userMessage(text, UUIDFor(c.s.spec.Run, id)), done)
 }
 
 func (c claudeProto) interrupt(id string) {

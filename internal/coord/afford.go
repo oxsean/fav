@@ -211,10 +211,12 @@ func affordDiff(sent, now map[string]string) (push map[string]map[string]json.Ra
 }
 
 // Reaffirm has every state stream count its viewer's affordances again: what they rest on changed outside the journal
-// (who owns a machine, who is disabled, what a node can do).
+// (who owns a machine, who is disabled, what a node can do), and ends the output streams of those who may no longer
+// read their run.
 func (c *Coord) Reaffirm() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	c.recheckOutputs()
 	for _, sb := range c.subs {
 		select {
 		case sb.again <- struct{}{}:

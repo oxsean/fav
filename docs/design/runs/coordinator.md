@@ -87,7 +87,7 @@ run `state` 转移表（终态单调，重复事件无副作用）：
 - 续接：`flow()` 每次先看已结束、还留着 `after` / `interrupt` 消息的 run，按 `seq` 顺序：以第一条消息的发送人身份续接它的会话（同 `run.continue`），任务书是这些消息的原文，空行隔开，新 run 的 `takes` 是它们的 id。run 是被 `run.stop` 停的、任务已结束、任务在它之后排过别的 run、或续接不了（没有权限、不能续会话、旧节点）时，这些消息写 `run_sent` 改 failed。续接先提交，任务才不会在这之前算作结束。
 - abandoned 的 run 在节点快照成终态之前（节点这次没列出它也算）仍占着目录和 slot，同目录的下一个 run 不派发。
 - 协调器已结束（含 abandoned / canceled）、节点是终态或 unknown 的 run 进 `ack`。
-- 退避期内的机器，`run.tail` / `run.output.page` / `node.call` 直接回 `offline`，不重拨；只有 `machine.list{connect}` 清退避。
+- 退避期内的机器，`run.tail` / `run.output.page` / `node.call` 直接回 `offline`，`run.output.watch` 回 `gone`，不重拨；只有 `machine.list{connect}` 清退避。
 - 节点连不上：失败后 5 s 起翻倍，最多 5 分钟；`machine.list` 回原因和下次重试时间。
 - 模式一：有未结束 run 的机器保持连接；其余空闲 5 分钟断开。
 - 连上节点后在后台调一次 `node.agents`，结果挂在机器上（`machine.list` 的 `agents`）；`machine.list{connect}` 和 `run.preview` 会重新取。

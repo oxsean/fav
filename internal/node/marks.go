@@ -1,10 +1,12 @@
 package node
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/json"
+	"io"
+	"os"
 	"path/filepath"
-	"time"
 	"unicode/utf8"
 
 	"github.com/oxsean/fav/internal/output"
@@ -15,24 +17,50 @@ import (
 const marksFile = "marks.jsonl"
 
 // Mark is a line of marks.jsonl, at where output.log was when it was written.
-type Mark struct {
-	Type  string    `json:"type"`            // tend
-	Event string    `json:"event"`           // start | turn | hook | exit | roll (the log went on in another file) | input | resolved | interrupt
-	ID    string    `json:"id,omitempty"`    // input: the message the agent took in; resolved: the request answered; interrupt: which
-	N     int       `json:"n,omitempty"`     // turn: which; interrupt: the turn it ends
-	Phase string    `json:"phase,omitempty"` // hook: begin | end; turn: end, where the line with its result ends
-	Name  string    `json:"name,omitempty"`  // hook: which
-	Code  *int      `json:"code,omitempty"`  // exit, hook end
-	File  string    `json:"file"`
-	Off   int64     `json:"off"`
-	At    time.Time `json:"at"`
-}
+type Mark = output.Mark
 
 const (
 	markStart, markTurn, markHook, markExit, markRoll = "start", "turn", "hook", "exit", "roll"
 	markInput, markResolved, markInterrupt            = "input", "resolved", "interrupt"
 	phaseBegin, phaseEnd                              = "begin", "end"
 )
+
+// readMarks reads the whole marks of marks.jsonl in dir from byte from on, each with its Pos; next is where the next
+// read starts.
+func readMarks(dir string, from int64) (ms []Mark, next int64) {
+	f, err := os.Open(filepath.Join(dir, marksFile))
+	if err != nil {
+		return nil, from
+	}
+	defer f.Close()
+	if _, err := f.Seek(from, io.SeekStart); err != nil {
+		return nil, from
+	}
+	br := bufio.NewReaderSize(io.LimitReader(f, maxMarksRead), 64<<10)
+	for next = from; ; {
+		line, err := br.ReadBytes('\n')
+		if err != nil { // a line still being written waits for the next read
+			return ms, next
+		}
+		var m Mark
+		if json.Unmarshal(line, &m) == nil && m.Type == "tend" && m.File != "" {
+			m.Pos = next
+			ms = append(ms, m)
+		}
+		next += int64(len(line))
+	}
+}
+
+// marksIn are the marks of log file placed in [from, to), and at to itself when to is the file's end.
+func marksIn(ms []Mark, file string, from, to int64, end bool) []Mark {
+	var out []Mark
+	for _, m := range ms {
+		if m.File == file && m.Off >= from && (m.Off < to || end && m.Off == to) {
+			out = append(out, m)
+		}
+	}
+	return out
+}
 
 // turnAt is where the output's turns stand at off in the log file names, read from the marks: what output.Parse
 // reading the log from its start would hold there. nil when the marks never saw that file.

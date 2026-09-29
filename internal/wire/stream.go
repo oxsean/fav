@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"strconv"
 	"sync"
 )
 
@@ -142,6 +143,26 @@ func (s *Stream) PushMark(method string, params any, mark any) error {
 	if err != nil {
 		return err
 	}
+	return s.put(b, method, mark)
+}
+
+// PushRaw is PushMark with params already encoded as compact JSON: a provider pushing one batch to many streams
+// encodes it once.
+func (s *Stream) PushRaw(method string, params json.RawMessage, mark any) error {
+	m, _ := json.Marshal(method)
+	b := make([]byte, 0, len(params)+len(m)+64)
+	b = append(b, `{"type":"push","id":`...)
+	b = strconv.AppendInt(b, s.id, 10)
+	b = append(append(append(b, `,"method":`...), m...), `,"params":`...)
+	b = append(append(b, params...), "}\n"...)
+	if len(b) >= MaxFrame {
+		return &Error{Code: CodeBadRequest, Detail: fmt.Sprintf("frame of %d bytes", len(b))}
+	}
+	return s.put(b, method, mark)
+}
+
+// put queues the encoded push b as Full says.
+func (s *Stream) put(b []byte, method string, mark any) error {
 	c, l := s.c, s.lane
 	c.wmx.Lock()
 	if s.ended {

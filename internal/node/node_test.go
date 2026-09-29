@@ -434,7 +434,7 @@ func TestListIsPerCoordinatorAndForgetsOldAcknowledgedRuns(t *testing.T) {
 	if runs, _ := n.List("a", nil); len(runs) != 0 {
 		t.Fatalf("an acknowledged run past keepDone is removed: %+v", runs)
 	}
-	if !slices.Equal(Methods, []string{MRunStart, MRunStop, MRunList, MRunTail, MRunLine, MRunResume, MAgents, MRunAnswer, MRunSend, MRunInterrupt, MDirs}) {
+	if !slices.Equal(Methods, []string{MRunStart, MRunStop, MRunList, MRunTail, MRunLine, MRunResume, MAgents, MRunAnswer, MRunSend, MRunInterrupt, MDirs, MRunFollow}) {
 		t.Fatal(Methods)
 	}
 }

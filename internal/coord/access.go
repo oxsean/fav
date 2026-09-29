@@ -63,6 +63,7 @@ var methodAccess = map[string]access{
 	MStateWatch:         reader,
 	MRunTail:            reader,
 	MRunOutputPage:      reader,
+	MRunOutputWatch:     reader,
 	MRunMessages:        reader,
 	MRunPreview:         reader,
 	MNodeCall:           reader, // a machine's own sessions: its owner and admins (nodeCall)

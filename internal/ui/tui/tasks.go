@@ -44,7 +44,7 @@ type tasksState struct {
 	matched    int            // the tasks the query matches, whichever of them the layout shows
 	cursor     int
 	scroll     int
-	out        map[string]runOutput // by run id
+	out        map[string]*outFeed // by run id: the runs the view shows
 	ticking    bool
 	fold       coord.StateFold   // the state as state.watch brings it; st is its St
 	gen        int               // which opening of state.watch the pushes belong to
@@ -60,16 +60,10 @@ type tasksState struct {
 	askReason  textinput.Model
 }
 
-type runOutput struct {
-	events []output.Event
-	end    bool // the run had ended when this was read: no need to read it again
-}
-
 const (
 	tasksEvery    = 2 * time.Second
 	machinesEvery = 5 * time.Second
 	tasksWait     = 20 * time.Second
-	outputEvents  = 100
 )
 
 // SetCoordinator lets the Tasks view reach the coordinator; without it the view says tasks are unavailable.
@@ -89,13 +83,6 @@ type tasksConnMsg struct {
 }
 
 type tasksTickMsg struct{}
-
-type runOutMsg struct {
-	run    string
-	events []output.Event
-	end    bool
-	err    error
-}
 
 // taskDoneMsg: a command came back; then runs on success.
 // taskLoadedMsg: task.get answered; the edit form opens on the whole task.
@@ -158,24 +145,15 @@ func (m *Model) tasksOpen() tea.Cmd {
 	return nil
 }
 
-// pollTasks reads what the state stream does not bring: the machines every machinesEvery, the agents once, and the
-// selected run's output while it runs.
+// pollTasks reads what the state stream does not bring: the machines every machinesEvery and the agents once.
 func (m *Model) pollTasks() tea.Cmd {
 	t := &m.tasks
 	if t.cl == nil {
 		return nil
 	}
 	var cmds []tea.Cmd
-	for _, r := range []*task.Run{m.selectedRun(), m.watchedRun()} {
-		if r == nil {
-			continue
-		}
-		if o, ok := t.out[r.ID]; !ok || !o.end {
-			cmds = append(cmds, readOutput(t.cl, r.ID, !task.Open(r.State)))
-		}
-	}
 	if time.Since(t.machinesAt) < machinesEvery && len(t.agents) > 0 {
-		return tea.Batch(cmds...)
+		return nil
 	}
 	t.machinesAt = time.Now()
 	cl, needAgents := t.cl, len(t.agents) == 0
@@ -303,16 +281,6 @@ func (msg tasksPushMsg) apply(m *Model) tea.Cmd {
 	return nil
 }
 
-func readOutput(cl *coord.Client, run string, ended bool) tea.Cmd {
-	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), tasksWait)
-		defer cancel()
-		var page coord.OutputPage
-		err := cl.Call(ctx, coord.MRunOutputPage, coord.OutputPageParams{Run: run, Before: -1, N: outputEvents}, &page)
-		return runOutMsg{run: run, events: page.Events, end: ended, err: err}
-	}
-}
-
 func (msg tasksConnMsg) apply(m *Model) tea.Cmd {
 	t := &m.tasks
 	t.connecting = false
@@ -340,17 +308,6 @@ func (tasksTickMsg) apply(m *Model) tea.Cmd {
 		return m.tasksOpen()
 	}
 	return tea.Batch(m.pollTasks(), tickTasks())
-}
-
-func (msg runOutMsg) apply(m *Model) tea.Cmd {
-	if msg.err != nil {
-		return nil
-	}
-	if m.tasks.out == nil {
-		m.tasks.out = map[string]runOutput{}
-	}
-	m.tasks.out[msg.run] = runOutput{events: msg.events, end: msg.end}
-	return nil
 }
 
 func (msg taskDoneMsg) apply(m *Model) tea.Cmd {
@@ -1031,9 +988,14 @@ func (m *Model) taskDetailIn(x *task.Task, w, h int) []string {
 
 // outputLines are the last room lines of r's output as render.RunOutputLines reads its events, wrapped to inner.
 func (m *Model) outputLines(r *task.Run, inner, room int) []string {
-	o, ok := m.tasks.out[r.ID]
+	o := m.tasks.out[r.ID]
+	ok := o != nil && o.loaded
+	var events []output.Event
+	if o != nil {
+		events = o.events
+	}
 	var lines []string
-	for _, l := range render.RunOutputLines(o.events) {
+	for _, l := range render.RunOutputLines(events) {
 		lines = append(lines, render.Wrap(render.Sanitize(l), inner)...)
 	}
 	switch {

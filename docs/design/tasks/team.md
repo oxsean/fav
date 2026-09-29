@@ -91,7 +91,7 @@
    - 模式二的连接缺身份时一律拒绝。
    - 防止 server 的数据目录被当成模式一 home 的检查只在 `tend-server` 一侧：`coord/events.jsonl` 有事件而 `tend.db` 不存在时拒绝启动（见 [storage.md](storage.md)「迁移」）。`tend` 不拦：server 停着时 `TEND_HOME=<server 数据目录> tend …` 会在那里起一个 JSONL 协调器，以本机主人身份写 `events.jsonl`，有了 `tend.db` 的 server 会忽略这些写入。
 2. **方法授权表**：`coord.Methods` 里的每个方法都有一条规则，没有规则的默认拒绝。`coord` 的测试断言每个方法都有规则，做法和 `keys_test.go` 一样。
-3. **可见性过滤只有一个入口**：`visibleState(principal, state)`。`state.get`、`task.get`、`state.watch`、`run.tail`、`run.output.page`、`run.messages`、`machine.list`、`agent.list` 都走它。
+3. **可见性过滤只有一个入口**：`visibleState(principal, state)`。`state.get`、`task.get`、`state.watch`、`run.tail`、`run.output.page`、`run.output.watch`（开流时判一次，可见范围变了再判）、`run.messages`、`machine.list`、`agent.list` 都走它。
 4. **订阅保持 seq 连续**。
    - 仍然一个 `seq` 一个信封。
    - 信封里的事件按人过滤成子集，子集为空也照发，客户端只推进 `seq`。

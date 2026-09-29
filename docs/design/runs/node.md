@@ -83,7 +83,7 @@ runner 方式：
 - 停止：先中断当前这一轮（claude `interrupt` 控制请求，每次一个新的 `request_id` `stop_<hex>`；codex `turn/interrupt`）并关 stdin，3 s 后还没退出再结束进程树，之后照常 10 s 强杀。
 - 打断 `run.interrupt{run, turn, id?}`：节点把 `{id, turn}` 追加进 `interrupts.jsonl`（没给 `id` 就生成 `int_<hex>`，回 `{id, …快照}`；同一个 id 已在文件里 → 直接回）。监督进程读到时，只有 `turn` 就是 `rolling` 数到的当前这一轮、这一轮还没收尾、stdin 还开着，才发打断（claude `interrupt` 控制请求，`request_id` 就是这个 id；codex `turn/interrupt`），记 `interrupt{id, n}` 标记，再关 stdin；否则什么都不做，重试和迟到的打断不会打到后来的一轮。之后和停止一样：agent 收尾退出，3 s 后还没退出再结束进程树；run 记为 `stopped{interrupted}`，不跑 check，也不提交留下的改动。节点：不是 stream run → `conflict cannot_interrupt`；run 已结束 → 直接回快照（它的轮次都已结束）。
 - 消息从 `inbox.jsonl` 取出时在 `state.sends` 里是 queued，写 goroutine 真的写进管道后才改成 sent（同时算作开了下一轮、沉默计时重置），写失败（agent 已退出）改成 failed；一轮结束后还有消息在排队时不关 stdin。
-- agent 已接收（`seen`）：claude 回放 `isReplay:true` 的 user 消息，按 `uuid` 对上 send；codex 的 userMessage `item/started` 按 `item.clientId` 对上。第一次对上时 send 改成 `seen`，在这一行的开头记 `input{id}` 标记；再出现就忽略（claude 连发几条时各回放一次，最后一条的回放里是拼起来的全文，所以文字以 journal 为准）。回放行照旧进 `output.log`，是一个 user 事件。对不上的（进程被杀、崩溃）停在 sent。一轮结束时还有 sent 的消息，stdin 最多多开 30 s 等它（claude 在纯文字回复中收到的消息要等 `result` 之后另起一轮）。
+- agent 已接收（`seen`）：claude 回放 `isReplay:true` 的 user 消息，按 `uuid` 对上 send；codex 的 userMessage `item/started` 按 `item.clientId` 对上。第一次对上时 send 改成 `seen`，在这一行的开头记 `input{id}` 标记；再出现就忽略（claude 连发几条时各回放一次，最后一条的回放里是拼起来的全文，所以文字以 journal 为准）。回放行照旧进 `output.log`；协调器按它的 `uuid` / `clientId` 对上 journal 的 send，把它显示成 `you`（见 [output.md](output.md)「标记和 journal」），`input` 标记只表示位置和 `seen`。对不上的（进程被杀、崩溃）停在 sent。一轮结束时还有 sent 的消息，stdin 最多多开 30 s 等它（claude 在纯文字回复中收到的消息要等 `result` 之后另起一轮）。
 - codex 的 `serverRequest/resolved{requestId}` 记 `resolved{rpc-<id>}`；这个请求还在等回答（codex 自己撤回了它）就从 `state.requests` 里去掉。
 - 结束时：关 stdin，等排队的写完，最多 2 s，还没写进去的（agent 留下的子进程拿着 stdin 不读）记 failed；还没送出的消息记 failed，没回答的请求清掉；用户拒绝过的工具不算「等你批准」（只有权限模式没问就拒的才算）。
 - 节点 feature：`input_marks`（`input`、`resolved` 标记和 `seen`）、`interrupt`（`run.interrupt`，方法名同时进 `hello.methods`）、`answer_scope`（`run.answer` 的 `decision`）。
@@ -101,4 +101,11 @@ runner 方式：
 - `run.tail{run, before, max, file?, clip?}` 从 `before`（`-1` 是末尾）往前读最多 `max`（默认 64 KiB，最多 1 MiB）。`file` 是日志的 `fileio.ID`：当前这一代，或者还留着的 `.1`（按打开的句柄核对 ID，打开前后正好轮转也认得出）；都不是回 `stale`。回 `{from, file, done, prev?, turn?}`：`done` 是读到了这一代的开头，这时 `prev` 给出 `.1` 的 ID；`turn` 是 `from` 处的轮次（`{turn, closed}`，照 `marks.jsonl` 算，标记里没有这一代就不给）。
   - 不带 `clip` 回 `text`：从第一个换行之后起的原文。
   - 带 `clip` 回 `lines[]{off, text, size?, head?}`，每行照上面「送出的行」处理。页从一行的开头切：第一行被切开时，这一行超过 1 MiB 就往前找到它的开头，把它作为 `head` 放在第一行，`from` 是它的开头；否则丢掉这一段。最后一行还没写完、又超过 16 KiB 时不送。
+  - 带 `clip` 时另回 `marks`：这一代日志里偏移落在这一页的标记（页的末尾正好是文件末尾时，末尾那个偏移上的也算），每条带 `pos`，即它在 `marks.jsonl` 里的字节位置；`marks_to` 是这次读到 `marks.jsonl` 的哪里，从这一页的末尾跟随时，标记从这里接着读。
+- `run.follow.watch{run, from{file, off, marks}}` 是流（见 [wire.md](wire.md)「流」），协调器的输出 hub 用它（见 [output.md](output.md)「实时」）：
+  - 每 200 ms 按路径打开 `output.log`，定位到 `off`，读到末尾，关掉，不一直开着文件，Windows 上轮转不受影响；`marks.jsonl` 同样从 `marks` 这个字节位置接着读。第一条推送是 `open{cursor, mode}`；之后每条 `run.follow{file, lines[], part?, marks[], gap?, cursor}` 只含一代日志，行照 `run.tail{clip}` 截断，每行带 `at`（跟随读到它的时间），一条大约 256 KiB。
+  - 只推完整的行，游标只跟着整行走。最后一行等了 1 秒还没写完（运行结束时不等），又不超过 16 KiB，就作为 `part` 推出去，不推进游标；内容没变不再推。
+  - 轮转：`from.file` 是 `.1` 的 ID，或者读的过程中 `fileio.ID` 变了，就把 `.1` 从游标读完，再从新文件的 0 开始；文件比游标短（同一 ID）或者两代都对不上，推 `gap{from, to}`，从新文件的 0 开始。打开时 `from.file` 已经两代都不是，第一条推 `open{mode: gap}`，从还留着的最早一代的开头读。
+  - `from` 带 `file` 或 `off` 而 `marks` 为 0 时，第一次读标记只留偏移在 `from` 之后的（这一代从 `off` 起，之后各代全部）。
+  - 运行结束（`Terminal` 或 `unknown`）以后再读一遍，然后回 `done`；run 目录没了回 `gone`。推送用 `PushWait`：协调器读得慢，跟随就停下等，数据在文件里，不丢。
 - `run.line{run, file?, off, max?}` 从 `off`（一行的开头）读这一行，最多 `max`（默认也最多 1 MiB）字节；回 `{text, size, file}`，`size` 是整行的长度（含换行）。`run.tail` 在 `from > 0` 时会丢掉第一个换行之前的内容，取不出从某处开始的一整行，所以另有这个方法。

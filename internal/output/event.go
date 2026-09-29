@@ -18,6 +18,12 @@ const (
 	KindResult     = "result"
 	KindError      = "error"
 	KindRaw        = "raw"
+	// From the journal and the node's marks (Join), and the output watch.
+	KindYou       = "you"       // a message someone sent, where the agent took it in
+	KindResolved  = "resolved"  // a request answered (or dropped by the agent)
+	KindInterrupt = "interrupt" // a turn interrupted
+	KindMark      = "mark"      // a hook's begin or end
+	KindGap       = "gap"       // output lost between From and To
 )
 
 // Families of tool events.
@@ -74,6 +80,32 @@ type Event struct {
 
 	Usage *Usage  `json:"usage,omitempty"`
 	Cost  float64 `json:"cost,omitempty"`
+
+	By       string `json:"by,omitempty"`       // you, resolved, interrupt: who
+	Mode     string `json:"mode,omitempty"`     // you: how the message went in
+	Decision string `json:"decision,omitempty"` // resolved
+	N        int    `json:"n,omitempty"`        // interrupt: the turn it ended
+	Mark     string `json:"event,omitempty"`    // mark: which (hook)
+	Phase    string `json:"phase,omitempty"`    // mark: begin | end
+	From     *Pos   `json:"from,omitempty"`     // gap
+	To       *Pos   `json:"to,omitempty"`
+
+	Echo string `json:"-"` // a user event: the id the agent gave the message back with (claude's uuid, codex's clientId)
+}
+
+// Pos is a place in a run's output: a log file's identity and an offset in it.
+type Pos struct {
+	File string `json:"file"`
+	Off  int64  `json:"off"`
+}
+
+// InputID is a you event's message id.
+func (e Event) InputID() string {
+	var id string
+	if e.Kind == KindYou {
+		json.Unmarshal(e.Input, &id)
+	}
+	return id
 }
 
 // Usage is tokens as a line reports them: claude's result for its turn, codex's thread totals so far.

@@ -86,6 +86,11 @@ func (c *Client) Call(ctx context.Context, method string, params, out any) error
 	return err
 }
 
+// Watch opens a stream on the connection (wire.Conn.Watch).
+func (c *Client) Watch(ctx context.Context, method string, params any) *wire.Watch {
+	return c.conn.Watch(ctx, method, params)
+}
+
 // Err is why the client stopped, nil while it works.
 func (c *Client) Err() *wire.Error {
 	why := c.conn.Err()

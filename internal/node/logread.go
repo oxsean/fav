@@ -29,6 +29,10 @@ type Tail struct {
 	Done  bool          `json:"done"`            // the page starts at the beginning of this file
 	Prev  string        `json:"prev,omitempty"`  // Done in the current log: the log before it, still kept
 	Turn  *output.State `json:"turn,omitempty"`  // where the turns stand at From, from marks.jsonl
+	// Clip: the marks placed in the page (at its end too when that is the file's), and where marks.jsonl ended when
+	// they were read: a follow from the page's end goes on from there.
+	Marks   []Mark `json:"marks,omitempty"`
+	MarksTo int64  `json:"marks_to,omitempty"`
 }
 
 // TailLine is a line of a Clip page, as clipLine sends it.
@@ -37,6 +41,7 @@ type TailLine struct {
 	Text string `json:"text"`           // with its newline, but for a head or the last line still being written
 	Size int64  `json:"size,omitempty"` // the whole line's length, when Text is cut
 	Head bool   `json:"head,omitempty"` // Text is only the line's start
+	At   string `json:"at,omitempty"`   // a followed line: when the follow read it
 }
 
 type LineParams struct {
@@ -154,6 +159,8 @@ func (n *Node) Tail(p TailParams) (Tail, error) {
 		if head != nil {
 			t.Lines = append([]TailLine{*head}, t.Lines...)
 		}
+		ms, next := readMarks(dir, 0)
+		t.Marks, t.MarksTo = marksIn(ms, id, from, end, end == fi.Size()), next
 	}
 	t.From, t.File, t.Done, t.Turn = from, id, from == 0, turnAt(dir, id, from)
 	if t.Done {
