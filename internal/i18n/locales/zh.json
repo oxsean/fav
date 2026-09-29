@@ -232,7 +232,7 @@
   "cli.install.steps": "复制并换上：\n%s\n",
   "cli.install.dest_wsl": "%s：tend 放到那个 WSL 发行版里的 %s\n",
   "cli.install.dest_container": "%s：tend 放到 %s（容器 %s 里）\n",
-  "cli.install.usage": "用法：tend hosts install <机器> [--os linux --arch amd64] [--src 目录] [--dry-run] [--server]",
+  "cli.install.usage": "用法：tend hosts install <机器> [--os linux --arch amd64] [--src 目录] [--dry-run] [--server] [--build-there [--proxy 地址]]",
   "cli.record_not_found": "找不到记录 %q（或前缀有歧义）",
   "cli.remote.read_only": "%s 上的记录在这一版里只读，不能在这里改",
   "cli.resume.chdir_failed": "无法进入 %s：%w",
@@ -1418,5 +1418,11 @@
   "help.task_layout": "切换排列：首页 / 列表 / 树 / 看板",
   "footer.task_layout": "排列",
   "footer.board_cols": "切列",
-  "footer.board_cards": "切卡"
+  "footer.board_cards": "切卡",
+  "cli.install.flag_there": "让那台机器从源码已推送的提交自己编译 tend，不再往那里复制二进制（那边要有 git，以及 go 或 mise）",
+  "cli.install.dirty": "源码目录有未提交的改动：那台机器编译的是已推送的提交，请先提交并推送",
+  "cli.install.unpushed": "提交 %s 不在任何远端分支上：请先推送，那台机器从远端拉取",
+  "cli.install.build_there": "编译 tend %s，在 %s 上自己编译，来源 %s 的 %s 分支，提交 %s：\n%s\n",
+  "cli.install.script": "编译脚本（%s）：\n%s",
+  "cli.install.flag_proxy": "配合 --build-there：那台机器上 git 和 go 走的代理（HTTPS_PROXY），只用于这次编译"
 }

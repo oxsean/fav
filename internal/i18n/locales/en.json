@@ -232,7 +232,7 @@
   "cli.install.steps": "Copying and swapping it in:\n%s\n",
   "cli.install.dest_wsl": "%s: tend goes to %s inside that WSL distro\n",
   "cli.install.dest_container": "%s: tend goes to %s in container %s\n",
-  "cli.install.usage": "usage: tend hosts install <host> [--os linux --arch amd64] [--src dir] [--dry-run] [--server]",
+  "cli.install.usage": "usage: tend hosts install <host> [--os linux --arch amd64] [--src dir] [--dry-run] [--server] [--build-there [--proxy url]]",
   "cli.record_not_found": "record %q not found (or the prefix is ambiguous)",
   "cli.remote.read_only": "records on %s are read-only here in this version",
   "cli.resume.chdir_failed": "cannot enter %s: %w",
@@ -1418,5 +1418,11 @@
   "help.task_layout": "Arrange: home / list / tree / board",
   "footer.task_layout": "arrange",
   "footer.board_cols": "columns",
-  "footer.board_cards": "cards"
+  "footer.board_cards": "cards",
+  "cli.install.flag_there": "have the host build tend from the tree's pushed commit instead of copying a binary there (it needs git, and go or mise)",
+  "cli.install.dirty": "the source tree has uncommitted changes: the host builds a pushed commit, so commit and push first",
+  "cli.install.unpushed": "commit %s is on no remote branch: push it first, the host fetches it from there",
+  "cli.install.build_there": "Building tend %s on %s from %s, branch %s at %s:\n%s\n",
+  "cli.install.script": "The build script (%s):\n%s",
+  "cli.install.flag_proxy": "with --build-there: the proxy the host's git and go go through (HTTPS_PROXY), for this build only"
 }

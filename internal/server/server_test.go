@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/oxsean/fav/internal/agent"
 	"github.com/oxsean/fav/internal/coord"
 	"github.com/oxsean/fav/internal/dial"
 	"github.com/oxsean/fav/internal/node"
@@ -135,6 +136,7 @@ func (r *rig) node(token string) *wire.Conn {
 
 func (r *rig) dialNode(home, token string) (*wire.Conn, error) {
 	n := node.New(home)
+	n.Probe = func(string) agent.Check { return agent.Check{Installed: true, Auth: agent.AuthOK} } // ⚠️ a real probe holds the connection's drain for seconds
 	n.Limits = tend.NodeConfig{AllowDirs: []string{os.TempDir(), r.t.TempDir()}}
 	n.Launch = func(dir string, spec node.Spec) (string, error) {
 		os.WriteFile(filepath.Join(dir, "output.log"), []byte("done here\n"), 0o600)

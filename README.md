@@ -329,6 +329,7 @@ tend hosts add win win-pc --tend 'C:\Users\me\.local\bin\tend.exe'
 tend hosts add wsl win-pc --wsl Debian --tend /home/me/.local/bin/tend            # a WSL distro of that Windows machine
 tend hosts add box nas --docker dev --tend /usr/local/bin/tend                    # a container there (--docker-cmd podman / a full path)
 tend hosts install mba [--dry-run]       # build tend from this checkout for its system and put it there — in the distro or container too — then check the version
+tend hosts install win --build-there     # have the host build the pushed commit itself (git and go or mise there), for links too slow for the binary
 tend hosts                               # the machines, the tend version each answered with, when each list was last fetched
 tend hosts check [name…]                 # connect, versions, system, claude/codex on PATH, a round trip with Chinese text, list and message timings
 tend hosts rm <name…> · tend hosts clear [name…]   # remove machines / forget cached lists

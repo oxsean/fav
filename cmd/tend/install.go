@@ -25,7 +25,7 @@ const module = "github.com/oxsean/fav"
 
 // cmdHostsInstall cross-compiles tend from a source tree for a host and puts it where the host's config runs it — beside
 // it and renamed in, inside the WSL distro or the container when tend runs there — then asks the host which tend
-// answers. Only ever run by hand.
+// answers. With --build-there the host builds the tree's pushed commit itself instead. Only ever run by hand.
 func cmdHostsInstall(args []string) error {
 	fs := newFlags("hosts install")
 	goos := fs.String("os", "", i18n.T("cli.install.flag_os"))
@@ -33,6 +33,8 @@ func cmdHostsInstall(args []string) error {
 	src := fs.String("src", "", i18n.T("cli.install.flag_src"))
 	dry := fs.Bool("dry-run", false, i18n.T("cli.install.flag_dry_run"))
 	withServer := fs.Bool("server", false, i18n.T("cli.install.flag_server"))
+	there := fs.Bool("build-there", false, i18n.T("cli.install.flag_there"))
+	proxy := fs.String("proxy", "", i18n.T("cli.install.flag_proxy"))
 	pos, err := parseMixed(fs, args)
 	if err != nil {
 		return err
@@ -84,8 +86,11 @@ func cmdHostsInstall(args []string) error {
 		return err
 	}
 	defer os.RemoveAll(tmp)
-	out := filepath.Join(tmp, "tend")
 	ver := sourceVersion(root)
+	if *there {
+		return buildThere(h, t, root, *goos, ver, tmp, *proxy, *dry, *withServer)
+	}
+	out := filepath.Join(tmp, "tend")
 	build := buildCmd(root, *goos, *goarch, ver, out, "./cmd/tend")
 	steps, cleanup := t.steps(h, *goos, out)
 	fmt.Print(i18n.F("cli.install.build", *goos, *goarch, root, shell.User().Join(build.Args)))
@@ -106,27 +111,56 @@ func cmdHostsInstall(args []string) error {
 			return i18n.E("cli.install.failed", c.Args[0], err)
 		}
 	}
-	hello, err := askHello(h)
-	if err != nil {
-		return i18n.E("cli.install.unverified", h.Name, dest, reasonOf(err))
+	if err := checkInstalled(h, dest, *goos, *goarch, ver); err != nil {
+		return err
 	}
-	if hello.Version != ver || hello.OS != *goos || hello.Arch != *goarch {
-		return i18n.E("cli.install.other_tend", h.Name, hello.Version, hello.OS+"/"+hello.Arch, dest, ver)
-	}
-	fmt.Print(i18n.F("cli.install.done", h.Name, dest, hello.Version))
 	if *withServer {
 		return installServer(h, t, root, *goos, *goarch, ver, tmp)
 	}
 	return nil
 }
 
+// checkInstalled asks h which tend answers now: the one just put at dest, of version ver for goos (and goarch, unless
+// "").
+func checkInstalled(h tend.Host, dest, goos, goarch, ver string) error {
+	hello, err := askHello(h)
+	if err != nil {
+		return i18n.E("cli.install.unverified", h.Name, dest, reasonOf(err))
+	}
+	if hello.Version != ver || hello.OS != goos || goarch != "" && hello.Arch != goarch {
+		return i18n.E("cli.install.other_tend", h.Name, hello.Version, hello.OS+"/"+hello.Arch, dest, ver)
+	}
+	fmt.Print(i18n.F("cli.install.done", h.Name, dest, hello.Version))
+	return nil
+}
+
+// serverPath is where tend-server goes: next to tend at dest.
+func serverPath(dest, goos string) string {
+	p := path.Join(path.Dir(dest), "tend-server")
+	if goos == "windows" {
+		p += ".exe"
+	}
+	return p
+}
+
+// checkServer asks the tend-server at dest, run the way h runs tend, for its version.
+func checkServer(h tend.Host, dest, ver string) error {
+	argv := []string{dest}
+	if n := len(h.Tend); n > 0 {
+		argv = append(slices.Clone(h.Tend[:n-1]), dest)
+	}
+	got, err := sshCmd(h.SSH, remote.RemoteShell(h).Join(append(argv, "version"))).Output()
+	if v := strings.TrimSpace(string(got)); err != nil || v != "tend-server "+ver {
+		return i18n.E("cli.install.server_other", h.Name, dest, v, ver)
+	}
+	fmt.Print(i18n.F("cli.install.server_done", h.Name, dest, ver))
+	return nil
+}
+
 // installServer puts tend-server next to the tend just installed and asks it for its version.
 func installServer(h tend.Host, t target, root, goos, goarch, ver, tmp string) error {
 	st := t
-	st.dest = path.Join(path.Dir(t.destFor(goos)), "tend-server")
-	if goos == "windows" {
-		st.dest += ".exe"
-	}
+	st.dest = serverPath(t.destFor(goos), goos)
 	out := filepath.Join(tmp, "tend-server")
 	steps, cleanup := st.steps(h, goos, out)
 	if cleanup != nil {
@@ -138,16 +172,7 @@ func installServer(h tend.Host, t target, root, goos, goarch, ver, tmp string) e
 			return i18n.E("cli.install.failed", c.Args[0], err)
 		}
 	}
-	argv := []string{st.dest}
-	if n := len(h.Tend); n > 0 {
-		argv = append(slices.Clone(h.Tend[:n-1]), st.dest)
-	}
-	got, err := sshCmd(h.SSH, remote.RemoteShell(h).Join(append(argv, "version"))).Output()
-	if v := strings.TrimSpace(string(got)); err != nil || v != "tend-server "+ver {
-		return i18n.E("cli.install.server_other", h.Name, st.dest, v, ver)
-	}
-	fmt.Print(i18n.F("cli.install.server_done", h.Name, st.dest, ver))
-	return nil
+	return checkServer(h, st.dest, ver)
 }
 
 // target is where tend runs on a host and how a new binary gets there.
@@ -329,16 +354,26 @@ func prepLine(k shell.Kind, dest string) string {
 }
 
 // swapLine puts dest.new in dest's place. Windows cannot replace a running .exe but can rename it, so the old one moves
-// aside to dest.old first.
+// aside, to dest.old or, while an earlier one still runs from there, to dest.<n>.old; old ones no longer running go.
 func swapLine(k shell.Kind, dest string) string {
 	switch k {
 	case shell.Cmd:
 		w := strings.ReplaceAll(dest, "/", `\`)
-		return "(if exist " + k.Quote(w) + " move /y " + k.Quote(w) + " " + k.Quote(w+".old") + " >nul) & move /y " + k.Quote(w+".new") + " " + k.Quote(w)
+		q := func(suffix string) string { return k.Quote(w + suffix) }
+		return "(del /f /q " + q(".old") + " " + q(".*.old") + " >nul 2>&1) & " +
+			"(if exist " + q(".old") + " (if exist " + q("") + " move /y " + q("") + " " + q(".%RANDOM%.old") + " >nul) else if exist " + q("") + " move /y " + q("") + " " + q(".old") + " >nul) & " +
+			"move /y " + q(".new") + " " + q("")
 	case shell.PowerShell:
-		return "if (Test-Path " + k.Quote(dest) + ") { Move-Item -Force " + k.Quote(dest) + " " + k.Quote(dest+".old") + " }; Move-Item -Force " + k.Quote(dest+".new") + " " + k.Quote(dest)
+		return psSwap(psLiteral(dest))
 	}
 	return k.Join([]string{"mv", "-f", dest + ".new", dest})
+}
+
+// psSwap is swapLine for PowerShell, dest being any PowerShell expression.
+func psSwap(dest string) string {
+	return "$swap = " + dest + "; Get-Item \"$swap.old\", \"$swap.*.old\" -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue; " +
+		"if (Test-Path $swap) { $old = \"$swap.old\"; if (Test-Path $old) { $old = \"$swap.$([DateTime]::UtcNow.Ticks).old\" }; Move-Item -Force $swap $old }; " +
+		"Move-Item -Force \"$swap.new\" $swap"
 }
 
 func askHello(h tend.Host) (remote.Hello, error) {

@@ -326,6 +326,7 @@ tend hosts add win win-pc --tend 'C:\Users\me\.local\bin\tend.exe'
 tend hosts add wsl win-pc --wsl Debian --tend /home/me/.local/bin/tend            # 那台 Windows 里的一个 WSL 发行版
 tend hosts add box nas --docker dev --tend /usr/local/bin/tend                    # 那边的一个容器（--docker-cmd podman 或完整路径）
 tend hosts install mba [--dry-run]       # 用当前源码按那边的系统编译 tend 并装过去（WSL、容器里也行），最后核对版本
+tend hosts install win --build-there     # 让那台机器自己编译已推送的提交（那边要有 git，以及 go 或 mise），链路传不动二进制时用
 tend hosts                               # 机器列表、各自应答的 tend 版本、列表上次什么时候取的
 tend hosts check [名字…]                 # 连接、版本、系统、claude/codex 是否在 PATH、中文往返、列表和读消息耗时
 tend hosts rm <名字…> · tend hosts clear [名字…]   # 删掉机器 / 清掉缓存的列表
