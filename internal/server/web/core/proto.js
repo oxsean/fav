@@ -142,6 +142,12 @@ export const methods = Object.freeze([
   'run.interrupt',
   'machines.watch',
   'inbox.watch',
+  'run.output.item',
+  'run.output.find',
+  'run.changes',
+  'run.diff',
+  'run.blob',
+  'project.dirs',
 ]);
 
 // workflow.Builtins: the workflows a task or project may name besides its project's own.

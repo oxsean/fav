@@ -14,11 +14,7 @@ import (
 
 // comingMethods are methods the Web UI calls before the coordinator answers them, each with the card that adds it
 // there; a card that does removes its line.
-var comingMethods = map[string]string{
-	"project.dirs": "T4.3",
-	"run.changes":  "T4.3",
-	"run.diff":     "T4.3",
-}
+var comingMethods = map[string]string{}
 
 var methodCall = regexp.MustCompile(`\b(?:call|watch|has|send)\(\s*'([a-z_]+(?:\.[a-z_]+)+)'`)
 

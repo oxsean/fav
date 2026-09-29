@@ -1,4 +1,4 @@
-{"note":"changes where not everything can be shown, after home-state: a run outside git (r4, only what the agent's tools changed), a directory run on a machine this viewer does not own (r5, four more files only the owner sees), a run whose changes were cleared (r8), and a hunk whose content was cleared. Shapes as the design draft's §4.6 states them: run.changes and run.diff are not decoded strictly in Go until the node (T2c.2) and the coordinator (T4.3) have them."}
+{"note":"changes where not everything can be shown, after home-state: a run outside git (r4, only what the agent's tools changed), a directory run on a machine this viewer does not own (r5, four more files only the owner sees), a run whose changes were cleared (r8), and a hunk whose content was cleared. Shapes as the design draft's §4.6 states them; Go decodes run.changes and run.diff as node.Changes / node.Diff."}
 {"step":"lists"}
 {"c":{"type":"req","id":5,"method":"run.changes","params":{"run":"r4"}}}
 {"s":{"type":"res","id":5,"result":{"files":[{"path":"notes.txt","op":"modify","add":2,"del":1,"bytes":120,"agent":true}],"total":{"files":1,"add":2,"del":1},"git":false}}}
