@@ -214,7 +214,7 @@ func TestAMessageGoesToARunningRunAndAQuestionNeedsItsAnswers(t *testing.T) {
 		t.Fatalf("%+v", got.Sends)
 	}
 	end := e.wait(r.ID, ended)
-	if len(end.Sends) != 1 || end.Sends[0].State != agent.SendSent {
+	if len(end.Sends) != 1 || end.Sends[0].State != agent.SendSeen {
 		t.Fatalf("%+v", end.Sends)
 	}
 	if err := e.call(MRunSend, SendMessage{Run: r.ID, Text: "late"}, nil); wire.Code(err) != wire.CodeConflict {

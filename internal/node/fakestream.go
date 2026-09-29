@@ -42,6 +42,11 @@ func fakeStream(o fakeOpts) error {
 	}()
 	out := json.NewEncoder(os.Stdout)
 	emit := func(v any) { out.Encode(v) }
+	replay := func(m map[string]any) { // as claude's --replay-user-messages: a message it takes in comes back with its uuid
+		if m["uuid"] != nil {
+			emit(map[string]any{"type": "user", "message": m["message"], "uuid": m["uuid"], "isReplay": true})
+		}
+	}
 	var heard []string
 	interrupted := false
 	// next waits for the next message that is not a control response; nil when input ended
@@ -71,6 +76,7 @@ func fakeStream(o fakeOpts) error {
 				if want == "" {
 					return m
 				}
+				replay(m)
 				heard = append(heard, userText(m))
 			}
 		}
@@ -80,6 +86,7 @@ func fakeStream(o fakeOpts) error {
 	if first == nil {
 		return nil
 	}
+	replay(first)
 	cwd := o.dir
 	if cwd == "" {
 		cwd, _ = os.Getwd()
@@ -126,6 +133,7 @@ func fakeStream(o fakeOpts) error {
 				}
 				switch {
 				case m["type"] == "user":
+					replay(m)
 					heard = append(heard, userText(m))
 				case m["type"] == "control_request":
 					if req, _ := m["request"].(map[string]any); req["subtype"] == "interrupt" {
@@ -219,6 +227,7 @@ func fakeStream(o fakeOpts) error {
 		if m["type"] != "user" {
 			continue
 		}
+		replay(m)
 		heard = append(heard, userText(m))
 		tell()
 		result("heard")

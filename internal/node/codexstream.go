@@ -26,6 +26,7 @@ type codexProto struct {
 type codexCall struct {
 	method string
 	text   string // turn/steer: the message, sent as a new turn when the steer comes too late
+	input  string // turn/steer: the message's id
 }
 
 var errNotReady = errors.New("the agent has no thread yet")
@@ -37,33 +38,39 @@ func (c *codexProto) sendThen(v map[string]any, done func(error)) error {
 	return c.s.in.sendThen(v, done)
 }
 
-func (c *codexProto) call(method string, params any, text string) error {
-	return c.callThen(method, params, text, nil)
+func (c *codexProto) call(method string, params any) error {
+	return c.callThen(method, params, codexCall{}, nil)
 }
 
-func (c *codexProto) callThen(method string, params any, text string, done func(error)) error {
+func (c *codexProto) callThen(method string, params any, call codexCall, done func(error)) error {
 	c.mu.Lock()
 	c.next++
 	id := c.next
 	if c.calls == nil {
 		c.calls = map[int]codexCall{}
 	}
-	c.calls[id] = codexCall{method, text}
+	call.method = method
+	c.calls[id] = call
 	c.mu.Unlock()
 	return c.sendThen(map[string]any{"id": id, "method": method, "params": params}, done)
 }
 
-func (c *codexProto) reply(id json.RawMessage, result any) error {
-	return c.send(map[string]any{"id": id, "result": result})
+func (c *codexProto) reply(id json.RawMessage, result any, done func(error)) error {
+	return c.sendThen(map[string]any{"id": id, "result": result}, done)
 }
 
 func textInput(text string) []any { return []any{map[string]any{"type": "text", "text": text}} }
+
+// turnInput is a turn's input: text, and the id its userMessage item gives back (clientId).
+func turnInput(thread, text, id string) map[string]any {
+	return map[string]any{"threadId": thread, "input": textInput(text), "clientUserMessageId": id}
+}
 
 func (c *codexProto) begin(brief string) {
 	c.mu.Lock()
 	c.brief = brief
 	c.mu.Unlock()
-	c.call("initialize", map[string]any{"clientInfo": map[string]any{"name": "tend", "version": "1"}}, "")
+	c.call("initialize", map[string]any{"clientInfo": map[string]any{"name": "tend", "version": "1"}})
 }
 
 type rpcMessage struct {
@@ -76,7 +83,7 @@ type rpcMessage struct {
 	} `json:"error"`
 }
 
-func (c *codexProto) line(text []byte) bool {
+func (c *codexProto) line(text []byte, at logPos) bool {
 	var m rpcMessage
 	if json.Unmarshal(text, &m) != nil || m.Method == "" && len(m.ID) == 0 {
 		return false
@@ -87,7 +94,7 @@ func (c *codexProto) line(text []byte) bool {
 	case len(m.ID) > 0:
 		c.request(m)
 	default:
-		c.notification(m)
+		c.notification(m, at)
 	}
 	return true
 }
@@ -104,7 +111,7 @@ func (c *codexProto) response(m rpcMessage) {
 		switch call.method {
 		case "turn/steer": // the turn ended meanwhile: the message starts the next one
 			if thread != "" {
-				c.call("turn/start", map[string]any{"threadId": thread, "input": textInput(call.text)}, "")
+				c.call("turn/start", turnInput(thread, call.text, call.input))
 			}
 		case "initialize", "thread/start", "thread/resume", "turn/start":
 			c.s.mu.Lock()
@@ -118,9 +125,9 @@ func (c *codexProto) response(m rpcMessage) {
 	case "initialize":
 		c.send(map[string]any{"method": "initialized"})
 		if c.s.spec.Session != "" {
-			c.call("thread/resume", map[string]any{"threadId": c.s.spec.Session, "approvalPolicy": "on-request"}, "")
+			c.call("thread/resume", map[string]any{"threadId": c.s.spec.Session, "approvalPolicy": "on-request"})
 		} else {
-			c.call("thread/start", map[string]any{"cwd": c.s.spec.Dir, "approvalPolicy": "on-request"}, "")
+			c.call("thread/start", map[string]any{"cwd": c.s.spec.Dir, "approvalPolicy": "on-request"})
 		}
 	case "thread/start", "thread/resume":
 		var r struct {
@@ -136,13 +143,13 @@ func (c *codexProto) response(m rpcMessage) {
 		if r.Thread.ID != "" && !c.s.bound() {
 			c.s.keep(func(st *State) { st.Session = r.Thread.ID })
 		}
-		turn := map[string]any{"threadId": r.Thread.ID, "input": textInput(brief)}
+		turn := turnInput(r.Thread.ID, brief, briefInput)
 		if r.Sandbox["type"] == "workspaceWrite" { // tend run note / ask / verdict write the run's directory
 			roots, _ := r.Sandbox["writableRoots"].([]any)
 			r.Sandbox["writableRoots"] = append(roots, c.s.dir)
 			turn["sandboxPolicy"] = r.Sandbox
 		}
-		c.call("turn/start", turn, "")
+		c.call("turn/start", turn)
 	case "turn/start":
 		var r struct {
 			Turn struct {
@@ -181,7 +188,7 @@ func (c *codexProto) request(m rpcMessage) {
 	switch m.Method {
 	case "item/commandExecution/requestApproval":
 		if ownReport(p.Command) {
-			c.reply(m.ID, map[string]any{"decision": "accept"})
+			c.reply(m.ID, map[string]any{"decision": "accept"}, nil)
 			return
 		}
 		req.Tool, req.Summary = "shell", clip(firstOf(p.Command, p.Reason), maxSummary)
@@ -216,7 +223,7 @@ func firstOf(ss ...string) string {
 	return ""
 }
 
-func (c *codexProto) notification(m rpcMessage) {
+func (c *codexProto) notification(m rpcMessage, at logPos) {
 	var p struct {
 		Turn struct {
 			ID     string `json:"id"`
@@ -226,9 +233,11 @@ func (c *codexProto) notification(m rpcMessage) {
 			} `json:"error"`
 		} `json:"turn"`
 		Item struct {
-			Type string `json:"type"`
-			Text string `json:"text"`
+			Type     string `json:"type"`
+			Text     string `json:"text"`
+			ClientID string `json:"clientId"`
 		} `json:"item"`
+		RequestID  json.RawMessage `json:"requestId"`
 		TokenUsage struct {
 			Total struct {
 				Input  int64 `json:"inputTokens"`
@@ -262,6 +271,14 @@ func (c *codexProto) notification(m rpcMessage) {
 		s.spent(agent.Usage{Turns: 1})
 		s.out.turnDone = time.Now()
 		s.mu.Unlock()
+	case "item/started":
+		if p.Item.Type == "userMessage" && p.Item.ClientID != "" {
+			s.tookIn(p.Item.ClientID, at)
+		}
+	case "serverRequest/resolved": // answered, or gone by itself
+		if len(p.RequestID) > 0 {
+			s.resolved("rpc-"+string(p.RequestID), at)
+		}
 	case "item/completed":
 		if p.Item.Type == "agentMessage" {
 			s.mu.Lock()
@@ -287,7 +304,7 @@ func (c *codexProto) notification(m rpcMessage) {
 	}
 }
 
-func (c *codexProto) answer(p pending, a agent.Answer) error {
+func (c *codexProto) answer(p pending, a agent.Answer, done func(error)) error {
 	decision := "decline"
 	if a.Allow {
 		decision = "accept"
@@ -295,9 +312,9 @@ func (c *codexProto) answer(p pending, a agent.Answer) error {
 	switch p.method {
 	case "item/permissions/requestApproval":
 		if a.Allow {
-			return c.reply(p.id, map[string]any{"permissions": p.input, "scope": "turn"})
+			return c.reply(p.id, map[string]any{"permissions": p.input, "scope": "turn"}, done)
 		}
-		return c.reply(p.id, map[string]any{"permissions": map[string]any{}})
+		return c.reply(p.id, map[string]any{"permissions": map[string]any{}}, done)
 	case "item/tool/requestUserInput":
 		answers := map[string]any{}
 		if a.Allow {
@@ -307,12 +324,12 @@ func (c *codexProto) answer(p pending, a agent.Answer) error {
 				}
 			}
 		}
-		return c.reply(p.id, map[string]any{"answers": answers})
+		return c.reply(p.id, map[string]any{"answers": answers}, done)
 	}
-	return c.reply(p.id, map[string]any{"decision": decision})
+	return c.reply(p.id, map[string]any{"decision": decision}, done)
 }
 
-func (c *codexProto) message(text string, done func(error)) error {
+func (c *codexProto) message(id, text string, done func(error)) error {
 	c.mu.Lock()
 	thread, turn := c.thread, c.turn
 	c.mu.Unlock()
@@ -320,16 +337,18 @@ func (c *codexProto) message(text string, done func(error)) error {
 	case thread == "":
 		return errNotReady
 	case turn != "":
-		return c.callThen("turn/steer", map[string]any{"threadId": thread, "expectedTurnId": turn, "input": textInput(text)}, text, done)
+		steer := turnInput(thread, text, id)
+		steer["expectedTurnId"] = turn
+		return c.callThen("turn/steer", steer, codexCall{text: text, input: id}, done)
 	}
-	return c.callThen("turn/start", map[string]any{"threadId": thread, "input": textInput(text)}, "", done)
+	return c.callThen("turn/start", turnInput(thread, text, id), codexCall{}, done)
 }
 
-func (c *codexProto) interrupt() {
+func (c *codexProto) interrupt(string) {
 	c.mu.Lock()
 	thread, turn := c.thread, c.turn
 	c.mu.Unlock()
 	if turn != "" {
-		c.call("turn/interrupt", map[string]any{"threadId": thread, "turnId": turn}, "")
+		c.call("turn/interrupt", map[string]any{"threadId": thread, "turnId": turn})
 	}
 }

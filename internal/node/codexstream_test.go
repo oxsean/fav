@@ -119,7 +119,7 @@ func TestCodexApprovalsQuestionsAndSteering(t *testing.T) {
 	if m := g.sent(t); mustJSON(m["result"]) != `{"answers":{"q1":{"answers":["pg"]}}}` {
 		t.Fatalf("%v", m)
 	}
-	if g.s.proto.message("use tabs", nil) != nil {
+	if g.s.proto.message("m1", "use tabs", nil) != nil {
 		t.Fatal("message")
 	}
 	m := g.sent(t)

@@ -2,16 +2,21 @@ package node
 
 import (
 	"cmp"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/oxsean/fav/internal/agent"
+	"github.com/oxsean/fav/internal/output"
 	"github.com/oxsean/fav/internal/paths"
 	"github.com/oxsean/fav/internal/wire"
 )
@@ -20,12 +25,15 @@ import (
 // permission prompts and questions come out as control requests that wait in the run's state until someone answers
 // (answers.jsonl); messages for the agent while it runs wait in inbox.jsonl until they are written to it.
 const (
-	answersFile = "answers.jsonl"
-	inboxFile   = "inbox.jsonl"
+	answersFile    = "answers.jsonl"
+	inboxFile      = "inbox.jsonl"
+	interruptsFile = "interrupts.jsonl" // turns to interrupt (InterruptParams)
+	briefInput     = "brief"            // the id the brief goes to the agent with
 
 	streamEvery    = 250 * time.Millisecond
-	turnGrace      = 2 * time.Second // after a turn ends: no new output this long closes stdin, and the agent exits
-	interruptGrace = 3 * time.Second // a stop interrupts the turn first; the tree is stopped after this
+	turnGrace      = 2 * time.Second  // after a turn ends: no new output this long closes stdin, and the agent exits
+	seenWait       = 30 * time.Second // a message sent and not yet taken in keeps stdin open this long after a turn ends
+	interruptGrace = 3 * time.Second  // a stop interrupts the turn first; the tree is stopped after this
 	maxSends       = 50
 	maxSendText    = 1 << 10
 	maxSummary     = 500
@@ -182,8 +190,17 @@ func (in *streamIn) finish(d time.Duration) {
 	in.settle(left, errClosed)
 }
 
-func userMessage(text string) any {
-	return map[string]any{"type": "user", "message": map[string]any{"role": "user", "content": text}}
+// userMessage is claude's user message; it gives uuid back when it takes the message in (--replay-user-messages).
+func userMessage(text, uuid string) any {
+	return map[string]any{"type": "user", "message": map[string]any{"role": "user", "content": text}, "uuid": uuid}
+}
+
+// uuidFor is the uuid message id of run goes to claude with: the same id always gets the same one.
+func uuidFor(run, id string) string {
+	h := sha256.Sum256([]byte(run + "/" + id))
+	h[6], h[8] = h[6]&0x0f|0x50, h[8]&0x3f|0x80
+	x := hex.EncodeToString(h[:16])
+	return x[:8] + "-" + x[8:12] + "-" + x[12:16] + "-" + x[16:20] + "-" + x[20:]
 }
 
 func controlRequest(id string, req map[string]any) any {
@@ -206,11 +223,11 @@ func ownReport(command string) bool {
 
 // proto is how a stream run's agent speaks on stdin and stdout.
 type proto interface {
-	begin(brief string)                          // send the brief
-	line(text []byte) bool                       // take a line of output it knows; false leaves it to the common reading
-	answer(p pending, a agent.Answer) error      // answer a request
-	message(text string, done func(error)) error // a message while it runs; done is told once it reached the agent
-	interrupt()                                  // end the current turn
+	begin(brief string)                                       // send the brief
+	line(text []byte, at logPos) bool                         // take a line of output it knows, logged at at; false leaves it to the common reading
+	answer(p pending, a agent.Answer, done func(error)) error // answer a request; done is told once it reached the agent
+	message(id, text string, done func(error)) error          // a message while it runs; done is told once it reached the agent
+	interrupt(id string)                                      // end the current turn
 }
 
 // startStream sends the agent its brief.
@@ -317,7 +334,7 @@ func (s *sup) takeAnswers() {
 			s.userDenied[p.tool] = true
 			s.mu.Unlock()
 		}
-		s.proto.answer(p, a)
+		s.proto.answer(p, a, nil)
 		s.mu.Lock()
 		s.seen = time.Now() // it waited on the user, not stalled
 		s.mu.Unlock()
@@ -342,7 +359,7 @@ func (s *sup) takeInbox() {
 	}
 	s.keep(func(st *State) { st.Sends = keepSends(append(slices.Clone(st.Sends), ms...)) })
 	for i, m := range ms {
-		if err := s.proto.message(texts[i], func(err error) { s.delivered(m.ID, err) }); err != nil {
+		if err := s.proto.message(m.ID, texts[i], func(err error) { s.delivered(m.ID, err) }); err != nil {
 			s.delivered(m.ID, err)
 		}
 	}
@@ -360,11 +377,100 @@ func (s *sup) delivered(id string, err error) {
 	s.keep(func(st *State) {
 		st.Sends = slices.Clone(st.Sends)
 		for i := range st.Sends {
-			if st.Sends[i].ID == id {
+			if st.Sends[i].ID == id && st.Sends[i].State != agent.SendSeen { // it may have come back already
 				st.Sends[i].State = state
 			}
 		}
 	})
+}
+
+// sendOfUUID is the message sent to claude with uuid, "" when none was.
+func (s *sup) sendOfUUID(uuid string) string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, m := range s.st.Sends {
+		if uuidFor(s.spec.Run, m.ID) == uuid {
+			return m.ID
+		}
+	}
+	return ""
+}
+
+// tookIn records that the agent took message id in, its output giving it back at at; only the first time counts:
+// claude gives several messages sent together back once each, the last one holding all their text.
+func (s *sup) tookIn(id string, at logPos) {
+	s.mu.Lock()
+	i := slices.IndexFunc(s.st.Sends, func(m agent.Send) bool { return m.ID == id })
+	fresh := i >= 0 && s.st.Sends[i].State != agent.SendSeen
+	s.mu.Unlock()
+	if !fresh {
+		return
+	}
+	s.markAt(Mark{Event: markInput, ID: id}, at)
+	s.keep(func(st *State) {
+		st.Sends = slices.Clone(st.Sends)
+		for i := range st.Sends {
+			if st.Sends[i].ID == id {
+				st.Sends[i].State = agent.SendSeen
+			}
+		}
+	})
+}
+
+// unseen: a message reached the agent's input and it has not taken it in yet.
+func (s *sup) unseen() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return slices.ContainsFunc(s.st.Sends, func(m agent.Send) bool { return m.State == agent.SendSent })
+}
+
+// resolved marks where request id was answered, at at; one the agent dropped by itself no longer waits.
+func (s *sup) resolved(id string, at logPos) {
+	s.markAt(Mark{Event: markResolved, ID: id}, at)
+	s.mu.Lock()
+	_, waits := s.inputs[id]
+	delete(s.inputs, id)
+	s.mu.Unlock()
+	if waits {
+		s.keep(func(st *State) {
+			st.Requests = slices.DeleteFunc(slices.Clone(st.Requests), func(r agent.Request) bool { return r.ID == id })
+			s.markRequests(st)
+		})
+	}
+}
+
+func (s *sup) markAt(m Mark, at logPos) {
+	if s.log != nil {
+		s.log.markAt(m, at)
+	}
+}
+
+// interruptAsk is a line of interrupts.jsonl.
+type interruptAsk struct {
+	ID   string    `json:"id"`
+	Turn int       `json:"turn"`
+	At   time.Time `json:"at"`
+}
+
+// takeInterrupts ends the current turn when one that came since the last look asks for it, and closes the agent's
+// input so it exits after; an ask for a turn that is over does nothing. It answers whether it interrupted.
+func (s *sup) takeInterrupts() bool {
+	asks, next := linesFrom(filepath.Join(s.dir, interruptsFile), s.interruptsAt, func(a interruptAsk) bool { return a.ID != "" })
+	s.interruptsAt = next
+	for _, a := range asks {
+		var now output.State
+		if s.log != nil {
+			now = s.log.turn()
+		}
+		if max(now.Turn, 1) != a.Turn || now.Closed || s.in.isClosed() {
+			continue
+		}
+		s.proto.interrupt(a.ID)
+		s.markAt(Mark{Event: markInterrupt, ID: a.ID, N: a.Turn}, logPos{})
+		s.in.close()
+		return true
+	}
+	return false
 }
 
 func keepSends(ss []agent.Send) []agent.Send {
@@ -374,17 +480,23 @@ func keepSends(ss []agent.Send) []agent.Send {
 	return ss
 }
 
-// streamTick answers, sends, and closes the agent's input once a turn has ended and nothing more came.
-func (s *sup) streamTick() {
+// streamTick answers, sends, interrupts, and closes the agent's input once a turn has ended and nothing more came. It
+// answers whether it interrupted the turn.
+func (s *sup) streamTick() bool {
 	s.takeAnswers()
 	s.takeInbox()
+	if s.takeInterrupts() {
+		return true
+	}
 	s.mu.Lock()
 	done, sent := s.out.turnDone, s.sent
 	s.mu.Unlock()
-	// only a message it was sent can start another turn, and one on its way may be about to
-	if !done.IsZero() && (!sent || time.Since(done) > turnGrace) && !s.in.waiting() {
+	// only a message it was sent can start another turn, one on its way may be about to, and one it has not taken in
+	// yet will (claude takes a message sent while it only writes after that turn's result)
+	if !done.IsZero() && (!sent || time.Since(done) > turnGrace) && !s.in.waiting() && (!s.unseen() || time.Since(done) > seenWait) {
 		s.in.close()
 	}
+	return false
 }
 
 // endStream closes the agent's input for good: messages still waiting fail, requests no one answered go.
@@ -435,6 +547,70 @@ func (n *Node) Answer(p AnswerParams) (Snapshot, error) {
 		return Snapshot{}, err
 	}
 	return s, nil
+}
+
+// Features of stream runs: FeatureInputMarks, marks.jsonl places where the agent took a message in (input) and
+// where a request was answered (resolved), and a message the agent took in is seen; FeatureInterrupt, run.interrupt.
+const (
+	FeatureInputMarks = "input_marks"
+	FeatureInterrupt  = "interrupt"
+)
+
+// InterruptParams ends turn Turn of stream run Run, unless that turn is over by the time the run's supervisor reads it.
+type InterruptParams struct {
+	Run  string `json:"run"`
+	Turn int    `json:"turn"`
+	ID   string `json:"id,omitempty"` // the same id again is a no-op; "" gets a new one
+}
+
+// Interrupted answers run.interrupt.
+type Interrupted struct {
+	ID string `json:"id"`
+	Snapshot
+}
+
+var markID = regexp.MustCompile(`^[A-Za-z0-9_.-]{1,64}$`)
+
+// Interrupt asks the supervisor of a running stream run to interrupt a turn. An ended run's turns are all over: it
+// changes nothing.
+func (n *Node) Interrupt(p InterruptParams) (Interrupted, error) {
+	if !runID.MatchString(p.Run) || p.Turn < 1 || p.ID != "" && !markID.MatchString(p.ID) {
+		return Interrupted{}, &wire.Error{Code: wire.CodeBadRequest, Detail: "interrupt"}
+	}
+	dir := n.runDir(p.Run)
+	var spec Spec
+	if err := readJSON(filepath.Join(dir, "spec.json"), &spec); err != nil {
+		if !paths.Exists(dir) || errors.Is(err, os.ErrNotExist) {
+			return Interrupted{}, &wire.Error{Code: wire.CodeNotFound, Detail: p.Run}
+		}
+		return Interrupted{}, err
+	}
+	s, err := n.Snapshot(p.Run)
+	if err != nil {
+		return Interrupted{}, err
+	}
+	path := filepath.Join(dir, interruptsFile)
+	if p.ID == "" {
+		p.ID = newMarkID("int_")
+	} else if done, _ := linesFrom(path, 0, func(a interruptAsk) bool { return a.ID == p.ID }); len(done) > 0 {
+		return Interrupted{ID: p.ID, Snapshot: s}, nil
+	}
+	if Terminal(s.State.State) {
+		return Interrupted{ID: p.ID, Snapshot: s}, nil
+	}
+	if !spec.Stream {
+		return Interrupted{}, &wire.Error{Code: wire.CodeConflict, Detail: "cannot_interrupt"}
+	}
+	if err := appendLine(path, interruptAsk{ID: p.ID, Turn: p.Turn, At: time.Now()}); err != nil {
+		return Interrupted{}, err
+	}
+	return Interrupted{ID: p.ID, Snapshot: s}, nil
+}
+
+func newMarkID(prefix string) string {
+	var b [6]byte
+	rand.Read(b[:])
+	return prefix + hex.EncodeToString(b[:])
 }
 
 // Send queues a message for a running stream run; sending the same id again is a no-op.

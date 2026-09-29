@@ -1201,6 +1201,7 @@
   "cli.run.show_send": "message  %s · %s\n",
   "send.queued": "queued",
   "send.sent": "sent",
+  "send.seen": "received by the agent",
   "send.failed": "not delivered",
   "tasks.answered": "answered %s",
   "tasks.answer_title": "Run %s waits on you",

@@ -12,16 +12,17 @@ import (
 
 // Methods a node answers besides the session reads.
 const (
-	MRunStart  = "run.start"
-	MRunStop   = "run.stop"
-	MRunList   = "run.list"
-	MRunTail   = "run.tail"
-	MRunLine   = "run.line"     // one whole line of a run's output (LineParams)
-	MRunResume = "run.resume"   // run.start continuing a session (StartParams.Resume)
-	MRunAnswer = "run.answer"   // an answer to what a stream run waits on (AnswerParams)
-	MRunSend   = "run.send"     // a message for a running stream run (SendParams)
-	MAgents    = "node.agents"  // how each agent CLI stands here
-	MChanged   = "node.changed" // push: a run's state changed
+	MRunStart     = "run.start"
+	MRunStop      = "run.stop"
+	MRunList      = "run.list"
+	MRunTail      = "run.tail"
+	MRunLine      = "run.line"      // one whole line of a run's output (LineParams)
+	MRunResume    = "run.resume"    // run.start continuing a session (StartParams.Resume)
+	MRunAnswer    = "run.answer"    // an answer to what a stream run waits on (AnswerParams)
+	MRunSend      = "run.send"      // a message for a running stream run (SendParams)
+	MRunInterrupt = "run.interrupt" // end a turn of a running stream run (InterruptParams)
+	MAgents       = "node.agents"   // how each agent CLI stands here
+	MChanged      = "node.changed"  // push: a run's state changed
 )
 
 type RunRef struct {
@@ -97,6 +98,12 @@ func (n *Node) Handler(sessions remote.Handler) wire.Handler {
 				return nil, err
 			}
 			return n.Send(p)
+		case MRunInterrupt:
+			var p InterruptParams
+			if err := r.Decode(&p); err != nil {
+				return nil, err
+			}
+			return n.Interrupt(p)
 		case MDirs:
 			var p DirsParams
 			if err := r.Decode(&p); err != nil {
@@ -116,11 +123,12 @@ func (n *Node) Handler(sessions remote.Handler) wire.Handler {
 }
 
 // Methods lists what Handler answers.
-var Methods = []string{MRunStart, MRunStop, MRunList, MRunTail, MRunLine, MRunResume, MAgents, MRunAnswer, MRunSend, MDirs}
+var Methods = []string{MRunStart, MRunStop, MRunList, MRunTail, MRunLine, MRunResume, MAgents, MRunAnswer, MRunSend, MRunInterrupt, MDirs}
 
 // Features lists what run.start and run.resume understand beyond their first shape; a coordinator that needs a feature
 // this node lacks fails the run as node_outdated instead of starting it without.
-var Features = []string{FeatureDispatcher, FeatureAgentDef, FeatureVerdict, FeatureCheck, FeatureWorktree, FeatureFiles, FeaturePlan, FeatureBeforeRun}
+var Features = []string{FeatureDispatcher, FeatureAgentDef, FeatureVerdict, FeatureCheck, FeatureWorktree, FeatureFiles, FeaturePlan, FeatureBeforeRun,
+	FeatureInputMarks, FeatureInterrupt}
 
 // watchEvery is how often Watch looks at the runs.
 const watchEvery = 3 * time.Second

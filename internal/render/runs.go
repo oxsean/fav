@@ -30,7 +30,7 @@ func Tokens(n int64) string {
 	return strconv.FormatInt(n, 10)
 }
 
-var sendStates = map[string]string{agent.SendQueued: "send.queued", agent.SendSent: "send.sent", agent.SendFailed: "send.failed"}
+var sendStates = map[string]string{agent.SendQueued: "send.queued", agent.SendSent: "send.sent", agent.SendSeen: "send.seen", agent.SendFailed: "send.failed"}
 
 // SendState is how far a message for a run got, as a word.
 func SendState(state string) string {

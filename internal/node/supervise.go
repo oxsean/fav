@@ -23,6 +23,7 @@ import (
 	"github.com/oxsean/fav/internal/fileio"
 	"github.com/oxsean/fav/internal/filelock"
 	"github.com/oxsean/fav/internal/herdr"
+	"github.com/oxsean/fav/internal/output"
 	"github.com/oxsean/fav/internal/paths"
 	"github.com/oxsean/fav/internal/proc"
 	"github.com/oxsean/fav/internal/shell"
@@ -158,6 +159,7 @@ type sup struct {
 	reqAttention bool               // the attention was set by waiting requests
 	answersAt    int64              // how far answers.jsonl has been read
 	inboxAt      int64              // how far inbox.jsonl has been read
+	interruptsAt int64              // how far interrupts.jsonl has been read
 	sent         bool               // a message went to the agent while it ran
 
 	transcript string    // an interactive run's transcript, once found
@@ -317,7 +319,7 @@ func (s *sup) interrupt() bool {
 	if s.in == nil || s.in.isClosed() {
 		return false
 	}
-	s.proto.interrupt()
+	s.proto.interrupt(newMarkID("stop_"))
 	s.in.close()
 	return true
 }
@@ -595,7 +597,9 @@ func (s *sup) run() error {
 				tree.Kill()
 			}
 		case <-fast:
-			s.streamTick()
+			if s.streamTick() && asked.IsZero() {
+				asked, reason, soft = time.Now(), "interrupted", true
+			}
 		}
 	}
 }
@@ -647,11 +651,12 @@ func (s *sup) copyOut(r io.Reader, log *rolling) {
 			copyLong(line, q, log)
 			continue
 		}
+		var at logPos
 		if logged, keep := scrub(line); keep {
-			log.Write(logged)
+			at = log.put(logged)
 		}
 		if bytes.HasSuffix(line, []byte("\n")) {
-			s.line(line)
+			s.lineAt(line, at)
 		}
 	}
 }
@@ -816,9 +821,12 @@ func (s *sup) flushOut() {
 	}
 }
 
-func (s *sup) line(line []byte) {
+func (s *sup) line(line []byte) { s.lineAt(line, logPos{}) }
+
+// lineAt reads a line of the agent's output, logged at at.
+func (s *sup) lineAt(line []byte, at logPos) {
 	text := bytes.TrimSpace(line)
-	if len(text) == 0 || s.proto != nil && s.proto.line(text) {
+	if len(text) == 0 || s.proto != nil && s.proto.line(text, at) {
 		return
 	}
 	var ev event
@@ -932,20 +940,39 @@ type rolling struct {
 	turns turns
 }
 
+// logPos is where a line was written to the log; the zero value is wherever the log is.
+type logPos struct {
+	file string
+	off  int64
+}
+
 // mark adds m to marks.jsonl, at where the log is now.
-func (l *rolling) mark(m Mark) {
+func (l *rolling) mark(m Mark) { l.markAt(m, logPos{}) }
+
+// markAt adds m to marks.jsonl at at.
+func (l *rolling) markAt(m Mark, at logPos) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	if l.open(0) == nil {
+	if at.file != "" {
+		m.File, m.Off = at.file, at.off
+		l.add(m)
+	} else if l.open(0) == nil {
 		m.Off = l.n
 		l.add(m)
 	}
 }
 
-// add writes m, in the log's file. The caller holds mu.
+// add writes m, in the log's file unless it names one. The caller holds mu.
 func (l *rolling) add(m Mark) {
-	m.Type, m.File, m.At = "tend", l.id, time.Now()
+	m.Type, m.File, m.At = "tend", cmp.Or(m.File, l.id), time.Now()
 	appendLine(filepath.Join(filepath.Dir(l.path), marksFile), m)
+}
+
+// turn is where the log's turns stand now.
+func (l *rolling) turn() output.State {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.turns.st
 }
 
 func (l *rolling) Write(p []byte) (int, error) {
@@ -955,6 +982,18 @@ func (l *rolling) Write(p []byte) (int, error) {
 		return 0, err
 	}
 	return l.write(p)
+}
+
+// put writes p, answering where it went.
+func (l *rolling) put(p []byte) logPos {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.open(len(p)) != nil {
+		return logPos{}
+	}
+	at := logPos{l.id, l.n}
+	l.write(p)
+	return at
 }
 
 // long logs one line in pieces: first, then what next gives while it says the line goes on. Nothing else comes

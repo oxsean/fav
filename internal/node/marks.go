@@ -17,8 +17,9 @@ const marksFile = "marks.jsonl"
 // Mark is a line of marks.jsonl, at where output.log was when it was written.
 type Mark struct {
 	Type  string    `json:"type"`            // tend
-	Event string    `json:"event"`           // start | turn | hook | exit | roll (the log went on in another file)
-	N     int       `json:"n,omitempty"`     // turn: which
+	Event string    `json:"event"`           // start | turn | hook | exit | roll (the log went on in another file) | input | resolved | interrupt
+	ID    string    `json:"id,omitempty"`    // input: the message the agent took in; resolved: the request answered; interrupt: which
+	N     int       `json:"n,omitempty"`     // turn: which; interrupt: the turn it ends
 	Phase string    `json:"phase,omitempty"` // hook: begin | end; turn: end, where the line with its result ends
 	Name  string    `json:"name,omitempty"`  // hook: which
 	Code  *int      `json:"code,omitempty"`  // exit, hook end
@@ -29,6 +30,7 @@ type Mark struct {
 
 const (
 	markStart, markTurn, markHook, markExit, markRoll = "start", "turn", "hook", "exit", "roll"
+	markInput, markResolved, markInterrupt            = "input", "resolved", "interrupt"
 	phaseBegin, phaseEnd                              = "begin", "end"
 )
 

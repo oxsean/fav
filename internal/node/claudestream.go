@@ -25,16 +25,27 @@ type claudeProto struct{ s *sup }
 
 func (c claudeProto) begin(brief string) {
 	c.s.in.send(controlRequest(initRequest, map[string]any{"subtype": "initialize", "hooks": nil}))
-	c.s.in.send(userMessage(brief))
+	c.s.in.send(userMessage(brief, uuidFor(c.s.spec.Run, briefInput)))
 }
 
-func (c claudeProto) line(text []byte) bool {
+func (c claudeProto) line(text []byte, at logPos) bool {
 	var m struct {
 		Type      string          `json:"type"`
 		RequestID string          `json:"request_id"`
 		Request   json.RawMessage `json:"request"`
+		UUID      string          `json:"uuid"`
+		IsReplay  bool            `json:"isReplay"`
 	}
-	if json.Unmarshal(text, &m) != nil || m.Type != "control_request" {
+	if json.Unmarshal(text, &m) != nil {
+		return false
+	}
+	if m.Type == "user" && m.IsReplay { // a message it took in, given back; the common reading still sees the turn go on
+		if id := c.s.sendOfUUID(m.UUID); id != "" {
+			c.s.tookIn(id, at)
+		}
+		return false
+	}
+	if m.Type != "control_request" {
 		return false
 	}
 	var r struct {
@@ -54,7 +65,7 @@ func (c claudeProto) line(text []byte) bool {
 			Command string `json:"command"`
 		}
 		if json.Unmarshal(r.Input, &in) == nil && ownReport(in.Command) {
-			c.answer(pending{tool: r.ToolName, input: r.Input}, agent.Answer{Request: m.RequestID, Allow: true})
+			c.s.in.send(controlResponse(m.RequestID, claudeAnswer(pending{tool: r.ToolName, input: r.Input}, agent.Answer{Allow: true})))
 			return true
 		}
 	}
@@ -68,25 +79,34 @@ func (c claudeProto) line(text []byte) bool {
 	return true
 }
 
-func (c claudeProto) answer(p pending, a agent.Answer) error {
-	var resp any
-	if a.Allow {
-		upd := map[string]any{}
-		json.Unmarshal(p.input, &upd)
-		if len(a.Answers) > 0 {
-			upd["answers"] = a.Answers
+func (c claudeProto) answer(p pending, a agent.Answer, done func(error)) error {
+	return c.s.in.sendThen(controlResponse(a.Request, claudeAnswer(p, a)), func(err error) {
+		if err == nil {
+			c.s.resolved(a.Request, logPos{})
 		}
-		resp = map[string]any{"behavior": "allow", "updatedInput": upd}
-	} else {
-		resp = map[string]any{"behavior": "deny", "message": cmp.Or(a.Message, "The user denied this.")}
+		if done != nil {
+			done(err)
+		}
+	})
+}
+
+// claudeAnswer is the control response that answers p with a.
+func claudeAnswer(p pending, a agent.Answer) any {
+	if !a.Allow {
+		return map[string]any{"behavior": "deny", "message": cmp.Or(a.Message, "The user denied this.")}
 	}
-	return c.s.in.send(controlResponse(a.Request, resp))
+	upd := map[string]any{}
+	json.Unmarshal(p.input, &upd)
+	if len(a.Answers) > 0 {
+		upd["answers"] = a.Answers
+	}
+	return map[string]any{"behavior": "allow", "updatedInput": upd}
 }
 
-func (c claudeProto) message(text string, done func(error)) error {
-	return c.s.in.sendThen(userMessage(text), done)
+func (c claudeProto) message(id, text string, done func(error)) error {
+	return c.s.in.sendThen(userMessage(text, uuidFor(c.s.spec.Run, id)), done)
 }
 
-func (c claudeProto) interrupt() {
-	c.s.in.send(controlRequest("stop", map[string]any{"subtype": "interrupt"}))
+func (c claudeProto) interrupt(id string) {
+	c.s.in.send(controlRequest(id, map[string]any{"subtype": "interrupt"}))
 }

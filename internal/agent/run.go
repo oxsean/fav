@@ -60,6 +60,7 @@ type Answer struct {
 const (
 	SendQueued = "queued"
 	SendSent   = "sent"   // written to the agent
+	SendSeen   = "seen"   // the agent took it in: its output gave the message back
 	SendFailed = "failed" // the agent ended before it went out
 )
 

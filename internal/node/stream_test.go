@@ -96,8 +96,18 @@ func TestAMessageReachesARunningAgent(t *testing.T) {
 		t.Fatalf("the same message again is a no-op: %v", err)
 	}
 	end := wait(t, n, s.Run, func(s Snapshot) bool { return Terminal(s.State.State) })
-	if len(end.Sends) != 1 || end.Sends[0].State != agent.SendSent || !strings.Contains(logOf(t, n, s.Run), "heard: use tabs") {
-		t.Fatalf("%+v\n%s", end.Sends, logOf(t, n, s.Run))
+	log := logOf(t, n, s.Run)
+	if len(end.Sends) != 1 || end.Sends[0].State != agent.SendSeen || !strings.Contains(log, "heard: use tabs") {
+		t.Fatalf("%+v\n%s", end.Sends, log)
+	}
+	var inputs []Mark
+	for _, m := range marksOf(t, n, s.Run) {
+		if m.Event == markInput {
+			inputs = append(inputs, m)
+		}
+	}
+	if len(inputs) != 1 || inputs[0].ID != "m1" || !strings.HasPrefix(log[inputs[0].Off:], `{"isReplay":true,"message":{"content":"use tabs"`) {
+		t.Fatalf("the input is marked where the agent gave it back: %+v", inputs)
 	}
 	if _, err := n.Send(SendParams{Run: s.Run, Send: agent.Send{ID: "m2", Text: "late"}}); wire.Code(err) != wire.CodeConflict {
 		t.Fatalf("an ended run takes no message: %v", err)

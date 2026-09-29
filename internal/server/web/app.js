@@ -5,7 +5,7 @@ const words = {
   question: ['它问', 'It asked'], itAsks: ['它在问你', 'It asks you'], wantsTool: ['它想用 {0}：', 'It wants to use {0}:'],
   allow: ['允许', 'Allow'], deny: ['拒绝', 'Deny'], answer: ['回答', 'Answer'], noAnswer: ['不回答', "Don't answer"], answered: ['已回答', 'Answered'],
   sendMessage: ['发消息', 'Send a message'], sendPlaceholder: ['在它这一轮里告诉它…', 'Tell it, in its current turn…'], messageQueued: ['消息已排队', 'Message queued'],
-  message: ['消息', 'Message'], 'send.queued': ['排队中', 'queued'], 'send.sent': ['已送达', 'sent'], 'send.failed': ['没送到', 'not delivered'], progress: ['进展', 'Progress'], lastSaid: ['最后说', 'Said'],
+  message: ['消息', 'Message'], 'send.queued': ['排队中', 'queued'], 'send.sent': ['已送出', 'sent'], 'send.seen': ['agent 已接收', 'received by the agent'], 'send.failed': ['没送到', 'not delivered'], progress: ['进展', 'Progress'], lastSaid: ['最后说', 'Said'],
   usage: ['输入 {0} tokens，缓存命中 {1}，输出 {2} · {3} 轮', '{0} tokens in, {1} from cache, {2} out · {3} turns'], usageCost: [' · 约 ${0}', ' · about ${0}'], nextStep: ['下一步', 'Next'], reply: ['回复', 'Reply'],
   replyPlaceholder: ['你的回答；会作为新的后台运行进入同一个会话', 'Your answer; it goes to the same session as a new background run'],
   replied: ['回复已排队', 'Reply queued'], replyEmpty: ['先写回复内容', 'Write a reply first'], checking: ['正在检查机器…', 'Checking the machine…'],
