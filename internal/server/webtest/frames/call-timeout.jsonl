@@ -1,0 +1,10 @@
+{"connect":true}
+{"c":{"type":"req","id":1,"method":"hello","params":{"proto":2,"role":"client"}}}
+{"s":{"type":"res","id":1,"result":{"proto":2,"version":"test","role":"coordinator","methods":["hello","state.get","task.get","task.create","state.watch","run.output.watch","machines.watch","inbox.watch"]}}}
+{"step":"call"}
+{"c":{"type":"req","id":2,"method":"state.get","params":{}}}
+{"wait_ms":29999}
+{"wait_ms":1}
+{"c":{"type":"cancel","id":2}}
+{"note":"an answer after the caller stopped waiting is dropped"}
+{"s":{"type":"res","id":2,"result":{"seq":1}}}

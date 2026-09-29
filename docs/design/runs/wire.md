@@ -1,6 +1,6 @@
 # 协议
 
-协调器、节点和客户端之间的协议：帧、握手与版本、`Conn`、方法、传输。当前 `wire.Proto` = 1。实现：`internal/wire`（帧、`Conn`、`Pipe`），方法的处理在 `internal/remote`（会话读取）、`internal/node`（`run.*`）、`internal/coord`（客户端方法）。
+协调器、节点和客户端之间的协议：帧、握手与版本、`Conn`、方法、传输。当前 `wire.Proto` = 2。实现：`internal/wire`（帧、`Conn`、`Pipe`），方法的处理在 `internal/remote`（会话读取）、`internal/node`（`run.*`）、`internal/coord`（客户端方法）。
 
 ## 帧
 
@@ -10,14 +10,15 @@
 {"type":"req","id":7,"method":"run.start","params":{…},"command_id":"c_…"}
 {"type":"res","id":7,"result":{…}}
 {"type":"res","id":7,"error":{"code":"not_found","detail":"…"}}
-{"type":"push","method":"journal","params":{…}}
+{"type":"push","method":"node.changed","params":{…}}
+{"type":"push","id":12,"method":"run.output","params":{…}}
 {"type":"cancel","id":7}
 ```
 
-- `type` 是帧类型：`req` 请求、`res` 应答、`push` 推送（不需要应答）、`cancel` 取消对方正在处理的请求。`res` 有 `error` 就是失败，否则成功，`result` 可以没有。帧类型写在显式的 `type` 里，不像 JSON-RPC 2.0 那样靠字段推断；字段名不缩写：开了 permessage-deflate 以后缩写最多再省几个百分点，却让日志、抓包和 `journal verify` 难读。
+- `type` 是帧类型：`req` 请求、`res` 应答、`push` 推送（不需要应答；带 `id` 的属于那个请求打开的流，见「流」）、`cancel` 取消对方正在处理的请求或打开的流。`res` 有 `error` 就是失败，否则成功，`result` 可以没有。帧类型写在显式的 `type` 里，不像 JSON-RPC 2.0 那样靠字段推断；字段名不缩写：开了 permessage-deflate 以后缩写最多再省几个百分点，却让日志、抓包和 `journal verify` 难读。
 - `id` 在发送方内唯一，两个方向各自编号；应答按 `id` 回给等待者，可乱序。
 - `command_id`：写操作的幂等键（见 [coordinator.md](coordinator.md)「命令与收据」）。
-- 错误码稳定、不本地化；另有 `busy`、`conflict`、`unauthorized`、`canceled`。
+- 错误码稳定、不本地化；另有 `busy`、`conflict`、`unauthorized`、`canceled`，流另用 `lagged`（跟不上，按游标重开）、`gone`（跟的对象没了或机器断了）、`unsupported`（对方没有这个流）。
 - 单帧上限 16 MiB；超长帧断开连接。集合类应答（`list`、`run.list`）超过 8 MiB 时分页。
 - 没有 `type` 或 `type` 不认识的行跳过（ssh 登录横幅、shell 警告）。
 - WebSocket 上一条文本消息就是一帧；两端协商 permessage-deflate（每条连接一个压缩窗口），不支持的一端退回不压缩。ssh 用 `Compression=yes`。
@@ -33,11 +34,40 @@
 
 ## `Conn`
 
-- 写：单写锁，写超时（30 s）断开连接。
-- 读：读协程永不阻塞；`req` 交给处理器（最多 16 个同时处理，待处理超过 64 个回 `busy`）；`res` 找等待者；`push` 回调；`cancel` 取消请求的 `ctx`。`ping` 的应答和 `busy` 应答不占处理槽位：处理器全满时 `ping` 照样回（它证明的是连接，不是处理器）。
-- 调用超时：发 `cancel`，连接保留。连接断开：所有等待者返回 `closed`。
+- 写：每条连接一个写协程，所有帧先进队列再由它写出；帧在调用方那里编码好。一次写超过写超时（30 s）断开连接。普通的调用、应答和不属于流的推送等写完才返回；流的推送只入队。
+- 发送调度：四级优先（`wire.Class`），每次从有帧的最高一级取：
+  1. `ClassControl`：普通的 req 和 res、`ping`、`cancel`、不属于流的推送；
+  2. `ClassState`：状态流；
+  3. `ClassStream`：输出流和快照型的流；
+  4. `ClassBulk`：`Options.Bulk` 标记的方法的应答（协调器的 `coord.Bulk`：`run.output.page`）。
+  同一级内按「道」轮流：每个流一条道，每个 bulk 应答一条道，control 共用一条道。所以再大的输出流也挡不住应答、`ping` 和状态推送，翻一页也挡不住实时推送。
+- 读：读协程永不阻塞；`req` 交给处理器（最多 16 个同时处理，待处理超过 64 个回 `busy`）；`res` 找等待者或流；`push` 带 `id` 的交给那个流，不带的回调 `OnPush`；`cancel` 取消请求的 `ctx`，或结束那个流。`ping` 的应答和 `busy` 应答不占处理槽位：处理器全满时 `ping` 照样回（它证明的是连接，不是处理器）。
+- 调用超时：发 `cancel`（写请求的时候就超时了也发，排在请求后面），连接保留。连接断开：所有等待者和流返回 `closed`。
 - 对方关了发送方向（EOF）：已读到的请求答完再关，最多等 1 分钟（`drainWait`）；`Done()` 在这之后才触发，所以一个还在答的慢调用（如正在探测 CLI 的 `node.agents`）会把被顶掉的连接多拖几秒。
 - 保活：空闲 30 s 发 `ping`，60 s 没有任何帧就断开（节点侧同样执行，Mac 睡眠后远端 `node --stdio` 会自己退出）。
+
+## 流
+
+一个普通请求打开流（方法名以 `.watch` 结尾，和别的方法一样出现在 `hello.methods` 和授权表里），之后的推送带这个请求的 `id`，同一个 `id` 的 `res` 一定是流的最后一帧：
+
+```json
+{"type":"req","id":12,"method":"run.output.watch","params":{"run":"r-3f1","from":{"file":"a1:9","off":48213}}}
+{"type":"push","id":12,"method":"open","params":{"cursor":{"file":"a1:9","off":48213},"mode":"resume"}}
+{"type":"push","id":12,"method":"run.output","params":{…}}
+{"type":"cancel","id":12}
+{"type":"res","id":12,"error":{"code":"canceled"}}
+```
+
+- 第一条推送是 `open{cursor?, mode, from?, to?}`（`wire.Open`）：`resume` 从游标接着来，`snapshot` 先给全量，`gap` 表示 `from` 到 `to` 这一段取不回来了。
+- 正常结束是 `result{reason: "done"}`（`wire.EndDone`）；出错时 `error.code` 是 `canceled`、`lagged`、`unauthorized`、`gone`、`unsupported` 之一。
+- 提供方：handler 调 `r.Stream(StreamOptions)` 拿到 `*Stream`，然后照常返回（返回值忽略，返回错误就用它结束流）。流登记在单独的表里，不占处理槽，handler 返回时也不取消；handler 在调 `Stream()` 之前那段仍然占槽，所以推送放在另一个协程里做。每条连接最多 64 个流（`MaxStreams`），多了回 `busy`。`Push` 入队，`End(result, err)` 发最后一帧；对方 `cancel` 时丢掉排队中的推送、自动回 `canceled`，流的 `Context()` 随之结束。对方在流打开之前就取消了，`Stream()` 直接回 `canceled`。
+- 每个流一个按字节计的发送队列（`StreamQueue`，1 MiB），装不下一条推送时按 `StreamOptions.Full` 处理：
+  - `FullLag`：丢掉排队中的推送，以 `lagged` 结束流，打开方按游标重开；
+  - `FullGap`：**只丢排队中和这条同一个方法的推送**，连同这一条；`Push` 返回 `*GapError{Mark}`，`Mark` 是第一条被丢推送的标记（`PushMark` 传入，没有排队的就是这一条的），提供方据此推 `gap`，流不断；
+  - `FullLatest`：只丢排队中同一个方法的推送，这一条入队，只留最新一份。
+  只丢同一个方法的推送，所以已经排着的 `open` 和别的推送不会被丢，输出 hub 靠这一条插 `gap`。
+- 打开方：`conn.Watch(ctx, method, params)` 先登记接收者再发请求，所以推送不会找不到主人。`Next(ctx)` 取下一条推送；流结束后，提供方正常结束时回 `io.EOF`，否则回结束的原因；`Done()`、`Err()`（正常结束时为空）、`Result(out)`、`Cancel()`。`ctx` 结束等同于 `Cancel()`。每个 `Watch` 一个有界队列（`WatchQueue`，256 条），读的人跟不上就在本地以 `lagged` 结束并发 `cancel`。结束以后这个 `id` 迟到的推送和应答一律丢弃；本地结束（取消、跟不上）后，队列里没取走的推送也不再交出。
+- 帧序列：`internal/server/webtest/frames/` 下是网页客户端的帧序列（`c` 客户端帧，`s` server 帧），`internal/wire` 的回放测试拿 Go 的两端各对照一遍。
 
 ## 方法
 

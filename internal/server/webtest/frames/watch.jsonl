@@ -1,0 +1,11 @@
+{"connect":true}
+{"c":{"type":"req","id":1,"method":"hello","params":{"proto":2,"role":"client"}}}
+{"s":{"type":"res","id":1,"result":{"proto":2,"version":"test","role":"coordinator","methods":["hello","state.get","task.get","task.create","state.watch","run.output.watch","machines.watch","inbox.watch"]}}}
+{"step":"watch"}
+{"c":{"type":"req","id":2,"method":"run.output.watch","params":{"run":"r1"}}}
+{"s":{"type":"push","id":2,"method":"open","params":{"cursor":{"file":"a1:9","off":0},"mode":"resume"}}}
+{"s":{"type":"push","id":2,"method":"run.output","params":{"events":[{"id":"a1:9:0:0","off":0,"kind":"say","text":"one"}],"cursor":{"file":"a1:9","off":40}}}}
+{"s":{"type":"push","id":2,"method":"run.output","params":{"events":[{"id":"a1:9:40:0","off":40,"kind":"say","text":"two"}],"cursor":{"file":"a1:9","off":80}}}}
+{"s":{"type":"res","id":2,"result":{"reason":"done"}}}
+{"note":"a frame after the stream ended is dropped"}
+{"s":{"type":"push","id":2,"method":"run.output","params":{"events":[{"kind":"say","text":"late"}]}}}

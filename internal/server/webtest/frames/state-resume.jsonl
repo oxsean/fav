@@ -1,0 +1,25 @@
+{"note":"state.watch{no_briefs}: tasks come without briefs; task.get fetches one"}
+{"connect":true}
+{"c":{"type":"req","id":1,"method":"hello","params":{"proto":2,"role":"client"}}}
+{"s":{"type":"res","id":1,"result":{"proto":2,"version":"test","role":"coordinator","methods":["hello","task.get","state.watch","run.output.watch","machines.watch","inbox.watch"]}}}
+{"step":"start"}
+{"c":{"type":"req","id":2,"method":"state.watch","params":{"no_briefs":true}}}
+{"c":{"type":"req","id":3,"method":"machines.watch","params":{}}}
+{"c":{"type":"req","id":4,"method":"inbox.watch","params":{}}}
+{"s":{"type":"push","id":2,"method":"open","params":{"mode":"snapshot"}}}
+{"s":{"type":"push","id":2,"method":"snapshot","params":{"part":"tasks","items":{"t1":{"id":"t1","title":"Pay timeout","dir":"/w","project":"p1","owner":"u_b","status":"todo","rev":1,"created_at":"2026-09-29T09:00:00Z","updated_at":"2026-09-29T09:00:00Z"}}}}}
+{"s":{"type":"push","id":2,"method":"live","params":{"seq":5}}}
+{"step":"brief"}
+{"c":{"type":"req","id":5,"method":"task.get","params":{"id":"t1"}}}
+{"s":{"type":"res","id":5,"result":{"id":"t1","title":"Pay timeout","brief":"Fix the timeout.","dir":"/w","project":"p1","owner":"u_b","status":"todo","rev":1,"created_at":"2026-09-29T09:00:00Z","updated_at":"2026-09-29T09:00:00Z"}}}
+{"note":"the connection drops; state.watch resumes after the applied seq"}
+{"drop":true}
+{"wait_ms":1000}
+{"connect":true}
+{"c":{"type":"req","id":6,"method":"hello","params":{"proto":2,"role":"client"}}}
+{"s":{"type":"res","id":6,"result":{"proto":2,"version":"test","role":"coordinator","methods":["hello","task.get","state.watch","run.output.watch","machines.watch","inbox.watch"]}}}
+{"c":{"type":"req","id":7,"method":"state.watch","params":{"after_seq":5,"no_briefs":true}}}
+{"c":{"type":"req","id":8,"method":"machines.watch","params":{}}}
+{"c":{"type":"req","id":9,"method":"inbox.watch","params":{}}}
+{"s":{"type":"push","id":7,"method":"open","params":{"mode":"resume"}}}
+{"s":{"type":"push","id":7,"method":"journal","params":{"v":2,"seq":6,"at":"2026-09-29T10:00:06Z","events":[{"type":"task_edited","data":{"id":"t1","title":"Pay timeout, again"}}]}}}

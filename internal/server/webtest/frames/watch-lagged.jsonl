@@ -1,0 +1,11 @@
+{"connect":true}
+{"c":{"type":"req","id":1,"method":"hello","params":{"proto":2,"role":"client"}}}
+{"s":{"type":"res","id":1,"result":{"proto":2,"version":"test","role":"coordinator","methods":["hello","state.get","task.get","task.create","state.watch","run.output.watch","machines.watch","inbox.watch"]}}}
+{"step":"watch"}
+{"c":{"type":"req","id":2,"method":"run.output.watch","params":{"run":"r1"}}}
+{"s":{"type":"push","id":2,"method":"open","params":{"cursor":{"file":"a1:9","off":0},"mode":"resume"}}}
+{"s":{"type":"push","id":2,"method":"run.output","params":{"events":[{"id":"a1:9:0:0","off":0,"kind":"say","text":"one"}],"cursor":{"file":"a1:9","off":100}}}}
+{"note":"lagged: the client opens the stream again from what it applied"}
+{"s":{"type":"res","id":2,"error":{"code":"lagged"}}}
+{"c":{"type":"req","id":3,"method":"run.output.watch","params":{"run":"r1","from":{"file":"a1:9","off":100}}}}
+{"s":{"type":"push","id":3,"method":"open","params":{"cursor":{"file":"a1:9","off":100},"mode":"resume"}}}

@@ -1,0 +1,12 @@
+{"connect":true}
+{"c":{"type":"req","id":1,"method":"hello","params":{"proto":2,"role":"client"}}}
+{"s":{"type":"res","id":1,"result":{"proto":2,"version":"test","role":"coordinator","methods":["hello","state.get","task.get","task.create","state.watch","run.output.watch","machines.watch","inbox.watch"]}}}
+{"step":"watch"}
+{"c":{"type":"req","id":2,"method":"run.output.watch","params":{"run":"r1"}}}
+{"s":{"type":"push","id":2,"method":"open","params":{"cursor":{"file":"a1:9","off":0},"mode":"resume"}}}
+{"step":"cancel"}
+{"c":{"type":"cancel","id":2}}
+{"note":"cancelling again sends nothing; what was in flight is dropped"}
+{"step":"cancel"}
+{"s":{"type":"push","id":2,"method":"run.output","params":{"events":[{"kind":"say","text":"late"}],"cursor":{"file":"a1:9","off":9}}}}
+{"s":{"type":"res","id":2,"error":{"code":"canceled"}}}

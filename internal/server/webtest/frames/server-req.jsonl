@@ -1,0 +1,8 @@
+{"connect":true}
+{"c":{"type":"req","id":1,"method":"hello","params":{"proto":2,"role":"client"}}}
+{"s":{"type":"res","id":1,"result":{"proto":2,"version":"test","role":"coordinator","methods":["hello","state.get","task.get","task.create","state.watch","run.output.watch","machines.watch","inbox.watch"]}}}
+{"note":"the server's keepalive is answered; a method the page does not serve is refused"}
+{"s":{"type":"req","id":7,"method":"ping"}}
+{"c":{"type":"res","id":7}}
+{"s":{"type":"req","id":8,"method":"node.call","params":{}}}
+{"c":{"type":"res","id":8,"error":{"code":"unknown_method","detail":"node.call"}}}

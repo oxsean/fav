@@ -20,6 +20,9 @@ type Request struct {
 	CommandID string
 	Params    json.RawMessage
 	Conn      *Conn
+	id        int64
+	ctx       context.Context
+	stream    *Stream
 }
 
 // Decode reads r's params into v; bad_request when they do not fit.
@@ -38,8 +41,14 @@ type Handler func(ctx context.Context, req *Request) (any, error)
 
 type Options struct {
 	Handler Handler
-	// OnPush gets one-way messages on the reading goroutine: it must not block.
+	// OnPush gets one-way messages outside any stream on the reading goroutine: it must not block.
 	OnPush func(method string, params json.RawMessage)
+	// Bulk marks the methods whose answers are large pieces fetched on demand: they are written after everything else.
+	Bulk func(method string) bool
+	// MaxStreams bounds the streams this end serves at once (default 64); WatchQueue the pushes a Watch holds before
+	// its reader falls behind (default 256).
+	MaxStreams int
+	WatchQueue int
 	// MaxInflight bounds the requests handled at once; more wait their turn (default 16), and past MaxQueued waiting
 	// ones the answer is busy (default 64).
 	MaxInflight int
@@ -55,21 +64,22 @@ type Options struct {
 
 // Conn is one connection. Every method is safe for concurrent use.
 type Conn struct {
-	opt    Options
-	rw     io.ReadWriteCloser
-	wmu    chan struct{}
-	sem    chan struct{}
-	next   atomic.Int64
-	seen   atomic.Int64 // unix nanos of the last frame read
-	mu     sync.Mutex
-	wait   map[int64]chan *Frame
-	serve  map[int64]context.CancelFunc
-	busy   sync.WaitGroup // requests being handled
-	queued atomic.Int32   // requests waiting for a handler slot
-	oob    chan struct{}  // answers sent outside the handler slots (pings, busy) being written
-	done   chan struct{}
-	err    *Error
-	closed sync.Once
+	opt Options
+	rw  io.ReadWriteCloser
+	sched
+	sem     chan struct{}
+	next    atomic.Int64
+	seen    atomic.Int64 // unix nanos of the last frame read
+	mu      sync.Mutex
+	wait    map[int64]chan *Frame
+	serve   map[int64]context.CancelFunc
+	streams map[int64]*Stream
+	watches map[int64]*Watch
+	busy    sync.WaitGroup // requests being handled
+	queued  atomic.Int32   // requests waiting for a handler slot
+	done    chan struct{}
+	err     *Error
+	closed  sync.Once
 }
 
 // New starts reading rw; Close (or the other end) ends it.
@@ -83,10 +93,19 @@ func New(rw io.ReadWriteCloser, opt Options) *Conn {
 	if opt.WriteTimeout <= 0 {
 		opt.WriteTimeout = 30 * time.Second
 	}
-	c := &Conn{opt: opt, rw: rw, wmu: make(chan struct{}, 1), sem: make(chan struct{}, opt.MaxInflight),
-		oob: make(chan struct{}, max(opt.MaxQueued, 64)), wait: map[int64]chan *Frame{}, serve: map[int64]context.CancelFunc{}, done: make(chan struct{})}
+	if opt.MaxStreams <= 0 {
+		opt.MaxStreams = 64
+	}
+	if opt.WatchQueue <= 0 {
+		opt.WatchQueue = 256
+	}
+	c := &Conn{opt: opt, rw: rw, sem: make(chan struct{}, opt.MaxInflight), wait: map[int64]chan *Frame{},
+		serve: map[int64]context.CancelFunc{}, streams: map[int64]*Stream{}, watches: map[int64]*Watch{}, done: make(chan struct{})}
+	c.sched.init(max(opt.MaxQueued, 64))
 	c.seen.Store(time.Now().UnixNano())
 	go c.read()
+	go c.writer()
+	go c.watchdog()
 	if opt.Keepalive > 0 {
 		go c.keepalive()
 	}
@@ -113,14 +132,21 @@ func (c *Conn) fail(why *Error) {
 	c.closed.Do(func() {
 		c.mu.Lock()
 		c.err = why
-		serve := c.serve
+		serve, streams, watches := c.serve, c.streams, c.watches
 		c.wait, c.serve = map[int64]chan *Frame{}, map[int64]context.CancelFunc{} // each waiting call sees done
+		c.streams, c.watches = map[int64]*Stream{}, map[int64]*Watch{}
 		c.mu.Unlock()
 		c.rw.Close()
 		for _, cancel := range serve {
 			cancel()
 		}
+		for _, s := range streams {
+			s.drop(why)
+		}
 		close(c.done)
+		for _, w := range watches {
+			w.end(why, nil, false)
+		}
 		if c.opt.OnClose != nil {
 			go c.opt.OnClose(why)
 		}
@@ -162,8 +188,11 @@ func (c *Conn) CallCommand(ctx context.Context, method, commandID string, params
 		case res := <-ch:
 			return decodeResult(res, out)
 		default:
-			return err
 		}
+		if Code(err) == CodeTimeout && c.Err() == nil { // the request is queued or written: the cancel goes after it
+			c.post(c.ctl, &pending{b: cancelFrame(f.ID)})
+		}
+		return err
 	}
 	select {
 	case res := <-ch:
@@ -194,7 +223,7 @@ func decodeResult(res *Frame, out any) error {
 	return nil
 }
 
-// Push sends a one-way message.
+// Push sends a one-way message outside any stream.
 func (c *Conn) Push(method string, params any) error {
 	b, err := json.Marshal(params)
 	if err != nil {
@@ -203,16 +232,11 @@ func (c *Conn) Push(method string, params any) error {
 	return c.send(context.Background(), &Frame{Type: TypePush, Method: method, Params: b})
 }
 
-// reply sends an answer that takes no handler slot; with MaxQueued of them already being written (the other end reads
-// nothing) it is dropped and the caller's call times out.
+// reply sends an answer that takes no handler slot and is not waited for; with enough of them already waiting to be
+// written (the other end reads nothing) it is dropped and the caller's call times out.
 func (c *Conn) reply(f *Frame) {
-	select {
-	case c.oob <- struct{}{}:
-		go func() {
-			defer func() { <-c.oob }()
-			c.sendQuiet(f)
-		}()
-	default:
+	if b, err := encode(f); err == nil {
+		c.post(c.ctl, &pending{b: b, oob: true})
 	}
 }
 
@@ -222,50 +246,42 @@ func (c *Conn) sendQuiet(f *Frame) {
 	c.send(ctx, f)
 }
 
-// send writes one frame. A write that does not finish in WriteTimeout ends the connection: half a line would break
-// the stream.
-func (c *Conn) send(ctx context.Context, f *Frame) error {
-	b, err := json.Marshal(f)
+// send queues one frame on the control lane and waits until it is written.
+func (c *Conn) send(ctx context.Context, f *Frame) error { return c.sendOn(ctx, c.ctl, f) }
+
+func (c *Conn) sendOn(ctx context.Context, l *lane, f *Frame) error {
+	b, err := encode(f)
 	if err != nil {
 		return err
 	}
-	if len(b) >= MaxFrame { // the other end would drop the connection
-		if f.Type != TypeRes {
-			return &Error{Code: CodeBadRequest, Detail: fmt.Sprintf("frame of %d bytes", len(b))}
-		}
-		b, _ = json.Marshal(&Frame{Type: TypeRes, ID: f.ID, Error: &Error{Code: CodeInternal, Detail: fmt.Sprintf("answer of %d bytes", len(b))}})
+	o := &pending{b: b, done: make(chan error, 1)}
+	if !c.post(l, o) {
+		return c.Err()
 	}
-	b = append(b, '\n')
 	select {
-	case c.wmu <- struct{}{}:
+	case err := <-o.done:
+		return err
 	case <-c.done:
 		return c.Err()
 	case <-ctx.Done():
 		return &Error{Code: CodeTimeout, Detail: f.Method}
 	}
-	wrote := make(chan error, 1)
-	go func() {
-		_, err := c.rw.Write(b)
-		wrote <- err
-	}()
-	t := time.NewTimer(c.opt.WriteTimeout)
-	defer t.Stop()
-	select {
-	case err := <-wrote:
-		<-c.wmu
-		if err != nil {
-			c.fail(&Error{Code: CodeClosed, Detail: err.Error()})
-			return c.Err()
-		}
-		return nil
-	case <-t.C:
-		c.fail(&Error{Code: CodeTimeout, Detail: "write"})
-		go func() { <-wrote; <-c.wmu }()
-		return c.Err()
-	case <-c.done:
-		go func() { <-wrote; <-c.wmu }()
-		return c.Err()
+}
+
+// encode is f as one line. A frame the other end would drop the connection for is refused, and an answer that large
+// becomes an internal error.
+func encode(f *Frame) ([]byte, error) {
+	b, err := json.Marshal(f)
+	if err != nil {
+		return nil, err
 	}
+	if len(b) >= MaxFrame {
+		if f.Type != TypeRes {
+			return nil, &Error{Code: CodeBadRequest, Detail: fmt.Sprintf("frame of %d bytes", len(b))}
+		}
+		b, _ = json.Marshal(&Frame{Type: TypeRes, ID: f.ID, Error: &Error{Code: CodeInternal, Detail: fmt.Sprintf("answer of %d bytes", len(b))}})
+	}
+	return append(b, '\n'), nil
 }
 
 func (c *Conn) read() {
@@ -315,26 +331,38 @@ func (c *Conn) dispatch(line []byte) {
 	switch f.Type {
 	case TypeRes:
 		c.mu.Lock()
-		ch := c.wait[f.ID]
+		ch, w := c.wait[f.ID], c.watches[f.ID]
 		c.mu.Unlock()
 		if ch != nil {
 			select {
 			case ch <- &f:
 			default:
 			}
+		} else if w != nil {
+			w.end(f.Error, f.Result, false)
 		}
 	case TypeReq:
 		c.handle(&f)
 	case TypePush:
-		if c.opt.OnPush != nil {
+		if f.ID != 0 {
+			c.mu.Lock()
+			w := c.watches[f.ID]
+			c.mu.Unlock()
+			if w != nil {
+				w.take(Push{Method: f.Method, Params: f.Params})
+			}
+		} else if c.opt.OnPush != nil {
 			c.opt.OnPush(f.Method, f.Params)
 		}
 	case TypeCancel:
 		c.mu.Lock()
-		cancel := c.serve[f.ID]
+		if cancel := c.serve[f.ID]; cancel != nil {
+			cancel() // under mu: a handler opening its stream right now sees it (Request.Stream)
+		}
+		s := c.streams[f.ID]
 		c.mu.Unlock()
-		if cancel != nil {
-			cancel()
+		if s != nil {
+			s.abort(&Error{Code: CodeCanceled})
 		}
 	}
 }
@@ -364,6 +392,10 @@ func (c *Conn) handle(f *Frame) {
 		return
 	}
 	ctx, cancel := context.WithCancel(context.Background())
+	l := c.ctl
+	if c.opt.Bulk != nil && c.opt.Bulk(f.Method) {
+		l = &lane{class: ClassBulk}
+	}
 	c.mu.Lock()
 	if c.err != nil {
 		c.mu.Unlock()
@@ -391,34 +423,40 @@ func (c *Conn) handle(f *Frame) {
 		}
 		defer func() { <-c.sem }() // held until the answer is written: a peer that does not read holds the slots
 		res := c.answer(ctx, f)
-		if ctx.Err() != nil && c.Err() != nil {
+		if res == nil || ctx.Err() != nil && c.Err() != nil {
 			return
 		}
-		c.sendQuiet(res)
+		wctx, wcancel := context.WithTimeout(context.Background(), c.opt.WriteTimeout)
+		defer wcancel()
+		c.sendOn(wctx, l, res)
 	}()
 }
 
+// answer is the res for f, nil when the handler opened a stream: the stream sends its own last res.
 func (c *Conn) answer(ctx context.Context, f *Frame) (res *Frame) {
 	res = &Frame{Type: TypeRes, ID: f.ID}
+	r := &Request{Method: f.Method, CommandID: f.CommandID, Params: f.Params, Conn: c, id: f.ID, ctx: ctx}
 	defer func() {
 		if p := recover(); p != nil {
 			res.Result, res.Error = nil, &Error{Code: CodeInternal, Detail: fmt.Sprint(p)}
+		}
+		if r.stream != nil {
+			if res.Error != nil {
+				r.stream.End(nil, res.Error)
+			}
+			res = nil
 		}
 	}()
 	if c.opt.Handler == nil {
 		res.Error = &Error{Code: CodeUnknownMethod, Detail: f.Method}
 		return res
 	}
-	out, err := c.opt.Handler(ctx, &Request{Method: f.Method, CommandID: f.CommandID, Params: f.Params, Conn: c})
+	out, err := c.opt.Handler(ctx, r)
 	if err != nil {
-		var e *Error
-		if !errors.As(err, &e) {
-			e = &Error{Code: CodeInternal, Detail: err.Error()}
-		}
-		if ctx.Err() != nil && e.Code == CodeInternal {
-			e = &Error{Code: CodeCanceled}
-		}
-		res.Error = e
+		res.Error = asError(ctx, err)
+		return res
+	}
+	if r.stream != nil {
 		return res
 	}
 	b, err := json.Marshal(out)
@@ -428,6 +466,17 @@ func (c *Conn) answer(ctx context.Context, f *Frame) (res *Frame) {
 	}
 	res.Result = b
 	return res
+}
+
+func asError(ctx context.Context, err error) *Error {
+	var e *Error
+	if !errors.As(err, &e) {
+		e = &Error{Code: CodeInternal, Detail: err.Error()}
+	}
+	if ctx.Err() != nil && e.Code == CodeInternal {
+		e = &Error{Code: CodeCanceled}
+	}
+	return e
 }
 
 func (c *Conn) keepalive() {

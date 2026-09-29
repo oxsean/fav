@@ -36,7 +36,7 @@ func (c *Coord) Serve(ctx context.Context) error {
 			}
 			return err
 		}
-		wire.New(nc, wire.Options{Handler: c.Handler()})
+		wire.New(nc, wire.Options{Handler: c.Handler(), Bulk: Bulk})
 	}
 }
 
@@ -78,7 +78,7 @@ func Connect(opt Options, wopt wire.Options) (*Client, error) {
 			ctx, cancel := context.WithCancel(context.Background())
 			go c.Serve(ctx)
 			go c.Run(ctx)
-			a, _ := wire.Pipe(wopt, wire.Options{Handler: c.Handler()})
+			a, _ := wire.Pipe(wopt, wire.Options{Handler: c.Handler(), Bulk: Bulk})
 			return &Client{Conn: a, Coord: c, cancel: cancel}, nil
 		}
 		if !errors.Is(err, ErrLocked) || time.Now().After(deadline) {

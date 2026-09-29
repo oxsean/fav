@@ -1,0 +1,34 @@
+{"note":"state.watch from nothing: the snapshot in parts, live, then envelopes; a reset starts a new snapshot"}
+{"connect":true}
+{"c":{"type":"req","id":1,"method":"hello","params":{"proto":2,"role":"client"}}}
+{"s":{"type":"res","id":1,"result":{"proto":2,"version":"test","role":"coordinator","methods":["hello","task.get","state.watch","run.output.watch","machines.watch","inbox.watch"]}}}
+{"step":"start"}
+{"c":{"type":"req","id":2,"method":"state.watch","params":{}}}
+{"c":{"type":"req","id":3,"method":"machines.watch","params":{}}}
+{"c":{"type":"req","id":4,"method":"inbox.watch","params":{}}}
+{"s":{"type":"push","id":2,"method":"open","params":{"mode":"snapshot"}}}
+{"s":{"type":"push","id":2,"method":"snapshot","params":{"part":"projects","items":{"p1":{"id":"p1","name":"Shop","owner":"u_a","members":{"u_b":"participant"},"rev":2,"created_at":"2026-09-29T09:00:00Z","updated_at":"2026-09-29T09:00:00Z"}}}}}
+{"s":{"type":"push","id":2,"method":"snapshot","params":{"part":"tasks","items":{"t1":{"id":"t1","title":"Pay timeout","brief":"Fix the timeout.","dir":"/w","project":"p1","owner":"u_b","status":"todo","rev":1,"created_at":"2026-09-29T09:00:00Z","updated_at":"2026-09-29T09:00:00Z"}}}}}
+{"s":{"type":"push","id":2,"method":"snapshot","params":{"part":"tasks","items":{"t2":{"id":"t2","title":"Receipts","project":"p1","owner":"u_b","status":"backlog","rev":1,"created_at":"2026-09-29T09:00:00Z","updated_at":"2026-09-29T09:00:00Z"}}}}}
+{"s":{"type":"push","id":2,"method":"snapshot","params":{"part":"runs","items":{"r1":{"id":"r1","task":"t1","machine":"mba","agent":"fake","profile":{"name":"fake","provider":"fake"},"dir":"/w","project":"p1","dispatcher":"u_b","want":"run","seq":9,"state":"running","node_rev":1,"queued_at":"2026-09-29T09:00:00Z"}}}}}
+{"s":{"type":"push","id":2,"method":"snapshot","params":{"part":"shares","items":{"mba":{"machine":"mba","projects":["p1"],"approve":true}}}}}
+{"s":{"type":"push","id":2,"method":"snapshot","params":{"part":"agent_defs","items":{"coder":{"name":"coder","provider":"claude","owner":"u_a","rev":1,"updated_at":"2026-09-29T09:00:00Z"}}}}}
+{"note":"affordances are the viewer's own; the store takes them without folding"}
+{"s":{"type":"push","id":2,"method":"snapshot","params":{"part":"affordances","items":{"t1":["dispatch","edit"]}}}}
+{"step":"parts"}
+{"s":{"type":"push","id":2,"method":"live","params":{"seq":10}}}
+{"s":{"type":"push","id":2,"method":"journal","params":{"v":2,"seq":11,"at":"2026-09-29T10:00:11Z","events":[{"type":"task_edited","data":{"id":"t1","title":"Pay timeout on retry"}}]}}}
+{"s":{"type":"push","id":2,"method":"journal","params":{"v":2,"seq":12,"at":"2026-09-29T10:00:12Z","events":[{"type":"run_observed","data":{"id":"r1","state":"running","node_rev":2,"last":"go test ./..."}}]}}}
+{"note":"an envelope at or below the applied seq is skipped"}
+{"s":{"type":"push","id":2,"method":"journal","params":{"v":2,"seq":12,"at":"2026-09-29T10:00:12Z","events":[{"type":"run_observed","data":{"id":"r1","state":"exited","node_rev":3,"exit_code":0}}]}}}
+{"s":{"type":"push","id":2,"method":"journal","params":{"v":2,"seq":13,"at":"2026-09-29T10:00:13Z","events":[{"type":"task_created","data":{"id":"t3","title":"Refunds","project":"p1","owner":"u_b","status":"todo"}}]}}}
+{"s":{"type":"push","id":3,"method":"open","params":{"mode":"snapshot"}}}
+{"s":{"type":"push","id":3,"method":"machines","params":{"items":[{"name":"mba","online":true}]}}}
+{"s":{"type":"push","id":4,"method":"open","params":{"mode":"snapshot"}}}
+{"s":{"type":"push","id":4,"method":"inbox","params":{"items":[{"task":"t1","reason":"dispatch"}]}}}
+{"step":"live"}
+{"note":"what this viewer may see changed"}
+{"s":{"type":"push","id":2,"method":"reset","params":{}}}
+{"s":{"type":"push","id":2,"method":"snapshot","params":{"part":"tasks","items":{"t1":{"id":"t1","title":"Pay timeout on retry","brief":"Fix the timeout.","dir":"/w","project":"p1","owner":"u_b","status":"todo","rev":2,"created_at":"2026-09-29T09:00:00Z","updated_at":"2026-09-29T09:00:00Z"}}}}}
+{"s":{"type":"push","id":2,"method":"live","params":{"seq":20}}}
+{"s":{"type":"push","id":2,"method":"journal","params":{"v":2,"seq":21,"at":"2026-09-29T10:00:21Z","events":[{"type":"task_status_set","data":{"id":"t1","status":"done"}}]}}}

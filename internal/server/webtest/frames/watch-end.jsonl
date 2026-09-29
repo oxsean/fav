@@ -1,0 +1,14 @@
+{"connect":true}
+{"c":{"type":"req","id":1,"method":"hello","params":{"proto":2,"role":"client"}}}
+{"s":{"type":"res","id":1,"result":{"proto":2,"version":"test","role":"coordinator","methods":["hello","state.get","task.get","task.create","state.watch","run.output.watch","machines.watch","inbox.watch"]}}}
+{"step":"watch"}
+{"c":{"type":"req","id":2,"method":"run.output.watch","params":{"run":"r1"}}}
+{"c":{"type":"req","id":3,"method":"run.output.watch","params":{"run":"r2"}}}
+{"c":{"type":"req","id":4,"method":"run.output.watch","params":{"run":"r3"}}}
+{"note":"a stream the server ends with an error stays ended"}
+{"s":{"type":"res","id":2,"error":{"code":"unauthorized"}}}
+{"s":{"type":"res","id":3,"error":{"code":"gone","detail":"machine mba"}}}
+{"s":{"type":"res","id":4,"error":{"code":"unsupported","detail":"run.output.watch"}}}
+{"note":"a watch of a method hello did not name ends without a request"}
+{"step":"missing"}
+{"wait_ms":60000}

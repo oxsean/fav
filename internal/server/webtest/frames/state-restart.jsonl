@@ -1,0 +1,18 @@
+{"note":"a push the state cannot take (a part it does not know, an envelope about what it does not hold): the client starts over from a snapshot"}
+{"connect":true}
+{"c":{"type":"req","id":1,"method":"hello","params":{"proto":2,"role":"client"}}}
+{"s":{"type":"res","id":1,"result":{"proto":2,"version":"test","role":"coordinator","methods":["hello","task.get","state.watch","run.output.watch","machines.watch","inbox.watch"]}}}
+{"step":"start"}
+{"c":{"type":"req","id":2,"method":"state.watch","params":{}}}
+{"c":{"type":"req","id":3,"method":"machines.watch","params":{}}}
+{"c":{"type":"req","id":4,"method":"inbox.watch","params":{}}}
+{"s":{"type":"push","id":2,"method":"open","params":{"mode":"snapshot"}}}
+{"s":{"type":"push","id":2,"method":"snapshot","params":{"part":"tasks","items":{}}}}
+{"s":{"type":"push","id":2,"method":"live","params":{"seq":3}}}
+{"s":{"type":"push","id":2,"method":"journal","params":{"v":2,"seq":4,"at":"2026-09-29T10:00:04Z","events":[{"type":"task_edited","data":{"id":"t404","title":"x"}}]}}}
+{"c":{"type":"cancel","id":2}}
+{"c":{"type":"req","id":5,"method":"state.watch","params":{}}}
+{"s":{"type":"push","id":5,"method":"open","params":{"mode":"snapshot"}}}
+{"s":{"type":"push","id":5,"method":"snapshot","params":{"part":"nope","items":{}}}}
+{"c":{"type":"cancel","id":5}}
+{"c":{"type":"req","id":6,"method":"state.watch","params":{}}}

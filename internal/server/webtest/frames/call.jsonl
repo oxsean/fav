@@ -1,0 +1,11 @@
+{"connect":true}
+{"c":{"type":"req","id":1,"method":"hello","params":{"proto":2,"role":"client"}}}
+{"s":{"type":"res","id":1,"result":{"proto":2,"version":"test","role":"coordinator","methods":["hello","state.get","task.get","task.create","state.watch","run.output.watch","machines.watch","inbox.watch"]}}}
+{"step":"calls"}
+{"c":{"type":"req","id":2,"method":"state.get","params":{}}}
+{"c":{"type":"req","id":3,"method":"task.create","command_id":"cmd-1","params":{"title":"x"}}}
+{"c":{"type":"req","id":4,"method":"task.get","params":{"id":"t9"}}}
+{"note":"answers come in any order"}
+{"s":{"type":"res","id":3,"result":{"id":"t1"}}}
+{"s":{"type":"res","id":2,"result":{"seq":4}}}
+{"s":{"type":"res","id":4,"error":{"code":"not_found","detail":"t9"}}}

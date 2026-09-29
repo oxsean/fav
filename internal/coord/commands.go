@@ -123,6 +123,10 @@ var Methods = []string{MStateGet, MTaskGet, MTaskCreate, MTaskEdit, MTaskStatus,
 	MProjectCreate, MProjectEdit, MProjectMember, MMachineShare, MTaskStart, MTaskMove,
 	MAgentDefList, MAgentDefGet, MAgentDefSave, MAgentDefRemove, MAgentDefShare, MInboxList, MUserOffboard, MTaskSync, MTaskLink, MTaskSourceAck, MTaskGate, MTaskMerge, MTaskPlan, MTaskPlanSave, MTaskPlanApply, MTaskMessage}
 
+// Bulk marks the methods whose answers are large pieces fetched on demand: a connection writes them after everything
+// else (wire.Options.Bulk).
+func Bulk(method string) bool { return method == MRunOutputPage }
+
 // Handler answers this machine's user.
 func (c *Coord) Handler() wire.Handler { return c.HandlerFor(Owner) }
 

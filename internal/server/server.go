@@ -205,7 +205,7 @@ func (s *Server) handleClient(w http.ResponseWriter, r *http.Request) {
 	}
 	ws.SetReadLimit(wire.MaxFrame + 1)
 	s.team().Touch(cred.ID)
-	c := wire.New(websocket.NetConn(r.Context(), ws, websocket.MessageText), wire.Options{Handler: s.audited(r, u, s.opt.Coord.HandlerFor(principal(u))), Keepalive: keepalive})
+	c := wire.New(websocket.NetConn(r.Context(), ws, websocket.MessageText), wire.Options{Handler: s.audited(r, u, s.opt.Coord.HandlerFor(principal(u))), Bulk: coord.Bulk, Keepalive: keepalive})
 	s.track(c, cred.ID)
 	defer s.untrack(c)
 	<-c.Done()
