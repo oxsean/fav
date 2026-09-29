@@ -198,6 +198,9 @@ type Node struct {
 	sweepMu sync.Mutex
 	swept   time.Time
 	trimmed time.Time // when TrimBlobs last ran
+
+	changesMu sync.Mutex
+	live      map[string]liveChanges // running runs' changes, by run
 }
 
 // Limits is what this machine lets a coordinator do (mode 2 sets them).
@@ -855,6 +858,10 @@ func (n *Node) forget(id string) {
 		if err := capture.KeepRunSession(n.Dir, sid, capture.RunSession{Run: id, Provider: spec.Provider, Dir: spec.Dir, Title: spec.Title}); err != nil {
 			return
 		}
+	}
+	var tr trees
+	if readJSON(filepath.Join(dir, treesFile), &tr) == nil {
+		tr.unref(id)
 	}
 	os.RemoveAll(dir)
 }

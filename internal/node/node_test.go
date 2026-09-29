@@ -1,6 +1,7 @@
 package node
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -35,6 +36,20 @@ func TestMain(m *testing.M) {
 	if len(os.Args) > 3 && os.Args[1] == "_say" { // a hook: says one line on stdout, one on stderr
 		fmt.Println(os.Args[2])
 		fmt.Fprintln(os.Stderr, os.Args[3])
+		os.Exit(0)
+	}
+	if len(os.Args) > 2 && os.Args[1] == "_act" { // an agent: writes files, removes some, then says lines (actScript)
+		var act actScript
+		b, _ := os.ReadFile(os.Args[2])
+		json.Unmarshal(b, &act)
+		for p, text := range act.Write {
+			os.MkdirAll(filepath.Dir(p), 0o755)
+			os.WriteFile(p, []byte(text), 0o644)
+		}
+		for _, p := range act.Remove {
+			os.Remove(p)
+		}
+		os.Stdout.WriteString(act.Say)
 		os.Exit(0)
 	}
 	if len(os.Args) > 2 && os.Args[1] == "_cat" { // an agent: says what a file holds on stdout
@@ -439,7 +454,8 @@ func TestListIsPerCoordinatorAndForgetsOldAcknowledgedRuns(t *testing.T) {
 	if runs, _ := n.List("a", nil); len(runs) != 0 {
 		t.Fatalf("an acknowledged run past keepDone is removed: %+v", runs)
 	}
-	if !slices.Equal(Methods, []string{MRunStart, MRunStop, MRunList, MRunTail, MRunLine, MRunResume, MAgents, MRunAnswer, MRunSend, MRunInterrupt, MDirs, MRunFollow}) {
+	if !slices.Equal(Methods, []string{MRunStart, MRunStop, MRunList, MRunTail, MRunLine, MRunResume, MAgents, MRunAnswer, MRunSend, MRunInterrupt, MDirs,
+		MRunFollow, MRunChanges, MRunDiff, MRunBlob}) {
 		t.Fatal(Methods)
 	}
 }

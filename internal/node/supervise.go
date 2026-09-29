@@ -434,6 +434,8 @@ func (s *sup) run() error {
 		}
 	}
 	s.slim = newSlimmer(s.dir, inGit(s.spec.Dir))
+	s.slim.cwd = s.spec.Dir
+	s.startChanges()
 	c := exec.Command(s.spec.Argv[0], s.spec.Argv[1:]...)
 	c.Dir = s.spec.Dir
 	c.Env = append(append(os.Environ(), EnvRun+"="+s.spec.Run, EnvRunDir+"="+s.dir), s.spec.env()...)
@@ -559,6 +561,7 @@ func (s *sup) run() error {
 			if well && len(s.spec.Check) > 0 {
 				s.check()
 			}
+			s.endChanges()
 			if s.spec.Work != nil {
 				s.settle(from)
 			}

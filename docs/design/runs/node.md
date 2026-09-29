@@ -25,6 +25,10 @@
 | `blobs/<sha256>` | 监督进程 | 瘦身移出日志的字段原文，按内容寻址，同一份内容只存一次（见「瘦身」） |
 | `blobs.gone` | 节点 | 存在 = 节点为守住总上限删掉了 `blobs/`，要用 blob 的读取回 `gone` |
 | `diffs/turn-<id>.patch` | 监督进程 | codex 一轮的最后一份 `turn/diff/updated`，`turn/completed` 时写一次 |
+| `touched.jsonl` | 监督进程 | 只追加 `{path, via edit\|cmd, base?, new?, lost?}`：agent 用工具改过的文件和命令里提到的路径，每个路径每种方式一条（见「改动」） |
+| `trees.json` | 监督进程 | `{git, git_dir?, prefix?, base?, end?}`：运行开始和结束时工作区的树（见「改动」） |
+| `base.index` / `end.index` / `live.index` | 监督进程 / 节点 | 取树用的临时索引 |
+| `changes.json` | 监督进程 | 运行结束时的全部改动，`run.changes` / `run.diff` 从这里读 |
 
 - `run.list{coordinator, runs?}` 回这个协调器派发的 run 的快照（给了 `runs` 就只回这些）；读快照只读不写。快照在 `state.json` 之上补一条：`!Held` 且 state 不是终态 → `unknown{reason: supervisor_gone}`（没人持锁时再读一次 state，防监督进程刚写完就走）；没有 `state.json`、`!Held`、且创建超过 30 s（`spec.created`）→ 报 `failed{reason: not_launched}`，结束时间是创建后 30 s，不落盘。迟到的监督进程发现创建已超过 30 s，自己写下 `failed{not_launched}` 退出，不起 agent（agent 只在第一个 state 写成之后才启动）。`state.json` 读失败重试 5 次、间隔 20 ms。
 - 准入：`run.start` 在 `node/admit.lock` 下检查并发布：同一真实目录已有未结束的 run → `conflict "dir_busy <run>"`；未结束的 run 数已到 `node.slots`（0 = 不限）→ `conflict "slots n/m"`。节点预检已判定跑不了（blocker）的 run 不占名额，直接发布成 failed。
@@ -81,6 +85,28 @@ claude 的工具结果里带着整份文件，codex 反复推一轮的全部 dif
   - 每个运行 256 MiB（`maxRunBlobs`），从 `blobs/` 已有的大小算起；超了新的字段不再存，换成 `{"$omit":"<字段>","bytes":n,"lines":k,"cap":true}`，只剩统计。
   - 每个节点 2 GiB（`maxNodeBlobs`）：`run.list` 每 10 分钟最多一次 `TrimBlobs`，超了从最早创建的已结束（或 unknown）运行删起：先写 `blobs.gone`，再删 `blobs/`，删到不超为止；还在跑的运行不删。
   - `tend doctor` 报 blob 的总量、分布在几个运行里和两个上限。
+
+## 改动
+
+一次运行改了什么，按文件列（`internal/node/changes.go`、`trees.go`、`touched.go`）。
+
+- **碰过的文件**：监督进程在瘦身时顺带记 `touched.jsonl`：
+  - `edit`：claude 带 `filePath` 的工具结果、codex `fileChange` 的各个 `path`（和 `move_path`）；
+  - `cmd`：claude `Bash` 的 `command`、codex `commandExecution` 在 `item/started` 时的 `command`（按它的 `cwd`）。按 POSIX 规则拆词，跳过程序名（开头和 `&&` `||` `|` `;` 之后的词）、`-` 开头的参数和带通配符的词，`a=b` 取 `b`，只留运行目录下的路径，一条命令最多 100 个。只按字面认，不看文件在不在，所以命令生成的文件只要命令里写了路径也认得出。
+  - 不在 git 里时，每个文件第一次被改时记下改之前的内容：claude 取 `originalFile`（`type: create` 或 `null` 是新文件），codex 在 `item/started` 时读盘；存成 blob，`base` 是它的 sha256。存不下（超上限）或者没有原文（codex 只见到 `item/completed`）记 `lost`。
+- **在 git 里**：
+  - 运行开始时（工作树准备好、agent 启动之前）：`rev-parse --git-common-dir` 和 `--show-prefix` 定仓库和运行目录在里面的位置；把用户的索引（`rev-parse --git-path index`）复制成 `base.index`，用 `GIT_INDEX_FILE=base.index GIT_OPTIONAL_LOCKS=0` 在运行目录下 `git add -A -- .`、`git write-tree`，就是起点树：未跟踪的文件在里面，忽略的不在；用户的索引和工作区只读不写。挂 `refs/tend/runs/<run>/base`，写 `trees.json`。
+  - 结束时（agent 退出、提交留下的改动、check 之后，settle 之前）：同样从 `base.index` 复制出 `end.index` 取终点树，挂 `…/end`，把改动写进 `changes.json`。之后工作树被续接复用、只读副本被删，都不影响结果。
+  - 比较：`diff-tree -r -M --raw` 和 `--numstat`（限在 `prefix` 下），大小用 `cat-file --batch-check`，`generated` 是文件名规则（`go.sum`、各种 lock 文件、`*.min.js`、`*.pb.go`、`vendor/`、`dist/`……）加 `check-attr linguist-generated`；`big` 是改动超过 400 行或文件超过 256 KiB；`agent` 是 `touched.jsonl` 里 edit 过的，或者在某个 cmd 路径之下的。
+  - 运行目录清理（`forget`）时两个 ref 一起删。
+- **不在 git 里**：每个 edit 过的文件，从 `base` 到文件现在的内容，用节点里的行 diff（Myers，`lineDiff`；超过 2000 处改动的那一段整块算删掉再加上）数 `+a −d`；结束时文件现在的内容存成 blob（`end`）。命令改的文件不在里面。含 NUL 或不是 UTF-8 的文件算二进制。
+- **运行中**：节点现取：git 里用 `live.index`（从 `base.index` 复制）写当前的树，不在 git 里读盘；同一个运行 2 s 内复用上一次的结果。`snapshot` 是这棵树（不在 git 里是各文件内容的哈希）。结束后只读 `changes.json`，`snapshot` 是终点树。
+- **方法**（方法名进 `hello.methods`；`run.start` 的参数没变，没有节点 feature；旧节点起的运行没有 `trees.json`，回 `gone`）：
+  - `run.changes{run, after?, snapshot?, all?}` → `{files: [{path, op add|modify|delete|rename, from?, add, del, bytes, old_bytes?, binary?, generated?, big?, agent?}], total: {files, add, del}, snapshot, git, hidden?, next?}`：按路径排序，`after` 之后的 500 个，`next` 是这一页最后一个路径；`path` 相对运行目录。
+  - `run.diff{run, path, snapshot?, hunk?, line?, n?, context?, all?}` → `{hunks: [{at, lines}], of, next?: {hunk, line?}}`：从第 `hunk` 处（这一处从第 `line` 行）起最多 `n`（默认 20）处、256 KiB；一处放不下就在这一处里按行续；`context` 默认 3、最多 10000。git 里是 `git diff --no-ext-diff --no-textconv -M` 两棵树之间这个文件；二进制没有 hunk。
+  - `run.blob{run, sha, off?, n?}` → `{text, off, size, next?}`：这个运行 `blobs/` 里的 blob，每页最多 256 KiB，只在字符边界切。
+  - `snapshot` 和现在的不一样 → `snapshot_changed`；`path` 不在这个人能看到的列表里 → `not_found`；blob 已清理（`blobs.gone`）、不在 git 里的 `lost` 文件、或者没有起点 → `gone`。
+  - `all`：看的人是机器主人。目录运行（没有 `Workspace`）不带 `all` 时只列 `agent` 的文件，其余只给个数 `hidden`；工作树运行全列。`all` 由协调器按看的人填，节点照信。
 
 ## 观察
 

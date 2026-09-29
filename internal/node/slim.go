@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -32,12 +33,14 @@ var slimPatterns = [][]byte{[]byte(`"tool_use_result"`), []byte(`"type":"tool_us
 type slimmer struct {
 	dir   string
 	git   bool
+	cwd   string            // the run's directory: what the agent touches is recorded under it ("" not recorded)
 	used  int64             // bytes in blobs/
 	diffs map[string]string // codex: each open turn's latest diff
+	seen  map[string]bool   // what touched.jsonl has, by way and path
 }
 
 func newSlimmer(dir string, git bool) *slimmer {
-	sl := &slimmer{dir: dir, git: git, diffs: map[string]string{}}
+	sl := &slimmer{dir: dir, git: git, diffs: map[string]string{}, seen: map[string]bool{}}
 	sl.used, _ = dirBytes(filepath.Join(dir, blobsDir))
 	return sl
 }
@@ -58,7 +61,7 @@ func dirBytes(dir string) (int64, int) {
 
 // line is line as the log keeps it, keep false to leave it out, and a mark to add where it is logged.
 func (sl *slimmer) line(line []byte) (logged []byte, keep bool, mark *Mark) {
-	if !containsAny(line, slimPatterns) {
+	if !containsAny(line, slimPatterns) && !containsAny(line, touchPatterns) {
 		return line, true, nil
 	}
 	body := bytes.TrimRight(line, "\r\n")
@@ -66,6 +69,7 @@ func (sl *slimmer) line(line []byte) (logged []byte, keep bool, mark *Mark) {
 	if json.Unmarshal(body, &m) != nil {
 		return line, true, nil
 	}
+	sl.touch(m)
 	changed := false
 	if method := str(m["method"]); method != "" {
 		var drop bool
@@ -246,20 +250,40 @@ func (sl *slimmer) omit(m map[string]json.RawMessage, k string, min int) bool {
 // store keeps b, field k's content, in a blob (once per content) and answers the ref standing in for it; past the
 // run's cap the ref only says k was left out. nil: the blob could not be written.
 func (sl *slimmer) store(k string, b []byte, lines int) json.RawMessage {
+	sum, err := sl.put(b)
+	switch {
+	case errors.Is(err, errBlobCap):
+		return encode(output.Ref{Omit: k, Bytes: len(b), Lines: lines, Cap: true})
+	case err != nil:
+		return nil
+	}
+	return encode(output.Ref{Blob: sum, Bytes: len(b), Lines: lines})
+}
+
+// keep keeps b in a blob, answering its sha256; ok false past the cap or when it could not be written.
+func (sl *slimmer) keep(b []byte) (string, bool) {
+	sum, err := sl.put(b)
+	return sum, err == nil
+}
+
+var errBlobCap = errors.New("blob cap")
+
+func (sl *slimmer) put(b []byte) (string, error) {
 	h := sha256.Sum256(b)
 	sum := hex.EncodeToString(h[:])
 	path := filepath.Join(sl.dir, blobsDir, sum)
-	if _, err := os.Stat(path); err != nil {
-		if sl.used+int64(len(b)) > maxRunBlobs || fileExists(filepath.Join(sl.dir, blobsGone)) {
-			return encode(output.Ref{Omit: k, Bytes: len(b), Lines: lines, Cap: true})
-		}
-		// ⚠️ the blob is whole before the line naming it is logged: temp file, then rename
-		if err := fileio.WriteAtomic(path, 0o600, func(w io.Writer) error { _, err := w.Write(b); return err }); err != nil {
-			return nil
-		}
-		sl.used += int64(len(b))
+	if _, err := os.Stat(path); err == nil {
+		return sum, nil
 	}
-	return encode(output.Ref{Blob: sum, Bytes: len(b), Lines: lines})
+	if sl.used+int64(len(b)) > maxRunBlobs || fileExists(filepath.Join(sl.dir, blobsGone)) {
+		return "", errBlobCap
+	}
+	// ⚠️ the blob is whole before the line naming it is logged: temp file, then rename
+	if err := fileio.WriteAtomic(path, 0o600, func(w io.Writer) error { _, err := w.Write(b); return err }); err != nil {
+		return "", err
+	}
+	sl.used += int64(len(b))
+	return sum, nil
 }
 
 func fileExists(path string) bool {

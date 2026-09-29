@@ -321,3 +321,26 @@ func TestSuperviseSlimsTheLog(t *testing.T) {
 		}
 	}
 }
+
+// Outside git, codex's file change about to happen keeps the file as it is as its base; a command's paths under the
+// run's directory are recorded, others and flags not.
+func TestTouchCodex(t *testing.T) {
+	runDir, dir := t.TempDir(), t.TempDir()
+	os.WriteFile(filepath.Join(dir, "a.txt"), []byte("old\n"), 0o644)
+	sl := newSlimmer(runDir, false)
+	sl.cwd = dir
+	sl.line(codexLine("item/started", `{"item":{"type":"fileChange","id":"f","changes":[{"path":`+jsonStr(filepath.Join(dir, "a.txt"))+`,"kind":{"type":"update"},"diff":"-old\n+new\n"},{"path":"b.txt","kind":{"type":"add"},"diff":"+b\n"}]}}`))
+	sl.line(codexLine("item/completed", `{"item":{"type":"fileChange","id":"f","changes":[{"path":`+jsonStr(filepath.Join(dir, "a.txt"))+`,"kind":{"type":"update"},"diff":"-old\n+new\n"}]}}`))
+	sl.line(codexLine("item/started", `{"item":{"type":"commandExecution","id":"c","command":"sed -i -e s/a/b/ sub/y.txt /etc/hosts > out.log","cwd":`+jsonStr(dir)+`}}`))
+	var got []string
+	for _, tc := range readTouched(runDir) {
+		rel, _ := filepath.Rel(dir, tc.Path)
+		got = append(got, tc.Via+":"+filepath.ToSlash(rel))
+		if rel == "a.txt" && tc.Base != sha("old\n") || rel == "b.txt" && !tc.New {
+			t.Errorf("%+v", tc)
+		}
+	}
+	if strings.Join(got, " ") != "edit:a.txt edit:b.txt cmd:s/a/b cmd:sub/y.txt cmd:out.log" {
+		t.Fatalf("%q", got)
+	}
+}

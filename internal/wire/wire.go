@@ -65,6 +65,8 @@ const (
 	CodeRequestGone   = "request_gone"  // answered already (Detail: by whom, when known) or no longer asked
 	CodeCannotSend    = "cannot_send"   // nothing takes a message that way now (Detail: why)
 	CodeRouteChanged  = "route_changed" // a message's route is not the one its sender saw (Detail: where it goes now)
+	// CodeSnapshotChanged: a run's workspace moved since the snapshot its changes were paged from: read them again
+	CodeSnapshotChanged = "snapshot_changed"
 
 	CodeOffline = "offline" // ssh could not connect
 	CodeAuth    = "auth"    // ssh refused the key

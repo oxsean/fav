@@ -110,6 +110,24 @@ func (n *Node) Handler(sessions remote.Handler) wire.Handler {
 				return nil, err
 			}
 			return n.Interrupt(p)
+		case MRunChanges:
+			var p ChangesParams
+			if err := r.Decode(&p); err != nil {
+				return nil, err
+			}
+			return n.Changes(p)
+		case MRunDiff:
+			var p DiffParams
+			if err := r.Decode(&p); err != nil {
+				return nil, err
+			}
+			return n.Diff(p)
+		case MRunBlob:
+			var p BlobParams
+			if err := r.Decode(&p); err != nil {
+				return nil, err
+			}
+			return n.BlobOf(p)
 		case MDirs:
 			var p DirsParams
 			if err := r.Decode(&p); err != nil {
@@ -129,7 +147,8 @@ func (n *Node) Handler(sessions remote.Handler) wire.Handler {
 }
 
 // Methods lists what Handler answers.
-var Methods = []string{MRunStart, MRunStop, MRunList, MRunTail, MRunLine, MRunResume, MAgents, MRunAnswer, MRunSend, MRunInterrupt, MDirs, MRunFollow}
+var Methods = []string{MRunStart, MRunStop, MRunList, MRunTail, MRunLine, MRunResume, MAgents, MRunAnswer, MRunSend, MRunInterrupt, MDirs,
+	MRunFollow, MRunChanges, MRunDiff, MRunBlob}
 
 // Features lists what run.start and run.resume understand beyond their first shape; a coordinator that needs a feature
 // this node lacks fails the run as node_outdated instead of starting it without.
