@@ -335,7 +335,7 @@ test('the timeline follows the bottom, leaves it when the viewer scrolls up, kee
   } finally { undo(); }
 });
 
-test('the task page\'s conversation: watched, paged back into the run before, then written to', async () => {
+test('the task page\'s conversation: watched, paged back into the run before, written to, then carried on', async () => {
   const r = await outputs();
   const a = app(r, {url: '/?page=tasks&task=t1'});
   let root;
@@ -407,6 +407,22 @@ test('the task page\'s conversation: watched, paged back into the run before, th
   await click(root.one('[data-key=a2:3:650:0]').one('.out-line'));
   await click(buttonOf(root, words.t('out.copyLink')));
   ok(a.copied.at(-1)?.endsWith(link('t1', 'r2', 'a2:3:650:0')), `the step's link: ${a.copied.at(-1)}`);
+  await r.srv.play('output-carry', {
+    async after() {
+      await settled();
+      await click(root.one('.cmp-modes').find('button').find(b => b.textContent === words.t('cmp.after')));
+      await type(composer(), 'Then add a footer with the page number.');
+      await click(buttonOf(root, words.t('cmp.send')));
+    },
+    async ended() { await settled(); r.flush(); await settled(); },
+    async continued() {
+      await settled(); r.flush(); await settled();
+      const you = root.one('[data-key=a3:1:0:0]');
+      ok(you.textContent.includes(words.f('out.by', 'u_b')) && you.textContent.includes('Then add a footer'), `r3's prompt is u_b's message: ${you.textContent}`);
+      ok(!you.textContent.includes(words.t('out.you')), 'not a prompt of nobody');
+      eq(root.find('[data-key]').filter(x => x.getAttribute('data-key') === 'send:m_a1').length, 0, 'the message is not left waiting in r2');
+    },
+  });
   eq(r.errors, [], 'errors');
 });
 

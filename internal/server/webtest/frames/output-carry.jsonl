@@ -1,0 +1,13 @@
+{"note":"after output-send: a message sent to go after the turn; the run ends and the coordinator continues its session with it (r3 takes it, T3.4), so r3's first prompt is that message, drawn as its sender sent it"}
+{"step":"after"}
+{"c":{"type":"req","id":13,"method":"task.message","params":{"id":"t1","text":"Then add a footer with the page number.","mode":"after","expect":{"to":"run","run":"r2","version":30}},"command_id":"c6"}}
+{"s":{"type":"res","id":13,"result":{"to":"run","run":"r2"}}}
+{"s":{"type":"push","id":2,"method":"journal","params":{"v":2,"seq":42,"at":"2026-09-30T14:34:00Z","events":[{"type":"run_sent","data":{"id":"r2","send":{"id":"m_a1","text":"Then add a footer with the page number.","state":"queued","mode":"after","by":"u_b","at":"2026-09-30T14:34:00Z"}}}]}}}
+{"s":{"type":"push","id":2,"method":"journal","params":{"v":2,"seq":43,"at":"2026-09-30T14:35:00Z","events":[{"type":"run_observed","data":{"id":"r2","state":"exited","node_rev":3,"exit_code":0,"provider":"claude","session":"s-1","caps":{"steer":true,"after":true,"interrupt":true,"answer_scope":true,"questions":true,"continue":true},"turn":1,"ended_at":"2026-09-30T14:35:00Z"}},{"type":"run_queued","data":{"id":"r3","task":"t1","machine":"mba","agent":"claude","profile":{"name":"claude","provider":"claude"},"dir":"/w/shop","project":"p1","dispatcher":"u_b","brief":"Then add a footer with the page number.","runner":"background","parent":"r2","resume":"s-1","takes":["m_a1"]}}]}}}
+{"s":{"type":"push","id":2,"method":"journal","params":{"v":2,"seq":44,"at":"2026-09-30T14:35:02Z","events":[{"type":"run_starting","data":{"id":"r3"}},{"type":"run_observed","data":{"id":"r3","state":"running","node_rev":1,"provider":"claude","session":"s-1","stream":true,"caps":{"steer":true,"after":true,"interrupt":true,"answer_scope":true,"questions":true,"continue":true},"turn":1,"started_at":"2026-09-30T14:35:02Z"}}]}}}
+{"step":"ended"}
+{"c":{"type":"req","id":14,"method":"run.output.watch","params":{"run":"r3"}}}
+{"c":{"type":"cancel","id":5}}
+{"s":{"type":"push","id":14,"method":"open","params":{"cursor":{"file":"a3:1","off":0},"mode":"resume"}}}
+{"s":{"type":"push","id":14,"method":"run.output","params":{"events":[{"id":"a3:1:0:0","off":0,"kind":"user","text":"Then add a footer with the page number.","turn":1},{"id":"a3:1:120:0","off":120,"kind":"say","text":"Adding the footer now.","turn":1}]}}}
+{"step":"continued"}

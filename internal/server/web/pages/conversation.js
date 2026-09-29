@@ -85,9 +85,10 @@ export function Conversation({store, commands, toasts, prefs, task, run = '', ta
     const o = outputs.get(r.id);
     let head = heads[i];
     if (i === 0 && head.start && from > 0) head = {more: true};
-    return {run: r, events: o?.events.value || [], head: i === 0 ? head : head.gone ? head : null};
+    const taken = (r.takes || []).map(id => (st.runs[r.parent]?.sends || []).find(m => m.id === id)).filter(Boolean);
+    return {run: r, events: o?.events.value || [], head: i === 0 ? head : head.gone ? head : null, taken};
   });
-  const partsKey = parts.map(p => p.run.id + ':' + idOf(p.events) + ':' + JSON.stringify(p.head) + ':' + (p.run.state || '') + ':' + (p.run.requests || []).map(q => q.id).join() + ':' + (p.run.sends || []).map(m => m.id + m.state).join()).join('|');
+  const partsKey = parts.map(p => p.run.id + ':' + idOf(p.events) + ':' + JSON.stringify(p.head) + ':' + (p.run.state || '') + ':' + (p.run.requests || []).map(q => q.id).join() + ':' + (p.run.sends || []).map(m => m.id + m.state).join() + ':' + p.taken.map(m => m.id).join()).join('|');
   const memoParts = useMemo(() => parts, [partsKey]);
 
   const more = () => {

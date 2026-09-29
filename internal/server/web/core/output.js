@@ -104,8 +104,9 @@ function stepOf(it, events, res, ctx) {
   return step;
 }
 
-// runModel is one run's steps by turn. events are the run's in order; run the run as the state holds it.
-function runModel(run, events, {first = true, head = null} = {}) {
+// runModel is one run's steps by turn. events are the run's in order; run the run as the state holds it; taken the
+// messages of the run it continues that it carries (its takes), which its first prompt is.
+function runModel(run, events, {first = true, head = null, taken = []} = {}) {
   const open = ['queued', 'starting', 'running', 'unknown'].includes(run?.state);
   const pending = new Set(open ? (run?.requests || []).map(q => q.id) : []);
   const resolved = new Map(events.filter(e => e.kind === 'resolved' && e.request).map(e => [e.request, e]));
@@ -113,7 +114,8 @@ function runModel(run, events, {first = true, head = null} = {}) {
   const res = results(events);
   const firstItem = laid.find(it => events[it.events[0]].kind === 'user');
   const ctx = {run: run?.id || '', open, pending, resolved, first, firstItem};
-  const all = laid.map(it => stepOf(it, events, res, ctx)).filter(s => s.kind !== 'resolved');
+  const all = laid.flatMap(it => (it === firstItem && taken.length ? carried(it, events[it.events[0]], taken, ctx)
+    : [stepOf(it, events, res, ctx)])).filter(s => s.kind !== 'resolved');
   const byParent = new Map();
   for (const s of all) if (s.parent) byParent.set(s.parent, [...(byParent.get(s.parent) || []), s]);
   const calls = new Set(all.map(s => s.call).filter(Boolean));
@@ -133,10 +135,18 @@ function runModel(run, events, {first = true, head = null} = {}) {
   return {run, id: ctx.run, open, turns, temps, sends, head};
 }
 
-// model is a conversation: parts [{run, events, head}] from its first run to its last. head says what is before the
-// loaded events: {more: true} while an earlier page can be fetched, {gone: true} when the run's output was cleared.
+// carried are the steps of a continuation's first prompt: one you per message it carries, as its sender sent it (the
+// coordinator joins their texts into the prompt).
+function carried(it, e, taken, ctx) {
+  return taken.map((m, i) => ({key: i ? `${it.id}/${i}` : it.id, id: e.id, run: ctx.run, turn: e.turn || 0, at: m.at || e.at || '', parent: '',
+    kind: 'you', text: m.text || '', input: m.id, by: m.by || '', mode: m.mode || ''}));
+}
+
+// model is a conversation: parts [{run, events, head, taken}] from its first run to its last. head says what is before
+// the loaded events: {more: true} while an earlier page can be fetched, {gone: true} when the run's output was cleared;
+// taken are the messages of the run before that the run carries.
 export function model(parts) {
-  const runs = parts.map((p, i) => runModel(p.run, p.events || [], {first: i === 0, head: p.head || null}));
+  const runs = parts.map((p, i) => runModel(p.run, p.events || [], {first: i === 0, head: p.head || null, taken: p.taken || []}));
   let plan = null;
   for (const r of runs) for (const t of r.turns) for (const s of t.steps) if (s.kind === 'plan' && s.plan.length) plan = s;
   return {runs, plan};
