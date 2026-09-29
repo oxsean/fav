@@ -8,6 +8,7 @@ import {readFileSync} from 'node:fs';
 import {render} from '../web/vendor/preact.mjs';
 import renderToString from './vendor/render-to-string.mjs';
 import {act} from './vendor/test-utils.mjs';
+import {useState} from '../web/vendor/hooks.mjs';
 import {createKeys} from '../web/core/keys.js';
 import {createRouter, parse, format, link} from '../web/core/router.js';
 import {form, createNav} from '../web/core/layout.js';
@@ -241,6 +242,37 @@ test('who decided: a person by name, a question answered even though its agent w
   ok(s.includes('Bob answered'), 'the question, by name');
   ok(s.includes('Server admin allowed'), 'the permission, by the server admin');
   ok(!s.includes('u_b'), 'no id');
+});
+
+test('find in earlier output asks the node first: nothing there, a hit fetched page by page, a server that cannot as before', async () => {
+  const hit = {id: 'f:1:0', off: 1, kind: 'say', text: 'The coupon rule stays.', turn: 1};
+  const probe = async ({onFind, at}) => {
+    const clk = clock();
+    let asked = 0;
+    function Rig() {
+      const [events, setEvents] = useState(r2Early);
+      const more = () => { asked++; if (asked === at) setEvents(e => [hit, ...e]); return Promise.resolve(); };
+      return html`<${Output} parts=${[{run: {...state.r2, sends: []}, events, head: {more: true}}]} onMore=${more} onFind=${onFind} timers=${clk} />`;
+    }
+    const root = await mount(html`<${Rig} />`, 'phone');
+    await click(root.find('button').find(b => b.getAttribute('aria-label') === words.t('out.find')));
+    await type(root.one('.out-find').find('input')[0], 'coupon');
+    await act(() => clk.advance(200));
+    await click(buttonOf(root, words.t('out.earlier')));
+    // not in act, which holds the renders the search waits for until it ends
+    await settle();
+    await settled();
+    return {asked, text: root.one('.out-find').textContent, hits: root.find('.out-flash').length + root.textContent.includes('The coupon rule') };
+  };
+  const none = await probe({onFind: () => Promise.resolve(false)});
+  eq([none.asked, none.text.includes(words.t('out.noEarlier'))], [0, true], 'the node found nothing: no page fetched');
+  const far = await probe({onFind: () => Promise.resolve(true), at: 12});
+  eq([far.asked, far.text.includes(words.f('out.earlierMore', 8))], [12, false], 'a hit the node found is fetched however far back');
+  ok(far.hits, 'and shown');
+  const old = await probe({onFind: () => Promise.reject(Object.assign(new Error('unsupported'), {code: 'unsupported'})), at: 99});
+  eq([old.asked, old.text.includes(words.f('out.earlierMore', 8))], [8, true], 'a server that cannot: eight pages, then asks');
+  const bad = await probe({onFind: () => Promise.reject(Object.assign(new Error('x'), {code: 'unavailable'}))});
+  eq([bad.asked, bad.text.includes(words.f('out.findFailed', 'unavailable'))], [0, true], 'a failed find says so');
 });
 
 test('answers and routes: own words over picks, one press for one question, the modes a route offers', () => {

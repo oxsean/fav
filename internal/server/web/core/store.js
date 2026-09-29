@@ -17,6 +17,8 @@ const noAffordances = () => ({runs: {}, tasks: {}});
 // OUTPUT_BYTES (as JSON), earliest first, once the view is back at the bottom.
 export const PAGE_EVENTS = 200;
 export const OUTPUT_BYTES = 32 << 20;
+// ⚠️ How many times a find goes on where the node stopped looking before it says there is nothing.
+export const FIND_ROUNDS = 8;
 
 // fileOf is the log an event id is in: the id is file:off:n and the file (dev:ino) has colons of its own.
 export const fileOf = id => String(id).split(':').slice(0, -2).join(':');
@@ -183,6 +185,12 @@ export function createStore({wire, frame = fn => globalThis.requestAnimationFram
     return {
       events: o.events, done: o.done, head: o.head,
       more: () => more(o, run),
+      // find says whether q is shown before the earliest event held.
+      find: q => {
+        const h = o.head.value, first = o.events.value.find(e => e.id);
+        if (h.start || h.gone) return Promise.resolve(false);
+        return find(run, q, o.back || (first ? {before: first.off, file: fileOf(first.id)} : {before: -1}));
+      },
       // trim drops the earliest fetched pages past OUTPUT_BYTES, for a view back at the bottom.
       trim: () => trim(o),
       release() {
@@ -217,6 +225,18 @@ export function createStore({wire, frame = fn => globalThis.requestAnimationFram
       if (e.code === code.stale) { o.back = null; o.head.value = {more: true}; return; }
       o.head.value = e.code === code.gone || e.code === code.notFound ? {gone: true} : {more: true, failed: e.code || 'error'};
     });
+  }
+
+  // find says whether q is shown in run's output before at ({before, file}; before -1 from the end): the node looks
+  // (run.output.find); a server without it fails unsupported.
+  async function find(run, q, at = {before: -1}) {
+    for (let n = 0; n < FIND_ROUNDS; n++) {
+      const p = await wire.call('run.output.find', {run, q, before: at.before, ...(at.file ? {file: at.file} : {}), limit: 1});
+      if (p?.hits?.length) return true;
+      if (!p?.next) return false;
+      at = p.next;
+    }
+    return false;
   }
 
   function trim(o) {
@@ -258,6 +278,8 @@ export function createStore({wire, frame = fn => globalThis.requestAnimationFram
     // raw is the last page of a run's output as its log has it.
     raw: run => wire.call('run.output.page', {run, before: -1, n: PAGE_EVENTS, raw: true}).then(p => p?.raw ?? ''),
     state, rev, phase, machines, inbox, affordances, session, prefs, brief, briefOf, output,
+    // find says whether q is shown anywhere in a run's output; canFind whether the server can look.
+    find: (run, q) => find(run, q), canFind: () => !!wire.has?.('run.output.find'),
     // start opens the watches; noBriefs leaves the tasks' briefs out of the state (brief fetches one).
     start({noBriefs = false} = {}) {
       briefs = !noBriefs;

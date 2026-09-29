@@ -99,6 +99,12 @@ export function Conversation({store, commands, toasts, prefs, task, run = '', ta
     if (o.head.value.start && from > 0) { setFrom(from - 1); return Promise.resolve(); }
     return o.more();
   };
+  // findBack says whether q is shown before what is loaded: in the run at the top, then in each earlier run
+  const findBack = store.canFind() ? async q => {
+    if (await outputs.get(shown[0]?.id)?.find(q)) return true;
+    for (let i = conv.length - shown.length - 1; i >= 0; i--) if (await store.find(conv[i].id, q)) return true;
+    return false;
+  } : null;
   // an earlier run brought in by scrolling up starts from its last page
   useEffect(() => {
     const o = outputs.get(shown[0]?.id);
@@ -141,7 +147,7 @@ export function Conversation({store, commands, toasts, prefs, task, run = '', ta
   };
 
   return html`<div class="conv">
-    <${Output} key=${root} parts=${memoParts} density=${density} onDensity=${prefs.setOutput} onMore=${more} renderAsk=${renderAsk} target=${target}
+    <${Output} key=${root} parts=${memoParts} density=${density} onDensity=${prefs.setOutput} onMore=${more} onFind=${findBack} renderAsk=${renderAsk} target=${target}
       place=${place} onPlace=${p => keepPlace(session, root, p)} raw=${raw} onRaw=${toggleRaw} copy=${copy}
       onResend=${m => message({text: m.text, mode: ''})} linkOf=${s => address() + link(task.id, s.run, s.id)}>
       <${Composer} route=${route} acts=${acts} machine=${last.machine} busy=${busy} onSend=${onSend}

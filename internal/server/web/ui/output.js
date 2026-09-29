@@ -9,7 +9,7 @@ import {Button, Chip, Chips, Segmented} from './controls.js';
 import {Markdown} from './markdown.js';
 import {register} from '../core/i18n.js';
 import * as out from '../core/output.js';
-import {density as dt} from '../core/proto.js';
+import {density as dt, code} from '../core/proto.js';
 import * as fl from '../core/follow.js';
 import {duration, tokens, money, clock, usageTokens} from '../core/format.js';
 
@@ -46,14 +46,16 @@ register('output', {
   'out.findHint': ['在输出里查找', 'Find in the output'], 'out.findScope': ['查的是摘要，不含截掉的部分', 'Searches the summaries, not what was cut'],
   'out.hits': ['%d / %d', '%d / %d'], 'out.noHit': ['没有找到', 'Not found'], 'out.earlier': ['在更早的内容里找', 'Find in earlier output'],
   'out.earlierMore': ['找过更早的 %d 页，没有找到。接着找？', 'Looked through %d earlier pages without a hit. Go on?'],
+  'out.noEarlier': ['更早的内容里也没有', 'Not in earlier output either'], 'out.findFailed': ['没能在更早的内容里找（%s）', 'Could not look in earlier output (%s)'],
   'out.prevHit': ['上一处', 'Previous'], 'out.nextHit': ['下一处', 'Next'], 'out.close': ['关闭查找', 'Close find'],
   'out.empty': ['还没有输出', 'No output yet'], 'out.copyLink': ['复制这一步的链接', 'Copy a link to this step'],
 });
 
 // ⚠️ Find waits this long after a key; "find in earlier output" fetches this many pages (each at most 1 MiB, so about
-// 8 MiB) before asking to go on.
+// 8 MiB) before asking to go on, or, once the node found a hit there, at most FOUND_PAGES to reach it.
 const FIND_WAIT = 150;
 const FIND_PAGES = 8;
+const FOUND_PAGES = 200;
 
 const glyph = {ok: '✓', failed: '✗', running: '●', unknown: '?'};
 const tone = {ok: 't-success', failed: 't-failed', running: 't-running', unknown: 't-muted'};
@@ -281,7 +283,9 @@ function FindBar({q, setQ, hits, at, onStep, onClose, onEarlier, earlier, inputR
     ${phone && html`<${Button} kind="quiet" icon="up" label=${t('out.prevHit')} onClick=${() => onStep(-1)} /><${Button} kind="quiet" icon="down" label=${t('out.nextHit')} onClick=${() => onStep(1)} />`}
     <${Button} kind="quiet" icon="close" label=${t('out.close')} onClick=${onClose} />
     <span class="out-find-note t-muted">${t('out.findScope')}</span>
-    ${onEarlier && q.trim() && html`<span class="out-find-more">${earlier?.asked ? html`<span class="t-muted">${f('out.earlierMore', earlier.pages)}</span>` : ''}
+    ${onEarlier && q.trim() && html`<span class="out-find-more">${earlier?.none ? html`<span class="t-muted">${t('out.noEarlier')}</span>`
+      : earlier?.failed ? html`<span class="t-failed">${f('out.findFailed', earlier.failed)}</span>`
+      : earlier?.asked ? html`<span class="t-muted">${f('out.earlierMore', earlier.pages)}</span>` : ''}
       <${Button} kind="quiet" disabled=${earlier?.busy} onClick=${onEarlier}>${t('out.earlier')}<//></span>`}
   </div>`;
 }
@@ -338,12 +342,13 @@ function useFollow({scroller, keys, waits, ended, away, timers = globalThis}) {
 }
 
 // Output: parts are the conversation's runs [{run, events, head}] (store outputs); density and onDensity the viewer's
-// setting; onMore fetches the page before (a promise); renderAsk(step) draws the answer form of a pending question;
+// setting; onMore fetches the page before (a promise); onFind(q) says whether q is shown before what is loaded (a
+// promise; none: earlier pages are fetched and looked through); renderAsk(step) draws the answer form of a pending question;
 // target is a step to go to (a deep link); place and onPlace keep where the view was left; raw and onRaw show the
 // lines as written; copy puts text on the clipboard; tools go at the top right (the page's own buttons); children
 // (the composer) go under the timeline; linkOf(step) is the address of a step, copied for the selected one. bare is a
 // preview: the timeline alone, without its tools and keys.
-export function Output({bare = false, parts, density = 'standard', onDensity, onMore, onResend, renderAsk, target = '', place = null, onPlace, linkOf,
+export function Output({bare = false, parts, density = 'standard', onDensity, onMore, onFind = null, onResend, renderAsk, target = '', place = null, onPlace, linkOf,
   raw = null, onRaw, copy = text => globalThis.navigator?.clipboard?.writeText?.(text), tools, children, timers = globalThis, active: activeProp}) {
   const w = useWords();
   const {t} = w;
@@ -467,6 +472,7 @@ export function Output({bare = false, parts, density = 'standard', onDensity, on
 
   useEffect(() => {
     const id = timers.setTimeout(() => setQuery(q.trim()), FIND_WAIT);
+    setEarlier(null);
     return () => timers.clearTimeout(id);
   }, [q]);
 
@@ -480,14 +486,22 @@ export function Output({bare = false, parts, density = 'standard', onDensity, on
   const findEarlier = async () => {
     const before = hits.length;
     setEarlier({busy: true, pages: 0});
+    let found = null;
+    if (onFind) {
+      try { found = await onFind(q.trim()); } catch (e) {
+        if (e.code !== code.unsupported) { setEarlier({busy: false, pages: 0, failed: e.code || 'error'}); return; }
+      }
+      if (found === false) { setEarlier({busy: false, pages: 0, none: true}); return; }
+    }
+    const cap = found ? FOUND_PAGES : FIND_PAGES;
     let pages = 0;
-    for (; pages < FIND_PAGES; pages++) {
+    for (; pages < cap; pages++) {
       const head = latestRef.current[0];
       if (head?.type !== 'head' || !head.more) break;
       await onMore?.();
       if (hitsRef.current.length > before) break;
     }
-    setEarlier({busy: false, pages, asked: hitsRef.current.length === before && pages >= FIND_PAGES});
+    setEarlier({busy: false, pages, asked: hitsRef.current.length === before && pages >= cap});
     if (hitsRef.current.length > before) { const h = hitsRef.current[0]; setHit(h); goTo(h.key); }
   };
   const latestRef = useRef(latest), hitsRef = useRef(hits);

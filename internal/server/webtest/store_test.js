@@ -86,4 +86,21 @@ test('a push the state cannot take starts over from a snapshot', async () => {
   eq(store.phase.value, 'idle', 'phase');
 });
 
+test('find asks the node where it left off, until a hit, the log\'s start or a few rounds', async () => {
+  const asked = [];
+  const answers = [];
+  const wire = {has: m => m === 'run.output.find', call: (m, p) => { asked.push([m, p]); return Promise.resolve(answers.shift()); }};
+  const store = createStore({wire, frame: fn => fn(), onError: () => {}});
+  ok(store.canFind(), 'the server can look');
+  answers.push({hits: [], file: 'a', next: {file: 'a', before: 500}}, {hits: [{id: 'r1/a:10:0'}], file: 'a'});
+  eq(await store.find('r1', 'coupon'), true, 'a hit past where the node stopped');
+  eq(asked.map(([, p]) => p), [{run: 'r1', q: 'coupon', before: -1, limit: 1}, {run: 'r1', q: 'coupon', before: 500, file: 'a', limit: 1}], 'from the end, then on');
+  asked.length = 0;
+  answers.push({hits: [], file: 'a'});
+  eq([await store.find('r1', 'coupon'), asked.length], [false, 1], 'none at the log\'s start');
+  for (let i = 0; i < 20; i++) answers.push({hits: [], file: 'a', next: {file: 'a', before: 10}});
+  asked.length = 0;
+  eq([await store.find('r1', 'coupon'), asked.length], [false, 8], 'a few rounds at most');
+});
+
 run();
