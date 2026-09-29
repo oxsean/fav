@@ -26,7 +26,7 @@ var notCode = []string{"Width", "Height", "TestName", "RESULT", "tend.sh", "tend
 
 var (
 	backtick = regexp.MustCompile("`([^`\n]+)`")
-	pathLike = regexp.MustCompile(`^(internal|cmd|tools|scripts|skills)/[\w./-]*$|^[\w.-]+\.(go|sh|py|toml|yml|yaml|md)$`)
+	pathLike = regexp.MustCompile(`^(internal|cmd|tools|scripts|skills|docs)/[\w./-]*$|^[\w.-]+\.(go|sh|py|toml|yml|yaml|md)$`)
 	// external: package qualifiers and builtins that are not this module's
 	external = regexp.MustCompile(`^(t|tea|syscall|lipgloss|os|filepath|strings|exec|time|json|testing)\.|^len\(`)
 	goFile   = regexp.MustCompile(`[\w-]+\.go\b`)
@@ -37,6 +37,7 @@ var (
 	tendCmd  = regexp.MustCompile(`^tend ([a-z][a-z-]+)(?: \[?([a-z][a-z-]+))?`)
 	caseLine = regexp.MustCompile(`case ((?:"[^"]*"(?:, )?)+):`)
 	quoted   = regexp.MustCompile(`"([^"]*)"`)
+	mdLink   = regexp.MustCompile(`\]\(([^)#\s]+\.md)(?:#[^)]*)?\)`)
 )
 
 func root(t *testing.T) string {
@@ -199,5 +200,46 @@ func checkTend(t *testing.T, doc, snippet string, top, hosts map[string]bool) {
 		t.Errorf("%s: tend %s is not a subcommand", doc, m[1])
 	} else if m[1] == "hosts" && m[2] != "" && !hosts[m[2]] {
 		t.Errorf("%s: tend hosts %s is not a subcommand", doc, m[2])
+	}
+}
+
+// TestDesignDocsAreIndexed fails when a design document is missing from docs/design/README.md or a Markdown link in
+// the design documents or AGENTS.md points at no file.
+func TestDesignDocsAreIndexed(t *testing.T) {
+	root := root(t)
+	design := filepath.Join(root, "docs", "design")
+	index, err := os.ReadFile(filepath.Join(design, "README.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	linked := map[string]bool{}
+	for _, m := range mdLink.FindAllStringSubmatch(string(index), -1) {
+		linked[filepath.ToSlash(filepath.Clean(m[1]))] = true
+	}
+	pages := []string{filepath.Join(root, "AGENTS.md")}
+	filepath.WalkDir(design, func(p string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() || !strings.HasSuffix(p, ".md") {
+			return err
+		}
+		pages = append(pages, p)
+		if rel, _ := filepath.Rel(design, p); rel != "README.md" && !linked[filepath.ToSlash(rel)] {
+			t.Errorf("docs/design/README.md does not list %s", filepath.ToSlash(rel))
+		}
+		return nil
+	})
+	for _, page := range pages {
+		b, err := os.ReadFile(page)
+		if err != nil {
+			t.Fatal(err)
+		}
+		rel, _ := filepath.Rel(root, page)
+		for _, m := range mdLink.FindAllStringSubmatch(string(b), -1) {
+			if strings.Contains(m[1], "://") {
+				continue
+			}
+			if _, err := os.Stat(filepath.Join(filepath.Dir(page), filepath.FromSlash(m[1]))); err != nil {
+				t.Errorf("%s links %s: no such file", filepath.ToSlash(rel), m[1])
+			}
+		}
 	}
 }

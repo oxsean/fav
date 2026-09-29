@@ -397,7 +397,7 @@
   "footer.unarchive": "取消归档",
   "footer.undo_done": "取消完成",
   "footer.unfavorite": "取消收藏",
-  "fzf.header_favorites": "只列收藏；对话预览在 tend tui",
+  "fzf.header_favorites": "只列收藏；完整对话在 tend tui",
   "fzf.header_live": "此刻在跑的会话：等你 / 工作中 / 空闲多久；每 3 秒刷新",
   "fzf.header_live_manual": "此刻在跑的会话：等你 / 工作中 / 空闲多久；Ctrl+L 刷新（fzf 0.73 起自动）",
   "fzf.header_query": "查询：#标签  project:x  provider:claude  status:open|active|done|archived|live|all|agent  last:7d  after:2026-09-01  host:<机器名>|all  关键词（AND）",

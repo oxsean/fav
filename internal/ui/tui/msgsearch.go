@@ -284,8 +284,8 @@ func (m *Model) msgTitle() string {
 
 const seekMsgs = 200
 
-// findHit shows hit k of the current record. A \ query has the full text loaded; message search pages back only until
-// hit k is loaded, so a huge transcript is not read whole on every cursor stop.
+// findHit shows hit k of the current record. Message search pages back only until hit k is loaded, so a huge
+// transcript is not read whole on every cursor stop.
 func (m *Model) findHit(k int) tea.Cmd {
 	r := m.current()
 	p := m.probes[r]

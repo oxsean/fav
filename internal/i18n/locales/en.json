@@ -397,7 +397,7 @@
   "footer.unarchive": "unarchive",
   "footer.undo_done": "undo done",
   "footer.unfavorite": "unfavorite",
-  "fzf.header_favorites": "favorites only; the chat preview lives in tend tui",
+  "fzf.header_favorites": "favorites only; the full conversation lives in tend tui",
   "fzf.header_live": "sessions running right now: waiting / working / idle for; refreshes every 3 s",
   "fzf.header_live_manual": "sessions running right now: waiting / working / idle for; Ctrl+L refreshes (automatic from fzf 0.73)",
   "fzf.header_query": "query: #tag  project:x  provider:claude  status:open|active|done|archived|live|all|agent  last:7d  after:2026-09-01  host:<name>|all  keywords (AND)",
