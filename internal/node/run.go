@@ -197,6 +197,7 @@ type Node struct {
 	checks  checks
 	sweepMu sync.Mutex
 	swept   time.Time
+	trimmed time.Time // when TrimBlobs last ran
 }
 
 // Limits is what this machine lets a coordinator do (mode 2 sets them).
@@ -772,6 +773,9 @@ func (n *Node) List(coordinator string, ack []string, only ...string) ([]Snapsho
 		sort.Slice(out, func(i, j int) bool { return out[i].Run < out[j].Run })
 		return out, nil
 	}
+	if n.trimDue() {
+		n.TrimBlobs()
+	}
 	ents, err := os.ReadDir(filepath.Join(n.Dir, "runs"))
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, nil
@@ -824,6 +828,16 @@ func (n *Node) sweepDue() bool {
 		return false
 	}
 	n.swept = time.Now()
+	return true
+}
+
+func (n *Node) trimDue() bool {
+	n.sweepMu.Lock()
+	defer n.sweepMu.Unlock()
+	if time.Since(n.trimmed) < sweepEvery {
+		return false
+	}
+	n.trimmed = time.Now()
 	return true
 }
 

@@ -20,3 +20,16 @@ const (
 	followEvery   = 200 * time.Millisecond // how often it looks at the log
 	maxFollowPush = 256 << 10              // the lines of one push, about
 )
+
+// What slimming keeps of a run's output (slim.go).
+const (
+	slimMin   = 4 << 10  // a shorter string stays in its line
+	slimPatch = 64 << 10 // a shorter patch or diff stays in its line
+)
+
+// Caps on the blobs slimming keeps: past a run's, fields are left out with cap; past the node's, the oldest ended
+// runs lose their blobs. Variables for the tests.
+var (
+	maxRunBlobs  int64 = 256 << 20
+	maxNodeBlobs int64 = 2 << 30
+)

@@ -151,6 +151,7 @@ type sup struct {
 
 	log  *rolling    // output.log
 	errs *lineWriter // the agent's stderr on its way to the log
+	slim *slimmer    // what takes the copies of files out of the log
 
 	in           *streamIn          // a stream run's stdin
 	proto        proto              // how it speaks there
@@ -432,6 +433,7 @@ func (s *sup) run() error {
 			return s.workFailed(err)
 		}
 	}
+	s.slim = newSlimmer(s.dir, inGit(s.spec.Dir))
 	c := exec.Command(s.spec.Argv[0], s.spec.Argv[1:]...)
 	c.Dir = s.spec.Dir
 	c.Env = append(append(os.Environ(), EnvRun+"="+s.spec.Run, EnvRunDir+"="+s.dir), s.spec.env()...)
@@ -655,8 +657,16 @@ func (s *sup) copyOut(r io.Reader, log *rolling) {
 			continue
 		}
 		var at logPos
-		if logged, keep := scrub(line); keep {
+		logged, keep := scrub(line)
+		var mark *Mark
+		if keep && s.slim != nil {
+			logged, keep, mark = s.slim.line(logged)
+		}
+		if keep {
 			at = log.put(logged)
+		}
+		if mark != nil {
+			log.markAt(*mark, at)
 		}
 		if bytes.HasSuffix(line, []byte("\n")) {
 			s.lineAt(line, at)

@@ -73,6 +73,8 @@
 | mcp | `server.tool` 加上参数里第一个字符串值 | — |
 | other | 参数里第一个字符串值 | — |
 
+节点在写日志前把整份文件的副本移出了行（[node.md](node.md)「瘦身」）：原处是 `output.Ref`，`{"$blob":"<sha256>","bytes":n,"lines":k}` 或 `{"$omit":"<字段>","bytes":n,"lines":k,"cap"?:true}`。解析时字符串字段读作 `output.Text`（字符串或引用），edit 的 `+加 −减` 用引用里的 `lines`，所以标题和瘦身前一样。
+
 **输出**（`tool_result`、`cmd`、`mcp` 的 `output`）：不超过 80 行、32 KiB 时原样；否则留头 40 行和尾 40 行，每头最多 16 KiB，中间放一行 `…`。`lines` 和 `bytes` 是原来的总行数和字节数，`truncated.output` 是略掉的字节数。
 
 **`parent`**：子 agent 内部的事件指向发起它的那次调用（claude 的 `parent_tool_use_id`）。

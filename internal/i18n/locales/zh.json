@@ -1175,6 +1175,7 @@
   "cli.doctor.coord_journal": "协调器日志：%d 条记录，最后 seq %d\n",
   "cli.doctor.coord_repair": "  → tend journal repair\n",
   "cli.doctor.coord_runs": "运行：%d 个未结束，%d 个需要你（tend inbox）\n",
+  "cli.doctor.run_blobs": "运行的 blob：%.1f MB，分布在 %d 个运行里（这台机器最多 %d MB，每个运行最多 %d MB；超了先删最旧的已结束运行）\n",
   "cli.inbox.none": "没有需要你处理的\n",
   "cli.inbox.col_title": "任务",
   "cli.inbox.col_waiting": "已等",

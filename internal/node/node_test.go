@@ -37,6 +37,11 @@ func TestMain(m *testing.M) {
 		fmt.Fprintln(os.Stderr, os.Args[3])
 		os.Exit(0)
 	}
+	if len(os.Args) > 2 && os.Args[1] == "_cat" { // an agent: says what a file holds on stdout
+		b, _ := os.ReadFile(os.Args[2])
+		os.Stdout.Write(b)
+		os.Exit(0)
+	}
 	if len(os.Args) > 1 && os.Args[1] == "_fake-agent" {
 		if err := FakeAgent(os.Args[2:]); err != nil {
 			os.Exit(2)

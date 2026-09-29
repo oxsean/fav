@@ -14,12 +14,15 @@ import (
 // ⚠️ The agent can write the run directory: a mark only places things; who did what is the journal's.
 type Mark struct {
 	Type  string    `json:"type"`            // tend
-	Event string    `json:"event"`           // start | turn | hook | exit | roll (the log went on in another file) | input | resolved | interrupt
+	Event string    `json:"event"`           // start | turn | hook | exit | roll (the log went on in another file) | input | resolved | interrupt | diff
 	ID    string    `json:"id,omitempty"`    // input: the message the agent took in; resolved: the request answered; interrupt: which
 	N     int       `json:"n,omitempty"`     // turn: which; interrupt: the turn it ends
 	Phase string    `json:"phase,omitempty"` // hook: begin | end; turn: end, where the line with its result ends
 	Name  string    `json:"name,omitempty"`  // hook: which
 	Code  *int      `json:"code,omitempty"`  // exit, hook end
+	Files int       `json:"files,omitempty"` // diff: the files codex's diff of the turn (ID) changed
+	Add   int       `json:"add,omitempty"`   // diff: lines added
+	Del   int       `json:"del,omitempty"`   // diff: lines removed
 	File  string    `json:"file"`
 	Off   int64     `json:"off"`
 	At    time.Time `json:"at"`

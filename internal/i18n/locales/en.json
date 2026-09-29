@@ -1175,6 +1175,7 @@
   "cli.doctor.coord_journal": "Coordinator journal: %d envelopes, last seq %d\n",
   "cli.doctor.coord_repair": "  → tend journal repair\n",
   "cli.doctor.coord_runs": "Runs: %d open, %d need you (tend inbox)\n",
+  "cli.doctor.run_blobs": "Run blobs: %.1f MB in %d runs (at most %d MB on this machine, %d MB per run; the oldest ended runs lose theirs first)\n",
   "cli.inbox.none": "nothing needs you\n",
   "cli.inbox.col_title": "TASK",
   "cli.inbox.col_waiting": "WAITING",

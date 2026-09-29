@@ -22,6 +22,7 @@ type Mark = output.Mark
 const (
 	markStart, markTurn, markHook, markExit, markRoll = "start", "turn", "hook", "exit", "roll"
 	markInput, markResolved, markInterrupt            = "input", "resolved", "interrupt"
+	markDiff                                          = "diff"
 	phaseBegin, phaseEnd                              = "begin", "end"
 )
 

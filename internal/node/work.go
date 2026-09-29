@@ -105,6 +105,12 @@ func (g gitIn) run(args ...string) (string, error) {
 	return strings.TrimSpace(out.String()), nil
 }
 
+// inGit tells a directory inside a git work tree; without git nothing is.
+func inGit(dir string) bool {
+	out, err := gitIn{dir: dir}.run("rev-parse", "--is-inside-work-tree")
+	return err == nil && out == "true"
+}
+
 // samePlace: a and b are the same directory, symbolic links followed.
 func samePlace(a, b string) bool {
 	ra, errA := realPath(a)

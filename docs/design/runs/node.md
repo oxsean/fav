@@ -16,12 +16,15 @@
 | `state.json` | 监督进程或拿到 `claim` 的节点（`fileio.WriteAtomic`） | `{rev, state, pid, pid_start, pane, session, exit_code, reason, detail, attention, ask, note, last, usage, stream, requests, sends, started_at, ended_at}`；`pid_start` 是 agent 进程的启动时间（`proc.StartTime`：macOS sysctl、Linux `/proc/<pid>/stat` 第 22 项、Windows `GetProcessTimes`），和 pid 一起认出同一个进程 |
 | `stop` | `run.stop` | 存在 = 请求停止 |
 | `output.log` | 监督进程 | background 方式的 stdout / stderr 和 hook 的输出，16 MB 轮转为 `.1`，最多两代 |
-| `marks.jsonl` | 监督进程 | 只追加 `{type:"tend", event, id?, n?, phase?, name?, code?, file, off, at}`，`file` 是 `output.log` 这一代的 `fileio.ID`、`off` 是写这一行时它的位置。`event`：`roll`（日志从这一代的 `off` 接着写，每代打开时一条）、`start`（agent 启动前）、`exit{code}`（agent 退出、输出读完之后；这两条只在 background 方式）、`hook{name, phase begin\|end, code}`（setup、before_run、check、cleanup）、`turn{n}`（开始第 n 轮的那一行的开头）和 `turn{n, phase:"end"}`（带这一轮 result 的那一行的末尾）、`input{id}`（agent 把 send `id` 交回来的那一行的开头，见「双向流」）、`resolved{id}`（请求 `id` 被答掉：claude 是回答写进 stdin 的那一刻，codex 是 `serverRequest/resolved` 那一行的开头）、`interrupt{id, n}`（打断第 n 轮的请求发出的那一刻）。只用来在输出里定位和翻页：run 目录 agent 写得了，谁问谁答以 journal 为准 |
+| `marks.jsonl` | 监督进程 | 只追加 `{type:"tend", event, id?, n?, phase?, name?, code?, file, off, at}`，`file` 是 `output.log` 这一代的 `fileio.ID`、`off` 是写这一行时它的位置。`event`：`roll`（日志从这一代的 `off` 接着写，每代打开时一条）、`start`（agent 启动前）、`exit{code}`（agent 退出、输出读完之后；这两条只在 background 方式）、`hook{name, phase begin\|end, code}`（setup、before_run、check、cleanup）、`turn{n}`（开始第 n 轮的那一行的开头）和 `turn{n, phase:"end"}`（带这一轮 result 的那一行的末尾）、`input{id}`（agent 把 send `id` 交回来的那一行的开头，见「双向流」）、`resolved{id}`（请求 `id` 被答掉：claude 是回答写进 stdin 的那一刻，codex 是 `serverRequest/resolved` 那一行的开头）、`interrupt{id, n}`（打断第 n 轮的请求发出的那一刻）、`diff{id, files, add, del}`（codex 第 `id` 轮的 diff 写进了 `diffs/`，在 `turn/completed` 那一行的开头）。只用来在输出里定位和翻页：run 目录 agent 写得了，谁问谁答以 journal 为准 |
 | `settings.json` / `mcp.json`（0600） | `run.start` | agent 定义的 claude hooks 和 MCP 服务器（feature `files`） |
 | `reports.jsonl` | agent（`tend run ask\|note\|verdict\|plan`、`note --pr`） | 只追加 `{at, kind ask\|note\|verdict\|pr\|plan, text, verdict}`；监督进程每秒读新增的整行，verdict（pass / rework / blocked）进 `state.json` 的 `verdict` |
 | `answers.jsonl` | `run.answer` | 只追加 `{request, allow, decision?, message, answers}`；监督进程每 250 ms 读新增的整行 |
 | `inbox.jsonl` | `run.send` | 只追加 `{id, text, state, at}`；监督进程每 250 ms 读新增的整行 |
 | `interrupts.jsonl` | `run.interrupt` | 只追加 `{id, turn, at}`；监督进程每 250 ms 读新增的整行 |
+| `blobs/<sha256>` | 监督进程 | 瘦身移出日志的字段原文，按内容寻址，同一份内容只存一次（见「瘦身」） |
+| `blobs.gone` | 节点 | 存在 = 节点为守住总上限删掉了 `blobs/`，要用 blob 的读取回 `gone` |
+| `diffs/turn-<id>.patch` | 监督进程 | codex 一轮的最后一份 `turn/diff/updated`，`turn/completed` 时写一次 |
 
 - `run.list{coordinator, runs?}` 回这个协调器派发的 run 的快照（给了 `runs` 就只回这些）；读快照只读不写。快照在 `state.json` 之上补一条：`!Held` 且 state 不是终态 → `unknown{reason: supervisor_gone}`（没人持锁时再读一次 state，防监督进程刚写完就走）；没有 `state.json`、`!Held`、且创建超过 30 s（`spec.created`）→ 报 `failed{reason: not_launched}`，结束时间是创建后 30 s，不落盘。迟到的监督进程发现创建已超过 30 s，自己写下 `failed{not_launched}` 退出，不起 agent（agent 只在第一个 state 写成之后才启动）。`state.json` 读失败重试 5 次、间隔 20 ms。
 - 准入：`run.start` 在 `node/admit.lock` 下检查并发布：同一真实目录已有未结束的 run → `conflict "dir_busy <run>"`；未结束的 run 数已到 `node.slots`（0 = 不限）→ `conflict "slots n/m"`。节点预检已判定跑不了（blocker）的 run 不占名额，直接发布成 failed。
@@ -46,7 +49,7 @@
 - 读写管线：读 agent stdout 和 stderr 管道的 goroutine 只读，把字节放进内存里按字节计的有界缓冲（stdout 64 MiB，stderr 16 MiB，常数在 `internal/node/limits.go`），满了才等；写盘、解析、写 `state.json`、往 stdin 发消息都在另外的 goroutine 里做。Windows 上 agent 的这两个管道由 `proc.Pipe` 建（`CreatePipe`，缓冲 8 MiB；`os.Pipe` 只有 4 KiB，而 Node 在 Windows 上同步写管道，读的一方停一下，claude 整个就停下）。stream run 的 stdin 只由一个写 goroutine 按发送顺序写，谁发都不等 agent 读（agent 可能正等着自己的输出被读），排队超过 16 MiB 的发送失败；关 stdin 时先写完已排队的。
 - stdout 先组装成整行再处理：读管道的 goroutine 组装，一行最多 32 MiB（`maxLine`）；更长的行按到来的块原样写进日志，不解析，块之间不插别的内容。顺序是组装、scrub、写 `output.log`、解析。stderr 按行写：半行等它的换行，等满 1 s 或攒到 64 KiB 才整块写出。stdout、stderr 和 hook（setup、before_run、check、cleanup）的输出都经同一个 `rolling` 写，行不会拼在一起，轮转也按全部字节计；`rolling` 打开已有的 `output.log` 时从它的大小接着算。hook 的 stdout 和 stderr 合在一起按行写，半行在 hook 结束时写出。
 - 轮次：`rolling` 每写完一行，就照 `internal/output` 的 `Parse` 数轮次（读的是 `clipLine` 送出的样子，所以和协调器翻页时读到的一样；只送开头的行不算），轮次变了就在 `marks.jsonl` 记一条 `turn`。
-- 送出的行（`run.tail{clip}`）：不超过 16 KiB 的原样；更长的 JSON 行不超过 1 MiB 时解开，每个超过 16 KiB 的字符串截到 16 KiB 并以 `…` 结尾，再编回 JSON（不转义 `<>&`），带上原行长 `size`；其余的只送前 16 KiB，标 `head`。文件里始终是原文。
+- 送出的行（`run.tail{clip}`）：不超过 16 KiB 的原样；更长的 JSON 行不超过 1 MiB 时解开，每个超过 16 KiB 的字符串截到 16 KiB 并以 `…` 结尾，再编回 JSON（不转义 `<>&`），带上原行长 `size`；其余的只送前 16 KiB，标 `head`。文件里是原文（瘦身移出的字段在 blob 里或 git 里，见「瘦身」）。
 - 账号、套餐用量和 agent 自己配置所在的路径不写进 `output.log`：整行丢掉的有 claude 对 `initialize` 的回应（`request_id` 为 `init`，里面有 email、organization 和订阅类型）、claude 的 `rate_limit_event`、codex 的 `account/rateLimits/updated` 和 `hook/*`（hook 的 id 里也有配置文件的路径）；去掉字段再写的有 codex 回应里的 `codexHome`、`instructionSources`、`thread.path`（rollout 文件），`thread/started` 的 `thread.path`，claude `system init` 的 `memory_paths`。超过 32 MiB 的行只按开头的 32 MiB 预筛，可能要改写就整行不写；判断先按字节预筛，JSON 字符串里的引号一定带转义，只是提到这些词的文字不会误中；`output.log` 轮转改名失败（Windows 上有读者开着）就继续追加，下次再轮转。
 
 runner 方式：
@@ -55,6 +58,29 @@ runner 方式：
 |---|---|---|
 | herdr | 只给 claude；节点 Herdr 可达，且恰好一个 workspace 覆盖目录（零个或多个都走 background） | 新 tab 里跑 `tend _run <dir>`；agent 交互式、留在前台进程组；tab 被关（SIGHUP）先写 `stopped{tab_closed}`；启动时 workspace 已不在 → run 失败（不改成 background，命令行不同） |
 | background | 其它 | `proc.StartDetached` 启动 `tend _run <dir>`（unix `setsid`，Windows `DETACHED_PROCESS \| CREATE_NEW_PROCESS_GROUP \| CREATE_BREAKAWAY_FROM_JOB`，父进程的 Job 不许脱离（`ERROR_ACCESS_DENIED`）时去掉 `CREATE_BREAKAWAY_FROM_JOB` 再启动一次）；agent 无界面，claude / codex / fake 走双向流（见下文「双向流（stream）」），command 模板的任务书经 stdin 或 `{prompt_file}`，输出进 `output.log` |
+
+## 瘦身
+
+claude 的工具结果里带着整份文件，codex 反复推一轮的全部 diff；监督进程在 scrub 之后、写 `output.log` 之前把它们移出行（`internal/node/slim.go`）。只看按字节预筛出的行（`"tool_use_result"`、`"type":"tool_use"`、`"type":"fileChange"` 和几个 codex 方法）；没改的行原样写。运行开始时 `git rev-parse --is-inside-work-tree` 定这次运行在不在 git 里。
+
+| 字段 | 在 git 里 | 不在 git 里 |
+|---|---|---|
+| claude `tool_use_result.originalFile` | 去掉（任何大小；改之前的内容从起点树取） | blob |
+| Write 结果的 `content`：`type: create` | blob | blob |
+| Write 结果的 `content`：`type: update` | 去掉 | blob |
+| `tool_use_result.structuredPatch` ≥ 64 KiB | blob（数组的 JSON） | 同左 |
+| Read 结果的 `file.content` | blob | 同左 |
+| `tool_use` 的 `input` 里 `content`、`old_string`、`new_string`、`new_source`、`edits[]` 的新旧文字 | blob | 同左 |
+| codex `fileChange` 各文件的 `diff` ≥ 64 KiB（`item/started`、`item/completed`） | blob | 同左 |
+
+- 除了 git 里的 `originalFile`，短于 4 KiB 的字符串（`slimMin`）留在行里。
+- 原处换成 `{"$blob":"<sha256>","bytes":n,"lines":k}`；去掉的换成 `{"$omit":"<字段>","bytes":n,"lines":k}`（`output.Ref`）。blob 先用 `fileio.WriteAtomic` 写完整（临时文件再改名），才写引用它的那一行；写不成就原样留在行里。
+- codex：`turn/diff/updated` 不进日志，每一轮只记最后一份，`turn/completed` 时写 `diffs/turn-<id>.patch` 并记 `diff` 标记；`item/fileChange/patchUpdated` 不进日志。
+- 超过 32 MiB、按块写的行不瘦身。
+- 上限：
+  - 每个运行 256 MiB（`maxRunBlobs`），从 `blobs/` 已有的大小算起；超了新的字段不再存，换成 `{"$omit":"<字段>","bytes":n,"lines":k,"cap":true}`，只剩统计。
+  - 每个节点 2 GiB（`maxNodeBlobs`）：`run.list` 每 10 分钟最多一次 `TrimBlobs`，超了从最早创建的已结束（或 unknown）运行删起：先写 `blobs.gone`，再删 `blobs/`，删到不超为止；还在跑的运行不删。
+  - `tend doctor` 报 blob 的总量、分布在几个运行里和两个上限。
 
 ## 观察
 

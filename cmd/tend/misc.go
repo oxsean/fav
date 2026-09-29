@@ -12,6 +12,7 @@ import (
 	"github.com/oxsean/fav/internal/capture"
 	"github.com/oxsean/fav/internal/i18n"
 	"github.com/oxsean/fav/internal/index"
+	"github.com/oxsean/fav/internal/node"
 	"github.com/oxsean/fav/internal/paths"
 	"github.com/oxsean/fav/internal/tend"
 	"github.com/oxsean/fav/skills"
@@ -88,6 +89,10 @@ func cmdDoctor(args []string) error {
 	}
 
 	doctorCoordinator()
+	if used, runs := node.New(tend.Home()).BlobUse(); runs > 0 {
+		perRun, perNode := node.BlobCaps()
+		fmt.Print(i18n.F("cli.doctor.run_blobs", float64(used)/(1<<20), runs, perNode>>20, perRun>>20))
+	}
 
 	if days := loadConfig().TrashDays; days > 0 {
 		if n, err := tend.PurgeTrash(days); err != nil {

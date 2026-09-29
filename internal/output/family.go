@@ -56,13 +56,13 @@ func titleOf(family, name string, input json.RawMessage) (string, int) {
 		Pattern   string `json:"pattern"`
 		Path      string `json:"path"`
 		Glob      string `json:"glob"`
-		OldString string `json:"old_string"`
-		NewString string `json:"new_string"`
-		Content   string `json:"content"`
-		NewSource string `json:"new_source"`
+		OldString Text   `json:"old_string"`
+		NewString Text   `json:"new_string"`
+		Content   Text   `json:"content"`
+		NewSource Text   `json:"new_source"`
 		Edits     []struct {
-			OldString string `json:"old_string"`
-			NewString string `json:"new_string"`
+			OldString Text `json:"old_string"`
+			NewString Text `json:"new_string"`
 		} `json:"edits"`
 		URL         string `json:"url"`
 		Query       string `json:"query"`
@@ -105,14 +105,14 @@ func titleOf(family, name string, input json.RawMessage) (string, int) {
 		switch {
 		case len(in.Edits) > 0:
 			for _, e := range in.Edits {
-				add, del = add+lineCount(e.NewString), del+lineCount(e.OldString)
+				add, del = add+e.NewString.lines(), del+e.OldString.lines()
 			}
-		case in.Content != "" || name == "Write":
-			add = lineCount(in.Content)
-		case in.NewSource != "":
-			add = lineCount(in.NewSource)
+		case !in.Content.empty() || name == "Write":
+			add = in.Content.lines()
+		case !in.NewSource.empty():
+			add = in.NewSource.lines()
 		default:
-			add, del = lineCount(in.NewString), lineCount(in.OldString)
+			add, del = in.NewString.lines(), in.OldString.lines()
 		}
 		return oneLine(firstOf(in.FilePath, in.Notebook)) + " " + counts(add, del), 0
 	case FamilyWeb:
@@ -238,13 +238,6 @@ func diffCounts(diff string) (add, del int) {
 	return add, del
 }
 
-func lineCount(s string) int {
-	if s == "" {
-		return 0
-	}
-	return strings.Count(strings.TrimSuffix(s, "\n"), "\n") + 1
-}
-
 func oneLine(s string) string {
 	first, _, _ := strings.Cut(strings.TrimSpace(s), "\n")
 	return clip(strings.TrimRight(first, "\r"))
@@ -269,7 +262,7 @@ func headTail(s string) (out string, lines, size int, truncated map[string]int) 
 	if s == "" {
 		return "", 0, 0, nil
 	}
-	lines, size = lineCount(s), len(s)
+	lines, size = Lines(s), len(s)
 	head, tail := s, ""
 	if all := strings.SplitAfter(strings.TrimSuffix(s, "\n"), "\n"); len(all) > 2*keepLines {
 		head, tail = strings.Join(all[:keepLines], ""), strings.Join(all[len(all)-keepLines:], "")
