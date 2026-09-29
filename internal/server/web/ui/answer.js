@@ -31,9 +31,13 @@ export function answersOf(questions, picks, own) {
   return out;
 }
 
-// quickOf is what a request can be answered with in one press: allow and deny, or the options of its one
-// single-choice question. The page puts them on 1–9.
-export function quickOf(t, req, {scope = !!req?.allow_run} = {}) {
+// allowsRun: req may be allowed for the rest of its run, both as the request says and as the run's affordances (acts)
+// give the viewer.
+export const allowsRun = (req, acts) => !!req?.allow_run && (acts || []).includes('allow_run');
+
+// quickOf is what a request can be answered with in one press: allow and deny (scope: and allow for the run), or the
+// options of its one single-choice question. The page puts them on 1–9.
+export function quickOf(t, req, {scope = false} = {}) {
   if (!req) return [];
   if (isPermission(req)) {
     return [{label: t('ans.allow'), kind: 'primary', params: {allow: true}},
@@ -45,9 +49,8 @@ export function quickOf(t, req, {scope = !!req?.allow_run} = {}) {
   return (qs[0].options || []).slice(0, 9).map(o => ({label: o, params: {allow: true, answers: {[qs[0].question]: o}}}));
 }
 
-// AnswerForm: onAnswer(params) sends run.answer's params (without run and request); scope offers allow_run, as the
-// request says it can be.
-export function AnswerForm({req, scope = !!req?.allow_run, busy = false, onAnswer, detail = ''}) {
+// AnswerForm: onAnswer(params) sends run.answer's params (without run and request); scope offers allow_run (allowsRun).
+export function AnswerForm({req, scope = false, busy = false, onAnswer, detail = ''}) {
   const {t, f} = useWords();
   const phone = usePhone();
   const [picks, setPicks] = useState({});

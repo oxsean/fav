@@ -7,7 +7,7 @@ import {Button} from '../ui/controls.js';
 import {Modal} from '../ui/overlay.js';
 import {Output} from '../ui/output.js';
 import {Composer} from '../ui/composer.js';
-import {AnswerForm} from '../ui/answer.js';
+import {AnswerForm, allowsRun} from '../ui/answer.js';
 import {conversation} from '../core/fold.js';
 import {readPlace, keepPlace} from '../core/follow.js';
 import {link} from '../core/router.js';
@@ -130,7 +130,7 @@ export function Conversation({store, commands, toasts, prefs, task, run = '', ta
   const renderAsk = s => {
     const r = st.runs[s.run];
     const req = (r?.requests || []).find(q => q.id === s.request);
-    return html`<${AnswerForm} req=${req} busy=${commands.state('run:' + s.run) === 'pending'}
+    return html`<${AnswerForm} req=${req} scope=${allowsRun(req, aff.runs?.[s.run])} busy=${commands.state('run:' + s.run) === 'pending'}
       onAnswer=${p => answer(s, p)} />`;
   };
   const toggleRaw = () => {

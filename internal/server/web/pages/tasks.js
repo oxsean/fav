@@ -44,6 +44,8 @@ export function Tasks({store, commands, toasts, wire, router, session, clock = (
   useSignalValue(store.rev.runs);
   useSignalValue(store.rev.projects);
   const machines = useSignalValue(store.machines);
+  const aff = useSignalValue(store.affordances);
+  const online = useSignalValue(wire.status) === 'open';
   useSignalValue(commands.pending);
   const route = useSignalValue(router.route);
   const want = useSignalValue(intent);
@@ -94,7 +96,9 @@ export function Tasks({store, commands, toasts, wire, router, session, clock = (
       case 'stop': return run && setModal({kind: 'confirm', title: t('home.confirmStop'), note: f('home.confirmStopNote', task.title, run.machine), label: t('home.stop'),
         go: () => quiet(send('run.stop', {id: run.id}, 'run:' + run.id).then(() => toasts.show({text: f('toast.stopping', task.title)})))});
       case 'review': return open({kind: 'plan', task});
-      case 'gate': return open({kind: 'gate', task});
+      case 'pass': return setModal({kind: 'confirm', title: f('gate.confirmPass', task.title), note: t('gate.passNote'), label: t('gate.pass'),
+        go: () => quiet(send('task.gate', {id: task.id, pass: true, expected_rev: task.rev}, 'task:' + task.id).then(() => toasts.show({text: f('toast.passed', task.title)})))});
+      case 'rework': return open({kind: 'gate', task});
       case 'sendBack': return open({kind: 'gate', task, reply: last?.id});
       case 'ack': return quiet(send('task.source_ack', {id: task.id, accept: true}, 'task:' + task.id).then(() => toasts.show({text: t('toast.acked')})));
       case 'keep': return quiet(send('task.source_ack', {id: task.id}, 'task:' + task.id).then(() => toasts.show({text: t('toast.kept')})));
@@ -137,8 +141,8 @@ export function Tasks({store, commands, toasts, wire, router, session, clock = (
   const task = picked ? st.tasks[picked] : null;
   const at = order.indexOf(picked);
   const step = n => { const id = order[at + n]; if (id) go(id); };
-  const acts = task ? tk.actionsFor(st, task) : {primary: '', more: []};
-  const can = id => !!task && !busy(task) && (acts.primary === id || acts.more.includes(id));
+  const acts = task ? tk.actionsOf(st, aff, task) : {primary: '', more: []};
+  const can = id => !!task && online && !busy(task) && (acts.primary === id || acts.more.includes(id));
 
   useActions('page', {
     view: {run: () => router.go({page: 'tasks', view: (phone ? ['list', 'tree'] : views)[((phone ? ['list', 'tree'] : views).indexOf(view) + 1) % (phone ? 2 : 3)], ...(picked ? {task: picked} : {})}, {replace: true})},
@@ -219,7 +223,7 @@ export function Tasks({store, commands, toasts, wire, router, session, clock = (
     run=${runOf} target=${route.event || ''} copy=${copy} />`;
   const showRun = id => router.go({page: 'tasks', view: route.view || 'list', task: picked, run: id}, {replace: !phone});
   const taskChanges = changes && task && (() => html`<${RunChanges} changes=${changes} runs=${tk.runsOf(st, task.id)} />`);
-  const detail = picked && html`<${Task} store=${store} task=${task} now=${now} busy=${busy(task)} onAct=${act} onGo=${id => go(id, {push: phone})}
+  const detail = picked && html`<${Task} store=${store} task=${task} now=${now} busy=${busy(task)} offline=${!online} onAct=${act} onGo=${id => go(id, {push: phone})}
     output=${prefs ? conv : null} changes=${taskChanges} onRun=${prefs ? showRun : null} run=${runOf} pane=${runOf && pane === 'overview' ? 'output' : pane} onPane=${setPane} onClose=${phone || view === 'board' ? undefined : () => go('')} />`;
   const nav = phone && picked && html`<span class="det-nav">
     <${Button} kind="quiet" icon="up" label=${t('ui.prev')} disabled=${at <= 0} onClick=${() => step(-1)} />
@@ -250,8 +254,7 @@ export function Tasks({store, commands, toasts, wire, router, session, clock = (
     },
     gate: () => {
       const x = st.tasks[modal.task.id] || modal.task;
-      return html`<${Gate} task=${x} reply=${modal.reply || null} busy=${busy(x)} onClose=${close}
-        onPass=${() => quiet(send('task.gate', {id: x.id, pass: true, expected_rev: x.rev}, 'task:' + x.id).then(() => { close(); toasts.show({text: f('toast.passed', x.title)}); }))}
+      return html`<${Gate} task=${x} reply=${modal.reply || null} busy=${busy(x) || !online} onClose=${close}
         onBack=${notes => quiet((modal.reply ? send('run.continue', {run: modal.reply, text: notes}, 'run:' + modal.reply)
           : send('task.gate', {id: x.id, pass: false, notes, expected_rev: x.rev}, 'task:' + x.id)).then(() => { close(); toasts.show({text: f('toast.sentBack', x.title)}); }))} />`;
     },

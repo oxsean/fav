@@ -3,7 +3,7 @@
 // board); on a phone it takes the screen, with the previous and next task of the list at its top. What each button
 // does is the task page's (onAct): this only says which ones there are.
 import {useEffect} from '../vendor/hooks.mjs';
-import {html, cx, usePhone, useWords} from '../ui/base.js';
+import {html, cx, usePhone, useWords, useSignalValue} from '../ui/base.js';
 import {Button, Tabs} from '../ui/controls.js';
 import {Status} from '../ui/status.js';
 import {Markdown} from '../ui/markdown.js';
@@ -60,21 +60,24 @@ function RunRow({run, now, onRun, on}) {
   </div>`;
 }
 
-// Task: acts lists what can be done (core/tasks.js actionsFor); busy is a write about it that is out. With output
+// Task: its buttons are what the viewer's affordances give (core/tasks.js actionsOf), grey while busy (a write about it
+// is out) or offline. With output
 // (a function of nothing that draws the conversation) a desktop shows it as a second pane, open by default once the
 // task has run, under a head folded into one line so the timeline keeps the height; onRun(id) shows a run's
 // conversation (on a phone, on a screen of its own); run is the one shown; onClose, when given, closes the pane.
 // changes, like output, draws the changes tab beside it.
-export function Task({store, task, now, busy = false, onAct, onGo, output, changes, onRun, run = '', pane = 'output', onPane = () => {}, onClose}) {
+export function Task({store, task, now, busy = false, offline = false, onAct, onGo, output, changes, onRun, run = '', pane = 'output', onPane = () => {}, onClose}) {
   const w = useWords();
   const {t, f} = w;
   const phone = usePhone();
   const st = store.state;
+  const aff = useSignalValue(store.affordances);
   const brief = task ? store.briefOf(task.id) : undefined;
   useEffect(() => { if (task && brief === undefined) store.brief(task.id).catch(() => {}); }, [task?.id, brief === undefined]);
   if (!task) return html`<p class="empty">${t('det.gone')}</p>`;
   const sit = situation(st, task);
-  const acts = tk.actionsFor(st, task);
+  const acts = tk.actionsOf(st, aff, task);
+  const grey = busy || offline;
   const kids = tk.childrenOf(st, task.id);
   const prog = tk.progress(st, task.id);
   const runs = tk.runsOf(st, task.id);
@@ -82,14 +85,14 @@ export function Task({store, task, now, busy = false, onAct, onGo, output, chang
   const def = tk.defaults(st, task);
   const project = st.projects[task.project];
   const stage = task.flow?.stages?.find(s => s.name === task.stage);
-  const button = (id, kind) => html`<${Button} kind=${kind} keyName=${phone ? '' : actionKeys[id] || ''} disabled=${busy} onClick=${() => onAct(id, task)}>${actLabel(w, id, sit)}<//>`;
+  const button = (id, kind) => html`<${Button} kind=${kind} keyName=${phone ? '' : actionKeys[id] || ''} disabled=${grey} onClick=${() => onAct(id, task)}>${actLabel(w, id, sit)}<//>`;
   const more = acts.more.filter(id => !['edit', 'dispatch'].includes(id) || phone);
   const direct = phone ? [] : acts.more.filter(id => ['edit', 'dispatch'].includes(id));
   const tabs = !phone && !!output && runs.length > 0;
   const panes = ['overview', 'output', ...(changes ? ['changes'] : [])];
   const shown = tabs && panes.includes(pane) ? pane : 'overview';
   const close = onClose && html`<${Button} kind="quiet" icon="close" label=${t('ui.close')} onClick=${onClose} />`;
-  const menu = ids => ids.length > 0 && html`<${Menu} label=${t('do.more')} items=${ids.map(id => ({label: actLabel(w, id, sit), kind: id === 'cancel' ? 'danger' : '', onClick: () => onAct(id, task)}))} />`;
+  const menu = ids => ids.length > 0 && html`<${Menu} label=${t('do.more')} disabled=${grey} items=${ids.map(id => ({label: actLabel(w, id, sit), kind: id === 'cancel' ? 'danger' : '', onClick: () => onAct(id, task)}))} />`;
   const tabBar = tabs && html`<${Tabs} label=${task.title} value=${shown} onChange=${onPane} idPrefix=${'det-' + task.id}
       tabs=${[{id: 'overview', label: t('det.overview')}, {id: 'output', label: t('det.output'), count: runs.length},
         ...(changes ? [{id: 'changes', label: t('det.changes')}] : [])]} />`;

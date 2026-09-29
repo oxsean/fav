@@ -11,7 +11,7 @@ import {Modal} from '../ui/overlay.js';
 import {Spark, Bars, Timeline, Meter} from '../ui/charts.js';
 import {TextInput} from '../ui/input.js';
 import {useListKeys} from '../ui/table.js';
-import {AnswerForm, quickOf, isPermission} from '../ui/answer.js';
+import {AnswerForm, quickOf, isPermission, allowsRun} from '../ui/answer.js';
 import * as sel from '../core/select.js';
 import {tokens, money, duration, clock as hhmm, usageTokens} from '../core/format.js';
 import {unsure} from '../core/commands.js';
@@ -94,7 +94,7 @@ export function Home({store, commands, toasts, clock = () => Date.now(), fetchOu
   // one single-choice question.
   const choices = v => {
     if (!v || v.group !== 'answer' || !v.req || !v.run) return [];
-    return quickOf(t, v.req).map(q => ({label: q.label, kind: q.kind, go: () => answer(v, q.params)}));
+    return quickOf(t, v.req, {scope: allowsRun(v.req, aff.runs?.[v.run.id])}).map(q => ({label: q.label, kind: q.kind, go: () => answer(v, q.params)}));
   };
 
   useListKeys({ids, selected, onSelect: setSelected, onOpen: id => onOpen(id), onToggle: id => setOpen(open === id ? '' : id),
@@ -138,7 +138,7 @@ export function Home({store, commands, toasts, clock = () => Date.now(), fetchOu
         onToggle=${() => { setSelected(v.x.task); setOpen(open === v.x.task ? '' : v.x.task); }}
         state=${stateOf(v.group, v.x.reason)} title=${title(v)} sub=${sub(v)} age=${duration(now - Date.parse(v.x.since))}
         agePct=${(now - Date.parse(v.x.since)) / waitFull * 100} actions=${busy(v) ? [] : quick(v)}>
-        <${WaitBody} v=${v} busy=${busy(v)} fetchOutput=${fetchOutput} onOpen=${onOpen} onClose=${() => setOpen('')}
+        <${WaitBody} v=${v} busy=${busy(v)} scope=${allowsRun(v.req, aff.runs?.[v.run?.id])} fetchOutput=${fetchOutput} onOpen=${onOpen} onClose=${() => setOpen('')}
           onDone=${canDone(v) ? () => markDone(v) : null} onRetry=${canRetry(v) ? () => askRetry(v) : null}
           onAnswer=${p => answer(v, p)} onReply=${text => reply(v, text)} />
       <//>`) : html`<p class="empty">${t('home.none')}</p>`}
@@ -237,7 +237,7 @@ export function Home({store, commands, toasts, clock = () => Date.now(), fetchOu
 
 // WaitBody is an open waiting item: what it asks or how it failed, what it just did, and the ways to answer: the
 // answer form for a request (every question, allow for the run when offered), a reply for a run that ended asking.
-function WaitBody({v, busy, fetchOutput, onOpen, onClose, onDone, onRetry, onAnswer, onReply}) {
+function WaitBody({v, busy, scope, fetchOutput, onOpen, onClose, onDone, onRetry, onAnswer, onReply}) {
   const {t} = useWords();
   const [steps, setSteps] = useState(null);
   const [text, setText] = useState('');
@@ -260,7 +260,7 @@ function WaitBody({v, busy, fetchOutput, onOpen, onClose, onDone, onRetry, onAns
     ${detail && html`<pre class="box">${detail}</pre>`}
     ${steps?.length > 0 && html`<div class="wait-steps"><span class="lbl">${t('home.did')}</span>
       ${steps.map(s => html`<div class="step"><span class="mono step-glyph">${s.glyph}</span><span class="mono ell">${s.text}</span></div>`)}</div>`}
-    ${v.group === 'answer' && v.req && html`<${AnswerForm} req=${v.req} busy=${busy} onAnswer=${onAnswer} />`}
+    ${v.group === 'answer' && v.req && html`<${AnswerForm} req=${v.req} scope=${scope} busy=${busy} onAnswer=${onAnswer} />`}
     ${v.group === 'answer' && !v.req && v.run && html`<div class="wait-own">
       <${TextInput} label=${t('home.reply')} value=${text} onInput=${setText}
         onKeyDown=${e => { if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); sendReply(); } }} />

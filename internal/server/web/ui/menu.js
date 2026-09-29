@@ -22,15 +22,15 @@ function Items({items, close, box}) {
     </div>`;
 }
 
-// Menu: items [{label, onClick, kind}]; label and icon draw its button.
-export function Menu({label, icon, items}) {
+// Menu: items [{label, onClick, kind}]; label and icon draw its button, which disabled greys.
+export function Menu({label, icon, items, disabled = false}) {
   const [open, setOpen] = useState(false);
   const button = useRef(null), box = useRef(null);
   const close = () => { setOpen(false); button.current?.focus?.(); };
   return html`<span class="menu-wrap">
-    <button type="button" class="btn quiet" ref=${button} aria-haspopup="menu" aria-expanded=${open ? 'true' : 'false'} onClick=${() => setOpen(!open)}>
+    <button type="button" class="btn quiet" ref=${button} aria-haspopup="menu" aria-expanded=${open ? 'true' : 'false'} disabled=${disabled} onClick=${() => setOpen(!open)}>
       ${icon && html`<${Icon} name=${icon} />`}${label}
     </button>
-    ${open && html`<${Items} items=${items} close=${close} box=${box} />`}
+    ${open && !disabled && html`<${Items} items=${items} close=${close} box=${box} />`}
   </span>`;
 }

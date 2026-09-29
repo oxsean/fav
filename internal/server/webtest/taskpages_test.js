@@ -99,10 +99,10 @@ test('the task pages draw in both forms and both languages, styled and worded', 
     '结论：pass · Totals round half-even now.', 'The totals round the wrong way.', 'claude（项目默认） @ mba（项目默认）']) ok(list.includes(want), `list: no ${want}`);
   const board = drawn(app(r, {url: '/?page=tasks&view=board'}).vnode(), 'desktop', 'en');
   eq((board.match(/class="board-col/g) || []).length, 5, 'five columns');
-  for (const want of ['Waiting on you', 'Not started', '↺1', '$1.10', '1/3']) ok(board.includes(want), `board: no ${want}`);
+  for (const want of ['Waiting on you', 'Not started', '↺1', '$1.10', '1/4']) ok(board.includes(want), `board: no ${want}`);
   const tree = drawn(app(r, {url: '/?page=tasks&view=tree&task=q1'}).vnode(), 'desktop', 'zh');
   for (const want of ['class="tree-row depth-2', 'Rewrite the checkout in <strong>three</strong> steps.', '<a href="https://git.example.com/shop/issues/42" target="_blank"',
-    'issue 有了第 3 版：', '1 / 3 完成']) ok(tree.includes(want), `tree: no ${want}`);
+    'issue 有了第 3 版：', '1 / 4 完成']) ok(tree.includes(want), `tree: no ${want}`);
   const phone = drawn(app(r, {url: '/?page=tasks'}).vnode(), 'phone', 'zh');
   for (const want of ['class="sect"', 'class="fab"', 'class="tabbar"']) ok(phone.includes(want), `phone: no ${want}`);
   ok(!phone.includes('class="board"') && !phone.includes('>看板<'), 'no board on a phone');
@@ -122,7 +122,7 @@ test('each form draws in both forms and both languages, styled and worded', asyn
     blocked: html`<${Dispatch} store=${r.store} task=${st.tasks.q7} agents=${agents} machines=${machines} onDispatch=${none} onClose=${none} />`,
     move: html`<${Move} store=${r.store} task=${st.tasks.q5} onMove=${none} onClose=${none} />`,
     plan: html`<${PlanReview} store=${r.store} task=${st.tasks.q6} onSave=${none} onApply=${none} onDiscard=${none} onReply=${none} onClose=${none} />`,
-    gate: html`<${Gate} task=${st.tasks.q4} onPass=${none} onBack=${none} onClose=${none} />`,
+    gate: html`<${Gate} task=${st.tasks.q4} onBack=${none} onClose=${none} />`,
     reply: html`<${Gate} task=${st.tasks.q10} reply=${'r22'} onPass=${none} onBack=${none} onClose=${none} />`,
   };
   for (const [name, v] of Object.entries(forms)) for (const f of ['desktop', 'phone']) for (const lang of ['zh', 'en']) {
@@ -214,7 +214,7 @@ test('a plan: a task taken out, the draft saved, the tasks made; what the coordi
   eq(r.errors, [], 'errors');
 });
 
-test('the task page\'s own writes: a gate sent back needs notes, then passes; an issue version, a merge, a move and its undo', async () => {
+test('the task page\'s own writes: a gate sent back for rework needs notes, then passes after asking; an issue version, a merge, a move and its undo', async () => {
   const r = await tasks();
   const a = app(r, {url: '/?page=tasks&task=q4'});
   const root = await mount(a.vnode());
@@ -222,7 +222,8 @@ test('the task page\'s own writes: a gate sent back needs notes, then passes; an
   const to = async id => { await act(() => a.router.go({page: 'tasks', task: id})); };
   await r.srv.play('tasks-acts', {
     async back() {
-      await primary();
+      await click(buttonOf(root.one('.det-acts'), words.t('do.more')));
+      await click(root.find('.menu-item').find(b => b.textContent === words.t('do.rework')));
       await click(buttonOf(root.one('.modal'), words.t('gate.back')));
       ok(root.one('.modal').textContent.includes(words.t('gate.needNotes')), 'notes first');
       await type(root.one('.modal').find('textarea')[0], 'Round the tax too.');
@@ -230,8 +231,10 @@ test('the task page\'s own writes: a gate sent back needs notes, then passes; an
     },
     async pass() {
       await settled();
+      ok(root.one('.det-acts').find('.btn').find(b => b.className.includes('primary')).textContent.includes(words.t('do.pass')), 'passing is its primary action');
       await primary();
-      await act(() => { a.keys.handle(press('Enter', {metaKey: true})); });
+      ok(root.one('.modal').textContent.includes(words.f('gate.confirmPass', 'Review step')), 'asks first');
+      await click(buttonOf(root.one('.modal'), words.t('gate.pass')));
     },
     async ack() { await settled(); await to('q1'); await primary(); },
     async merge() { await settled(); await to('q10'); await primary(); },
@@ -278,7 +281,29 @@ test('the board takes the four drops it allows, undoes one, and says why it refu
   eq(r.errors, [], 'errors');
 });
 
-test('on a phone a task is its own page, with the previous and next of the list; the gate asks with its buttons first', async () => {
+test('offline, every action of a task greys, in both forms, and its keys do nothing', async () => {
+  const r = await tasks();
+  const shown = async f => {
+    const a = app(r, {url: '/?page=tasks&task=q9'});
+    const root = await mount(a.vnode(), f);
+    await settled();
+    return {a, buttons: root.one('.det-acts').find('button'), modals: () => root.find('.modal').length};
+  };
+  try {
+    for (const f of ['desktop', 'phone']) ok((await shown(f)).buttons.every(b => !b.disabled), `${f}: online, nothing greyed`);
+    form.value = 'desktop';
+    await r.srv.play('tasks-offline', {async offline() { await settled(); }});
+    eq(r.wire.status.value, 'offline', 'the wire is offline');
+    for (const f of ['desktop', 'phone']) {
+      const {a, buttons, modals} = await shown(f);
+      ok(buttons.length > 1 && buttons.every(b => b.disabled), `${f}: every button greys`);
+      await act(() => { a.keys.handle(press('d')); });
+      eq(modals(), 0, `${f}: d opens no dispatch`);
+    }
+  } finally { form.value = 'desktop'; }
+});
+
+test('on a phone a task is its own page, with the previous and next of the list; sending back asks with its button first', async () => {
   const r = await tasks();
   const storage = memory({[FILTER_KEY]: JSON.stringify({column: 'waiting'})});
   const a = app(r, {url: '/?page=tasks&task=q4', storage});
@@ -293,9 +318,10 @@ test('on a phone a task is its own page, with the previous and next of the list;
     eq(a.router.route.value.task, 'q6', 'previous, twice');
     ok(root.one('.det-nav').find('button')[0].disabled, 'the first has no previous');
     await act(() => a.router.go({page: 'tasks', task: 'q4'}));
-    await click(root.one('.det-acts').find('.btn').find(b => b.className.includes('primary')));
+    await click(buttonOf(root.one('.det-acts'), words.t('do.more')));
+    await click(root.find('.menu-item').find(b => b.textContent === words.t('do.rework')));
     const sheet = root.one('.sheet');
-    ok(sheet.children.findIndex(c => c.className === 'sheet-body') >= 0 && sheet.one('.gate-quick').find('button').length === 2, 'two buttons on top');
+    ok(sheet.children.findIndex(c => c.className === 'sheet-body') >= 0 && sheet.one('.gate-quick').find('button').length === 1, 'its button on top');
     ok(sheet.find('kbd').length === 0, 'no key caps on a phone');
   } finally { form.value = 'desktop'; }
 });

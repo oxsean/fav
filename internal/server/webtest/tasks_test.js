@@ -36,8 +36,8 @@ test('a drop is one of four commands, with the write that takes it back; the res
 test('the tree: children under parents in after order, folded ones hidden, a filter keeps the ancestors', async () => {
   const {store} = await tasks();
   const st = store.state, line = r => `${'  '.repeat(r.depth)}${r.task.id}${r.kids ? '/' + r.kids : ''}`;
-  eq(tk.tree(st).map(line), ['q1/3', '  q2', '  q3/1', '    q5', '  q4', 'q10', 'q11', 'q6', 'q7', 'q8', 'q9'], 'the whole tree');
-  eq(tk.tree(st, undefined, new Set(['q3'])).map(line), ['q1/3', '  q2', '  q3/1', '  q4', 'q10', 'q11', 'q6', 'q7', 'q8', 'q9'], 'q3 folded');
+  eq(tk.tree(st).map(line), ['q1/4', '  q10', '  q2', '  q3/1', '    q5', '  q4', 'q11', 'q6', 'q7', 'q8', 'q9'], 'the whole tree');
+  eq(tk.tree(st, undefined, new Set(['q3'])).map(line), ['q1/4', '  q10', '  q2', '  q3/1', '  q4', 'q11', 'q6', 'q7', 'q8', 'q9'], 'q3 folded');
   eq(tk.tree(st, t => t.id === 'q5').map(line), ['q1/1', '  q3/1', '    q5'], 'a match with its ancestors');
   const backlog = tk.matcher(st, {column: 'backlog'});
   eq(tk.tree(st, backlog).map(r => r.task.id), ['q1', 'q3', 'q5', 'q7'], 'by column');
@@ -51,7 +51,7 @@ test('filters, subtask progress and what a task spent', async () => {
   eq(ids({me: 'u_a', mine: true}), [], 'mine: none for another');
   eq(ids({me: 'u_b', mine: true, column: 'ended'}), ['q2', 'q8'], 'mine and ended');
   eq(ids({project: 'p2'}), [], 'another project');
-  eq([tk.progress(st, 'q1'), tk.progress(st, 'q3'), tk.progress(st, 'q9')], [{done: 1, of: 3}, {done: 0, of: 1}, null], 'progress');
+  eq([tk.progress(st, 'q1'), tk.progress(st, 'q3'), tk.progress(st, 'q9')], [{done: 1, of: 4}, {done: 0, of: 1}, null], 'progress');
   eq(tk.spent(st, 'q2'), {usd: 1.1, tokens: 58000}, 'spent');
   eq(tk.runsOf(st, 'q4').map(r => r.id), ['r25'], 'runs, the latest first');
 });
@@ -109,20 +109,19 @@ test('a plan draft: its rows, adding, removing, renaming, and what the coordinat
   eq(tk.planCheck({tasks: Array.from({length: tk.PLAN_MAX + 1}, (_, i) => ({key: 'k' + i, title: 'T'}))}), [{key: '', code: 'many', detail: '50'}], 'too many');
 });
 
-test('what can be done with each task: one primary action by its situation, the rest after it', async () => {
+test('what can be done with each task: only what the affordances give, the primary one by its situation', async () => {
   const {store} = await tasks();
-  const st = store.state, of = id => tk.actionsFor(st, st.tasks[id]);
+  const st = store.state, aff = store.affordances.value, of = id => tk.actionsOf(st, aff, st.tasks[id]);
   eq(Object.fromEntries(['q1', 'q2', 'q3', 'q4', 'q5', 'q6', 'q7', 'q8', 'q9', 'q10', 'q11'].map(id => [id, of(id).primary])), {
-    q1: 'ack', q2: 'reopen', q3: 'stop', q4: 'gate', q5: 'start', q6: 'review', q7: 'start', q8: 'reopen', q9: 'dispatch', q10: 'merge', q11: 'stop',
+    q1: 'ack', q2: 'reopen', q3: 'stop', q4: 'pass', q5: 'start', q6: 'review', q7: 'start', q8: 'reopen', q9: 'dispatch', q10: 'merge', q11: 'stop',
   }, 'primaries');
-  eq(of('q9').more, ['done', 'plan', 'backlog', 'edit', 'move', 'child', 'copy', 'cancel'], 'a task to dispatch');
-  eq(of('q1').more, ['keep', 'edit', 'move', 'child', 'copy', 'cancel'], 'a requirement whose issue changed: its subtasks rule out planning');
-  eq(of('q4').more, ['backlog', 'edit', 'move', 'child', 'copy', 'cancel'], 'a workflow task: no dispatch, no done');
-  eq(of('q3').more, ['edit', 'move', 'child', 'copy', 'cancel'], 'running');
-  eq(of('q5').more, ['plan', 'edit', 'move', 'child', 'copy', 'cancel'], 'in the backlog');
-  eq(of('q2').more, ['copy'], 'done');
-  const ended = {...st, runs: {...st.runs, e1: {id: 'e1', task: 'q9', seq: 90, state: 'exited', exit_code: 0, session: 's1', queued_at: '2026-09-30T14:00:00Z'}}};
-  eq(tk.actionsFor(ended, st.tasks.q9), {primary: 'done', more: ['sendBack', 'dispatch', 'plan', 'backlog', 'edit', 'move', 'child', 'copy', 'cancel']}, 'its run ended well');
+  eq(of('q4').more, ['rework', 'dispatch', 'plan', 'backlog', 'edit', 'move', 'child', 'copy', 'cancel'], 'at its human gate: pass, then rework');
+  eq(of('q9').more, ['done', 'start', 'plan', 'backlog', 'edit', 'move', 'child', 'copy', 'cancel'], 'a task to dispatch');
+  eq(of('q2').more, ['edit', 'move', 'copy'], 'done');
+  eq(of('q6').more.includes('sendBack'), true, 'its last run may be continued: send it back');
+  eq(tk.actionsOf(st, {runs: {}, tasks: {}}, st.tasks.q9), {primary: '', more: ['copy']}, 'no affordances: only what the page does itself');
+  eq(tk.actionsOf(st, {runs: {}, tasks: {q9: {actions: ['edit', 'done']}}}, st.tasks.q9), {primary: '', more: ['done', 'edit', 'copy']},
+    'the one its situation asks for is not given: no primary, nothing in its place');
 });
 
 await run();

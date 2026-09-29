@@ -320,16 +320,15 @@ export function PlanReview({store, task, busy = false, onSave, onApply, onDiscar
   <//>`;
 }
 
-// Gate accepts a workflow task at its human gate or sends it back with what to change; for a task without one (reply),
-// it sends what to change to its last run's session.
-export function Gate({task, reply = null, busy = false, onPass, onBack, onClose}) {
+// Gate sends a workflow task at its human gate back with what to change; for a task without one (reply), it sends what
+// to change to its last run's session.
+export function Gate({task, reply = null, busy = false, onBack, onClose}) {
   const {t, f} = useWords();
   const phone = usePhone();
   const [notes, setNotes] = useState('');
   const [tried, setTried] = useState(false);
   const back = () => { setTried(true); if (notes.trim()) onBack(notes.trim()); };
-  const quick = [{label: t('gate.back'), kind: reply ? 'primary' : '', keyName: reply ? 'Mod+Enter' : '', disabled: busy, onClick: back},
-    ...(reply ? [] : [{label: t('gate.pass'), kind: 'primary', keyName: 'Mod+Enter', disabled: busy, onClick: onPass}])];
+  const quick = [{label: t('gate.back'), kind: 'primary', keyName: 'Mod+Enter', disabled: busy, onClick: back}];
   const field = html`<${TextArea} label=${t('gate.notes')} value=${notes} onInput=${setNotes} rows=${phone ? 4 : 5}
     note=${reply ? f('gate.replyNote', reply) : t('gate.notesNote')} error=${tried && !notes.trim() ? t('gate.needNotes') : undefined} />`;
   if (phone) {

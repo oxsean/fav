@@ -289,31 +289,33 @@ export function planCheck(plan) {
   return placed.size < list.length ? [{key: '', code: 'cycle'}] : [];
 }
 
-// actionsFor is what can be done with task now: {primary, more}, ids of the task page's actions. primary is the one
-// its situation asks for (none when it asks nothing); more are the others, in the order the page lists them.
-export function actionsFor(state, task) {
-  if (finished(task.status)) return {primary: 'reopen', more: ['copy']};
-  const sit = situation(state, task);
-  const open = openRun(state, task.id);
-  const kids = childrenOf(state, task.id).length > 0;
+// pageActs are the task actions the page draws, in its order: the coordinator's (task.Act*), sendBack (its last run's
+// continue) and copy, which is the page's own.
+const pageActs = ['pass', 'rework', 'ack', 'keep', 'merge', 'sendBack', 'done', 'dispatch', 'start', 'stop', 'review', 'plan', 'backlog',
+  'reopen', 'edit', 'move', 'child', 'copy', 'cancel'];
+
+// actionsOf is what the page offers for task: {primary, more}, ids of pageActs. Which may be done is only what the
+// coordinator says (aff, the viewer's affordances); the situation picks the one of them drawn as primary, and none
+// when that one is not given.
+export function actionsOf(state, aff, task) {
+  const given = new Set(aff?.tasks?.[task.id]?.actions || []);
   const last = runsOf(state, task.id)[0];
-  const human = task.flow && sit.reason === 'accept' && task.flow.stages?.find(s => s.name === task.stage)?.gate === 'human';
-  const list = [];
-  const add = (...ids) => { for (const id of ids) if (!list.includes(id)) list.push(id); };
-  if (task.status === 'backlog') add('start');
-  else if (open) add('stop');
-  else if (sit.reason === 'draft') add('review');
-  else if (human) add('gate');
-  else if (sit.reason === 'source_changed') add('ack', 'keep');
-  else if (sit.reason === 'source_closed') add('keep');
-  else if (sit.reason === 'merge_conflict') add('merge');
-  else if (!task.flow && (sit.reason === 'ended' || sit.reason === 'accept')) add('done', ...(sit.reason === 'ended' && last?.session ? ['sendBack'] : []));
-  else if (task.flow && !task.auto) add('start');
-  else if (!task.flow && sit.kind === 'waiting') add('dispatch');
-  const primary = list[0] || '';
-  if (task.status === 'todo' && !open && !task.flow && !kids && sit.reason !== 'source_changed') add('done', 'dispatch');
-  if (!open && !kids && !task.draft && !task.flow) add('plan');
-  if (task.status === 'todo' && !open && !kids) add('backlog');
-  add('edit', 'move', 'child', 'copy', 'cancel');
-  return {primary, more: list.filter(id => id !== primary)};
+  if (!task.flow && last && (aff?.runs?.[last.id] || []).includes('continue')) given.add('sendBack');
+  given.add('copy');
+  const sit = situation(state, task);
+  const want = [
+    [finished(task.status), 'reopen'],
+    [task.status === 'backlog', 'start'],
+    [!!openRun(state, task.id), 'stop'],
+    [sit.reason === 'draft', 'review'],
+    [!!task.flow && sit.reason === 'accept', 'pass'],
+    [sit.reason === 'source_changed', 'ack'],
+    [sit.reason === 'source_closed', 'keep'],
+    [sit.reason === 'merge_conflict', 'merge'],
+    [!task.flow && (sit.reason === 'ended' || sit.reason === 'accept'), 'done'],
+    [!!task.flow && !task.auto, 'start'],
+    [!task.flow && sit.kind === 'waiting', 'dispatch'],
+  ].find(([holds]) => holds)?.[1];
+  const primary = want && given.has(want) ? want : '';
+  return {primary, more: pageActs.filter(id => id !== primary && given.has(id))};
 }
