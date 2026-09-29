@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -52,6 +53,21 @@ func (g *codexRig) sent(t *testing.T) map[string]any {
 }
 
 func (g *codexRig) feed(line string) { g.s.line([]byte(line)) }
+
+// gone waits until request id no longer waits: its answer reached the agent.
+func (g *codexRig) gone(t *testing.T, id string) {
+	t.Helper()
+	for range 200 {
+		g.s.mu.Lock()
+		waits := slices.ContainsFunc(g.s.st.Requests, func(r agent.Request) bool { return r.ID == id })
+		g.s.mu.Unlock()
+		if !waits {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("%s still waits", id)
+}
 
 func params(m map[string]any) map[string]any { p, _ := m["params"].(map[string]any); return p }
 
@@ -109,6 +125,7 @@ func TestCodexApprovalsQuestionsAndSteering(t *testing.T) {
 	if m := g.sent(t); m["id"] != float64(7) || mustJSON(m["result"]) != `{"decision":"accept"}` {
 		t.Fatalf("%v", m)
 	}
+	g.gone(t, req.ID)
 	g.feed(`{"id":8,"method":"item/tool/requestUserInput","params":{"questions":[{"id":"q1","question":"Which DB?","options":[{"label":"pg"}]}]}}`)
 	q := g.s.st.Requests[0]
 	if q.Kind != agent.RequestQuestion || g.s.st.Ask != "Which DB?" {

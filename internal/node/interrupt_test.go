@@ -158,6 +158,7 @@ func TestCodexGivesMessagesAndResolvedRequestsBack(t *testing.T) {
 	appendLine(filepath.Join(g.s.dir, answersFile), agent.Answer{Request: "rpc-0", Allow: true})
 	g.s.takeAnswers()
 	g.sent(t)
+	g.gone(t, "rpc-0")
 	g.logLine(`{"method":"serverRequest/resolved","params":{"threadId":"th-1","requestId":0}}`)
 	rat := g.logLine(`{"method":"serverRequest/resolved","params":{"threadId":"th-1","requestId":1}}`)
 	res := g.marks(t, markResolved)
