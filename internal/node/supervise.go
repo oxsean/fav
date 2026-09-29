@@ -482,6 +482,9 @@ func (s *sup) run() error {
 		go func() { defer pipes.Done(); s.copyOut(or, s.log) }()
 		go func() { defer pipes.Done(); io.Copy(s.errs, errs) }()
 	}
+	if !interactive {
+		s.log.mark(Mark{Event: markStart})
+	}
 	tree, err := proc.StartTree(c, interactive)
 	closeAll(writeEnds) // the agent has its own copies
 	if s.in != nil {
@@ -532,6 +535,9 @@ func (s *sup) run() error {
 				s.endStream()
 			}
 			code := c.ProcessState.ExitCode()
+			if !interactive {
+				s.log.mark(Mark{Event: markExit, Code: &code})
+			}
 			if asked.IsZero() && s.stopAsked() {
 				asked, reason = time.Now(), "asked"
 			}
@@ -915,12 +921,31 @@ func (s *sup) heard() {
 }
 
 // rolling is output.log, moved to output.log.1 once it passes logCap. Each write is whole lines (or a long line's
-// pieces, or stderr's half line): the log never rolls inside one.
+// pieces, or stderr's half line): the log never rolls inside one. It keeps marks.jsonl beside it: where the log goes
+// on in another file, and where the turns begin and end.
 type rolling struct {
-	mu   sync.Mutex
-	path string
-	f    *os.File
-	n    int64
+	mu    sync.Mutex
+	path  string
+	f     *os.File
+	id    string // the open file's
+	n     int64
+	turns turns
+}
+
+// mark adds m to marks.jsonl, at where the log is now.
+func (l *rolling) mark(m Mark) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.open(0) == nil {
+		m.Off = l.n
+		l.add(m)
+	}
+}
+
+// add writes m, in the log's file. The caller holds mu.
+func (l *rolling) add(m Mark) {
+	m.Type, m.File, m.At = "tend", l.id, time.Now()
+	appendLine(filepath.Join(filepath.Dir(l.path), marksFile), m)
 }
 
 func (l *rolling) Write(p []byte) (int, error) {
@@ -969,11 +994,17 @@ func (l *rolling) open(n int) error {
 		return err
 	}
 	l.f, l.n = f, fi.Size()
+	if id := fileio.IDOf(f); id != l.id {
+		l.id = id
+		l.turns.restart()
+		l.add(Mark{Event: markRoll, Off: l.n})
+	}
 	return nil
 }
 
 func (l *rolling) write(p []byte) (int, error) {
 	n, err := l.f.Write(p)
+	l.turns.took(l.id, l.n, p[:n], l.add)
 	l.n += int64(n)
 	return n, err
 }
@@ -1051,14 +1082,20 @@ func (s *sup) hook(argv []string, dir, name string) (int, string) {
 	c.Env = append(os.Environ(), s.spec.env()...)
 	var out bytes.Buffer
 	var w io.Writer = &out
+	var lw *lineWriter
 	if s.log != nil {
-		lw := newLineWriter(s.log)
-		defer lw.flush()
+		lw = newLineWriter(s.log)
 		w = io.MultiWriter(&out, lw)
+		s.log.mark(Mark{Event: markHook, Name: name, Phase: phaseBegin})
 	}
 	c.Stdout, c.Stderr = w, w
 	exit := 0
-	if err := c.Run(); err != nil {
+	err := c.Run()
+	if lw != nil {
+		lw.flush()
+		defer func() { s.log.mark(Mark{Event: markHook, Name: name, Phase: phaseEnd, Code: &exit}) }()
+	}
+	if err != nil {
 		exit = -1
 		var ee *exec.ExitError
 		if errors.As(err, &ee) {

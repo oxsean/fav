@@ -1,6 +1,7 @@
 package fileio
 
 import (
+	"os"
 	"strconv"
 	"syscall"
 )
@@ -18,6 +19,13 @@ func ID(path string) string {
 		return ""
 	}
 	defer syscall.CloseHandle(h)
+	return handleID(h)
+}
+
+// IDOf is ID of the file f has open, whatever its path names by now.
+func IDOf(f *os.File) string { return handleID(syscall.Handle(f.Fd())) }
+
+func handleID(h syscall.Handle) string {
 	var d syscall.ByHandleFileInformation
 	if syscall.GetFileInformationByHandle(h, &d) != nil {
 		return ""

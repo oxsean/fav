@@ -3,6 +3,7 @@
 package fileio
 
 import (
+	"io/fs"
 	"os"
 	"strconv"
 	"syscall"
@@ -14,6 +15,19 @@ func ID(path string) string {
 	if err != nil {
 		return ""
 	}
+	return idOf(fi)
+}
+
+// IDOf is ID of the file f has open, whatever its path names by now.
+func IDOf(f *os.File) string {
+	fi, err := f.Stat()
+	if err != nil {
+		return ""
+	}
+	return idOf(fi)
+}
+
+func idOf(fi fs.FileInfo) string {
 	if st, ok := fi.Sys().(*syscall.Stat_t); ok {
 		return strconv.FormatUint(uint64(st.Dev), 16) + ":" + strconv.FormatUint(uint64(st.Ino), 16)
 	}

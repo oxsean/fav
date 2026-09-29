@@ -90,12 +90,12 @@
 
 ## 翻页：`run.output.page`
 
-`run.output.page{run, before, n, raw?, file?}` 回 `{events, from, to, earliest, file, raw?}`，权限和 `run.tail` 一样（能读这个 run 的任务就能读）。实现在 `internal/coord/output.go`。
-- 协调器转问节点的 `run.tail`：第一次读 `before`（`-1` 是末尾）之前的 64 KiB，不够 `n` 个事件（默认 200，最多 1000）就接着往前读，每次加倍，读到日志开头或一共 1 MiB 为止；拼起来的文字整份交给 `Parse`。
+`run.output.page{run, before, n, raw?, file?}` 回 `{events, from, to, earliest, file, prev?, turn?, raw?}`，权限和 `run.tail` 一样（能读这个 run 的任务就能读）。实现在 `internal/coord/output.go`。
+- 协调器转问节点的 `run.tail{clip}`（`raw` 时不带 `clip`）：第一次读 `before`（`-1` 是末尾）之前的 64 KiB，不够 `n` 个事件（默认 200，最多 1000）就接着往前读，每次加倍，读到日志开头、一共 1 MiB 或者读不动了为止；拼起来的行从节点给的轮次起逐行交给 `Parse`。只送开头的行（`head`）成一个 `raw` 事件；被截过的行（有 `size`），它的事件都带 `truncated.line`（原行长），要全文用 `run.line`。只回文字的旧节点，文字按行切开照样读。
 - 超过 `n` 个就只留最后 `n` 个，再往前补齐第一个事件所在那一行的其余事件：页从一行的开头切。`from` 是这一行的偏移，往前翻一页就用它作 `before`；`to` 是最后一个完整行的末尾；还没写完的最后一行作为临时事件放在最后。
-- `earliest` 是还能取到的最早位置；`.1` 读不到之前它总是 0，`from` 等于它就是到了开头。
-- `file` 带上一页的日志 ID：日志换了（轮转）回 `stale`，客户端丢掉手上的页重新从末尾取。
+- `earliest` 是还能取到的最早位置，现在总是 0；`from` 等于它就是到了这一代日志的开头，这时 `prev` 给出上一代（`.1`）的 ID，往前翻就用 `{file: prev, before: -1}`。
+- `file` 带上一页的日志 ID：当前这一代或 `.1` 都认；两者都不是回 `stale`，客户端丢掉手上的页重新从末尾取。
 - `raw` 时另回这一页的原文（从 `from` 起，含没写完的最后一行），给「原始行」用。
-- 每页都从 `State{}` 读，事件里的 `turn` 在返回前清空；有了 `marks.jsonl` 以后，节点给出这一页开头的轮次，页里再往后数。
+- `turn`：节点照 `marks.jsonl` 给出这一页开头的轮次，页里再往后数，所以事件的 `turn` 和从头读整份日志的一样；`turn` 是第一个事件的轮次。节点的标记里没有这一代日志（旧节点、手写的日志）时，事件里的 `turn` 清空，也不回 `turn`。
 
 CLI 的 `tend run logs` 原样打印日志，仍用 `run.tail`。

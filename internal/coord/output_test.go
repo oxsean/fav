@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/oxsean/fav/internal/fileio"
 	"github.com/oxsean/fav/internal/tend"
 )
 
@@ -26,6 +27,7 @@ func TestRunOutputComesInPagesOfEvents(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(e.home, "node", "runs", r.ID, "output.log"), []byte(log), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	os.Remove(filepath.Join(e.home, "node", "runs", r.ID, "marks.jsonl")) // the turns of another log
 	defer func(was int) { outputChunk = was }(outputChunk)
 	outputChunk = 300 // a few lines a read
 
@@ -51,5 +53,48 @@ func TestRunOutputComesInPagesOfEvents(t *testing.T) {
 	e.must(MRunOutputPage, OutputPageParams{Run: r.ID, Before: 0}, &none)
 	if len(none.Events) != 0 || none.From != 0 {
 		t.Fatalf("nothing before the start: %+v", none)
+	}
+}
+
+// A page starts at the turn the node's marks give where it starts; a line too long to send whole is its head, raw.
+func TestAPageKnowsItsTurnsFromTheNodesMarks(t *testing.T) {
+	e := newEnv(t, tend.Config{})
+	e.start()
+	r := e.dispatch(Dispatch{Task: e.task("x", "quick").ID})
+	e.wait(r.ID, ended)
+	say := func(text string) string {
+		return `{"type":"assistant","message":{"content":[{"type":"text","text":"` + text + `"}]}}` + "\n"
+	}
+	result := `{"type":"result","subtype":"success","result":"ok"}` + "\n"
+	huge := `{"type":"user","big":"` + strings.Repeat("b", 2<<20) + `"}` + "\n"
+	lines := []string{`{"type":"system","subtype":"init"}` + "\n", say("one"), result, say("two"), result, huge}
+	dir := filepath.Join(e.home, "node", "runs", r.ID)
+	path := filepath.Join(dir, "output.log")
+	os.Remove(path)
+	if err := os.WriteFile(path, []byte(strings.Join(lines, "")), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	at := func(i int) int64 { return int64(len(strings.Join(lines[:i], ""))) }
+	id := fileio.ID(path)
+	var marks strings.Builder
+	for _, m := range []string{`"n":1,"off":0`, `"n":1,"phase":"end","off":` + strconv.FormatInt(at(3), 10),
+		`"n":2,"off":` + strconv.FormatInt(at(3), 10), `"n":2,"phase":"end","off":` + strconv.FormatInt(at(5), 10)} {
+		marks.WriteString(`{"type":"tend","event":"turn",` + m + `,"file":"` + id + `","at":"2026-09-30T00:00:00Z"}` + "\n")
+	}
+	os.WriteFile(filepath.Join(dir, "marks.jsonl"), []byte(marks.String()), 0o600)
+
+	var last OutputPage
+	e.must(MRunOutputPage, OutputPageParams{Run: r.ID, Before: -1, N: 3}, &last)
+	if len(last.Events) != 3 || last.Turn != 2 || last.From != at(3) || last.To != at(6) {
+		t.Fatalf("from %d to %d, turn %d: %+v", last.From, last.To, last.Turn, last.Events)
+	}
+	head := last.Events[2]
+	if head.Kind != "raw" || head.Turn != 2 || head.Truncated["line"] != len(huge) || len(head.Text) > 16<<10 || last.Events[0].Turn != 2 {
+		t.Fatalf("%+v %.100q", head.Truncated, head.Text)
+	}
+	var before OutputPage
+	e.must(MRunOutputPage, OutputPageParams{Run: r.ID, Before: last.From, File: last.File}, &before)
+	if len(before.Events) != 3 || before.Turn != 1 || before.Events[2].Turn != 1 || before.Events[2].Kind != "result" {
+		t.Fatalf("turn %d: %+v", before.Turn, before.Events)
 	}
 }

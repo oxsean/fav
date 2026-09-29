@@ -2,12 +2,10 @@ package node
 
 import (
 	"context"
-	"io"
 	"os"
 	"path/filepath"
 	"time"
 
-	"github.com/oxsean/fav/internal/fileio"
 	"github.com/oxsean/fav/internal/remote"
 	"github.com/oxsean/fav/internal/wire"
 )
@@ -18,6 +16,7 @@ const (
 	MRunStop   = "run.stop"
 	MRunList   = "run.list"
 	MRunTail   = "run.tail"
+	MRunLine   = "run.line"     // one whole line of a run's output (LineParams)
 	MRunResume = "run.resume"   // run.start continuing a session (StartParams.Resume)
 	MRunAnswer = "run.answer"   // an answer to what a stream run waits on (AnswerParams)
 	MRunSend   = "run.send"     // a message for a running stream run (SendParams)
@@ -38,20 +37,6 @@ type ListParams struct {
 
 type Runs struct {
 	Runs []Snapshot `json:"runs"`
-}
-
-type TailParams struct {
-	Run    string `json:"run"`
-	Before int64  `json:"before"` // < 0: from the end
-	Max    int    `json:"max"`    // bytes
-	File   string `json:"file,omitempty"`
-}
-
-type Tail struct {
-	Text string `json:"text"`
-	From int64  `json:"from"` // where Text starts; the next page ends here
-	File string `json:"file"` // the log's identity: another one answers stale
-	Done bool   `json:"done"` // Text starts at the beginning of the log
 }
 
 // Handler answers the node methods and, through sessions, the session reads.
@@ -94,6 +79,12 @@ func (n *Node) Handler(sessions remote.Handler) wire.Handler {
 				return nil, err
 			}
 			return n.Tail(p)
+		case MRunLine:
+			var p LineParams
+			if err := r.Decode(&p); err != nil {
+				return nil, err
+			}
+			return n.Line(p)
 		case MRunAnswer:
 			var p AnswerParams
 			if err := r.Decode(&p); err != nil {
@@ -125,60 +116,11 @@ func (n *Node) Handler(sessions remote.Handler) wire.Handler {
 }
 
 // Methods lists what Handler answers.
-var Methods = []string{MRunStart, MRunStop, MRunList, MRunTail, MRunResume, MAgents, MRunAnswer, MRunSend, MDirs}
+var Methods = []string{MRunStart, MRunStop, MRunList, MRunTail, MRunLine, MRunResume, MAgents, MRunAnswer, MRunSend, MDirs}
 
 // Features lists what run.start and run.resume understand beyond their first shape; a coordinator that needs a feature
 // this node lacks fails the run as node_outdated instead of starting it without.
 var Features = []string{FeatureDispatcher, FeatureAgentDef, FeatureVerdict, FeatureCheck, FeatureWorktree, FeatureFiles, FeaturePlan, FeatureBeforeRun}
-
-// Tail reads a page of a run's output.log backwards from p.Before.
-func (n *Node) Tail(p TailParams) (Tail, error) {
-	if !runID.MatchString(p.Run) {
-		return Tail{}, &wire.Error{Code: wire.CodeBadRequest, Detail: "run id"}
-	}
-	path := filepath.Join(n.runDir(p.Run), "output.log")
-	id := fileio.ID(path)
-	if id == "" {
-		return Tail{Done: true}, nil
-	}
-	if p.File != "" && p.File != id {
-		return Tail{}, &wire.Error{Code: wire.CodeStale}
-	}
-	f, err := os.Open(path)
-	if err != nil {
-		return Tail{}, err
-	}
-	defer f.Close()
-	fi, err := f.Stat()
-	if err != nil {
-		return Tail{}, err
-	}
-	end := p.Before
-	if end < 0 || end > fi.Size() {
-		end = fi.Size()
-	}
-	max := int64(p.Max)
-	if max <= 0 || max > 1<<20 {
-		max = 64 << 10
-	}
-	from := end - max
-	if from < 0 {
-		from = 0
-	}
-	b := make([]byte, end-from)
-	if _, err := f.ReadAt(b, from); err != nil && err != io.EOF {
-		return Tail{}, err
-	}
-	if from > 0 { // start at a line
-		for i, c := range b {
-			if c == '\n' {
-				b, from = b[i+1:], from+int64(i+1)
-				break
-			}
-		}
-	}
-	return Tail{Text: string(b), From: from, File: id, Done: from == 0}, nil
-}
 
 // watchEvery is how often Watch looks at the runs.
 const watchEvery = 3 * time.Second

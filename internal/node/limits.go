@@ -10,4 +10,6 @@ const (
 	maxLine      = 32 << 20    // a longer stdout line is logged in pieces as it comes, and not read
 	halfLineWait = time.Second // stderr's half line is logged once it waited this long for its end
 	halfLineMax  = 64 << 10    // or grew this long
+	maxSentField = 16 << 10    // a longer string in a line of output is sent cut to this
+	maxSentLine  = 1 << 20     // a longer line is sent as only its first maxSentField bytes
 )

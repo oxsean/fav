@@ -15,7 +15,8 @@
 | `lock` | 监督进程 | 终生持有；`filelock.Held` = 监督进程活着 |
 | `state.json` | 监督进程或拿到 `claim` 的节点（`fileio.WriteAtomic`） | `{rev, state, pid, pid_start, pane, session, exit_code, reason, detail, attention, ask, note, last, usage, stream, requests, sends, started_at, ended_at}`；`pid_start` 是 agent 进程的启动时间（`proc.StartTime`：macOS sysctl、Linux `/proc/<pid>/stat` 第 22 项、Windows `GetProcessTimes`），和 pid 一起认出同一个进程 |
 | `stop` | `run.stop` | 存在 = 请求停止 |
-| `output.log` | 监督进程 | background 方式的 stdout / stderr，16 MB 轮转为 `.1` |
+| `output.log` | 监督进程 | background 方式的 stdout / stderr 和 hook 的输出，16 MB 轮转为 `.1`，最多两代 |
+| `marks.jsonl` | 监督进程 | 只追加 `{type:"tend", event, n?, phase?, name?, code?, file, off, at}`，`file` 是 `output.log` 这一代的 `fileio.ID`、`off` 是写这一行时它的位置。`event`：`roll`（日志从这一代的 `off` 接着写，每代打开时一条）、`start`（agent 启动前）、`exit{code}`（agent 退出、输出读完之后；这两条只在 background 方式）、`hook{name, phase begin\|end, code}`（setup、before_run、check、cleanup）、`turn{n}`（开始第 n 轮的那一行的开头）和 `turn{n, phase:"end"}`（带这一轮 result 的那一行的末尾）。只用来在输出里定位和翻页：run 目录 agent 写得了，谁问谁答以 journal 为准 |
 | `settings.json` / `mcp.json`（0600） | `run.start` | agent 定义的 claude hooks 和 MCP 服务器（feature `files`） |
 | `reports.jsonl` | agent（`tend run ask\|note\|verdict\|plan`、`note --pr`） | 只追加 `{at, kind ask\|note\|verdict\|pr\|plan, text, verdict}`；监督进程每秒读新增的整行，verdict（pass / rework / blocked）进 `state.json` 的 `verdict` |
 | `answers.jsonl` | `run.answer` | 只追加 `{request, allow, message, answers}`；监督进程每 250 ms 读新增的整行 |
@@ -43,6 +44,8 @@
 - 运行中每秒：读 `reports.jsonl` 新增（ask → `attention=asked` + `ask`；note → `note`，并清掉 stalled）；background 方式下 stdout / stderr 超过 `spec.stall_after`（节点 `node.stall_after`，默认 15 分钟，`off` 关闭）没有字节 → `attention=stalled`，再有输出就清掉；只标记，不停。herdr 方式每 3 s 看 agent 是否在等人：Herdr 里它的 pane 是 `blocked`，或（claude）会话 transcript 末尾是没回答的 `AskUserQuestion` / `ExitPlanMode`，或最新的 Claude hook 事件是 `Notification` / `PermissionRequest` 且 transcript 之后没再长（`tend install-hook`）→ `attention=asked`（没有 `ask` 原文）；不再等时清掉，但只清自己标的，`tend run ask` 的提问留着。Herdr pane 状态和 Claude hook 这两个来源只用于 herdr 方式。
 - 读写管线：读 agent stdout 和 stderr 管道的 goroutine 只读，把字节放进内存里按字节计的有界缓冲（stdout 64 MiB，stderr 16 MiB，常数在 `internal/node/limits.go`），满了才等；写盘、解析、写 `state.json`、往 stdin 发消息都在另外的 goroutine 里做。Windows 上 agent 的这两个管道由 `proc.Pipe` 建（`CreatePipe`，缓冲 8 MiB；`os.Pipe` 只有 4 KiB，而 Node 在 Windows 上同步写管道，读的一方停一下，claude 整个就停下）。stream run 的 stdin 只由一个写 goroutine 按发送顺序写，谁发都不等 agent 读（agent 可能正等着自己的输出被读），排队超过 16 MiB 的发送失败；关 stdin 时先写完已排队的。
 - stdout 先组装成整行再处理：读管道的 goroutine 组装，一行最多 32 MiB（`maxLine`）；更长的行按到来的块原样写进日志，不解析，块之间不插别的内容。顺序是组装、scrub、写 `output.log`、解析。stderr 按行写：半行等它的换行，等满 1 s 或攒到 64 KiB 才整块写出。stdout、stderr 和 hook（setup、before_run、check、cleanup）的输出都经同一个 `rolling` 写，行不会拼在一起，轮转也按全部字节计；`rolling` 打开已有的 `output.log` 时从它的大小接着算。hook 的 stdout 和 stderr 合在一起按行写，半行在 hook 结束时写出。
+- 轮次：`rolling` 每写完一行，就照 `internal/output` 的 `Parse` 数轮次（读的是 `clipLine` 送出的样子，所以和协调器翻页时读到的一样；只送开头的行不算），轮次变了就在 `marks.jsonl` 记一条 `turn`。
+- 送出的行（`run.tail{clip}`）：不超过 16 KiB 的原样；更长的 JSON 行不超过 1 MiB 时解开，每个超过 16 KiB 的字符串截到 16 KiB 并以 `…` 结尾，再编回 JSON（不转义 `<>&`），带上原行长 `size`；其余的只送前 16 KiB，标 `head`。文件里始终是原文。
 - 账号、套餐用量和 agent 自己配置所在的路径不写进 `output.log`：整行丢掉的有 claude 对 `initialize` 的回应（`request_id` 为 `init`，里面有 email、organization 和订阅类型）、claude 的 `rate_limit_event`、codex 的 `account/rateLimits/updated` 和 `hook/*`（hook 的 id 里也有配置文件的路径）；去掉字段再写的有 codex 回应里的 `codexHome`、`instructionSources`、`thread.path`（rollout 文件），`thread/started` 的 `thread.path`，claude `system init` 的 `memory_paths`。超过 32 MiB 的行只按开头的 32 MiB 预筛，可能要改写就整行不写；判断先按字节预筛，JSON 字符串里的引号一定带转义，只是提到这些词的文字不会误中；`output.log` 轮转改名失败（Windows 上有读者开着）就继续追加，下次再轮转。
 
 runner 方式：
@@ -81,3 +84,10 @@ runner 方式：
 - 结束时：关 stdin，等排队的写完，最多 2 s，还没写进去的（agent 留下的子进程拿着 stdin 不读）记 failed；还没送出的消息记 failed，没回答的请求清掉；用户拒绝过的工具不算「等你批准」（只有权限模式没问就拒的才算）。
 - 节点 `run.answer`：请求不在 `state.requests` 里 → `conflict request_gone`；同一请求已在 `answers.jsonl` 里 → 直接回快照。`run.send`：不是 stream run 或已不在 starting / running → `conflict cannot_send`；同 id 已有 → 直接回快照。快照的 `sends` = `state.sends` 加上 `inbox.jsonl` 里监督进程还没取的（queued；run 已结束或 unknown 时算 failed）。
 - 最后一句话（`last`，500 字节内）和用量（`usage{input, cache_read, cache_write, output, cost_usd, turns}`）：claude 取 assistant 文本和每个 `result` 的 usage 累加、`total_cost_usd` 取最新；codex exec 取 `turn.completed` 的 usage；普通命令行取最后一行。每秒最多写一次 state。
+
+## 读输出
+
+- `run.tail{run, before, max, file?, clip?}` 从 `before`（`-1` 是末尾）往前读最多 `max`（默认 64 KiB，最多 1 MiB）。`file` 是日志的 `fileio.ID`：当前这一代，或者还留着的 `.1`（按打开的句柄核对 ID，打开前后正好轮转也认得出）；都不是回 `stale`。回 `{from, file, done, prev?, turn?}`：`done` 是读到了这一代的开头，这时 `prev` 给出 `.1` 的 ID；`turn` 是 `from` 处的轮次（`{turn, closed}`，照 `marks.jsonl` 算，标记里没有这一代就不给）。
+  - 不带 `clip` 回 `text`：从第一个换行之后起的原文。
+  - 带 `clip` 回 `lines[]{off, text, size?, head?}`，每行照上面「送出的行」处理。页从一行的开头切：第一行被切开时，这一行超过 1 MiB 就往前找到它的开头，把它作为 `head` 放在第一行，`from` 是它的开头；否则丢掉这一段。最后一行还没写完、又超过 16 KiB 时不送。
+- `run.line{run, file?, off, max?}` 从 `off`（一行的开头）读这一行，最多 `max`（默认也最多 1 MiB）字节；回 `{text, size, file}`，`size` 是整行的长度（含换行）。`run.tail` 在 `from > 0` 时会丢掉第一个换行之前的内容，取不出从某处开始的一整行，所以另有这个方法。

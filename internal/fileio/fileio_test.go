@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -119,5 +120,35 @@ func TestIDChangesWhenAFileIsRenamedOver(t *testing.T) {
 	}
 	if ID(filepath.Join(dir, "none")) != "" {
 		t.Fatal("a missing file has no id")
+	}
+}
+
+func TestAnOpenFileKeepsItsIDWhateverItsPathNamesNow(t *testing.T) {
+	dir := t.TempDir()
+	p, q := filepath.Join(dir, "output.log"), filepath.Join(dir, "other.log")
+	os.WriteFile(p, []byte("a\n"), 0o644)
+	os.WriteFile(q, []byte("b\n"), 0o644)
+	f, err := os.Open(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	g, err := os.Open(q)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer g.Close()
+	id := IDOf(f)
+	if id == "" || id != ID(p) || IDOf(g) != ID(q) || IDOf(g) == id {
+		t.Fatalf("%q %q %q", id, ID(p), IDOf(g))
+	}
+	if runtime.GOOS == "windows" { // ⚠️ an open file cannot be renamed over there
+		return
+	}
+	if err := os.Rename(q, p); err != nil {
+		t.Fatal(err)
+	}
+	if IDOf(f) != id || ID(p) == id {
+		t.Fatalf("the open file is the one it opened: %q, the path names another: %q", IDOf(f), ID(p))
 	}
 }

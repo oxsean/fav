@@ -2,6 +2,8 @@ package coord
 
 import (
 	"context"
+	"strconv"
+	"strings"
 
 	"github.com/oxsean/fav/internal/node"
 	"github.com/oxsean/fav/internal/output"
@@ -25,6 +27,8 @@ type OutputPage struct {
 	To       int64          `json:"to"`
 	Earliest int64          `json:"earliest"`
 	File     string         `json:"file,omitempty"`
+	Prev     string         `json:"prev,omitempty"` // the page starts the current log: the log before it, still kept
+	Turn     int            `json:"turn,omitempty"` // the turn the page starts in, when the node's marks know it
 	Raw      string         `json:"raw,omitempty"`
 }
 
@@ -53,20 +57,31 @@ func (c *Coord) outputPage(ctx context.Context, p Principal, r *wire.Request) (a
 	}
 	n = min(n, maxOutputEvents)
 	var (
-		text string
-		from int64
-		file = op.File
-		evs  []output.Event
-		to   int64
+		lines []node.TailLine
+		from  int64
+		file  = op.File
+		prev  string
+		st    *output.State
+		evs   []output.Event
+		to    int64
+		size  int
 	)
 	for before, chunk := op.Before, outputChunk; ; chunk *= 2 {
 		var t node.Tail
-		if err := c.call(ctx, run.Machine, node.MRunTail, node.TailParams{Run: op.Run, Before: before, Max: chunk, File: file}, &t); err != nil {
+		if err := c.call(ctx, run.Machine, node.MRunTail, node.TailParams{Run: op.Run, Before: before, Max: chunk, File: file, Clip: !op.Raw}, &t); err != nil {
 			return nil, err
 		}
-		text, from, file = t.Text+text, t.From, t.File
-		evs, _, to = output.Parse(file, from, text, output.State{})
-		if whole(evs) >= n || t.Done || len(text) >= outputMax {
+		got := t.Lines
+		if got == nil { // raw, or a node that sends only text
+			got = textLines(t.Text, t.From)
+		}
+		for _, l := range got {
+			size += len(l.Text)
+		}
+		stuck := before >= 0 && t.From >= before
+		lines, from, file, prev, st = append(got, lines...), t.From, t.File, t.Prev, t.Turn
+		evs, to = eventsOf(file, lines, st)
+		if whole(evs) >= n || t.Done || size >= outputMax || stuck {
 			break
 		}
 		before = t.From
@@ -87,14 +102,80 @@ func (c *Coord) outputPage(ctx context.Context, p Principal, r *wire.Request) (a
 	if len(evs) > 0 && !evs[0].Temp {
 		pageFrom = evs[0].Off
 	}
-	for i := range evs {
-		evs[i].Turn = 0 // ⚠️ a page is read from State{}: the page's turn comes with marks.jsonl
-	}
 	page := OutputPage{Events: evs, From: pageFrom, To: max(to, pageFrom), File: file}
+	if pageFrom == 0 {
+		page.Prev = prev
+	}
+	if st == nil {
+		for i := range evs {
+			evs[i].Turn = 0 // ⚠️ without the node's marks a page cannot know its turns
+		}
+	} else if len(evs) > 0 {
+		page.Turn = evs[0].Turn
+	}
 	if op.Raw {
-		page.Raw = text[pageFrom-from:]
+		var b strings.Builder
+		for _, l := range lines {
+			if l.Off >= pageFrom {
+				b.WriteString(l.Text)
+			}
+		}
+		page.Raw = b.String()
 	}
 	return page, nil
+}
+
+// textLines is text, read from off, as a page's lines.
+func textLines(text string, off int64) []node.TailLine {
+	var out []node.TailLine
+	for text != "" {
+		line, rest, whole := strings.Cut(text, "\n")
+		if whole {
+			line += "\n"
+		}
+		out = append(out, node.TailLine{Off: off, Text: line})
+		off, text = off+int64(len(line)), rest
+	}
+	return out
+}
+
+// eventsOf reads a page's lines from st on (nil: unknown, read as the first turn); it answers the events and where
+// the last whole line ends. A line the node cut is marked truncated, and one sent as only its head is raw.
+func eventsOf(file string, lines []node.TailLine, st *output.State) ([]output.Event, int64) {
+	var s output.State
+	if st != nil {
+		s = *st
+	}
+	var evs []output.Event
+	var to int64
+	if len(lines) > 0 {
+		to = lines[0].Off
+	}
+	for _, l := range lines {
+		if l.Head {
+			evs = append(evs, output.Event{ID: file + ":" + strconv.FormatInt(l.Off, 10) + ":0", Off: l.Off, Kind: output.KindRaw,
+				Text: l.Text, Turn: max(s.Turn, 1), Truncated: map[string]int{"line": int(l.Size)}})
+			to = l.Off + l.Size
+			continue
+		}
+		e, next, end := output.Parse(file, l.Off, l.Text, s)
+		if l.Size > 0 {
+			for i := range e {
+				if e[i].Truncated == nil {
+					e[i].Truncated = map[string]int{}
+				}
+				e[i].Truncated["line"] = int(l.Size)
+			}
+			if end > l.Off {
+				end = l.Off + l.Size
+			}
+		}
+		if end > l.Off {
+			to = end
+		}
+		s, evs = next, append(evs, e...)
+	}
+	return evs, to
 }
 
 func whole(evs []output.Event) int {
