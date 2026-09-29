@@ -65,8 +65,15 @@ func marksIn(ms []Mark, file string, from, to int64, end bool) []Mark {
 
 // turnAt is where the output's turns stand at off in the log file names, read from the marks: what output.Parse
 // reading the log from its start would hold there. nil when the marks never saw that file.
-func turnAt(dir, file string, off int64) *output.State {
+func turnAt(dir, file string, off int64) *output.State { return turnsOf(dir)(file, off) }
+
+// turnsOf is turnAt for many places, the marks read once.
+func turnsOf(dir string) func(file string, off int64) *output.State {
 	ms, _ := linesFrom(filepath.Join(dir, marksFile), 0, func(m Mark) bool { return m.File != "" })
+	return func(file string, off int64) *output.State { return turnIn(ms, file, off) }
+}
+
+func turnIn(ms []Mark, file string, off int64) *output.State {
 	var st output.State
 	seen := false
 	for _, m := range ms {

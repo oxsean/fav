@@ -128,6 +128,12 @@ func (n *Node) Handler(sessions remote.Handler) wire.Handler {
 				return nil, err
 			}
 			return n.BlobOf(p)
+		case MRunOutputFind:
+			var p FindParams
+			if err := r.Decode(&p); err != nil {
+				return nil, err
+			}
+			return n.Find(ctx, p)
 		case MDirs:
 			var p DirsParams
 			if err := r.Decode(&p); err != nil {
@@ -148,7 +154,7 @@ func (n *Node) Handler(sessions remote.Handler) wire.Handler {
 
 // Methods lists what Handler answers.
 var Methods = []string{MRunStart, MRunStop, MRunList, MRunTail, MRunLine, MRunResume, MAgents, MRunAnswer, MRunSend, MRunInterrupt, MDirs,
-	MRunFollow, MRunChanges, MRunDiff, MRunBlob}
+	MRunFollow, MRunChanges, MRunDiff, MRunBlob, MRunOutputFind}
 
 // Features lists what run.start and run.resume understand beyond their first shape; a coordinator that needs a feature
 // this node lacks fails the run as node_outdated instead of starting it without.

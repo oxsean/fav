@@ -201,6 +201,9 @@ type Node struct {
 
 	changesMu sync.Mutex
 	live      map[string]liveChanges // running runs' changes, by run
+
+	findOnce sync.Once
+	finds    chan struct{} // a slot per find running
 }
 
 // Limits is what this machine lets a coordinator do (mode 2 sets them).

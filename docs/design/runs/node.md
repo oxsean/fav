@@ -161,3 +161,8 @@ claude 的工具结果里带着整份文件，codex 反复推一轮的全部 dif
   - `from` 带 `file` 或 `off` 而 `marks` 为 0 时，第一次读标记只留偏移在 `from` 之后的（这一代从 `off` 起，之后各代全部）。
   - 运行结束（`Terminal` 或 `unknown`）以后再读一遍，然后回 `done`；run 目录没了回 `gone`。推送用 `PushWait`：协调器读得慢，跟随就停下等，数据在文件里，不丢。
 - `run.line{run, file?, off, max?}` 从 `off`（一行的开头）读这一行，最多 `max`（默认也最多 1 MiB）字节；回 `{text, size, file}`，`size` 是整行的长度（含换行）。`run.tail` 在 `from > 0` 时会丢掉第一个换行之前的内容，取不出从某处开始的一整行，所以另有这个方法。
+- `run.output.find{run, q, file?, before, limit?}` 在一次运行的输出里找文字，只找看得到的：页送出去的事件里，Web UI 查找搜的那些字段（`text`；`title`，没有时用 `tool`；`output`；`diff`；`input.command`；`ask` 的问题；`plan` 的步骤），一个事件的这些字段用换行连起来再找。长输出截掉的中间、超过 16 KiB 被截掉的字符串、移进 blob 的内容、临时事件和 `marks.jsonl` 都不找。
+  - 找的范围：`file`（默认当前这一代）里 `before`（`-1` 是末尾，要是一行的开头）之前的整行；`file` 是当前这一代时接着找 `.1`。`file` 不在了回 `stale`；`q` 去掉首尾空白后为空或超过 1 KiB 回 `bad_request`。
+  - 做法：逐行读，一行最多留 1 MiB；先在字节上预筛，这一行按 ASCII 折叠大小写后含 `q` 的原文、JSON 转义（不转义 `<>&`）或 `json.Marshal` 转义（`<>&` 写成 `\u003c`，节点瘦身重编的行是这样）三种形式之一才往下；命中的行照「送出的行」剪裁，用 `internal/output` 解析，再在上面的字段里核对。所以查 `tool` 不会命中 `"type":"tool_use"`，带引号、换行的文字也找得到。大小写只折叠 ASCII，按子串匹配。
+  - 回 `{hits: [{id, kind, ref?, turn, at?, excerpt}], file, next?: {file, before}}`：离 `before` 最近的 `limit`（默认 50，最多 200）条，按日志先后排；同一行的命中不拆开，所以可以多出几条。`ref` 是 `tool_result` 对应的调用；`turn` 照 `marks.jsonl` 算；`excerpt` 是第一处命中前后约 160 个字符，截断处带 `…`。`next` 是接着往前找的起点，没有就是找完了；当前这一代找满了而 `.1` 还没找时是 `{当前这一代, 0}`。
+  - 一个节点同时跑两个，多的排队，调用方取消就不再等；扫描中每读 1 MiB 看一次取消。两代日志最多约 2 × 16 MiB，不设扫描上限。
