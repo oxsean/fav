@@ -2,6 +2,8 @@
 
 原生 TUI 的 Agents 页（跑着的会话、Herdr、「需要你」）、布局阈值、视觉约定、键盘与鼠标。实现：`internal/ui/tui`（键表 `keys.go`、`attention.go`、`theme.go`、`zone.go`、`view.go`、`input_unix.go` / `input_windows.go`）、`internal/capture`（`live.go`、`ReadPulse`、`HookWaiting`）、`internal/herdr`、`cmd/tend`（`install-hook` / `hook-event`）。
 
+标签页改名（「项目」改「目录」、「Agents」改「在跑」，计划）见 [ui.md](../tasks/ui.md)「页面结构与用词（计划）」。
+
 ## 跑着的会话（Herdr）
 
 目标是盯着这个面板就知道各个 agent 的进展，不用一个个 tab 翻。第四个标签页「Agents N」只列此刻在

@@ -50,6 +50,8 @@ tend journal verify [--json] | repair [-y]
 
 ## Web UI（模式二）
 
+页面的合并和改名（计划）见 [ui.md](../tasks/ui.md)「页面结构与用词（计划）」。
+
 - 文件：`internal/server/web/`（`index.html`、`app.css`、`api.js`、`fold.js`、`team.js`、`tree.js`、`home.js`、`look.js`、`palette.js`、`app.js`），`go:embed` 进二进制，无构建步骤、无外部依赖。
   - `api.js` 是唯一的通信层（wire 帧走 `/client` WebSocket，每条请求 30 s 超时后发 `cancel`，应答 server 的 `ping`）。
   - `fold.js` 把推送的信封折进页面的状态（照搬 `task.State.Apply`，`fold_test.go` 用 Go 生成的信封对照）。
