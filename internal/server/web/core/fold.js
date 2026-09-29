@@ -22,7 +22,7 @@ function observe(r, o) {
   if (o.detail) r.detail = o.detail;
   if ((o.node_rev || 0) > 0) {
     r.attention = o.attention; r.ask = o.ask; r.note = o.note; r.last = o.last; r.usage = o.usage;
-    r.stream = o.stream; r.requests = o.requests; r.caps = o.caps; r.doing = o.doing; r.verdict = o.verdict; r.checked = o.check; r.worked = o.work; r.plan = o.plan;
+    r.stream = o.stream; r.requests = o.requests; r.caps = o.caps; r.doing = o.doing; r.turn = o.turn; r.verdict = o.verdict; r.checked = o.check; r.worked = o.work; r.plan = o.plan;
     const node = o.sends || [];
     r.sends = [...node, ...(r.sends || []).filter(m => !node.some(x => x.id === m.id))];
     r.answers = (r.answers || []).filter(a => (r.requests || []).some(q => q.id === a.request));
@@ -33,7 +33,8 @@ function observe(r, o) {
   if (o.ended_at) r.ended_at = o.ended_at;
   if (!openStates.has(r.state)) {
     r.requests = undefined; r.answers = undefined;
-    r.sends = (r.sends || []).map(m => m.state === 'queued' ? {...m, state: 'failed'} : m);
+    const carried = m => (m.mode === 'after' || m.mode === 'interrupt') && !!r.session; // a continuation takes it
+    r.sends = (r.sends || []).map(m => m.state === 'queued' && !carried(m) ? {...m, state: 'failed'} : m);
   }
 }
 
@@ -46,8 +47,8 @@ function applyEvent(s, e, at, seq) {
       break;
     case 'task_edited': {
       const t = need(s.tasks, d.id, 'task');
-      for (const k of ['title', 'brief', 'dir', 'machine', 'agent', 'project', 'owner', 'approver', 'kind', 'acceptance', 'tags']) if (d[k] !== undefined) t[k] = d[k];
-      if (d.workflow !== undefined) {
+      for (const k of ['title', 'brief', 'dir', 'machine', 'agent', 'project', 'owner', 'approver', 'kind', 'acceptance', 'tags']) if (d[k] != null) t[k] = d[k];
+      if (d.workflow != null) {
         t.workflow = d.workflow || undefined; t.flow = d.flow; t.loops = undefined; t.stage_seq = seq;
         t.stage = d.flow && d.flow.stages && d.flow.stages.length ? d.flow.stages[0].name : undefined;
       }
@@ -106,6 +107,10 @@ function applyEvent(s, e, at, seq) {
     case 'run_queued':
       s.runs[d.id] = {...d, state: 'queued', want: 'run', queued_at: at, seq};
       queuedWork(s, s.runs[d.id]);
+      if (s.runs[d.parent] && (d.takes || []).length) { // what it carries went out with it
+        const p = s.runs[d.parent];
+        p.sends = (p.sends || []).map(m => d.takes.includes(m.id) ? {...m, state: 'sent'} : m);
+      }
       break;
     case 'plan_drafted': {
       const t = need(s.tasks, d.id, 'task');
@@ -145,18 +150,24 @@ function applyEvent(s, e, at, seq) {
     }
     case 'run_answered': {
       const r = need(s.runs, d.id, 'run');
-      if (!(r.answers || []).some(a => a.request === d.answer.request)) r.answers = [...(r.answers || []), d.answer];
+      r.answers = [...(r.answers || []).filter(a => a.request !== d.answer.request), d.answer]; // a later answer replaces
       break;
     }
     case 'run_sent': {
       const r = need(s.runs, d.id, 'run');
       if (!(r.sends || []).some(m => m.id === d.send.id)) r.sends = [...(r.sends || []), d.send];
+      else r.sends = r.sends.map(m => m.id === d.send.id ? {...m, state: d.send.state} : m); // one the coordinator kept failed
+      break;
+    }
+    case 'run_interrupt_requested': {
+      const r = need(s.runs, d.id, 'run');
+      if (openStates.has(r.state)) r.interrupt = d;
       break;
     }
     case 'task_moved': {
       const t = need(s.tasks, d.id, 'task');
-      if (d.parent !== undefined) t.parent = d.parent;
-      if (d.after !== undefined) t.after = d.after;
+      if (d.parent != null) t.parent = d.parent;
+      if (d.after != null) t.after = d.after;
       t.held = undefined; t.rev = (t.rev || 0) + 1; t.updated_at = at;
       break;
     }
@@ -177,7 +188,7 @@ function applyEvent(s, e, at, seq) {
       break;
     case 'project_edited': {
       const p = need(s.projects, d.id, 'project');
-      for (const k of ['name', 'owner', 'repos', 'links', 'context', 'defaults', 'hooks', 'fetch', 'workflows']) if (d[k] !== undefined) p[k] = d[k];
+      for (const k of ['name', 'owner', 'repos', 'links', 'context', 'defaults', 'hooks', 'fetch', 'workflows']) if (d[k] != null) p[k] = d[k];
       p.rev = (p.rev || 0) + 1; p.updated_at = at;
       break;
     }
@@ -217,7 +228,7 @@ const parts = {
   task_linked: ['tasks'], task_source_acked: ['tasks'], task_status_set: ['tasks'], task_moved: ['tasks'], task_started: ['tasks'],
   task_held: ['tasks'], plan_drafted: ['tasks'], plan_applied: ['tasks'],
   run_queued: ['runs', 'tasks'], run_observed: ['runs', 'tasks'], run_starting: ['runs'], run_stop_requested: ['runs'],
-  run_canceled: ['runs'], run_abandoned: ['runs'], run_answered: ['runs'], run_sent: ['runs'],
+  run_canceled: ['runs'], run_abandoned: ['runs'], run_answered: ['runs'], run_sent: ['runs'], run_interrupt_requested: ['runs'],
   project_created: ['projects'], project_edited: ['projects'], member_set: ['projects'],
   agentdef_saved: ['agent_defs'], agentdef_removed: ['agent_defs'], agentdef_shared: ['agent_defs'],
   machine_shared: ['shares'],
@@ -372,8 +383,8 @@ function situation(s, t) {
   return held(s, t) || {kind: 'queued', reason: 'ready'};
 }
 
-// conversation is the runs of the conversation run is in, from its first: the run no parent of which the state holds,
-// then every run that answers one of them, by seq (task.State.Conversation, T3.3).
+// conversation is the runs of the conversation run id is in: its root (the run no parent of which the state holds) and
+// every run that goes on from it, by seq, then queue time, then id (task.State.Conversation).
 function conversation(s, id) {
   const rootOf = r => {
     const seen = new Set();
@@ -383,8 +394,12 @@ function conversation(s, id) {
   const r = s.runs[id];
   if (!r) return [];
   const root = rootOf(r);
+  const cmp = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
+  // ⚠️ Go orders by the nanosecond: Date.parse keeps the millisecond, the fraction's digits past it come on top
+  const sub = t => { const m = /\.(\d+)/.exec(t || ''); return m ? Number((m[1] + '000000000').slice(3, 9)) : 0; };
+  const at = (a, b) => (Date.parse(a.queued_at || 0) - Date.parse(b.queued_at || 0)) || sub(a.queued_at) - sub(b.queued_at);
   return Object.values(s.runs).filter(x => x.task === r.task && rootOf(x) === root)
-    .sort((a, b) => (a.seq || 0) - (b.seq || 0) || String(a.queued_at || '').localeCompare(String(b.queued_at || '')));
+    .sort((a, b) => (a.seq || 0) - (b.seq || 0) || at(a, b) || cmp(a.id, b.id));
 }
 
 export {apply, situation, stageOf, nextStage, parts, conversation};

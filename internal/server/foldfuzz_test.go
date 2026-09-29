@@ -393,67 +393,76 @@ func TestThePageFoldsRandomJournalsAsTheCoordinatorDoes(t *testing.T) {
 	dir := t.TempDir()
 	b, _ := json.Marshal(journals)
 	os.WriteFile(filepath.Join(dir, "journals.json"), b, 0o600)
-	fold, _ := filepath.Abs(filepath.Join("web", "fold.js"))
-	script := `const fs=require('fs'),vm=require('vm');vm.runInThisContext(fs.readFileSync(process.argv[1],'utf8'));
-const out=[];for(const envs of JSON.parse(fs.readFileSync(process.argv[2],'utf8'))){
+	body := `const out=[];for(const envs of JSON.parse(fs.readFileSync(process.argv[2],'utf8'))){
 let s={seq:0,tasks:{},runs:{},projects:{},shares:{},agent_defs:{}},fail_at=-1;
 for(let i=0;i<envs.length;i++){const c=structuredClone(s);try{Fold.apply(c,envs[i]);s=c}catch(e){fail_at=i;break}}
 const sits={},convs={};for(const t of Object.values(s.tasks))sits[t.id]=Fold.situation(s,t);
 for(const id of Object.keys(s.runs))convs[id]=Fold.conversation(s,id).map(r=>r.id);
 out.push({state:s,fail_at,sits,convs});}
 fs.writeFileSync(process.argv[3],JSON.stringify(out));`
-	res := filepath.Join(dir, "out.json")
-	if out, err := exec.Command(nodeBin, "-e", script, fold, filepath.Join(dir, "journals.json"), res).CombinedOutput(); err != nil {
-		t.Fatalf("node: %v\n%s", err, out)
+	// the page's classic script and the new UI's module fold the same way until the switch removes the first
+	scripts := map[string][]string{
+		"web/fold.js": {"-e", `const fs=require('fs'),vm=require('vm');vm.runInThisContext(fs.readFileSync(process.argv[1],'utf8'));` + body},
+		"web/core/fold.js": {"--input-type=module", "-e", `import fs from 'node:fs';import {pathToFileURL} from 'node:url';
+const Fold=await import(pathToFileURL(process.argv[1]));` + body},
 	}
-	var pages []folded
-	raw, _ := os.ReadFile(res)
-	if err := json.Unmarshal(raw, &pages); err != nil || len(pages) != len(journals) {
-		t.Fatalf("%d results: %v", len(pages), err)
-	}
-	bad := 0
-	for i, envs := range journals {
-		g, p := goFold(envs), pages[i]
-		why := ""
-		switch {
-		case g.FailAt != p.FailAt:
-			why = fmt.Sprintf("Go refuses envelope %d (%v), the page %d", g.FailAt, g.err, p.FailAt)
-		case !reflect.DeepEqual(g.Sits, p.Sits):
-			why = fmt.Sprintf("situations:\n%v\n%v", g.Sits, p.Sits)
-		case !reflect.DeepEqual(normalized(anyOf(g.Convs)), normalized(anyOf(p.Convs))):
-			why = fmt.Sprintf("conversations:\n%v\n%v", g.Convs, p.Convs)
-		case !reflect.DeepEqual(normalized(g.State), normalized(p.State)):
-			var ds []string
-			diffs("", normalized(g.State), normalized(p.State), &ds, 5)
-			why = "state: " + strings.Join(ds, "; ")
-		}
-		if why != "" {
-			if bad++; bad <= 8 {
-				at := len(envs)
-				if g.FailAt >= 0 {
-					at = g.FailAt + 1
-				}
-				eb, _ := json.Marshal(envs[:at])
-				if len(eb) > 1500 && os.Getenv("TEND_FOLD_FULL") == "" {
-					eb = append(eb[:1500], "…"...)
-				}
-				t.Errorf("seed %d: %s\nenvelopes: %s", i, why, eb)
+	for file, script := range scripts {
+		t.Run(file, func(t *testing.T) {
+			fold, _ := filepath.Abs(filepath.FromSlash(file))
+			res := filepath.Join(dir, "out.json")
+			if out, err := exec.Command(nodeBin, append(script, fold, filepath.Join(dir, "journals.json"), res)...).CombinedOutput(); err != nil {
+				t.Fatalf("node: %v\n%s", err, out)
 			}
-		}
-	}
-	if bad > 0 {
-		t.Fatalf("%d of %d journals differ", bad, len(journals))
-	}
-	if envs, refused := 0, 0; true {
-		for i, j := range journals {
-			envs += len(j)
-			if pages[i].FailAt >= 0 {
-				refused++
+			var pages []folded
+			raw, _ := os.ReadFile(res)
+			if err := json.Unmarshal(raw, &pages); err != nil || len(pages) != len(journals) {
+				t.Fatalf("%d results: %v", len(pages), err)
 			}
-		}
-		if envs < 20*len(journals) || refused < len(journals)/10 {
-			t.Fatalf("%d envelopes in %d journals, %d refused: the journals test too little", envs, len(journals), refused)
-		}
+			bad := 0
+			for i, envs := range journals {
+				g, p := goFold(envs), pages[i]
+				why := ""
+				switch {
+				case g.FailAt != p.FailAt:
+					why = fmt.Sprintf("Go refuses envelope %d (%v), the page %d", g.FailAt, g.err, p.FailAt)
+				case !reflect.DeepEqual(g.Sits, p.Sits):
+					why = fmt.Sprintf("situations:\n%v\n%v", g.Sits, p.Sits)
+				case !reflect.DeepEqual(normalized(anyOf(g.Convs)), normalized(anyOf(p.Convs))):
+					why = fmt.Sprintf("conversations:\n%v\n%v", g.Convs, p.Convs)
+				case !reflect.DeepEqual(normalized(g.State), normalized(p.State)):
+					var ds []string
+					diffs("", normalized(g.State), normalized(p.State), &ds, 5)
+					why = "state: " + strings.Join(ds, "; ")
+				}
+				if why != "" {
+					if bad++; bad <= 8 {
+						at := len(envs)
+						if g.FailAt >= 0 {
+							at = g.FailAt + 1
+						}
+						eb, _ := json.Marshal(envs[:at])
+						if len(eb) > 1500 && os.Getenv("TEND_FOLD_FULL") == "" {
+							eb = append(eb[:1500], "…"...)
+						}
+						t.Errorf("seed %d: %s\nenvelopes: %s", i, why, eb)
+					}
+				}
+			}
+			if bad > 0 {
+				t.Fatalf("%d of %d journals differ", bad, len(journals))
+			}
+			if envs, refused := 0, 0; true {
+				for i, j := range journals {
+					envs += len(j)
+					if pages[i].FailAt >= 0 {
+						refused++
+					}
+				}
+				if envs < 20*len(journals) || refused < len(journals)/10 {
+					t.Fatalf("%d envelopes in %d journals, %d refused: the journals test too little", envs, len(journals), refused)
+				}
+			}
+		})
 	}
 }
 
