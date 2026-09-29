@@ -62,6 +62,19 @@ func Inside(base, p string) (string, bool) {
 	return rel, err == nil
 }
 
+// From is p as a command run in cwd names it: a rooted p ("/etc/hosts") is not from cwd, and on Windows it is on
+// cwd's drive.
+func From(cwd, p string) string {
+	switch {
+	case filepath.IsAbs(p):
+	case p != "" && (p[0] == '/' || p[0] == filepath.Separator):
+		p = filepath.VolumeName(cwd) + p
+	default:
+		p = filepath.Join(cwd, p)
+	}
+	return filepath.Clean(p)
+}
+
 // Rebase moves p from under old to under new; p outside old comes back cleaned.
 func Rebase(p, old, new string) string {
 	rel, ok := Inside(old, p)

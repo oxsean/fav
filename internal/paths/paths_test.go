@@ -63,6 +63,29 @@ func TestInsideAndRebase(t *testing.T) {
 	}
 }
 
+func TestFrom(t *testing.T) {
+	cwd := native("/w/app")
+	if runtime.GOOS == "windows" {
+		cwd = `C:\w\app`
+	}
+	if got := From(cwd, "sub/a.go"); got != filepath.Join(cwd, "sub", "a.go") {
+		t.Errorf("a relative path is from cwd: %q", got)
+	}
+	for _, p := range []string{"/etc/hosts", native("/etc/hosts")} {
+		if got := From(cwd, p); Under(got, cwd) {
+			t.Errorf("From(%q, %q) = %q: a rooted path is not under cwd", cwd, p, got)
+		}
+	}
+	if runtime.GOOS == "windows" {
+		if got := From(cwd, "/etc/hosts"); got != `C:\etc\hosts` {
+			t.Errorf("a rooted path is on cwd's drive: %q", got)
+		}
+		if got := From(cwd, `D:\x`); got != `D:\x` {
+			t.Errorf("an absolute path stays: %q", got)
+		}
+	}
+}
+
 func TestTildeAndExpand(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

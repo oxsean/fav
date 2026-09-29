@@ -103,7 +103,7 @@ func (sl *slimmer) touch(m map[string]json.RawMessage) {
 				case !started:
 					return touch{Lost: true}
 				}
-				b, err := os.ReadFile(sl.abs(path, sl.cwd))
+				b, err := os.ReadFile(paths.From(sl.cwd, path))
 				if err != nil {
 					return touch{Lost: true}
 				}
@@ -118,7 +118,7 @@ func (sl *slimmer) touch(m map[string]json.RawMessage) {
 
 // edited records the agent's tools editing path; outside git what it was before comes from before, once.
 func (sl *slimmer) edited(path string, before func() touch) {
-	p := sl.abs(path, sl.cwd)
+	p := paths.From(sl.cwd, path)
 	if sl.seen[viaEdit+"\x00"+p] {
 		return
 	}
@@ -164,7 +164,7 @@ func (sl *slimmer) named(command, cwd string) {
 		if w == "" || w[0] == '-' || strings.Contains(w, "://") || strings.ContainsAny(w, "*?$`\n") {
 			continue
 		}
-		p := sl.abs(w, cwd)
+		p := paths.From(cwd, w)
 		if !paths.Under(p, sl.cwd) || p == sl.cwd || sl.seen[viaCmd+"\x00"+p] {
 			continue
 		}
@@ -174,13 +174,6 @@ func (sl *slimmer) named(command, cwd string) {
 			return
 		}
 	}
-}
-
-func (sl *slimmer) abs(p, cwd string) string {
-	if !filepath.IsAbs(p) {
-		p = filepath.Join(cwd, p)
-	}
-	return filepath.Clean(p)
 }
 
 // readTouched is what touched.jsonl holds, the first line of each path and way.
