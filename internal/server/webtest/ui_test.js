@@ -20,6 +20,10 @@ import {Table, windowOf, VIRTUAL_ABOVE} from '../web/ui/table.js';
 import {ExpandItem} from '../web/ui/expand.js';
 import {Shell, KeyBar, barGroups, navPages, phoneTabs, tabOf} from '../web/ui/shell.js';
 import {iconNames} from '../web/ui/icons.js';
+import {Markdown, safeHref} from '../web/ui/markdown.js';
+import {Picker} from '../web/ui/picker.js';
+import {TreeList} from '../web/ui/tree.js';
+import {Board} from '../web/ui/board.js';
 import {install} from './dom.js';
 import {clock} from './fake.js';
 import {test, eq, ok, run} from './check.js';
@@ -34,6 +38,11 @@ const columns = [
   {id: 'name', label: 'Name', mobile: 'primary', sort: (a, b) => a.name.localeCompare(b.name)},
   {id: 'age', label: 'Age', width: '56px', align: 'right', mobile: 'trailing', sort: (a, b) => a.age - b.age},
 ];
+
+const pickOptions = [{value: 'mba', label: 'mba', state: 'online', sub: 'darwin'}, {value: 'win', label: 'win', state: 'offline', note: 'offline', tone: 'muted'},
+  {value: 'linux', label: 'linux', words: ['container'], disabled: false}];
+const treeRows = [{id: 'a', depth: 0, kids: true, open: true, title: 'Parent', sub: 'p1', trail: '1/2'},
+  {id: 'b', depth: 1, title: 'Child'}, {id: 'c', depth: 4, kids: true, open: false, title: 'Deep'}];
 
 function gallery() {
   const keys = createKeys({timers: clock()});
@@ -62,6 +71,12 @@ function gallery() {
     <${Modal} title="New task" onClose=${() => {}} actions=${[{label: 'Cancel', onClick() {}}, {label: 'Start', kind: 'primary', keyName: 'Mod+Enter', onClick() {}}]}>form<//>
     <${Modal} title="Long form" full onClose=${() => {}}>form<//>
     <${Drawer} title="Run r1" onClose=${() => {}} actions=${[{label: 'Stop', kind: 'danger', onClick() {}}]}>detail<//>
+    <${Markdown} text=${'### Plan\n\n1. **cart**\n2. `pay`\n\n> quoted\n\n```\ngo test\n```\n\nSee https://example.com and [docs](/docs).'} />
+    <${Markdown} text="" empty="No brief" />
+    <${Picker} label="Machine" value="mba" onChange=${() => {}} options=${pickOptions} note="where it runs" />
+    <${Picker} label="After" multi value=${[]} onChange=${() => {}} options=${pickOptions} error="a cycle" />
+    <${TreeList} label="Tree" selected="b" onFold=${() => {}} rows=${treeRows} />
+    <${Board} label="Board" selected="x" columns=${[{id: 'a', label: 'A', cards: [{id: 'x', content: 'card x'}]}, {id: 'b', label: 'B', cards: []}]} />
   <//>`;
 }
 
@@ -301,6 +316,66 @@ test('tabs and segments move by arrows', async () => {
   root.one('[role=radiogroup]').dispatch('keydown', {key: 'ArrowRight'});
   eq(got, ['b', 'c', 'c', 'a', 'x'], 'picked');
   eq(root.find('[role=tab]').map(b => b.getAttribute('tabindex')), ['0', '-1', '-1'], 'only the picked tab is in the tab order');
+});
+
+test('markdown draws a brief\'s blocks as elements, and a link only to http(s) or this site', async () => {
+  const s = renderToString(html`<${Markdown} text=${'# Top\n\n- one\n- **two**\n\n[x](javascript:alert(1)) [y](//evil.test/a) [z](/docs?a=1) <b>raw</b>'} />`);
+  ok(s.includes('<h3 class="md-h">Top</h3>') && s.includes('<li><strong>two</strong></li>'), 'heading and list');
+  ok(s.includes('<a href="/docs?a=1"') && !s.includes('href="javascript') && !s.includes('href="//evil'), 'only safe links');
+  ok(s.includes('[x](javascript:alert(1))') && s.includes('&lt;b>raw&lt;/b>'), 'the rest as text');
+  eq(['https://a.test/x', 'http://a.test', '/p', '?q', '#f', '//a.test', 'javascript:x', 'data:text/html,x', ' /p'].map(u => !!safeHref(u)),
+    [true, true, true, true, true, false, false, false, true], 'safeHref');
+});
+
+test('a picker opens under its button on a desktop and over the page on a phone; typing finds, arrows and Enter pick', async () => {
+  for (const f of ['desktop', 'phone']) {
+    form.value = f;
+    try {
+      const got = [];
+      const {root} = await mount(html`<${Picker} label="Machine" value="mba" onChange=${v => got.push(v)} options=${pickOptions} />`);
+      eq(root.one('.picker-btn').one('.ell').textContent, 'mba', `${f}: the chosen one`);
+      await act(() => root.one('.picker-btn').dispatch('click'));
+      eq([root.find('.picker-pop').length, root.find('.page-over').length], f === 'phone' ? [0, 1] : [1, 0], `${f}: where it opens`);
+      const q = root.one('.picker-q');
+      await act(() => { q.value = 'contai'; q.dispatch('input'); });
+      eq(root.find('.pk-label').map(x => x.textContent), ['linux'], `${f}: found by its words`);
+      await act(() => { q.value = ''; q.dispatch('input'); });
+      await act(() => q.dispatch('keydown', {key: 'ArrowDown', preventDefault() {}}));
+      await act(() => q.dispatch('keydown', {key: 'Enter', preventDefault() {}}));
+      eq([got, root.find('.picker-q').length], [['win'], 0], `${f}: picked and closed`);
+    } finally { form.value = 'desktop'; }
+  }
+  const got = [];
+  const {root} = await mount(html`<${Picker} label="After" multi value=${['mba']} onChange=${v => got.push(v)} options=${pickOptions} />`);
+  await act(() => root.one('.picker-btn').dispatch('click'));
+  await act(() => root.find('.pk')[2].dispatch('click'));
+  eq([got, root.find('.picker-q').length], [[['mba', 'linux']], 1], 'several stay open');
+});
+
+test('a tree folds by Space and by its button, and caps the indent', async () => {
+  const folded = [], picked = [];
+  const {root, keys} = await mount(html`<${TreeList} label="Tree" rows=${treeRows} selected="a" onSelect=${id => picked.push(id)} onFold=${id => folded.push(id)} />`);
+  eq(root.find('.tree-row').map(r => r.className.split(' ')[1]), ['depth-0', 'depth-1', 'depth-2'], 'indent');
+  eq(root.find('[role=treeitem]').map(r => r.getAttribute('aria-expanded')), ['true', null, 'false'], 'expanded');
+  await key(keys, ' ');
+  await act(() => root.find('.tree-fold')[2].dispatch('click'));
+  await key(keys, 'j');
+  eq([folded, picked], [['a', 'c'], ['b']], 'folded and moved');
+});
+
+test('a board drops a card only where it may, and says why elsewhere', async () => {
+  const dropped = [], refused = [];
+  const cols = [{id: 'a', label: 'A', cards: [{id: 'x', content: 'card x'}]}, {id: 'b', label: 'B', cards: []}, {id: 'c', label: 'C', cards: []}];
+  const {root} = await mount(html`<${Board} label="Board" columns=${cols} canDrop=${(_, c) => c === 'b'} onDrop=${(id, c) => dropped.push(id + c)} onRefused=${(id, c) => refused.push(id + c)} />`);
+  await act(() => root.one('.board-card').dispatch('dragstart', {dataTransfer: {setData() {}}}));
+  eq(root.find('.board-col').map(c => c.className), ['board-col drop-no', 'board-col drop-ok', 'board-col drop-no'], 'where it may go');
+  const over = root.find('.board-col')[1].dispatch('dragover');
+  ok(over.defaultPrevented, 'dragover allows the drop');
+  ok(!root.find('.board-col')[2].dispatch('dragover').defaultPrevented, 'not there');
+  await act(() => root.find('.board-col')[1].dispatch('drop'));
+  await act(() => root.one('.board-card').dispatch('dragstart', {dataTransfer: {setData() {}}}));
+  await act(() => root.find('.board-col')[2].dispatch('drop'));
+  eq([dropped, refused, root.find('.board-col').map(c => c.className)], [['xb'], ['xc'], ['board-col', 'board-col', 'board-col']], 'dropped, refused, cleared');
 });
 
 run();

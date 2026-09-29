@@ -1,0 +1,8 @@
+{"note":"q6's plan: one task removed and the draft saved, then the tasks made from it"}
+{"step":"review"}
+{"c":{"type":"req","id":5,"method":"task.plan_save","command_id":"c1","params":{"id":"q6","plan":{"tasks":[{"key":"index","title":"Facet index per category","brief":"Build the **facet** index.","acceptance":["counts match the catalogue"],"size":"M"},{"key":"api","title":"Facets in the search API","after":["index"],"size":"S"},{"key":"ui","title":"Facet filters in the shop","after":["api"],"role_hint":"implement","machine_hint":"linux","size":"L"}],"questions":["Should empty facets be hidden?"]},"expected_rev":3}}}
+{"s":{"type":"res","id":5,"result":{"id":"q6","title":"Search facets","dir":"/w/search","project":"p1","owner":"u_b","created_at":"2026-09-23T09:00:00Z","status":"todo","rev":4,"updated_at":"2026-09-30T14:32:00Z","draft":{"plan":{"tasks":[{"key":"index","title":"Facet index per category","brief":"Build the **facet** index.","acceptance":["counts match the catalogue"],"size":"M"},{"key":"api","title":"Facets in the search API","after":["index"],"size":"S"},{"key":"ui","title":"Facet filters in the shop","after":["api"],"role_hint":"implement","machine_hint":"linux","size":"L"}],"questions":["Should empty facets be hidden?"]},"run":"r21","by":"u_b"}}}}
+{"step":"apply"}
+{"c":{"type":"req","id":6,"method":"task.plan_apply","command_id":"c2","params":{"id":"q6","expected_rev":3}}}
+{"s":{"type":"res","id":6,"result":{"id":"q6","title":"Search facets","dir":"/w/search","project":"p1","owner":"u_b","created_at":"2026-09-23T09:00:00Z","status":"todo","rev":4,"updated_at":"2026-09-30T14:32:00Z"}}}
+{"step":"applied"}

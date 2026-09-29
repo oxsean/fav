@@ -50,10 +50,10 @@ function actionButtons(actions, phone) {
   return ordered.map(a => html`<${Button} kind=${a.kind} keyName=${a.keyName} wide=${phone} disabled=${a.disabled} onClick=${a.onClick}>${a.label}<//>`);
 }
 
-function FullPage({titleID, title, onClose, onKeyDown, box, actions, children}) {
+function FullPage({titleID, title, onClose, onKeyDown, box, actions, extra, children}) {
   const {t} = useWords();
   return html`<div class="page-over" role="dialog" aria-modal="true" aria-labelledby=${titleID} ref=${box} tabindex="-1" onKeyDown=${onKeyDown}>
-    <header class="page-head"><button type="button" class="back" onClick=${onClose}><${Icon} name="back" />${t('ui.back')}</button><h2 id=${titleID}>${title}</h2></header>
+    <header class="page-head"><button type="button" class="back" onClick=${onClose}><${Icon} name="back" />${t('ui.back')}</button><h2 id=${titleID}>${title}</h2>${extra}</header>
     <div class="page-body">${children}</div>
     ${actions.length > 0 && html`<footer class="page-foot">${actionButtons(actions, true)}</footer>`}
   </div>`;
@@ -90,17 +90,18 @@ export function Modal({title, onClose, actions = [], children, full = false}) {
   </div>`;
 }
 
-// Drawer shows one thing beside the page (a run, a machine) without leaving it; Esc closes it.
-export function Drawer({title, onClose, actions = [], children}) {
+// Drawer shows one thing beside the page (a run, a machine) without leaving it; Esc closes it. extra goes in its head
+// (a phone's previous and next buttons).
+export function Drawer({title, onClose, actions = [], extra, children}) {
   const phone = usePhone();
   const {t} = useWords();
   const titleID = useId();
   const box = useRef(null);
   const trap = useFocusTrap(box);
   useKeys('drawer', [{key: 'Esc', run: onClose}]);
-  if (phone) return html`<${FullPage} titleID=${titleID} title=${title} onClose=${onClose} onKeyDown=${trap} box=${box} actions=${actions}>${children}<//>`;
+  if (phone) return html`<${FullPage} titleID=${titleID} title=${title} onClose=${onClose} onKeyDown=${trap} box=${box} actions=${actions} extra=${extra}>${children}<//>`;
   return html`<aside class="drawer" role="dialog" aria-labelledby=${titleID} ref=${box} tabindex="-1" onKeyDown=${trap}>
-    <header class="modal-head"><h2 id=${titleID}>${title}</h2><${Button} kind="quiet" icon="close" label=${t('ui.close')} onClick=${onClose} /></header>
+    <header class="modal-head"><h2 id=${titleID}>${title}</h2>${extra}<${Button} kind="quiet" icon="close" label=${t('ui.close')} onClick=${onClose} /></header>
     <div class="modal-body">${children}</div>
     ${actions.length > 0 && html`<footer class="modal-foot">${actionButtons(actions, false)}</footer>`}
   </aside>`;

@@ -23,4 +23,6 @@ register('ui', {
   'palette.hint': ['输入操作、任务、运行或机器…', 'Type an action, a task, a run or a machine…'], 'palette.none': ['没有匹配的', 'Nothing matches'],
   'palette.task': ['任务', 'Task'], 'palette.run': ['运行', 'Run'], 'palette.machine': ['机器', 'Machine'],
   'status.online': ['在线', 'Online'], 'status.offline': ['离线', 'Offline'],
+  'picker.find': ['输入以查找', 'Type to find'], 'picker.none': ['没有匹配的', 'Nothing matches'], 'picker.nothing': ['未选', 'None'],
+  'picker.done': ['完成', 'Done'], 'ui.prev': ['上一条', 'Previous'], 'ui.next': ['下一条', 'Next'],
 });

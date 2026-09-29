@@ -65,6 +65,12 @@ func TestTheFiguresActionsAndWritesUnderThePages(t *testing.T) {
 
 func TestThePagesInBothFormsAndLanguages(t *testing.T) { runModule(t, "webtest/pages_test.js") }
 
+func TestTheTaskPagesBoardsTreesAndDrafts(t *testing.T) { runModule(t, "webtest/tasks_test.js") }
+
+func TestTheTaskPagesAndFormsInBothFormsAndLanguages(t *testing.T) {
+	runModule(t, "webtest/taskpages_test.js")
+}
+
 // The store folds a state.watch as the coordinator folds the same snapshot and envelopes.
 func TestTheStoreFoldsAStateWatchAsTheCoordinatorDoes(t *testing.T) {
 	cases := runModule(t, "webtest/store_test.js")
@@ -279,11 +285,21 @@ func TestFrameWritesAndListsAreTheCoordinatorsShapes(t *testing.T) {
 		coord.MTaskStatus: func() any { return new(task.TaskStatus) }, coord.MRunDispatch: func() any { return new(coord.Dispatch) },
 		coord.MRunStop: func() any { return new(task.RunRef) }, coord.MRunAnswer: func() any { return new(coord.Answer) },
 		coord.MRunContinue: func() any { return new(coord.Continue) }, coord.MRunOutputPage: func() any { return new(coord.OutputPageParams) },
+		coord.MTaskCreate: func() any { return new(coord.TaskCreate) }, coord.MTaskStart: func() any { return new(coord.TaskRef) },
+		coord.MTaskMerge: func() any { return new(coord.TaskRef) }, coord.MTaskMove: func() any { return new(task.TaskMove) },
+		coord.MTaskPlanSave: func() any { return new(coord.PlanSave) }, coord.MTaskPlanApply: func() any { return new(coord.PlanApply) },
+		coord.MTaskGate: func() any { return new(coord.TaskGate) }, coord.MTaskSourceAck: func() any { return new(task.SourceAck) },
+		coord.MRunPreview: func() any { return new(coord.Dispatch) }, coord.MAgentList: func() any { return new(struct{}) },
 	}
 	results := map[string]func() any{
 		coord.MTaskStatus: func() any { return new(task.Task) }, coord.MRunDispatch: func() any { return new(task.Run) },
 		coord.MRunStop: func() any { return new(task.Run) }, coord.MRunAnswer: func() any { return new(task.Run) },
 		coord.MRunContinue: func() any { return new(task.Run) }, coord.MRunOutputPage: func() any { return new(coord.OutputPage) },
+		coord.MTaskCreate: func() any { return new(task.Task) }, coord.MTaskStart: func() any { return new(task.Task) },
+		coord.MTaskMerge: func() any { return new(task.Task) }, coord.MTaskMove: func() any { return new(task.Task) },
+		coord.MTaskPlanSave: func() any { return new(task.Task) }, coord.MTaskPlanApply: func() any { return new(task.Task) },
+		coord.MTaskGate: func() any { return new(task.Task) }, coord.MTaskSourceAck: func() any { return new(task.Task) },
+		coord.MRunPreview: func() any { return new(coord.Preview) }, coord.MAgentList: func() any { return new(coord.Agents) },
 	}
 	files, _ := filepath.Glob(filepath.Join("webtest", "frames", "*.jsonl"))
 	seen := map[string]int{}
@@ -316,7 +332,9 @@ func TestFrameWritesAndListsAreTheCoordinatorsShapes(t *testing.T) {
 			}
 		}
 	}
-	for _, m := range []string{coord.MTaskStatus, coord.MRunDispatch, coord.MRunStop, coord.MRunAnswer, coord.MRunOutputPage, "machines", "inbox"} {
+	for _, m := range []string{coord.MTaskStatus, coord.MRunDispatch, coord.MRunStop, coord.MRunAnswer, coord.MRunOutputPage, coord.MTaskCreate,
+		coord.MTaskStart, coord.MTaskMerge, coord.MTaskMove, coord.MTaskPlanSave, coord.MTaskPlanApply, coord.MTaskGate, coord.MTaskSourceAck,
+		coord.MRunPreview, coord.MAgentList, "machines", "inbox"} {
 		if seen[m] == 0 {
 			t.Errorf("no frame file has %s", m)
 		}

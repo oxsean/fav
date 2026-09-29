@@ -17,9 +17,14 @@ export function rig() {
 }
 
 // home is a rig that has played home-state up to live; steps run more of the file.
-export async function home(steps = {}) {
+export const home = steps => played((r, s) => r.srv.play('home-state', s), steps);
+
+// tasks is a rig that has played tasks-state, the task pages' data.
+export const tasks = steps => played((r, s) => r.srv.play('tasks-state', s), steps);
+
+async function played(play, steps = {}) {
   const r = rig();
-  await r.srv.play('home-state', {start() { r.store.start(); }, live() { r.flush(); steps.live?.(r); }, journal() { r.flush(); steps.journal?.(r); }});
+  await play(r, {start() { r.store.start(); }, live() { r.flush(); steps.live?.(r); }, journal() { r.flush(); steps.journal?.(r); }});
   r.flush();
   return r;
 }

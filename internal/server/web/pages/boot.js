@@ -33,7 +33,7 @@ function connect({open, location, clock, doc}) {
   return {wire, store, commands, toasts, clock, fetchOutput: run => wire.call('run.output.page', {run, before: -1, n: 20})};
 }
 
-function Root({http, router, keys, nav, prefs, first, open, location, history, clock, doc}) {
+function Root({http, router, keys, nav, prefs, first, open, location, history, clock, doc, storage}) {
   const [session, setSession] = useState(first);
   const [live, setLive] = useState(null);
   const route = router.route.value;
@@ -55,7 +55,7 @@ function Root({http, router, keys, nav, prefs, first, open, location, history, c
     return html`<${AuthFrame} onLang=${lang}><${Device} http=${http} code=${auth.value} onBack=${dropAuth} /><//>`;
   }
   if (!live) return null;
-  return html`<${App} ...${live} router=${router} keys=${keys} nav=${nav} prefs=${prefs} session=${session}
+  return html`<${App} ...${live} router=${router} keys=${keys} nav=${nav} prefs=${prefs} session=${session} storage=${storage}
     onLogout=${async () => { try { await http.logout(); } finally { location.assign('/'); } }} />`;
 }
 
@@ -87,6 +87,6 @@ export async function boot({root = globalThis.document.getElementById('app'), op
   let first = null;
   try { first = await http.session(); } catch {}
   const draw = () => render(html`<${KeysContext.Provider} value=${keys}><${Root} http=${http} router=${router} keys=${keys} nav=${nav}
-    prefs=${prefs} first=${first} open=${open} location=${location} history=${history} clock=${clock} doc=${doc} /><//>`, root);
+    prefs=${prefs} first=${first} open=${open} location=${location} history=${history} clock=${clock} doc=${doc} storage=${storage} /><//>`, root);
   effect(() => { void router.route.value; draw(); });
 }

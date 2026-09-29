@@ -41,7 +41,8 @@ class Text extends Node {
   get textContent() { return this.data; }
 }
 
-const events = ['click', 'dblclick', 'keydown', 'keyup', 'input', 'change', 'scroll', 'focus', 'blur', 'submit', 'pointerdown', 'mousedown'];
+const events = ['click', 'dblclick', 'keydown', 'keyup', 'input', 'change', 'scroll', 'focus', 'blur', 'submit', 'pointerdown', 'mousedown',
+  'dragstart', 'dragover', 'dragleave', 'drop', 'dragend'];
 
 class Element extends Node {
   constructor(doc, ns, tag) {

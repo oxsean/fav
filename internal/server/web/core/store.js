@@ -153,10 +153,17 @@ export function createStore({wire, frame = fn => globalThis.requestAnimationFram
     };
   }
 
+  // briefOf is a task's brief as the state holds it: undefined while state.watch leaves briefs out and none was fetched.
+  function briefOf(id) {
+    const t = state.tasks[id];
+    if (!t) return undefined;
+    return t.brief !== undefined ? t.brief : briefs ? '' : undefined;
+  }
+
   // brief is a task's brief, fetched with task.get when state.watch left it out.
   async function brief(id) {
     const t = state.tasks[id];
-    if (t && t.brief !== undefined) return t.brief;
+    if (briefOf(id) !== undefined) return briefOf(id);
     const got = await wire.call('task.get', {id});
     const now = state.tasks[id];
     if (now && now.brief === undefined) {
@@ -167,7 +174,7 @@ export function createStore({wire, frame = fn => globalThis.requestAnimationFram
   }
 
   return {
-    state, rev, phase, machines, inbox, session, prefs, brief, output,
+    state, rev, phase, machines, inbox, session, prefs, brief, briefOf, output,
     // start opens the watches; noBriefs leaves the tasks' briefs out of the state (brief fetches one).
     start({noBriefs = false} = {}) {
       briefs = !noBriefs;

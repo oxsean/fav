@@ -15,7 +15,7 @@ export function ExpandItem({id, open = false, selected = false, onToggle, state,
       <button type="button" class="xi-head" aria-expanded=${open ? 'true' : 'false'} aria-controls=${bodyID} onClick=${onToggle}>
         ${!phone && html`<span class="xi-chev mono" aria-hidden="true">${open ? '▾' : '▸'}</span>`}
         <${Status} state=${state} />
-        <span class="xi-text"><span class="xi-title">${title}</span>${sub && html`<span class="xi-sub">${sub}</span>`}</span>
+        <span class="xi-text"><span class="xi-title" title=${open ? undefined : title}>${title}</span>${sub && html`<span class="xi-sub">${sub}</span>`}</span>
         <span class="xi-age">
           <span class=${cx('mono', late && 't-unknown')}>${age}</span>
           ${phone ? html`<span class="xi-toggle">${open ? t('ui.collapse') + ' ▴' : t('ui.expand') + ' ▾'}</span>`

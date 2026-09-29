@@ -1,0 +1,11 @@
+{"note":"d on q9 opens the dispatch with its own machine and agent: the agents, the preview, then Mod+Enter queues it"}
+{"step":"dispatch"}
+{"c":{"type":"req","id":5,"method":"agent.list","params":{}}}
+{"s":{"type":"res","id":5,"result":{"agents":[{"name":"claude","provider":"claude"},{"name":"codex","provider":"codex","model":"gpt-6"}]}}}
+{"step":"loaded"}
+{"c":{"type":"req","id":6,"method":"run.preview","params":{"task":"q9","machine":"linux","agent":"codex"}}}
+{"s":{"type":"res","id":6,"result":{"machine":"linux","agent":"codex","provider":"codex","dir":"/srv/shop","state":"connected","check":{"installed":true,"version":"0.50.0","auth":"ok"},"profile":{"name":"codex","provider":"codex"},"notes":[{"code":"background"}]}}}
+{"step":"queue"}
+{"c":{"type":"req","id":7,"method":"run.dispatch","command_id":"c1","params":{"task":"q9","machine":"linux","agent":"codex"}}}
+{"s":{"type":"res","id":7,"result":{"id":"r30","task":"q9","machine":"linux","agent":"codex","profile":{"name":"codex","provider":"codex"},"dir":"/srv/shop","project":"p1","dispatcher":"u_b","want":"run","seq":71,"state":"queued","provider":"codex","runner":"background","queued_at":"2026-09-30T14:32:00Z"}}}
+{"step":"queued"}

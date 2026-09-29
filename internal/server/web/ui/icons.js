@@ -18,6 +18,8 @@ const paths = {
   stop: 'M6 6h12v12H6z',
   close: 'M6 6l12 12M18 6 6 18',
   back: 'm15 5-7 7 7 7',
+  down: 'm6 9 6 6 6-6',
+  up: 'm6 15 6-6 6 6',
 };
 
 export const iconNames = Object.keys(paths);

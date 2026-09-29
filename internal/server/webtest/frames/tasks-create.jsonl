@@ -1,0 +1,10 @@
+{"note":"n opens a new task: the agents are asked for; a title, a brief and a directory from the candidates, then Mod+Enter creates it and starts it"}
+{"step":"new"}
+{"c":{"type":"req","id":5,"method":"agent.list","params":{}}}
+{"s":{"type":"res","id":5,"result":{"agents":[{"name":"claude","provider":"claude"},{"name":"codex","provider":"codex","model":"gpt-6"}]}}}
+{"step":"fill"}
+{"c":{"type":"req","id":6,"method":"task.create","command_id":"c1","params":{"title":"Refund emails","brief":"Send **one** email per refund.","dir":"/w/shop"}}}
+{"s":{"type":"res","id":6,"result":{"id":"q12","title":"Refund emails","brief":"Send **one** email per refund.","dir":"/w/shop","owner":"u_b","status":"todo","rev":1,"created_at":"2026-09-30T14:32:00Z","updated_at":"2026-09-30T14:32:00Z"}}}
+{"c":{"type":"req","id":7,"method":"task.start","command_id":"c2","params":{"id":"q12"}}}
+{"s":{"type":"res","id":7,"result":{"id":"q12","title":"Refund emails","brief":"Send **one** email per refund.","dir":"/w/shop","owner":"u_b","status":"todo","rev":2,"created_at":"2026-09-30T14:32:00Z","updated_at":"2026-09-30T14:32:00Z","auto":true,"start_seq":71}}}
+{"step":"made"}

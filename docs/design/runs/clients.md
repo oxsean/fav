@@ -100,7 +100,7 @@ tend journal verify [--json] | repair [-y]
       - 之后是 `journal{信封}`，seq 不大于已应用的就跳过。
       - `open{mode: resume}` 表示接着已应用的 seq 继续。`affordances` 这个 part 按人计算，store 收下但不折叠。
     - 状态原地折叠，每张表一个版本号 signal，一帧最多加一次（页面上用 `requestAnimationFrame`）。
-    - 折叠遇到自己没有的对象，或者不认识的 part：结束这个流，不带 `after_seq` 重开。重开时的参数：已经 live 过就带 `after_seq`；`no_briefs` 时任务不带任务书，由 `brief(id)` 用 `task.get` 按需取回并填进状态。
+    - 折叠遇到自己没有的对象，或者不认识的 part：结束这个流，不带 `after_seq` 重开。重开时的参数：已经 live 过就带 `after_seq`；`no_briefs` 时任务不带任务书，由 `brief(id)` 用 `task.get` 按需取回并填进状态；`briefOf(id)` 同步地说有没有：有就是任务书，开着 `no_briefs` 但还没取回是 `undefined`，没开 `no_briefs` 而任务没有任务书是空字符串。
     - `machines.watch` 推 `machines{items}`，`inbox.watch` 推 `inbox{items}`，都是整份替换。
     - `output(run)` 按运行引用计数：第一个持有者开 `run.output.watch`（可暂停，续传带 `from`），最后一个释放时 `cancel`。`run.output{events, cursor}` 里带 `key` 的事件替换前一条同 `key` 的；`open{mode: gap}` 在事件里插一条 `gap{from, to}`。
   - `keys.js`：作用域栈，顺序是 `modal` → `drawer` → `list` → `page` → `global`，同一层里后推入的先查；`blocks` 的作用域挡住下面各层，`when` 为假的绑定让给下一层。
@@ -120,24 +120,30 @@ tend journal verify [--json] | repair [-y]
   - `prefs.js`：语言、主题（跟随系统 / 浅色 / 深色）、密度（紧凑 / 标准 / 宽松）和皮肤，沿用旧页面的存储键（`tend-lang`、`tend-theme`、`tend-look`），切换界面不丢；存储不可用时用默认值。
   - `format.js`：数字的写法（`312k` tok、`$3.18`、`1h 04m`、`14:32`）。token 数是 input + cache_write + output，不含读缓存。
   - `select.js`：页面上的数，全是纯函数，输入是 store 的状态、机器、inbox 和当前时间。首页每个数的来源见下面「首页」。
+  - `tasks.js`：任务页的纯函数：处境归到哪一列、筛选、列表 / 看板 / 树的行、看板上一次拖放对应的写、目录候选、默认的机器和 agent、派发前的判断、拆解草稿的编辑和检查、一个任务此刻能做哪些操作。规则见下面「任务页」。
 - **`ui/`**（共用组件）：每个组件从一开始就有电脑和手机两种形态，读 `form` 决定画哪一种，页面不用分两份写。样式在 `css/base.css`（尺寸变量、字体、外框）和 `css/components.css`，颜色只用皮肤 token；手机形态的样式挂在外框的 `data-form="phone"` 下，密度挂在 `:root[data-density]` 上。
   - `Shell`：电脑上是 56 px 顶栏（品牌、搜索框和 `Mod+K`、在跑 / 排队 / 离线计数、当前用户）、左侧栏（七个页面，`[` 或底部按钮开合，收起时只剩图标，等你的数目变成角标；下方是新建任务）和 32 px 键栏；手机上是 52 px 顶栏（server 名可点开切换）和底部四个标签：等你、任务、运行、我。机器页归在「运行」标签下，Agent 和团队归在「我」下。连接断开时顶部出横幅，可立即重连；server 已升级时提示刷新。它也提供按键的上下文。
   - 键栏只列此刻生效、操作表里标了 `bar` 的操作；同一说明的键合成一项（`j k 上下一条`），连续的数字写成 `1–9`。手机上不画键帽。
   - `Button`（primary / quiet / danger，`on` 是按下的开关）、`Chip`、`Segmented`、`Tabs`（方向键移动，只有选中的一项在 Tab 顺序里）、`Status`（形状加颜色区分状态，屏幕阅读器读状态名）、`Panel`、`Stat`。手机上按钮高 44 px，筛选项横向滚动。
   - `Table`：列表都用它。电脑上是表格，表头可排序（升、降、取消）；手机上每行变成一张卡片，列的 `mobile` 决定它在卡片的哪个位置。选中按 id 记，排序和推送之后不丢。`j` / `k` / 方向键移动，`Enter` 打开，`Space` 展开，`1`–`9` 选择。超过 `VIRTUAL_ABOVE`（200）行只画可见的一段，选中项移出视野时滚过去。
-  - `ExpandItem`：原地展开的一条（等你处理的事）。收起时显示状态、问题、等了多久和快捷操作；手机上只留第一个操作，展开 / 收起写成文字。
-  - `Modal`：电脑上是居中的对话框；手机上从底部升起（sheet），长表单（`full`）占满整屏并带返回。它推一个 `blocks` 的 `modal` 作用域：`Esc` 关闭，`Mod+Enter` 执行主操作，页面的键被挡住；焦点移进来、`Tab` 在里面循环，关闭后回到打开前的元素。`Drawer` 在电脑上是右侧面板，手机上占满整屏。
+  - `ExpandItem`：原地展开的一条（等你处理的事）。收起时显示状态、问题、等了多久和快捷操作，标题一行放不下时截断，悬停看全文；展开后标题和说明换行显示全文。手机上只留第一个操作，展开 / 收起写成文字。
+  - `Modal`：电脑上是居中的对话框；手机上从底部升起（sheet），长表单（`full`）占满整屏并带返回。它推一个 `blocks` 的 `modal` 作用域：`Esc` 关闭，`Mod+Enter` 执行主操作，页面的键被挡住；焦点移进来、`Tab` 在里面循环，关闭后回到打开前的元素。`Drawer` 在电脑上是右侧面板，手机上占满整屏。整屏的页头有 `extra` 一格，任务页在这里放上一个 / 下一个。
   - `Toasts`：`Mod+Z` 或按钮撤销最新一条。
   - 手机上左右切换用上一个 / 下一个按钮，不用滑动手势。
   - `Menu`：按钮下弹出的一小列选项，打开时占住按键（方向键移动、`Esc` 关闭，焦点回到按钮）。顶栏的用户菜单放语言、主题、密度和退出登录。
   - `TextInput` / `TextArea`：上面是标签，下面是说明或错误。
+  - `Markdown`：任务书这类文字。认标题（画成 h3–h6）、段落、有序 / 无序列表、引用、围栏代码，行内的代码、粗体、斜体、链接和裸 URL；全部生成节点，不用 innerHTML，其余原样当文字。链接只放行 http(s) 和本站的路径、查询、片段（`//` 开头的不算），别的链接连同括号当文字显示。
+  - `Picker`：从一列里挑一个或几个（`multi`）：父任务、前置任务、机器、agent。电脑上在按钮下弹出，手机上占满整屏；输入即搜（按标签、值、说明和 `words`），方向键移动，`Enter` 选中。每项可带状态、说明和提示。
+  - `TreeList`：缩进的树（最多画三级缩进），`Space` 或行首按钮展开 / 收起，键和选中同 `Table`；手机上点一下直接打开。
+  - `Board`：看板，按列排卡片，键按列的顺序走。拖动时每列标出能不能放（`canDrop`），放在不能放的列上由 `onRefused` 说明原因。只在电脑上用。
   - 图表（`charts.js`）：`Spark`（数字下面的小折线，可画成阶梯）、`Bars`（按天并排、每天按部分堆叠，部分按顺序取色）、`Timeline`（每台机器一条泳道，运行按重叠排成几行，颜色是运行的状态；右端是现在）、`Meter`（一条按部分分色的横条）。尺寸用 style 对象设置，走 CSSOM，不产生 style 属性。
   - `Palette` / `Help`：命令面板和快捷键页，手机上占满整屏。键栏右端提示 `⌘K 全部命令 · ? 快捷键`。
 - **`pages/`**：
   - `boot.js`：页面启动。读偏好并写到 `<html>`（`lang`、`data-theme`、`data-density`，皮肤样式表的地址），按 media query 设形态，建按键、路由、HTTP；问 `/session`：没登录画登录页，`#device-<码>` 画终端登录确认，否则连 `/client`、开 store 的三个 watch，画应用。登录结果、邀请这类一次性片段用过就从地址里去掉；页面隐藏时交给 `wire.setVisible`。socket、fetch、存储和时钟都可以从参数传入，预览和测试靠它换成假的。入口 `main.js` 只调用它。
   - `auth.js`：登录页（各登录方式的按钮，邀请时写明谁邀请、什么身份、加入哪个项目、何时失效，下面是 token 登录）；登录被拒（`not_admitted` / `disabled`）时说明是哪个账号、为什么，可以换账号或复制账号信息；终端登录确认（核对设备码，显示设备名、来源地址、请求时间，允许或拒绝；码已用过或过期时说明）。
-  - `app.js`：登录后的页面：外框、全局操作（去各页、命令面板、快捷键、主题、语言、密度）、命令面板里的任务 / 运行 / 机器搜索。还没做的页面先显示「这一页还在做」。
+  - `app.js`：登录后的页面：外框、全局操作（去各页、命令面板、快捷键、主题、语言、密度）、命令面板里的任务 / 运行 / 机器搜索；`n` 和 `/` 在任何页都转到任务页，打开新建表单或搜索框。还没做的页面先显示「这一页还在做」。
   - `home.js`：首页，见下。
+  - `tasks.js`（列表、看板、树和每个写操作）、`task.js`（一个任务的详情）、`taskforms.js`（新建 / 子任务 / 复制 / 编辑、派发、调整位置、审拆解、验收）、`taskwords.js`（它们的词表）：任务页，见下。
 - **首页**：
   - 上面四个数：
     - 等你：inbox 的条数，按「要回答（asked、permission）/ 出错 / 待验收（accept、ended、draft）/ 其他（dispatch、source_changed、source_closed）」分组计数；最久一条等了多久。
@@ -151,6 +157,17 @@ tend journal verify [--json] | repair [-y]
   - 近 7 天用量：每天的 token 按 provider 堆叠，另写 claude 估算的美元。近 7 天运行结果：结束状态的比例条。
   - 手机上首页只有等你和在跑 / 排队两块，上下排，图表不画。
   - 首页的数不靠定时器刷新：每次重画时取当前时间。
+- **任务页**：
+  - 处境（`fold.js` 的 `situation`）归成五列：等你、在跑、排队、未开始、已结束（完成和取消）。筛选：我相关的（负责或验收）、项目、列、搜索（标题、id、标签）；前三项记在浏览器里（`tend-task-filter`），搜索不记。选中的任务写在地址里（`task`），电脑上换选中用 replace，手机上打开一个任务是 push。
+  - 列表：按列的顺序，同列里最近更新的在前；每行是处境、标题（带子任务进度、花费）、原因、谁在哪跑、更新时间。手机上按列分节，每节一张卡片表。
+  - 看板（只在电脑上）：五列卡片。拖放只有四种对应写操作：待办且没有未结束运行的拖到已结束是完成（带工作流的不行）；拖到未开始是「先不开始」（待办且没有未结束运行的，或已结束的）；从未开始拖到排队或在跑是开始（`task.start`）；从已结束拖到等你是重新打开。除开始以外都走可撤销的 `task.set_status`。别的组合不能放，放下时提示原因。
+  - 树：父子关系缩进，兄弟按 `after` 再按创建时间排；搜到的任务连同它的上级一起显示，收起的节点记在页面里。
+  - 详情：电脑上列表和树是右边的分栏，看板是右侧抽屉；手机上占满整屏，页头有上一个 / 下一个（按当前视图的顺序），不用滑动手势。内容：处境和工作流阶段；主操作按处境选（重新打开、开始、停止、审拆解、验收、采用新版需求、合并、完成、派发等），编辑和派发在电脑上直接显示，其余在「更多」里；需求有新版、来源已关闭、有拆解草稿时各一条提示；负责人、验收人、在哪跑（项目默认的注明）、目录、分支、全部运行的花费、issue 链接；任务书（`Markdown`，按 `briefOf` 按需取回）、验收标准、工作流各阶段、父任务和前置任务、子任务、运行记录（状态、agent @ 机器、阶段、`doing` / `note` / `last`、结论、时长、用量）、工作记录。详情里的运行记录不开 `run.output.watch`。
+  - 写操作都经 `commands.js`，按任务记 pending，操作中按钮变灰；完成、先不开始、重新打开和调整位置可以撤销；停止和取消先确认。失败时提示错误码，没收到应答时说明结果不明。
+  - 新建（`n`）：标题、任务书（写 / 预览两个标签）、验收标准、项目、机器、agent、目录、工作流、父任务、前置任务。目录候选先是项目在这台机器上的检出目录，再是最近用过的目录；手输的目录只在 server 支持 `project.dirs` 时去那台机器上检查（停手 400 ms 后），不支持时不检查。没写完的新建表单记在浏览器里（`tend-task-draft`），发出后清掉。三种建法：先不开始、建好后拆解（`task.plan`）、建好就开始（`task.start`，主操作，`Mod+Enter`）。编辑只发改过的字段；子任务带上父任务的项目和目录；复制带上原任务除标题和工作流以外的字段。
+  - 派发（`d`）：选机器和 agent（手机上是一列可点的行），先按页面自己的规则判断（已有未结束的运行、状态不对、没有目录、没选、agent 限定了机器、CLI 没装或没登录挡住；机器离线、满载只提示），没被挡住时再问 `run.preview`，显示 CLI 版本、挡住的原因和提示。确认后 `run.dispatch`；也可以「先不开始」。
+  - 审拆解：左边是草稿里的任务（按父子缩进），右边编辑选中的一条（标题、key、父任务、前置、大小、说明）；手机上编辑是再叠一层整屏。上面是拆解 agent 的问题，可以直接回复（`run.continue`）。提交前按 coordinator 的规则检查（最多 50 个、key 的写法、重复、父任务和前置存在、最多三层、不依赖自己或上级、没有环），有错不能保存。改过先保存（`task.plan_save`，带 `expected_rev`），没改过就是应用（`task.plan_apply`）；也可以丢弃草稿。
+  - 验收：通过，或写明原因退回（`task.gate`，退回必须写原因）；运行结束待确认完成、最后一次运行留有会话时，「退回」把原因作为 `run.continue` 发给那次运行。手机上两个按钮在上面，原因在下面。
 - **测试**（`webtest/`，不在 `web/` 下）：
   - Go 用 `runModule` 在 node 里跑 `*_test.js`，每个 JS 用例是一个子测试。
   - 假 server（`fake.js`）在进程内模拟 WebSocket 和时钟，回放 `webtest/frames/*.jsonl`：一行一个动作。`c` 是客户端应该发出的帧，`s` 是 server 发的帧，`raw` 是原样发出的一段文字，另外还有 `connect` / `refuse` / `drop` / `dialing` / `wait_ms` / `step` / `note`。
@@ -160,5 +177,7 @@ tend journal verify [--json] | repair [-y]
   - 结构测试：vendor 的校验和，改写只出现在声明过的地方；import 只用相对路径并且合乎分层；每个帧文件都被某个测试回放；皮肤 token 递归检查（跳过 `vendor/`）。
   - 首页的帧：`home-state.jsonl` 是一天的运行加前六天、三台机器（一台离线）、五条 inbox，现在是 2026-09-30T14:32Z（测试用 UTC）；`home-commands.jsonl` 接在它后面，是完成和撤销、按数字作答、重试、停止，各带 command id；`output-page.jsonl` 是展开一条时取的输出；`command-unknown.jsonl` 是没收到应答的写用同一个 command id 重发。Go 把 store 折叠 `home-state` 的结果和 `task.State` 对照，并把帧里的写请求参数、应答和 `machines` / `inbox` 的每一项严格按 coordinator 的类型解码（`task.TaskStatus`、`coord.Dispatch`、`task.RunRef`、`coord.Answer`、`coord.OutputPageParams`、`coord.Continue`；`task.Task`、`task.Run`、`coord.OutputPage`；`coord.Machine`、`coord.InboxItem`）。
   - `select_test.js`：数字写法；首页每个数对帧文件算出的值；空的一天；HTTP 请求的形状；操作表和 §6.6 的键表一致、每个操作有键和两种语言的名字、两种名字都搜得到；写操作的 pending、隐藏、未知和重发；偏好的读写。
+  - 任务页的帧：`tasks-state.jsonl` 是一个项目、十一个任务（需求有新版、完成、在跑、等人工验收、未开始的子任务、拆解草稿、没目录、已取消、等派发、合并冲突、排队）和它们的运行、三台机器、inbox；`tasks-create`（新建并开始）、`tasks-dispatch`（预览后派发）、`tasks-plan`（删一条、保存、应用）、`tasks-acts`（验收退回和通过、采用新版需求、合并、调整位置和撤销）、`tasks-board`（拖到已结束、撤销、被拒的拖放）接在它后面。Go 另外严格解码其中的 `coord.TaskCreate`、`coord.TaskRef`、`task.TaskMove`、`coord.PlanSave`、`coord.PlanApply`、`coord.TaskGate`、`task.SourceAck`、`run.preview` 的 `coord.Dispatch` 和 `coord.Preview`、`coord.Agents`。
+  - `tasks_test.js`：`core/tasks.js` 对 `tasks-state` 的结果：看板的列、每种拖放、树和收起、筛选 / 进度 / 花费、目录候选和默认值、派发前的判断、拆解草稿的编辑和每种错误、每种处境的操作。`taskpages_test.js`：任务页（列表、看板、树，带选中的任务）和每个表单按两种形态、两种语言画一遍，检查 class 和漏译；按上面五个帧文件走一遍；手机上的上一个 / 下一个和验收的按钮位置。
   - `pages_test.js`：首页（在应用里）和登录、邀请、登录被拒、终端确认各页按两种形态、两种语言画一遍，检查 class 有规则、没有漏译；按 `home-commands` 用键盘走完完成 → 撤销 → 作答 → 重试（确认）→ 停止（确认，`Esc` 不发）；展开一条看它刚做的三步；`doing` → `note` → `last` 的先后；命令面板按中文名找操作、按标题找任务，快捷键页；token 登录（错的、对的）和终端的允许、已过期。
-- **预览**：`go run ./tools/webpreview` 在 127.0.0.1:18765 用工作区里的文件起一个只给看的页面：`web/` 的文件、`webtest/preview/` 的预览页、帧文件和皮肤，响应头和 server 一样（`server.SecureHeaders`，CSP 不变）。预览页用假 socket 按方法回放上面的帧文件、用假 fetch 回答登录和终端确认，时钟固定在帧文件的时刻；`?as=signedout` 看登录页，`#device-<码>`、`#invite-<码>` 看另两页。它不连任何 coordinator。
+- **预览**：`go run ./tools/webpreview` 在 127.0.0.1:18765 用工作区里的文件起一个只给看的页面：`web/` 的文件、`webtest/preview/` 的预览页、帧文件和皮肤，响应头和 server 一样（`server.SecureHeaders`，CSP 不变）。预览页用假 socket 按方法回放上面的帧文件、用假 fetch 回答登录和终端确认，时钟固定在帧文件的时刻；`?frames=tasks` 换成任务页的帧，`?as=signedout` 看登录页，`#device-<码>`、`#invite-<码>` 看另两页。它不连任何 coordinator。

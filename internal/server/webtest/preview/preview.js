@@ -1,5 +1,6 @@
 // preview runs the page (web/pages/boot.js) on a fake server for tools/webpreview, which serves this at /: a socket that answers from the frame
-// files by method, a fetch that answers the sign-in and device calls, and the clock of the home frames.
+// files by method, a fetch that answers the sign-in and device calls, and the clock of the home frames. ?frames=tasks
+// plays the task pages' frames instead of the home's.
 import {boot} from '../../web/pages/boot.js';
 
 // ⚠️ The moment the home frames are written for.
@@ -9,9 +10,12 @@ const lines = async name => (await (await fetch(`webtest/frames/${name}.jsonl`))
 
 // answers maps each request method of the frame files to what the server sent for it: the result, then the pushes on
 // its stream, remapped to the ids the page uses.
-async function answers() {
+const sets = {home: ['home-state', 'output-page', 'home-commands'],
+  tasks: ['tasks-state', 'tasks-create', 'tasks-dispatch', 'tasks-plan', 'tasks-acts', 'tasks-board']};
+
+async function answers(names) {
   const out = {};
-  for (const name of ['home-state', 'output-page', 'home-commands']) {
+  for (const name of names) {
     const asked = {};
     for (const l of await lines(name)) {
       if (l.c?.type === 'req') { asked[l.c.id] = l.c.method; out[l.c.method] ||= {res: null, pushes: []}; }
@@ -63,6 +67,7 @@ function fakeFetch(signedIn) {
   };
 }
 
-const table = await answers();
-const signedOut = new URLSearchParams(location.search).get('as') === 'signedout';
+const query = new URLSearchParams(location.search);
+const table = await answers(sets[query.get('frames')] || sets.home);
+const signedOut = query.get('as') === 'signedout';
 boot({open: () => socket(table), fetch: fakeFetch(!signedOut), clock: () => NOW});
