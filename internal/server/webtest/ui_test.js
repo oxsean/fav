@@ -15,7 +15,7 @@ import {Button, Chip, Chips, Segmented, Tabs, Kbd} from '../web/ui/controls.js';
 import {Status, statuses} from '../web/ui/status.js';
 import {Panel, Stat} from '../web/ui/panel.js';
 import {Modal, Drawer} from '../web/ui/overlay.js';
-import {Toasts} from '../web/ui/toast.js';
+import {Toasts, floorOf} from '../web/ui/toast.js';
 import {Table, windowOf, VIRTUAL_ABOVE} from '../web/ui/table.js';
 import {ExpandItem} from '../web/ui/expand.js';
 import {Shell, KeyBar, barGroups, navPages, phoneTabs, tabOf} from '../web/ui/shell.js';
@@ -235,6 +235,19 @@ test('a modal takes the keys, keeps focus inside and gives it back', async () =>
   eq(document.activeElement, opener, 'focus is back on the opener');
   await key(keys, 'n');
   eq(log, ['page n'], 'the page has its keys again');
+});
+
+test('a toast keeps above the controls under it: a phone page\'s foot and composer, a desktop composer at the right', () => {
+  const box = (top, height) => ({getBoundingClientRect: () => ({top, height})});
+  const doc = (...overs) => ({defaultView: {innerHeight: 844}, querySelectorAll: () => overs.map(parts => ({querySelectorAll: () => parts}))});
+  eq(floorOf(doc()), 0, 'no full-screen page: the tab bar rule');
+  eq(floorOf(doc([])), 0, 'a page with nothing at its bottom: the bottom of the screen');
+  eq(floorOf(doc([box(641, 135), box(776, 68)])), 203, 'above the composer, the highest of its bottom controls');
+  eq(floorOf(doc([box(700, 144)], [box(780, 64), box(0, 0)])), 64, 'the topmost page counts, a hidden part does not');
+  const desk = (...parts) => ({defaultView: {innerHeight: 800, innerWidth: 1440}, querySelectorAll: () => parts});
+  const at = (top, right) => ({getBoundingClientRect: () => ({top, height: 60, right})});
+  eq(floorOf(desk(at(685, 1416)), false), 115, 'a desktop toast keeps above a composer under it');
+  eq(floorOf(desk(at(685, 640)), false), 0, 'not one left of it');
 });
 
 test('a toast with undo waits six seconds; Mod+Z takes it back', async () => {

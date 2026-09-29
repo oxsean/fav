@@ -64,6 +64,7 @@ export function Composer({route, acts = [], machine = '', sends = [], busy = fal
   const onKeyDown = e => {
     if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && !e.isComposing) { e.preventDefault(); send(); }
   };
+  const where = html`<div class="cmp-where t-muted">${whereTo(w, route, mode, machine)}${route?.to === 'run' && !modes.includes('steer') ? ' · ' + t('cmp.noSteer') : ''}</div>`;
   return html`<div class=${cx('composer', phone && 'composer-phone')}>
     ${sends.length > 0 && html`<ul class="cmp-sends" aria-label=${t('cmp.label')}>${sends.map(m => html`<li key=${m.id} class=${cx('cmp-send', m.state === 'failed' && 't-failed')}>
       <span class="ell">${m.text}</span><span class="cmp-state">${t(sendWords[m.state] || 'cmp.sent')}</span>
@@ -76,9 +77,9 @@ export function Composer({route, acts = [], machine = '', sends = [], busy = fal
         options=${modes.map(m => ({value: m, label: t('cmp.' + m)}))} /></div>`}
       <textarea class="in cmp-in" rows="1" value=${text} placeholder=${t('cmp.hint')} aria-label=${t('cmp.label')} disabled=${disabled}
         onInput=${e => setText(e.currentTarget.value)} onKeyDown=${onKeyDown}></textarea>
-      ${tools}
+      ${!phone && tools}
       <${Button} kind=${mode === 'interrupt' ? 'danger' : 'primary'} keyName="Mod+Enter" disabled=${!canSend} onClick=${send}>${t('cmp.send')}<//>
     </div>
-    <div class="cmp-where t-muted">${whereTo(w, route, mode, machine)}${route?.to === 'run' && !modes.includes('steer') ? ' · ' + t('cmp.noSteer') : ''}</div>
+    ${phone ? html`<div class="cmp-foot">${where}${tools}</div>` : where}
   </div>`;
 }

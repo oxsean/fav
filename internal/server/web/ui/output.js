@@ -7,6 +7,7 @@ import {useState, useRef, useEffect, useLayoutEffect, useMemo} from '../vendor/h
 import {html, cx, usePhone, useWords, useActions, useName} from './base.js';
 import {Button, Chip, Chips, Segmented} from './controls.js';
 import {Markdown} from './markdown.js';
+import {Menu} from './menu.js';
 import {register} from '../core/i18n.js';
 import * as out from '../core/output.js';
 import {density as dt, code} from '../core/proto.js';
@@ -18,7 +19,7 @@ register('output', {
   'out.f.all': ['全部', 'All'], 'out.f.talk': ['只看对话', 'Talk'], 'out.f.shell': ['只看命令', 'Commands'], 'out.f.edit': ['只看改动', 'Changes'],
   'out.f.error': ['出错的', 'Errors'], 'out.nextError': ['下一处错误', 'Next error'], 'out.noError': ['没有出错的步骤', 'No step failed'],
   'out.density': ['密度', 'Density'], 'out.d.brief': ['简洁', 'Brief'], 'out.d.standard': ['标准', 'Standard'], 'out.d.detailed': ['详细', 'Detailed'],
-  'out.raw': ['原始', 'Raw'], 'out.rawNote': ['这一页的原始行', 'This page’s lines as written'],
+  'out.raw': ['原始', 'Raw'], 'out.unraw': ['看整理后的', 'Tidy view'], 'out.tools': ['更多', 'More'], 'out.rawNote': ['这一页的原始行', 'This page’s lines as written'],
   'out.follow': ['跟随', 'Follow'], 'out.pause': ['暂停', 'Pause'], 'out.find': ['查找', 'Find'],
   'out.more': ['加载更早的…', 'Load earlier…'], 'out.loading': ['正在加载更早的…', 'Loading earlier…'], 'out.start': ['这次运行的开头', 'The start of this run'],
   'out.gone': ['这一轮的输出已清理', 'This part’s output was cleared'], 'out.failedLoad': ['没取到更早的内容（%s）', 'Could not load earlier output (%s)'],
@@ -562,15 +563,26 @@ export function Output({bare = false, parts, density = 'standard', onDensity, on
     html`<${Row} key=${r.key} row=${r} density=${density} onToggle=${toggle} onMore=${onMore} onResend=${onResend} renderAsk=${renderAsk}
       copy=${copy} target=${flash} selected=${selected} />`];
 
-  const bar = html`<div class=${cx('out-tools', phone && 'out-tools-phone')}>
-    <${Chips} label=${t('out.filter')}>${out.filters.map(x => html`<${Chip} label=${t('out.f.' + x)} on=${filter === x} onClick=${() => setFilter(x)} />`)}<//>
+  const chips = html`<${Chips} label=${t('out.filter')}>${out.filters.map(x => html`<${Chip} label=${t('out.f.' + x)} on=${filter === x} onClick=${() => setFilter(x)} />`)}<//>`;
+  const densities = onDensity && html`<${Segmented} label=${t('out.density')} value=${density} onChange=${onDensity} options=${dt.names.map(d => ({value: d, label: t('out.d.' + d)}))} />`;
+  const extras = [errs.length && {label: t('out.nextError'), onClick: nextError}, onRaw && {label: t(raw !== null ? 'out.unraw' : 'out.raw'), onClick: onRaw},
+    linkOf && selStep && {label: t('out.copyLink'), onClick: () => copy(linkOf(selStep))}].filter(Boolean);
+  const bar = phone ? html`<div class="out-tools out-tools-phone">
+    ${chips}
+    <span class="out-tools-end">
+      ${densities}
+      <${Button} kind="quiet" icon="search" label=${t('out.find')} onClick=${() => setFinding(true)} />
+      <${Button} kind="quiet" onClick=${() => (away ? bottom() : f.dispatch({type: 'up'}))}>${away ? t('out.follow') : t('out.pause')}<//>
+      ${extras.length > 0 && html`<${Menu} label=${t('out.tools')} items=${extras} />`}
+      ${tools}
+    </span>
+  </div>` : html`<div class="out-tools">
+    ${chips}
     <span class="out-tools-end">
       <${Button} kind="quiet" disabled=${!errs.length} title=${errs.length ? undefined : t('out.noError')} onClick=${nextError}>${t('out.nextError')}<//>
-      ${onDensity && html`<${Segmented} label=${t('out.density')} value=${density} onChange=${onDensity} options=${dt.names.map(d => ({value: d, label: t('out.d.' + d)}))} />`}
+      ${densities}
       ${onRaw && html`<${Button} kind="quiet" on=${raw !== null} onClick=${onRaw}>${t('out.raw')}<//>`}
       ${linkOf && selStep && html`<${Button} kind="quiet" onClick=${() => { copy(linkOf(selStep)); }}>${t('out.copyLink')}<//>`}
-      ${phone && html`<${Button} kind="quiet" icon="search" label=${t('out.find')} onClick=${() => setFinding(true)} />
-        <${Button} kind="quiet" on=${!away} onClick=${() => (away ? bottom() : f.dispatch({type: 'up'}))}>${away ? t('out.follow') : t('out.pause')}<//>`}
       ${tools}
     </span>
   </div>`;
