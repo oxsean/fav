@@ -1,7 +1,6 @@
 package node
 
 import (
-	"bufio"
 	"bytes"
 	"cmp"
 	"context"
@@ -148,6 +147,9 @@ type sup struct {
 	out  outcome
 	seen time.Time // the agent's latest output
 	read int64     // how far reports.jsonl has been read
+
+	log  *rolling    // output.log
+	errs *lineWriter // the agent's stderr on its way to the log
 
 	in           *streamIn          // a stream run's stdin
 	proto        proto              // how it speaks there
@@ -414,6 +416,8 @@ func lastLine(text string) string {
 const drainWait = 2 * time.Second
 
 func (s *sup) run() error {
+	s.log = &rolling{path: filepath.Join(s.dir, "output.log")}
+	defer s.log.Close()
 	var from string
 	if w := s.spec.Work; w != nil {
 		if w.Merge != "" {
@@ -454,9 +458,6 @@ func (s *sup) run() error {
 	if interactive {
 		c.Stdout, c.Stderr = os.Stdout, os.Stderr
 	} else {
-		log := &rolling{path: filepath.Join(s.dir, "output.log")}
-		defer log.Close()
-		out := activity{log, s}
 		// ⚠️ os.Pipe, not StdoutPipe: Wait then returns when the agent exits, not when every child it left closes
 		// the output
 		or, ow, err := proc.Pipe()
@@ -473,12 +474,13 @@ func (s *sup) run() error {
 		}
 		c.Stdout, c.Stderr = ow, ew
 		readEnds, writeEnds = []*os.File{or, er}, []*os.File{ow, ew}
-		// ⚠️ the pipes are only read here: logging and reading the output wait for the disk and for the agent's input,
-		// and the agent waits whenever its output is not read
-		outs, errs := spooled(&pipes, or, maxSpoolOut), spooled(&pipes, er, maxSpoolErr)
+		// ⚠️ the pipes are only read on goroutines of their own: logging and reading the output wait for the disk and
+		// for the agent's input, and the agent waits whenever its output is not read
+		errs := spooled(&pipes, er, maxSpoolErr)
+		s.errs = newLineWriter(activity{s.log, s})
 		pipes.Add(2)
-		go func() { defer pipes.Done(); s.copyOut(outs, out) }()
-		go func() { defer pipes.Done(); io.Copy(out, errs) }()
+		go func() { defer pipes.Done(); s.copyOut(or, s.log) }()
+		go func() { defer pipes.Done(); io.Copy(s.errs, errs) }()
 	}
 	tree, err := proc.StartTree(c, interactive)
 	closeAll(writeEnds) // the agent has its own copies
@@ -523,6 +525,9 @@ func (s *sup) run() error {
 		select {
 		case err := <-done:
 			s.drain(tree, &pipes, readEnds)
+			if s.errs != nil {
+				s.errs.flush()
+			}
 			if s.in != nil {
 				s.endStream()
 			}
@@ -563,6 +568,9 @@ func (s *sup) run() error {
 		case <-tick.C:
 			s.reports()
 			s.flushOut()
+			if s.errs != nil {
+				s.errs.stale(time.Now())
+			}
 			if interactive {
 				s.watchLive()
 			} else {
@@ -616,62 +624,46 @@ func closeAll(fs []*os.File) {
 	}
 }
 
-// copyOut writes the agent's stdout to the log and reads it as it goes: codex's thread id, the final message, errors
-// and denied permissions; a line longer than the buffer is not read. What says who is signed in, how much of their
-// plan is used or where the agent's own configuration lives stays out of the log (scrub).
-func (s *sup) copyOut(r io.Reader, w io.Writer) {
-	br := bufio.NewReaderSize(r, 64<<10)
+// copyOut logs the agent's stdout a line at a time and reads each line as it goes: codex's thread id, the final
+// message, errors and denied permissions. A line longer than maxLine is logged in pieces as it comes, and not read.
+// What says who is signed in, how much of their plan is used or where the agent's own configuration lives stays out
+// of the log (scrub).
+func (s *sup) copyOut(r io.Reader, log *rolling) {
+	q := newSpool(maxSpoolOut)
+	go readLines(r, q)
 	for {
-		line, err := br.ReadSlice('\n')
-		if errors.Is(err, bufio.ErrBufferFull) {
-			err = copyLong(br, line, w)
-		} else if len(line) > 0 {
-			if logged, keep := scrub(line); keep {
-				w.Write(logged)
-			}
-			if err == nil {
-				s.line(line)
-			}
-		}
-		if err != nil {
+		line, more, ok := q.take()
+		if !ok {
 			return
+		}
+		s.heard()
+		if more {
+			copyLong(line, q, log)
+			continue
+		}
+		if logged, keep := scrub(line); keep {
+			log.Write(logged)
+		}
+		if bytes.HasSuffix(line, []byte("\n")) {
+			s.line(line)
 		}
 	}
 }
 
-// maxScrub is the longest line scrub reads whole; a longer one that might need it is left out of the log.
-const maxScrub = 32 << 20
-
-// copyLong logs a line longer than br's buffer, of which first is the start: in pieces, or whole through scrub when
-// it might need it. It answers the error that ended the line.
-func copyLong(br *bufio.Reader, first []byte, w io.Writer) error {
-	whole := mayScrub(first)
-	var buf []byte
-	if whole {
-		buf = append(buf, first...)
-	} else {
-		w.Write(first)
+// copyLong logs a line longer than maxLine, of which first is the start and q holds the rest; one scrub might
+// change is left out whole.
+func copyLong(first []byte, q *spool, log *rolling) {
+	next := func() ([]byte, bool) {
+		b, more, ok := q.take()
+		return b, more && ok
 	}
-	for {
-		piece, err := br.ReadSlice('\n')
-		switch {
-		case !whole:
-			w.Write(piece)
-		case buf != nil && len(buf)+len(piece) <= maxScrub:
-			buf = append(buf, piece...)
-		default:
-			buf = nil
+	if mayScrub(first) {
+		for more := true; more; {
+			_, more = next()
 		}
-		if errors.Is(err, bufio.ErrBufferFull) {
-			continue
-		}
-		if whole && buf != nil {
-			if logged, keep := scrub(buf); keep {
-				w.Write(logged)
-			}
-		}
-		return err
+		return
 	}
+	log.long(first, next)
 }
 
 var (
@@ -911,13 +903,19 @@ type activity struct {
 }
 
 func (a activity) Write(p []byte) (int, error) {
-	a.s.mu.Lock()
-	a.s.seen = time.Now()
-	a.s.mu.Unlock()
+	a.s.heard()
 	return a.w.Write(p)
 }
 
-// rolling is output.log, moved to output.log.1 once it passes logCap.
+// heard marks when the agent last said something.
+func (s *sup) heard() {
+	s.mu.Lock()
+	s.seen = time.Now()
+	s.mu.Unlock()
+}
+
+// rolling is output.log, moved to output.log.1 once it passes logCap. Each write is whole lines (or a long line's
+// pieces, or stderr's half line): the log never rolls inside one.
 type rolling struct {
 	mu   sync.Mutex
 	path string
@@ -928,18 +926,53 @@ type rolling struct {
 func (l *rolling) Write(p []byte) (int, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	if l.f != nil && l.n+int64(len(p)) > logCap {
+	if err := l.open(len(p)); err != nil {
+		return 0, err
+	}
+	return l.write(p)
+}
+
+// long logs one line in pieces: first, then what next gives while it says the line goes on. Nothing else comes
+// between them.
+func (l *rolling) long(first []byte, next func() ([]byte, bool)) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	err := l.open(len(first))
+	if err == nil {
+		_, err = l.write(first)
+	}
+	for more := true; more; {
+		var b []byte
+		if b, more = next(); err == nil {
+			_, err = l.write(b)
+		}
+	}
+}
+
+// open rolls the log over when n more bytes would pass logCap, and opens it when it is not. The caller holds mu.
+func (l *rolling) open(n int) error {
+	if l.f != nil && l.n+int64(n) > logCap {
 		l.f.Close()
 		l.f = nil
 		fileio.Rename(l.path, l.path+".1") // ⚠️ may fail while a reader holds it (Windows): then it grows on and rolls later
 	}
-	if l.f == nil {
-		f, err := os.OpenFile(l.path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
-		if err != nil {
-			return 0, err
-		}
-		l.f, l.n = f, 0
+	if l.f != nil {
+		return nil
 	}
+	f, err := os.OpenFile(l.path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+	if err != nil {
+		return err
+	}
+	fi, err := f.Stat()
+	if err != nil {
+		f.Close()
+		return err
+	}
+	l.f, l.n = f, fi.Size()
+	return nil
+}
+
+func (l *rolling) write(p []byte) (int, error) {
 	n, err := l.f.Write(p)
 	l.n += int64(n)
 	return n, err
@@ -951,8 +984,52 @@ func (l *rolling) Close() error {
 	if l.f == nil {
 		return nil
 	}
-	return l.f.Close()
+	err := l.f.Close()
+	l.f = nil
+	return err
 }
+
+// lineWriter passes on what it is written in whole lines; a half line waits for its end, until it waited
+// halfLineWait (stale) or grew to halfLineMax.
+type lineWriter struct {
+	mu    sync.Mutex
+	w     io.Writer
+	half  []byte
+	since time.Time
+}
+
+func newLineWriter(w io.Writer) *lineWriter { return &lineWriter{w: w} }
+
+func (lw *lineWriter) Write(p []byte) (int, error) {
+	lw.mu.Lock()
+	defer lw.mu.Unlock()
+	if len(lw.half) == 0 {
+		lw.since = time.Now()
+	}
+	lw.half = append(lw.half, p...)
+	if i := bytes.LastIndexByte(lw.half, '\n'); i >= 0 {
+		lw.w.Write(lw.half[:i+1])
+		lw.half, lw.since = append(lw.half[:0], lw.half[i+1:]...), time.Now()
+	}
+	if len(lw.half) >= halfLineMax {
+		lw.w.Write(lw.half)
+		lw.half = lw.half[:0]
+	}
+	return len(p), nil
+}
+
+// stale passes on a half line that has waited halfLineWait by now.
+func (lw *lineWriter) stale(now time.Time) {
+	lw.mu.Lock()
+	defer lw.mu.Unlock()
+	if len(lw.half) > 0 && now.Sub(lw.since) >= halfLineWait {
+		lw.w.Write(lw.half)
+		lw.half = lw.half[:0]
+	}
+}
+
+// flush passes on what is left.
+func (lw *lineWriter) flush() { lw.stale(time.Now().Add(halfLineWait)) }
 
 // hookTimeout bounds a hook.
 const hookTimeout = 30 * time.Minute
@@ -963,7 +1040,8 @@ func (s *sup) check() {
 	s.keep(func(st *State) { st.Check = &agent.CheckResult{Argv: s.spec.Check, Exit: exit, Tail: tail} })
 }
 
-// hook runs argv in dir, its output going to output.log too; it answers the exit code and the end of the output.
+// hook runs argv in dir, its output going to the log too in whole lines; it answers the exit code and the end of the
+// output.
 func (s *sup) hook(argv []string, dir, name string) (int, string) {
 	s.keep(func(st *State) { st.Note = clip(name+": "+strings.Join(argv, " "), maxNote) })
 	ctx, cancel := context.WithTimeout(context.Background(), hookTimeout)
@@ -972,13 +1050,13 @@ func (s *sup) hook(argv []string, dir, name string) (int, string) {
 	c.Dir = dir
 	c.Env = append(os.Environ(), s.spec.env()...)
 	var out bytes.Buffer
-	log, err := os.OpenFile(filepath.Join(s.dir, "output.log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
-	if err == nil {
-		defer log.Close()
-		c.Stdout, c.Stderr = io.MultiWriter(&out, log), io.MultiWriter(&out, log)
-	} else {
-		c.Stdout, c.Stderr = &out, &out
+	var w io.Writer = &out
+	if s.log != nil {
+		lw := newLineWriter(s.log)
+		defer lw.flush()
+		w = io.MultiWriter(&out, lw)
 	}
+	c.Stdout, c.Stderr = w, w
 	exit := 0
 	if err := c.Run(); err != nil {
 		exit = -1

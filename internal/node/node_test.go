@@ -2,6 +2,7 @@ package node
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -29,6 +30,11 @@ func TestMain(m *testing.M) {
 	if len(os.Args) > 2 && os.Args[1] == "_touch" { // a hook: leaves a file where it ran
 		cwd, _ := os.Getwd()
 		os.WriteFile(os.Args[2], []byte(cwd), 0o600)
+		os.Exit(0)
+	}
+	if len(os.Args) > 3 && os.Args[1] == "_say" { // a hook: says one line on stdout, one on stderr
+		fmt.Println(os.Args[2])
+		fmt.Fprintln(os.Stderr, os.Args[3])
 		os.Exit(0)
 	}
 	if len(os.Args) > 1 && os.Args[1] == "_fake-agent" {
@@ -233,13 +239,73 @@ func TestARunEndsWhenItsAgentExitsThoughAChildKeepsItsOutput(t *testing.T) {
 	}
 }
 
-func TestAVeryLongLineIsLoggedInPieces(t *testing.T) {
-	var out strings.Builder
+// logIn is a log in a fresh directory, and a way to read what it holds, the rolled part first.
+func logIn(t *testing.T) (*rolling, func() string) {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "output.log")
+	l := &rolling{path: path}
+	t.Cleanup(func() { l.Close() })
+	return l, func() string {
+		old, _ := os.ReadFile(path + ".1")
+		b, _ := os.ReadFile(path)
+		return string(old) + string(b)
+	}
+}
+
+func TestALineIsReadWholeUpToItsLimit(t *testing.T) {
+	started := func(id string, pad int) string {
+		return `{"type":"thread.started","thread_id":"` + id + `","pad":"` + strings.Repeat("x", pad) + `"}` + "\n"
+	}
+	text := strings.Repeat("x", 200<<10) + "\n" + started("th-1", 1<<20)
+	log, logged := logIn(t)
 	s := &sup{dir: t.TempDir(), spec: Spec{Thread: true}}
-	long := strings.Repeat("x", 200<<10)
-	s.copyOut(strings.NewReader(long+"\n"+`{"type":"thread.started","thread_id":"th-1"}`+"\n"), &out)
-	if out.Len() != len(long)+1+len(`{"type":"thread.started","thread_id":"th-1"}`)+1 || s.st.Session != "th-1" {
-		t.Fatalf("%d bytes, session %q", out.Len(), s.st.Session)
+	s.copyOut(strings.NewReader(text), log)
+	if logged() != text || s.st.Session != "th-1" {
+		t.Fatalf("%d bytes, session %q", len(logged()), s.st.Session)
+	}
+	text = started("th-2", maxLine) + started("th-3", 10)
+	log, logged = logIn(t)
+	s = &sup{dir: t.TempDir(), spec: Spec{Thread: true}}
+	s.copyOut(strings.NewReader(text), log)
+	if logged() != text || s.st.Session != "th-3" {
+		t.Fatalf("a line past the limit is logged as it came and not read: %d bytes, session %q", len(logged()), s.st.Session)
+	}
+}
+
+func TestStderrIsLoggedInWholeLines(t *testing.T) {
+	log, logged := logIn(t)
+	errs := newLineWriter(log)
+	errs.Write([]byte("half "))
+	log.Write([]byte(`{"type":"system"}` + "\n"))
+	errs.Write([]byte("a line\nthe next"))
+	if got := logged(); got != `{"type":"system"}`+"\n"+"half a line\n" {
+		t.Fatalf("%q", got)
+	}
+	errs.stale(time.Now())
+	if strings.Contains(logged(), "the next") {
+		t.Fatal("a fresh half line waits")
+	}
+	errs.stale(time.Now().Add(halfLineWait))
+	if !strings.HasSuffix(logged(), "a line\nthe next") {
+		t.Fatalf("an old half line is logged: %q", logged())
+	}
+	big := strings.Repeat("y", halfLineMax)
+	errs.Write([]byte(big))
+	if !strings.HasSuffix(logged(), big) {
+		t.Fatal("a half line as long as halfLineMax is logged")
+	}
+}
+
+func TestAHooksOutputGoesThroughTheLog(t *testing.T) {
+	log, logged := logIn(t)
+	s := &sup{dir: t.TempDir(), log: log}
+	exit, tail := s.hook([]string{os.Args[0], "_say", "out line", "err line"}, t.TempDir(), "check")
+	got := logged()
+	if exit != 0 || !strings.Contains(tail, "out line") || !strings.Contains(got, "out line\n") || !strings.Contains(got, "err line\n") {
+		t.Fatalf("exit %d, tail %q, log %q", exit, tail, got)
+	}
+	if fi, _ := os.Stat(log.path); log.n != fi.Size() {
+		t.Fatalf("the log counts %d bytes, the file has %d", log.n, fi.Size())
 	}
 }
 
@@ -254,12 +320,12 @@ func TestTheAgentsAccountStaysOutOfTheLog(t *testing.T) {
 	longLimits := `{"method":"account/rateLimits/updated","params":{"rateLimits":{"planType":"pro","x":"` + strings.Repeat("y", 200<<10) + `"}}}`
 	home := `{"id":1,"result":{"userAgent":"tend/0.155.1","codexHome":"/home/someone/.codex","platformFamily":"unix"}}`
 	started := `{"method":"thread/started","params":{"thread":{"id":"th-1"}}}`
-	var out strings.Builder
+	log, logged := logIn(t)
 	s := &sup{dir: t.TempDir()}
-	s.copyOut(strings.NewReader(strings.Join([]string{short, long, other, said, limits, longLimits, home, started}, "\n")+"\n"), &out)
+	s.copyOut(strings.NewReader(strings.Join([]string{short, long, other, said, limits, longLimits, home, started}, "\n")+"\n"), log)
 	want := other + "\n" + said + "\n" + `{"id":1,"result":{"platformFamily":"unix","userAgent":"tend/0.155.1"}}` + "\n" + started + "\n"
-	if out.String() != want {
-		t.Fatalf("logged %d bytes: %.600q", out.Len(), out.String())
+	if got := logged(); got != want {
+		t.Fatalf("logged %d bytes: %.600q", len(got), got)
 	}
 }
 
@@ -272,10 +338,10 @@ func TestTheAgentsConfigPathsStayOutOfTheLog(t *testing.T) {
 	started := `{"method":"thread/started","params":{"thread":{"id":"th-1","path":"` + home + `/.codex/sessions/rollout-1.jsonl"}}}`
 	hook := `{"method":"hook/started","params":{"run":{"id":"session-start:6:` + home + `/.codex/hooks.json","sourcePath":"` + home + `/.codex/hooks.json"}}}`
 	said := `{"type":"assistant","message":{"content":[{"type":"text","text":"a \"path\" in \"thread\""}]}}`
-	var out strings.Builder
+	log, read := logIn(t)
 	s := &sup{dir: t.TempDir()}
-	s.copyOut(strings.NewReader(strings.Join([]string{limits, initLine, start, resumed, started, hook, said}, "\n")+"\n"), &out)
-	logged := out.String()
+	s.copyOut(strings.NewReader(strings.Join([]string{limits, initLine, start, resumed, started, hook, said}, "\n")+"\n"), log)
+	logged := read()
 	lines := strings.Split(strings.TrimSuffix(logged, "\n"), "\n")
 	if strings.Contains(logged, home) || strings.Contains(logged, "rate_limit") || len(lines) != 5 || lines[4] != said {
 		t.Fatalf("logged %d lines: %.800q", len(lines), logged)
