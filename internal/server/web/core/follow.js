@@ -95,6 +95,18 @@ export function held(shown, latest, anchorKey) {
   return kept.length !== latest.length || kept.some((r, i) => r !== latest[i]);
 }
 
+// pages cuts rows into pages of at most PAGE rows, starting a page again at each row that started one before (starts,
+// keys): rows put in front of or behind the drawn ones leave the pages there, and with them the rows' elements.
+export function pages(rows, starts = new Set()) {
+  const out = [];
+  let page = null;
+  for (const r of rows) {
+    if (!page || page.length >= PAGE || starts.has(r.key)) out.push(page = []);
+    page.push(r);
+  }
+  return out;
+}
+
 // placeholders are the pages (of PAGE rows) to draw as blocks of their height: with more than KEEP_ROWS rows, those
 // further than SCREENS screens from the view, never one that keeps (focus, selected text, an answer being written).
 // view is {top, bottom} in pixels; pages [{top, height, keep}].

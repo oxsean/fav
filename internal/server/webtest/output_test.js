@@ -155,6 +155,14 @@ test('follow: sticks until the viewer moves up, then counts what is new and what
 });
 
 test('follow: scrolling to the bottom, the anchor, what is held above, placeholders, the place', () => {
+  const rowsOf = (from, n) => Array.from({length: n}, (_, i) => ({key: 'k' + (from + i)}));
+  const firsts = ps => ps.map(p => [p[0].key, p.length]);
+  const cut = fl.pages(rowsOf(0, 450));
+  eq(firsts(cut), [['k0', 200], ['k200', 200], ['k400', 50]], 'pages of PAGE rows');
+  const starts = new Set(cut.map(p => p[0].key));
+  eq(firsts(fl.pages([...rowsOf(-30, 30), ...rowsOf(0, 470)], starts)), [['k-30', 30], ['k0', 200], ['k200', 200], ['k400', 70]],
+    'rows put in front and behind leave the pages as they were');
+  eq(firsts(fl.pages(rowsOf(0, 610), starts)), [['k0', 200], ['k200', 200], ['k400', 200], ['k600', 10]], 'the last page fills, then a new one');
   eq(fl.stick({grew: 0, screen: 800}), 'none', 'no growth');
   eq(fl.stick({grew: 300, screen: 800}), 'smooth', 'under a screen');
   eq(fl.stick({grew: 900, screen: 800}), 'jump', 'over a screen');
@@ -338,7 +346,12 @@ test('the timeline follows the bottom, leaves it when the viewer scrolls up, kee
 test('the task page\'s conversation: watched, paged back into the run before, written to, then carried on', async () => {
   const r = await outputs();
   const a = app(r, {url: '/?page=tasks&task=t1'});
-  let root;
+  let root, form;
+  const kept = what => {
+    ok(root.one('.answer') === form, `${what} prepended: the form is the one written in`);
+    eq([form.find('button').find(b => b.textContent === 'A4').getAttribute('aria-checked'), form.find('fieldset')[0].one('input').value],
+      ['true', 'A5, lands'], `${what} prepended: the pick and the half-written answer stay`);
+  };
   await r.srv.play('output-conv', {
     async open() { root = await mount(a.vnode()); },
     async watched() {
@@ -351,16 +364,23 @@ test('the task page\'s conversation: watched, paged back into the run before, wr
       await settled(); r.flush(); await settled();
       eq(rowKinds(root).slice(-6), ['740', '760', '780', '820', 'temp:a2:3:880', 'send:s_3'], 'the rest pushed: a hook, a message, the asks, a temp event');
       eq([root.find('.out-ask').map(x => x.className), root.find('.answer').length], [['out-ask', 'out-ask pending'], 1], 'the question waits with its form');
+      form = root.one('.answer');
+      await click(form.find('button').find(b => b.textContent === 'A4'));
+      await type(form.find('fieldset')[0].one('input'), 'A5, lands');
       await click(buttonOf(root, words.t('out.more')));
     },
     async earlier() {
       await settled();
       eq(rowKinds(root).slice(0, 3), ['head:r2', '0', '200'], 'the page before, and more before it: the run before');
+      kept('the page before');
       await click(buttonOf(root, words.t('out.more')));
     },
     async done() {
       await settled(); r.flush(); await settled();
       eq(rowKinds(root).slice(0, 4), ['head:r1', 'r1:t1', 'run:r2', '0'], 'the run before, its turn folded');
+      kept('the run before');
+      await click(form.find('button').find(b => b.textContent === 'A4'));
+      await type(form.find('fieldset')[0].one('input'), '');
       await click(root.find('[data-key]').find(x => x.getAttribute('data-key') === 'r1:t1').one('button'));
       eq(rowKinds(root).slice(0, 4), ['head:r1', 'r1:t1', '0', '300'], 'opened');
     },

@@ -292,12 +292,6 @@ function NewBadge({b, onGo, onWaiting}) {
   </div>`;
 }
 
-const pagesOf = rows => {
-  const out = [];
-  for (let i = 0; i < rows.length; i += fl.PAGE) out.push(rows.slice(i, i + fl.PAGE));
-  return out;
-};
-
 // useFollow ties the scroller to core/follow.js: what the viewer does moves it away from the bottom, programmatic
 // scrolls do not; once the scrolling stops it follows again near the bottom; while following, growth sticks to it.
 function useFollow({scroller, keys, waits, ended, away, timers = globalThis}) {
@@ -359,7 +353,7 @@ export function Output({bare = false, parts, density = 'standard', onDensity, on
   const [selected, setSelected] = useState('');
   const [flash, setFlash] = useState(target);
   const [holes, setHoles] = useState(() => new Map());
-  const scroller = useRef(null), findInput = useRef(null), drawn = useRef([]), heights = useRef(new Map());
+  const scroller = useRef(null), findInput = useRef(null), drawn = useRef([]), heights = useRef(new Map()), pageStarts = useRef(new Set());
   const anchor = useRef(place && !place.follow && place.anchor ? {key: place.anchor, offset: place.offset || 0, pinned: true} : null);
 
   const m = useMemo(() => out.model(parts), [parts]);
@@ -540,8 +534,14 @@ export function Output({bare = false, parts, density = 'standard', onDensity, on
   };
   const b = fl.badge(f.s);
   const selStep = latest.find(r => r.key === selected && r.type === 'step')?.step;
-  const pages = pagesOf(rows);
+  const top = rows[0]?.type === 'head' ? rows[0] : null;
+  const pages = fl.pages(top ? rows.slice(1) : rows, pageStarts.current);
+  pageStarts.current = new Set(pages.map(p => p[0].key));
   const divider = f.s.divider;
+  const drawRow = r => [
+    r.key === divider && html`<div class="out-newline" key="newline" role="separator"><span>${t('out.newLine')}</span></div>`,
+    html`<${Row} key=${r.key} row=${r} density=${density} onToggle=${toggle} onMore=${onMore} onResend=${onResend} renderAsk=${renderAsk}
+      copy=${copy} target=${flash} selected=${selected} />`];
 
   const bar = html`<div class=${cx('out-tools', phone && 'out-tools-phone')}>
     <${Chips} label=${t('out.filter')}>${out.filters.map(x => html`<${Chip} label=${t('out.f.' + x)} on=${filter === x} onClick=${() => setFilter(x)} />`)}<//>
@@ -565,11 +565,8 @@ export function Output({bare = false, parts, density = 'standard', onDensity, on
     <div class="out-view"><div class="out-scroll" ref=${scroller} tabindex="0" ...${f.handlers}>
       ${raw !== null ? html`<div class="out-raw"><span class="t-muted">${t('out.rawNote')}</span><pre class="out-pre">${raw}</pre></div>`
         : !rows.length ? html`<p class="empty">${t('out.empty')}</p>`
-        : pages.map(p => holes.has(p[0].key) ? html`<div class="out-page out-hole" key=${'p' + p[0].key} data-page=${p[0].key} style=${{height: holes.get(p[0].key) + 'px'}}></div>`
-          : html`<div class="out-page" key=${'p' + p[0].key} data-page=${p[0].key}>${p.map(r => html`
-            ${r.key === divider && html`<div class="out-newline" role="separator"><span>${t('out.newLine')}</span></div>`}
-            <${Row} key=${r.key} row=${r} density=${density} onToggle=${toggle} onMore=${onMore} onResend=${onResend} renderAsk=${renderAsk}
-              copy=${copy} target=${flash} selected=${selected} />`)}</div>`)}
+        : [top && drawRow(top), ...pages.map(p => holes.has(p[0].key) ? html`<div class="out-page out-hole" key=${'p' + p[0].key} data-page=${p[0].key} style=${{height: holes.get(p[0].key) + 'px'}}></div>`
+          : html`<div class="out-page" key=${'p' + p[0].key} data-page=${p[0].key}>${p.flatMap(drawRow)}</div>`)]}
     </div>
     <${NewBadge} b=${hit || finding ? (away ? {kind: 'latest', n: 0} : null) : b} onGo=${bottom} onWaiting=${k => goTo(k)} /></div>
     ${children}
