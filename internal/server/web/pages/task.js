@@ -62,8 +62,9 @@ function RunRow({run, now, onRun, on}) {
 
 // Task: acts lists what can be done (core/tasks.js actionsFor); busy is a write about it that is out. With output
 // (a function of nothing that draws the conversation) a desktop shows it as a second pane, open by default once the
-// task has run; onRun(id) shows a run's conversation (on a phone, on a screen of its own); run is the one shown.
-export function Task({store, task, now, busy = false, onAct, onGo, output, onRun, run = '', pane = 'output', onPane = () => {}}) {
+// task has run, under a head folded into one line so the timeline keeps the height; onRun(id) shows a run's
+// conversation (on a phone, on a screen of its own); run is the one shown; onClose, when given, closes the pane.
+export function Task({store, task, now, busy = false, onAct, onGo, output, onRun, run = '', pane = 'output', onPane = () => {}, onClose}) {
   const w = useWords();
   const {t, f} = w;
   const phone = usePhone();
@@ -85,23 +86,33 @@ export function Task({store, task, now, busy = false, onAct, onGo, output, onRun
   const direct = phone ? [] : acts.more.filter(id => ['edit', 'dispatch'].includes(id));
   const tabs = !phone && !!output && runs.length > 0;
   const shown = tabs ? pane : 'overview';
+  const close = onClose && html`<${Button} kind="quiet" icon="close" label=${t('ui.close')} onClick=${onClose} />`;
+  const menu = ids => ids.length > 0 && html`<${Menu} label=${t('do.more')} items=${ids.map(id => ({label: actLabel(w, id, sit), kind: id === 'cancel' ? 'danger' : '', onClick: () => onAct(id, task)}))} />`;
+  const tabBar = tabs && html`<${Tabs} label=${task.title} value=${shown} onChange=${onPane} idPrefix=${'det-' + task.id}
+      tabs=${[{id: 'overview', label: t('det.overview')}, {id: 'output', label: t('det.output'), count: runs.length}]} />`;
+  if (shown === 'output') {
+    const meta = [task.id, project?.name, stage && f('gate.stage', stage.name, task.loops || 0)].filter(Boolean).join(' · ');
+    return html`<article class="det det-out" aria-label=${task.title}>
+      <header class="det-bar">
+        <${Status} state=${sitState(sit)} label=${sitWord(w, sit)} />
+        <h2 class="det-bar-title ell" title=${task.title + ' · ' + meta}>${task.title}</h2>
+        ${tabBar}
+        <span class="det-bar-acts">${acts.primary && button(acts.primary, 'primary')}${menu([...direct, ...more])}${close}</span>
+      </header>
+      <div class="det-pane" role="tabpanel" id=${'det-' + task.id + '-output-pane'}>${output()}</div>
+    </article>`;
+  }
   const top = html`<header class="det-head">
-      <div class="det-sit"><${Status} state=${sitState(sit)} label=${sitWord(w, sit)} />${stage && html`<span class="chip">${f('gate.stage', stage.name, task.loops || 0)}</span>`}</div>
+      <div class="det-sit"><${Status} state=${sitState(sit)} label=${sitWord(w, sit)} />${stage && html`<span class="chip">${f('gate.stage', stage.name, task.loops || 0)}</span>`}${close && html`<span class="det-close">${close}</span>`}</div>
       <h2 class="det-title">${task.title}</h2>
       <div class="det-meta mono">${task.id}${project ? ' · ' + project.name : ''}${task.kind === 'requirement' ? ' · ' + t('det.requirement') : ''}</div>
     </header>
     <div class="det-acts">
       ${acts.primary && button(acts.primary, 'primary')}
       ${direct.map(id => button(id, ''))}
-      ${more.length > 0 && html`<${Menu} label=${t('do.more')} items=${more.map(id => ({label: actLabel(w, id, sit), kind: id === 'cancel' ? 'danger' : '', onClick: () => onAct(id, task)}))} />`}
+      ${menu(more)}
     </div>
-    ${tabs && html`<${Tabs} label=${task.title} value=${shown} onChange=${onPane} idPrefix=${'det-' + task.id}
-      tabs=${[{id: 'overview', label: t('det.overview')}, {id: 'output', label: t('det.output'), count: runs.length}]} />`}`;
-  if (shown === 'output') {
-    return html`<article class="det det-out" aria-label=${task.title}>${top}
-      <div class="det-pane" role="tabpanel" id=${'det-' + task.id + '-output-pane'}>${output()}</div>
-    </article>`;
-  }
+    ${tabBar}`;
   return html`<article class="det" aria-label=${task.title}>
     ${top}
     ${task.source?.pending && html`<div class="det-note"><b>${f('det.sourceNew', task.source.pending.rev)}</b><${Markdown} text=${task.source.pending.text} /></div>`}

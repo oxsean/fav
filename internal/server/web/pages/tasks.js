@@ -216,7 +216,7 @@ export function Tasks({store, commands, toasts, wire, router, session, clock = (
     run=${runOf} target=${route.event || ''} copy=${copy} />`;
   const showRun = id => router.go({page: 'tasks', view: route.view || 'list', task: picked, run: id}, {replace: !phone});
   const detail = picked && html`<${Task} store=${store} task=${task} now=${now} busy=${busy(task)} onAct=${act} onGo=${id => go(id, {push: phone})}
-    output=${prefs ? conv : null} onRun=${prefs ? showRun : null} run=${runOf} pane=${runOf ? 'output' : pane} onPane=${setPane} />`;
+    output=${prefs ? conv : null} onRun=${prefs ? showRun : null} run=${runOf} pane=${runOf ? 'output' : pane} onPane=${setPane} onClose=${phone || view === 'board' ? undefined : () => go('')} />`;
   const nav = phone && picked && html`<span class="det-nav">
     <${Button} kind="quiet" icon="up" label=${t('ui.prev')} disabled=${at <= 0} onClick=${() => step(-1)} />
     <${Button} kind="quiet" icon="down" label=${t('ui.next')} disabled=${at < 0 || at >= order.length - 1} onClick=${() => step(1)} />
@@ -267,8 +267,7 @@ export function Tasks({store, commands, toasts, wire, router, session, clock = (
     ${head}
     <div class=${cx('tasks-body', split && 'tasks-split')}>
       <div class=${cx('tasks-view', 'tasks-' + view)}>${body}</div>
-      ${split && html`<aside class="tasks-pane" aria-label=${task?.title || picked}>
-        <div class="pane-head"><${Button} kind="quiet" icon="close" label=${t('ui.close')} onClick=${() => go('')} /></div>${detail}</aside>`}
+      ${split && html`<aside class="tasks-pane" aria-label=${task?.title || picked}>${detail}</aside>`}
     </div>
     ${picked && view === 'board' && html`<${Drawer} title=${task?.title || picked} onClose=${() => go('')}>${detail}<//>`}
     ${dialogs}

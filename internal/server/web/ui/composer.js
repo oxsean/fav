@@ -43,8 +43,8 @@ const sendWords = {queued: 'cmp.queued', sent: 'cmp.sent', seen: 'cmp.seen', fai
 
 // Composer: route is the task's (null when the coordinator gives none); acts what the run offers; machine where the
 // run is; sends the run's last messages; onSend({text, mode}) resolves once sent, onResend(send) sends one again.
-// draft and onDraft keep what is written across draws.
-export function Composer({route, acts = [], machine = '', sends = [], busy = false, disabled = false, onSend, onResend, draft = '', onDraft}) {
+// draft and onDraft keep what is written across draws; tools sit beside the send button.
+export function Composer({route, acts = [], machine = '', sends = [], busy = false, disabled = false, onSend, onResend, draft = '', onDraft, tools = null}) {
   const w = useWords();
   const {t} = w;
   const phone = usePhone();
@@ -68,11 +68,14 @@ export function Composer({route, acts = [], machine = '', sends = [], busy = fal
       <span class="ell">${m.text}</span><span class="cmp-state">${t(sendWords[m.state] || 'cmp.sent')}</span>
       ${m.state === 'failed' && onResend && html`<${Button} kind="quiet" disabled=${busy || disabled} onClick=${() => onResend(m)}>${t('cmp.resend')}<//>`}
     </li>`)}</ul>`}
-    ${modes.length > 1 && html`<div class="cmp-modes"><${Segmented} label=${t('cmp.mode')} value=${mode} onChange=${setMode}
+    ${modes.length > 1 && phone && html`<div class="cmp-modes"><${Segmented} label=${t('cmp.mode')} value=${mode} onChange=${setMode}
       options=${modes.map(m => ({value: m, label: t('cmp.' + m)}))} /></div>`}
     <div class="cmp-row">
-      <textarea class="in cmp-in" rows=${phone ? 1 : 2} value=${text} placeholder=${t('cmp.hint')} aria-label=${t('cmp.label')} disabled=${disabled}
+      ${modes.length > 1 && !phone && html`<div class="cmp-modes"><${Segmented} label=${t('cmp.mode')} value=${mode} onChange=${setMode}
+        options=${modes.map(m => ({value: m, label: t('cmp.' + m)}))} /></div>`}
+      <textarea class="in cmp-in" rows="1" value=${text} placeholder=${t('cmp.hint')} aria-label=${t('cmp.label')} disabled=${disabled}
         onInput=${e => setText(e.currentTarget.value)} onKeyDown=${onKeyDown}></textarea>
+      ${tools}
       <${Button} kind=${mode === 'interrupt' ? 'danger' : 'primary'} keyName="Mod+Enter" disabled=${!canSend} onClick=${send}>${t('cmp.send')}<//>
     </div>
     <div class="cmp-where t-muted">${whereTo(w, route, mode, machine)}${route?.to === 'run' && !modes.includes('steer') ? ' · ' + t('cmp.noSteer') : ''}</div>

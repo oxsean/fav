@@ -70,7 +70,6 @@
 .tasks-view { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
 .tasks-list, .tasks-tree { position: relative; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; overflow: auto; }
 .tasks-pane { position: relative; min-height: 0; overflow-y: auto; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 4px var(--pad) var(--pad); }
-.pane-head { display: flex; justify-content: flex-end; }
 .task-cell { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .task-cell .ell { font-weight: 600; }
 .bc-top { display: flex; align-items: center; gap: 8px; font-size: 11px; }
@@ -153,10 +152,21 @@
 [data-form="phone"] .dir-pick { min-height: 44px; font-size: 14px; }
 .tasks-board { min-height: 0; overflow: auto; }
 
-.det-out { display: flex; flex-direction: column; gap: 10px; min-height: 100%; height: 100%; }
+.det-close { margin-left: auto; }
+.det-out { display: flex; flex-direction: column; gap: 6px; min-height: 100%; height: 100%; }
+.det-bar { flex: none; display: flex; align-items: center; gap: 12px; min-width: 0; min-height: 40px; border-bottom: 1px solid var(--border); }
+.det-bar-title { flex: 1; min-width: 0; font-size: 14px; font-weight: 650; }
+.det-bar .tabs { border-bottom: 0; flex: none; }
+.det-bar .tab { padding: 10px 0; }
+.det-bar-acts { flex: none; display: flex; align-items: center; gap: 6px; }
 .det-out .det-pane { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .tasks-pane:has(.det-out) { display: flex; flex-direction: column; overflow: hidden; padding-bottom: 0; }
 .tasks-split:has(.det-out) { grid-template-columns: minmax(0, .75fr) minmax(520px, 1.25fr); }
+.tasks:has(.det-out) { display: grid; grid-template-columns: minmax(0, .75fr) minmax(520px, 1.25fr); grid-template-rows: auto minmax(0, 1fr); gap: var(--gap); }
+.tasks:has(.det-out) > .tasks-head { grid-column: 1; grid-row: 1; }
+.tasks:has(.det-out) > .tasks-body { display: contents; }
+.tasks:has(.det-out) .tasks-view { grid-column: 1; grid-row: 2; }
+.tasks:has(.det-out) .tasks-pane { grid-column: 2; grid-row: 1 / span 2; }
 .det-run-go { cursor: pointer; border-radius: 4px; }
 .det-run-go:hover { background: var(--surface-hover); }
 .det-run-go.on { background: var(--accent-soft); }
