@@ -84,13 +84,7 @@ func TestTheTimelineStillReadsCodexExecLines(t *testing.T) {
 
 func runTimeline(t *testing.T, lines, provider string, out any) {
 	t.Helper()
-	nodeBin, err := exec.LookPath("node")
-	if err != nil {
-		t.Skip("node is not installed")
-	}
-	if v, err := exec.Command(nodeBin, "--version").Output(); err != nil || !strings.HasPrefix(string(v), "v") {
-		t.Skip("node does not run here")
-	}
+	nodeBin := nodeJS(t)
 	b, err := os.ReadFile(filepath.Join("web", "app.js"))
 	if err != nil {
 		t.Fatal(err)

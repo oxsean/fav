@@ -1,13 +1,14 @@
 [tools]
 go = "1.27.1"
 
-# scripts/test-hosts.sh runs this on every target; claude and codex are installed for this task only
+# scripts/test-hosts.sh runs this on every target; claude, codex, fzf and node are installed for this task only
 [tasks.test-host]
-tools = { claude = "2.1.278", codex = "0.155.1", fzf = "0.74.4" }
+tools = { claude = "2.1.278", codex = "0.155.1", fzf = "0.74.4", node = "24.19.0" }
 run = "go run ./tools/test-host"
 
-# every commit passes the gate; CI runs this same task
+# every commit passes the gate; CI runs this same task; node runs the Web UI's scripts in internal/server's tests
 [tasks.gate]
+tools = { node = "24.19.0" }
 run = "go build ./... && go vet ./... && GOOS=windows go vet ./... && GOOS=linux go vet ./... && go test ./... && TEND_TEST_LOG=sqlite go test ./internal/coord"
 
 # this Mac's tend and tend-server, stamped with the checkout they were built from, after the gate

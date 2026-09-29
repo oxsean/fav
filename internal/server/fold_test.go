@@ -6,7 +6,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
-	"strings"
 	"testing"
 	"time"
 
@@ -190,13 +189,7 @@ func normalized(v any) any {
 }
 
 func TestThePageFoldsEnvelopesAsTheCoordinatorDoes(t *testing.T) {
-	nodeBin, err := exec.LookPath("node")
-	if err != nil {
-		t.Skip("node is not installed")
-	}
-	if v, err := exec.Command(nodeBin, "--version").Output(); err != nil || !strings.HasPrefix(string(v), "v") {
-		t.Skip("node does not run here")
-	}
+	nodeBin := nodeJS(t)
 	envs := foldScenario()
 	st := task.New()
 	for _, env := range envs {

@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
+	"os/exec"
 	"regexp"
 	"strings"
 	"testing"
@@ -19,6 +20,20 @@ import (
 	"github.com/oxsean/fav/internal/task"
 	"github.com/oxsean/fav/internal/wire"
 )
+
+// nodeJS is the node that runs the page's scripts. The gate and test-host pin it in mise.toml, so a machine without it
+// fails these tests instead of skipping them.
+func nodeJS(t *testing.T) string {
+	t.Helper()
+	bin, err := exec.LookPath("node")
+	if err != nil {
+		t.Fatalf("node is not on PATH: run the tests through mise run gate: %v", err)
+	}
+	if v, err := exec.Command(bin, "--version").Output(); err != nil || !strings.HasPrefix(string(v), "v") {
+		t.Fatalf("%s is not Node.js (%q, %v): run the tests through mise run gate", bin, v, err)
+	}
+	return bin
+}
 
 func browser(t *testing.T) *http.Client {
 	jar, _ := cookiejar.New(nil)

@@ -11,13 +11,7 @@ import (
 // The page's action table: every action has one key of its own and a Chinese and an English name, and searching by
 // either name finds it first.
 func TestEveryActionHasAKeyAndIsFoundByEitherName(t *testing.T) {
-	nodeBin, err := exec.LookPath("node")
-	if err != nil {
-		t.Skip("node is not installed")
-	}
-	if v, err := exec.Command(nodeBin, "--version").Output(); err != nil || !strings.HasPrefix(string(v), "v") {
-		t.Skip("node does not run here")
-	}
+	nodeBin := nodeJS(t)
 	palette, _ := filepath.Abs(filepath.Join("web", "palette.js"))
 	script := `const fs=require('fs'),vm=require('vm');globalThis.esc=s=>String(s);
 vm.runInThisContext(fs.readFileSync(process.argv[1],'utf8'));

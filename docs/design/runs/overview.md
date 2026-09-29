@@ -96,6 +96,7 @@ tend 的运行层：为一份任务书在这台或别的机器上启动 agent、
 |---|---|
 | 单元 | `wire`（乱序、取消、断线、并发上限、`busy`、超长帧、EOF 答完）；`journal`（残缺尾行、校验失败、收据）；`task`（转移表、乱序事件）；`coord`（幂等、对账、调度、订阅交接，进程内节点 + fake）；`node`（启动权、监督进程死、停止、墓碑、双向流）；`agent`（各 provider 命令行、codex 协议逐帧）；`proc`（分离、杀树） |
 | 故障注入 | 协调器在 starting 时重启、丢失的启动后又停止、节点目录消失、停止发给离线节点、断连接后重连、迟到的监督进程、停止先于监督进程、子进程占着输出。监督进程停在切点（`TEND_CRASH_AT`：claimed → not_launched；running → 停止时 `orphan_stopped`；启动时间对不上 → 不杀、仍 unknown；ending → 停止时 `supervisor_gone`；started → 仍 unknown）；Windows 上短暂读不到快照时 abandoned 的 run 仍占目录；同目录、超 slot 的启动被拒后重发 |
+| 网页脚本 | `internal/server` 的测试用 node 跑页面脚本（`fold.js`、`palette.js`、`app.js` 的时间线）；`mise.toml` 的 `gate` 和 `test-host` 两个任务固定 node 版本，找不到 node 或它不是 Node.js 时测试失败，不跳过 |
 | fixture | `tools/test-host` 冒烟：fixture 上 `task add` → `run start --wait`（fake，background）→ `exited 0` |
 | 端到端 | `scripts/tend-e2e.sh`（模式一）和 `scripts/tend-e2e-server.sh`（模式二）：节点一律是 fixture 启动器；各远端跑 fake run；检查状态流转、会话读取、停止、断线重连，各有一次远端作答加插话；模式二另查网页和登录 |
 | 多平台 | `scripts/test-hosts.sh` 全量 |
