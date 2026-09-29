@@ -12,18 +12,17 @@ import (
 	"github.com/oxsean/fav/internal/coord"
 )
 
-// comingMethods are methods the new Web UI calls before the coordinator answers them, each with the card that adds it
+// comingMethods are methods the Web UI calls before the coordinator answers them, each with the card that adds it
 // there; a card that does removes its line.
 var comingMethods = map[string]string{
-	"project.dirs":     "T4.3",
-	"run.changes":      "T4.3",
-	"run.diff":         "T4.3",
-	"run.output.watch": "T4.1",
+	"project.dirs": "T4.3",
+	"run.changes":  "T4.3",
+	"run.diff":     "T4.3",
 }
 
 var methodCall = regexp.MustCompile(`\b(?:call|watch|has|send)\(\s*'([a-z_]+(?:\.[a-z_]+)+)'`)
 
-// Every method the new Web UI calls, watches or asks hello about is one the coordinator answers (proto.js's methods).
+// Every method the Web UI calls, watches or asks hello about is one the coordinator answers (proto.js's methods).
 func TestTheWebUICallsTheCoordinatorsMethods(t *testing.T) {
 	seen := map[string]bool{}
 	for _, dir := range []string{"core", "ui", "pages"} {

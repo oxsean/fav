@@ -2,6 +2,7 @@
 // file's first hunk (run.diff), and how the tab lays them out. A running run's list is compared against its workspace
 // as it is (a snapshot); when that moves between two pages the list is taken again from its start. An ended run's
 // changes do not change, so they are kept.
+import {code} from './proto.js';
 
 // ⚠️ A file's preview is at most this many lines of its first hunk (the design draft's §4.6).
 export const PREVIEW_LINES = 40;
@@ -55,7 +56,7 @@ export function createChanges({wire, now = () => Date.now()}) {
     let files = [], head = null, after = '';
     for (;;) {
       const p = await wire.call('run.changes', after ? {run, after, ...(head.snapshot ? {snapshot: head.snapshot} : {})} : {run});
-      if (head && (p.snapshot || '') !== head.snapshot) throw Object.assign(new Error('snapshot_changed'), {code: 'snapshot_changed'});
+      if (head && (p.snapshot || '') !== head.snapshot) throw Object.assign(new Error(code.snapshotChanged), {code: code.snapshotChanged});
       head ||= {total: p.total || {files: 0, add: 0, del: 0}, snapshot: p.snapshot || '', git: !!p.git, hidden: p.hidden || 0};
       files = [...files, ...(p.files || [])];
       if (!p.next) return {...head, files, at: now()};
@@ -74,7 +75,7 @@ export function createChanges({wire, now = () => Date.now()}) {
           if (ended) kept.set(run, got);
           return got;
         } catch (e) {
-          if (e.code !== 'snapshot_changed' || n >= RESTARTS) throw e;
+          if (e.code !== code.snapshotChanged || n >= RESTARTS) throw e;
         }
       }
     },

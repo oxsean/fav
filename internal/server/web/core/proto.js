@@ -30,6 +30,7 @@ export const code = Object.freeze({
   requestGone: 'request_gone',
   cannotSend: 'cannot_send',
   routeChanged: 'route_changed',
+  snapshotChanged: 'snapshot_changed',
   offline: 'offline',
   auth: 'auth',
   hostKey: 'hostkey',
@@ -46,6 +47,9 @@ export const push = Object.freeze({
   live: 'live',
   journal: 'journal',
   reset: 'reset',
+  output: 'run.output',
+  machines: 'machines',
+  inbox: 'inbox',
 });
 
 // wire.Mode*: how a stream opens.
@@ -69,6 +73,11 @@ export const kind = Object.freeze({
   result: 'result',
   error: 'error',
   raw: 'raw',
+  you: 'you',
+  resolved: 'resolved',
+  interrupt: 'interrupt',
+  mark: 'mark',
+  gap: 'gap',
 });
 
 // output.Family*: what a tool call does.
@@ -97,6 +106,7 @@ export const methods = Object.freeze([
   'run.abandon',
   'run.tail',
   'run.output.page',
+  'run.output.watch',
   'agent.list',
   'machine.list',
   'state.watch',
@@ -130,6 +140,8 @@ export const methods = Object.freeze([
   'task.message',
   'task.message.preview',
   'run.interrupt',
+  'machines.watch',
+  'inbox.watch',
 ]);
 
 // output.Families: a tool's family by the name claude or codex calls it; another name is other, claude's

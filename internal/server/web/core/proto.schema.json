@@ -44,6 +44,9 @@
         "at": {
           "type": "string"
         },
+        "by": {
+          "type": "string"
+        },
         "bytes": {
           "type": "integer"
         },
@@ -53,6 +56,9 @@
         "cost": {
           "type": "number"
         },
+        "decision": {
+          "type": "string"
+        },
         "diff": {
           "type": "string"
         },
@@ -61,6 +67,9 @@
         },
         "error": {
           "type": "boolean"
+        },
+        "event": {
+          "type": "string"
         },
         "exit": {
           "type": "integer"
@@ -86,6 +95,9 @@
           },
           "type": "array"
         },
+        "from": {
+          "$ref": "#/$defs/output.Pos"
+        },
         "id": {
           "type": "string"
         },
@@ -106,7 +118,12 @@
             "sys",
             "result",
             "error",
-            "raw"
+            "raw",
+            "you",
+            "resolved",
+            "interrupt",
+            "mark",
+            "gap"
           ],
           "type": "string"
         },
@@ -116,10 +133,16 @@
         "lines": {
           "type": "integer"
         },
+        "mode": {
+          "type": "string"
+        },
         "model": {
           "type": "string"
         },
         "more": {
+          "type": "integer"
+        },
+        "n": {
           "type": "integer"
         },
         "name": {
@@ -132,6 +155,9 @@
           "type": "string"
         },
         "parent": {
+          "type": "string"
+        },
+        "phase": {
           "type": "string"
         },
         "ref": {
@@ -155,6 +181,9 @@
         "title": {
           "type": "string"
         },
+        "to": {
+          "$ref": "#/$defs/output.Pos"
+        },
         "tool": {
           "type": "string"
         },
@@ -174,6 +203,21 @@
       "required": [
         "off",
         "kind"
+      ],
+      "type": "object"
+    },
+    "output.Pos": {
+      "properties": {
+        "file": {
+          "type": "string"
+        },
+        "off": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "file",
+        "off"
       ],
       "type": "object"
     },

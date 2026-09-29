@@ -41,7 +41,7 @@ function Counts({add, del}) {
 function FileBody({f, prev}) {
   const {t, f: fmt} = useWords();
   if (!prev || prev === 'loading') return html`<p class="chg-note t-muted">${t('chg.loading')}</p>`;
-  if (prev.error) return html`<p class="chg-note t-muted">${prev.error === code.gone ? t('chg.hunkGone') : prev.error === 'snapshot_changed' ? t('chg.moved') : fmt('chg.failed', prev.error)}</p>`;
+  if (prev.error) return html`<p class="chg-note t-muted">${prev.error === code.gone ? t('chg.hunkGone') : prev.error === code.snapshotChanged ? t('chg.moved') : fmt('chg.failed', prev.error)}</p>`;
   const lines = [prev.at, ...prev.lines].filter(Boolean);
   return html`<div class="chg-body">
     ${lines.length ? html`<${Diff} lines=${lines} />` : html`<p class="chg-note t-muted">${t('chg.noHunk')}</p>`}
@@ -136,7 +136,7 @@ export function RunChanges({changes, runs}) {
       if (!file || file.binary) continue;
       setPreviews(p => ({...p, [path]: 'loading'}));
       changes.diff(run.id, path, data.snapshot).then(pg => setPreviews(p => ({...p, [path]: ch.preview(pg) || {at: '', lines: [], cut: 0, more: 0}})),
-        e => { setPreviews(p => ({...p, [path]: {error: e.code || 'error'}})); if (e.code === 'snapshot_changed' && running) setTick(n => n + 1); });
+        e => { setPreviews(p => ({...p, [path]: {error: e.code || 'error'}})); if (e.code === code.snapshotChanged && running) setTick(n => n + 1); });
     }
   }, [got.data, [...open].join('\n')]);
   const toggle = path => setOpen(o => { const s = new Set(o); if (s.has(path)) s.delete(path); else s.add(path); return s; });
