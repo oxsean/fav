@@ -12,6 +12,7 @@ register('answer', {
   'ans.deny': ['拒绝', 'Deny'], 'ans.why': ['拒绝的理由（可不填）', 'Why not (optional)'],
   'ans.send': ['回答', 'Answer'], 'ans.skip': ['不回答', 'Don’t answer'], 'ans.own': ['或者自己写', 'Or write your own'],
   'ans.multi': ['可多选', 'Pick any'], 'ans.left': ['还有 %d 个问题没答', '%d questions left to answer'],
+  'ans.goneBy': ['已经被 %s 答了', '%s answered it already'], 'ans.gone': ['这个请求已经不在了', 'It is no longer asked'],
   'ans.open': ['作答…', 'Answer…'], 'ans.asks': ['要你批准：%s', 'Asks to run: %s'],
 });
 
@@ -49,14 +50,22 @@ export function quickOf(t, req, {scope = false} = {}) {
   return (qs[0].options || []).slice(0, 9).map(o => ({label: o, params: {allow: true, answers: {[qs[0].question]: o}}}));
 }
 
-// AnswerForm: onAnswer(params) sends run.answer's params (without run and request); scope offers allow_run (allowsRun).
-export function AnswerForm({req, scope = false, busy = false, onAnswer, detail = ''}) {
+// AnswerForm: onAnswer(params) sends run.answer's params (without run and request); scope offers allow_run (allowsRun);
+// gone, once an answer came back request_gone, is who answered first ('' when nobody did): what was asked stays, the
+// ways to answer go.
+export function AnswerForm({req, scope = false, busy = false, onAnswer, detail = '', gone}) {
   const {t, f} = useWords();
   const phone = usePhone();
   const [picks, setPicks] = useState({});
   const [own, setOwn] = useState({});
   const [why, setWhy] = useState('');
   if (!req) return null;
+  if (gone !== undefined) {
+    return html`<div class="answer answer-gone" role="status">
+      ${isPermission(req) ? req.tool && html`<div class="answer-q">${f('ans.asks', req.tool)}</div>` : (req.questions || []).map(q => html`<div class="answer-q" key=${q.question}>${q.question}</div>`)}
+      <p class="answer-note">${gone ? f('ans.goneBy', gone) : t('ans.gone')}</p>
+    </div>`;
+  }
   const submitKey = e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && !e.isComposing) { e.preventDefault(); e.currentTarget.form?.requestSubmit?.(); } };
 
   if (isPermission(req)) {

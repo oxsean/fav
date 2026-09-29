@@ -317,6 +317,7 @@ button.tl-seg:hover { filter: brightness(1.15); }
 .answer-q { font-weight: 600; font-size: 12px; padding: 0; }
 .answer-block { display: grid; gap: 6px; margin: 0; padding: 0; border: 0; min-width: 0; }
 .answer-note { font-size: 11px; }
+.answer-gone .answer-note { margin: 0; font-size: 13px; color: var(--muted); }
 .answer-acts, .answer-opts { display: flex; flex-wrap: wrap; gap: 6px; }
 .answer-acts-phone { display: grid; grid-template-columns: 1fr; }
 .answer-own { display: flex; gap: 8px; }

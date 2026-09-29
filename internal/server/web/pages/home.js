@@ -15,6 +15,7 @@ import {AnswerForm, quickOf, isPermission, allowsRun} from '../ui/answer.js';
 import * as sel from '../core/select.js';
 import {tokens, money, duration, clock as hhmm, usageTokens} from '../core/format.js';
 import {unsure} from '../core/commands.js';
+import {code} from '../core/proto.js';
 import {why} from './words.js';
 
 // ⚠️ An item's waiting bar is full after two hours.
@@ -51,6 +52,7 @@ export function Home({store, commands, toasts, clock = () => Date.now(), fetchOu
   const [as, setAs] = useState('');
   const [selected, setSelected] = useState('');
   const [open, setOpen] = useState('');
+  const [gone, setGone] = useState({});
   const [confirm, setConfirm] = useState(null);
   const st = store.state, now = clock();
 
@@ -62,7 +64,7 @@ export function Home({store, commands, toasts, clock = () => Date.now(), fetchOu
   const ids = list.map(v => v.x.task);
   const current = list.find(v => v.x.task === selected) || null;
 
-  const failed = e => toasts.show({text: unsure.includes(e.code)
+  const failed = e => e.code !== code.requestGone && toasts.show({text: unsure.includes(e.code)
     ? f('app.unsure', e.code) : f('app.failed', e.code || String(e.message || e)), tone: 'danger'});
   const send = (method, params, opts) => commands.send(method, params, opts).catch(e => { failed(e); throw e; });
 
@@ -76,7 +78,11 @@ export function Home({store, commands, toasts, clock = () => Date.now(), fetchOu
     }, () => {});
   };
   const answer = (v, params) => send('run.answer', {run: v.run.id, request: v.req.id, ...params}, {key: 'run:' + v.run.id, hide: v.task.id, until: store.inbox})
-    .then(() => toasts.show({text: t('home.answered')}), () => {});
+    .then(() => toasts.show({text: t('home.answered')}), e => {
+      if (e.code !== code.requestGone) return;
+      setGone(g => ({...g, [v.run.id + '\n' + v.req.id]: e.detail || ''}));
+      setOpen(v.task.id);
+    });
   const reply = (v, text) => send('run.continue', {run: v.run.id, text}, {key: 'run:' + v.run.id, hide: v.task.id, until: store.inbox})
     .then(() => toasts.show({text: t('home.answered')}), () => {});
   const askRetry = v => setConfirm({title: t('home.confirmRetry'), note: f('home.confirmRetryNote', v.task.title, v.run?.agent || v.task.agent || '', v.run?.machine || v.task.machine || ''),
@@ -93,7 +99,7 @@ export function Home({store, commands, toasts, clock = () => Date.now(), fetchOu
   // choices are what 1–9 does on an item: allow and deny (and allow for the run, when offered), or the options of its
   // one single-choice question.
   const choices = v => {
-    if (!v || v.group !== 'answer' || !v.req || !v.run) return [];
+    if (!v || v.group !== 'answer' || !v.req || !v.run || gone[v.run.id + '\n' + v.req.id] !== undefined) return [];
     return quickOf(t, v.req, {scope: allowsRun(v.req, aff.runs?.[v.run.id])}).map(q => ({label: q.label, kind: q.kind, go: () => answer(v, q.params)}));
   };
 
@@ -138,7 +144,7 @@ export function Home({store, commands, toasts, clock = () => Date.now(), fetchOu
         onToggle=${() => { setSelected(v.x.task); setOpen(open === v.x.task ? '' : v.x.task); }}
         state=${stateOf(v.group, v.x.reason)} title=${title(v)} sub=${sub(v)} age=${duration(now - Date.parse(v.x.since))}
         agePct=${(now - Date.parse(v.x.since)) / waitFull * 100} actions=${busy(v) ? [] : quick(v)}>
-        <${WaitBody} v=${v} busy=${busy(v)} scope=${allowsRun(v.req, aff.runs?.[v.run?.id])} fetchOutput=${fetchOutput} onOpen=${onOpen} onClose=${() => setOpen('')}
+        <${WaitBody} v=${v} busy=${busy(v)} scope=${allowsRun(v.req, aff.runs?.[v.run?.id])} gone=${v.req && gone[v.run?.id + '\n' + v.req.id]} fetchOutput=${fetchOutput} onOpen=${onOpen} onClose=${() => setOpen('')}
           onDone=${canDone(v) ? () => markDone(v) : null} onRetry=${canRetry(v) ? () => askRetry(v) : null}
           onAnswer=${p => answer(v, p)} onReply=${text => reply(v, text)} />
       <//>`) : html`<p class="empty">${t('home.none')}</p>`}
@@ -237,7 +243,7 @@ export function Home({store, commands, toasts, clock = () => Date.now(), fetchOu
 
 // WaitBody is an open waiting item: what it asks or how it failed, what it just did, and the ways to answer: the
 // answer form for a request (every question, allow for the run when offered), a reply for a run that ended asking.
-function WaitBody({v, busy, scope, fetchOutput, onOpen, onClose, onDone, onRetry, onAnswer, onReply}) {
+function WaitBody({v, busy, scope, gone, fetchOutput, onOpen, onClose, onDone, onRetry, onAnswer, onReply}) {
   const {t} = useWords();
   const [steps, setSteps] = useState(null);
   const [text, setText] = useState('');
@@ -260,7 +266,7 @@ function WaitBody({v, busy, scope, fetchOutput, onOpen, onClose, onDone, onRetry
     ${detail && html`<pre class="box">${detail}</pre>`}
     ${steps?.length > 0 && html`<div class="wait-steps"><span class="lbl">${t('home.did')}</span>
       ${steps.map(s => html`<div class="step"><span class="mono step-glyph">${s.glyph}</span><span class="mono ell">${s.text}</span></div>`)}</div>`}
-    ${v.group === 'answer' && v.req && html`<${AnswerForm} req=${v.req} scope=${scope} busy=${busy} onAnswer=${onAnswer} />`}
+    ${v.group === 'answer' && v.req && html`<${AnswerForm} req=${v.req} scope=${scope} gone=${gone} busy=${busy} onAnswer=${onAnswer} />`}
     ${v.group === 'answer' && !v.req && v.run && html`<div class="wait-own">
       <${TextInput} label=${t('home.reply')} value=${text} onInput=${setText}
         onKeyDown=${e => { if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); sendReply(); } }} />

@@ -73,6 +73,7 @@ export function Conversation({store, commands, toasts, prefs, task, run = '', ta
   const root = conv[0]?.id || '';
   const [from, setFrom] = useState(Math.max(0, conv.length - 1));
   const [confirm, setConfirm] = useState(null);
+  const [gone, setGone] = useState({});
   const [raw, setRaw] = useState(null);
   const [drafts, setDrafts] = useState({});
   useEffect(() => { setFrom(Math.max(0, conv.length - 1)); setRaw(null); }, [root, conv.length]);
@@ -105,7 +106,7 @@ export function Conversation({store, commands, toasts, prefs, task, run = '', ta
   }, [shown[0]?.id, outputs.get(shown[0]?.id)]);
   if (!last) return html`<p class="empty">${t('conv.none')}</p>`;
 
-  const failed = e => toasts.show({text: unsure.includes(e.code) ? f('app.unsure', e.code) : e.code === code.routeChanged ? t('conv.routeChanged')
+  const failed = e => e.code !== code.requestGone && toasts.show({text: unsure.includes(e.code) ? f('app.unsure', e.code) : e.code === code.routeChanged ? t('conv.routeChanged')
     : e.code === code.cannotSend ? f('conv.cannot', e.detail || e.code) : f('app.failed', e.code || String(e.message || e)), tone: 'danger'});
   const send = (method, params, key) => commands.send(method, params, {key}).catch(e => { failed(e); throw e; });
 
@@ -127,11 +128,11 @@ export function Conversation({store, commands, toasts, prefs, task, run = '', ta
   const interrupt = () => setConfirm({title: t('conv.confirmInterrupt'), note: f('conv.confirmInterruptNote', last.agent), label: t('conv.interrupt'),
     go: () => send('run.interrupt', {run: last.id, ...(turn ? {turn} : {})}, 'run:' + last.id).then(() => toasts.show({text: t('conv.interrupted')}), () => {})});
   const answer = (s, params) => send('run.answer', {run: s.run, request: s.request, ...params}, 'run:' + s.run)
-    .then(() => toasts.show({text: t('conv.answered')}), () => {});
+    .then(() => toasts.show({text: t('conv.answered')}), e => { if (e.code === code.requestGone) setGone(g => ({...g, [s.run + '\n' + s.request]: e.detail || ''})); });
   const renderAsk = s => {
     const r = st.runs[s.run];
     const req = (r?.requests || []).find(q => q.id === s.request);
-    return html`<${AnswerForm} req=${req} scope=${allowsRun(req, aff.runs?.[s.run])} busy=${commands.state('run:' + s.run) === 'pending'}
+    return html`<${AnswerForm} req=${req} scope=${allowsRun(req, aff.runs?.[s.run])} gone=${gone[s.run + '\n' + s.request]} busy=${commands.state('run:' + s.run) === 'pending'}
       onAnswer=${p => answer(s, p)} />`;
   };
   const toggleRaw = () => {

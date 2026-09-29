@@ -1,0 +1,7 @@
+{"note":"after output-conv, on the task page: both questions answered where they are asked, but u_a answered them first (request_gone, T3.4); the form says so where it was, no failure is shown, then u_a's answer arrives"}
+{"step":"answer"}
+{"c":{"type":"req","id":8,"method":"run.answer","params":{"run":"r2","request":"q7","allow":true,"answers":{"Which page size?":"A4","Which parts go on the cover?":"Logo, QR code"}},"command_id":"c1"}}
+{"s":{"type":"res","id":8,"error":{"code":"request_gone","detail":"u_a"}}}
+{"step":"gone"}
+{"s":{"type":"push","id":2,"method":"journal","params":{"v":2,"seq":41,"at":"2026-09-30T14:32:30Z","events":[{"type":"run_answered","data":{"id":"r2","answer":{"request":"q7","allow":true,"answers":{"Which page size?":"Letter","Which parts go on the cover?":"Totals"},"by":"u_a"}}}]}}}
+{"step":"done"}

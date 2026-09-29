@@ -470,6 +470,53 @@ test('the home answers a waiting item\'s two questions together', async () => {
   eq(r.errors, [], 'errors');
 });
 
+test('an answer someone gave first: said where it was asked, on the home and in the conversation, with no failure', async () => {
+  const saysGone = (root, what) => {
+    const form = root.one('.answer-gone');
+    ok(form.textContent.includes(words.f('ans.goneBy', 'u_a')) && form.textContent.includes('Which page size?'), `${what}: who answered first, and what was asked`);
+    eq([root.find('.answer-gone button').length, root.find('.answer-gone input').length], [0, 0], `${what}: no way to answer it`);
+    ok(!root.find('.toast-text').some(x => x.textContent.includes('request_gone')), `${what}: no failure`);
+  };
+  const answerAll = async form => {
+    await click(form.find('button').find(b => b.textContent === 'A4'));
+    await click(form.find('button').find(b => b.textContent === 'Logo'));
+    await click(form.find('button').find(b => b.textContent === 'QR code'));
+    await act(() => form.dispatch('submit'));
+  };
+  {
+    const r = await outputs();
+    const a = app(r);
+    const root = await mount(a.vnode());
+    await act(() => { a.keys.handle(press('j')); });
+    await act(() => { a.keys.handle(press(' ')); });
+    await settled();
+    await r.srv.play('output-answer-gone', {
+      async answer() { await answerAll(root.one('.answer')); },
+      async gone() { await settled(); saysGone(root, 'home'); },
+      async done() { await settled(); r.flush(); await settled(); },
+    });
+    eq(r.errors, [], 'errors on the home');
+  }
+  {
+    const r = await outputs();
+    const a = app(r, {url: '/?page=tasks&task=t1'});
+    let root;
+    await r.srv.play('output-conv', {
+      async open() { root = await mount(a.vnode()); },
+      async watched() { await settled(); r.flush(); await settled(); },
+      async more() { await settled(); r.flush(); await settled(); await click(buttonOf(root, words.t('out.more'))); },
+      async earlier() { await settled(); await click(buttonOf(root, words.t('out.more'))); },
+      async done() { await settled(); },
+    });
+    await r.srv.play('output-gone', {
+      async answer() { await answerAll(root.one('.answer')); },
+      async gone() { await settled(); saysGone(root, 'conversation'); },
+      async done() { await settled(); r.flush(); await settled(); },
+    });
+    eq(r.errors, [], 'errors in the conversation');
+  }
+});
+
 test('the task page in both forms with its conversation, styled and worded', async () => {
   const r = await outputs();
   for (const url of ['/?page=tasks&task=t1', '/?page=tasks&task=t1&run=r2']) for (const f of ['desktop', 'phone']) for (const lang of ['zh', 'en'])
