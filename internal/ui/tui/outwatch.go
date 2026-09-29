@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"slices"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -141,9 +142,15 @@ func (f *outFeed) take(p wire.Push) {
 			return
 		}
 		for _, e := range op.Events {
-			if i := keyedAt(f.events, e.Key); i >= 0 {
+			i := keyedAt(f.events, e.Key)
+			switch {
+			case e.Temp && e.Text == "": // a message being written that ended without its final event
+				if i >= 0 {
+					f.events = slices.Delete(f.events, i, i+1)
+				}
+			case i >= 0:
 				f.events[i] = e
-			} else {
+			default:
 				f.events = append(f.events, e)
 			}
 		}

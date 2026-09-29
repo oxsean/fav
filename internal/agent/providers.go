@@ -57,12 +57,12 @@ func (claude) Launch(s LaunchSpec) (CommandSpec, error) {
 	var args []string
 	switch {
 	case s.Stream: // permission prompts and questions come as control requests on stdout, answered on stdin; each
-		// message it takes in comes back on stdout with its uuid
+		// message it takes in comes back on stdout with its uuid; a message being written comes as stream_event deltas
 		args = append(args, "-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose",
-			"--permission-prompt-tool", "stdio", "--replay-user-messages")
+			"--include-partial-messages", "--permission-prompt-tool", "stdio", "--replay-user-messages")
 	case s.Headless:
 		// ⚠️ no one answers a question in the background: the run convention makes it the final message
-		args = append(args, "-p", "--output-format", "stream-json", "--verbose", "--disallowedTools", "AskUserQuestion")
+		args = append(args, "-p", "--output-format", "stream-json", "--verbose", "--include-partial-messages", "--disallowedTools", "AskUserQuestion")
 	}
 	switch {
 	case s.Resume != "":

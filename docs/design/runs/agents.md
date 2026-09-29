@@ -26,6 +26,7 @@ provider 适配器与 agent 档案：档案字段、选机器、有类型的参�
 - background：claude、codex 由监督进程把 `prompt.md` 作为第一条消息发出（见 [node.md](node.md)「双向流（stream）」）；command 模板 `stdin: true` 时经 stdin，否则只能用 `{prompt_file}`。
 - herdr：首条消息是「读 `<run 目录>/prompt.md` 并完成」，加 `--add-dir <run 目录>`。
 - 模板占位符只有 `{prompt_file}` `{model}` `{dir}`；Windows 上目标是 `.cmd` / `.bat` 时，参数含 cmd.exe 元字符（`& | < > ^ % ! "` 换行）就拒绝（npm 装的 `codex.cmd` 照常能跑）。
+- 后台 claude（双向流和无界面启动）都带 `--include-partial-messages`：正在写的消息以 `stream_event` 增量流出来，监督进程把它拼进 `partial.json`，不写日志（见 [node.md](node.md)「逐字输出」）；codex app-server 本来就发增量。
 - 后台 claude 走双向流时放开 `AskUserQuestion`（提问能远程作答）；非双向的无界面启动（`Headless` 而非 `Stream`）仍加 `--disallowedTools AskUserQuestion`。
 
 ## 续跑与探测

@@ -15,6 +15,7 @@ const (
 	maxOutputPush = 256 << 10              // bytes of events in one push
 	hubEvents     = 2000                   // a hub keeps the batches of this many events
 	hubBytes      = 1 << 20                // or of this many bytes, whichever is less
+	maxFinals     = 64                     // a hub remembers the keys this many final events took
 	hubLinger     = 10 * time.Second       // a hub nobody watches is kept this long
 )
 

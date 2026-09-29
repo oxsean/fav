@@ -24,6 +24,7 @@
 | `interrupts.jsonl` | `run.interrupt` | 只追加 `{id, turn, at}`；监督进程每 250 ms 读新增的整行 |
 | `blobs/<sha256>` | 监督进程 | 瘦身移出日志的字段原文，按内容寻址，同一份内容只存一次（见「瘦身」） |
 | `blobs.gone` | 节点 | 存在 = 节点为守住总上限删掉了 `blobs/`，要用 blob 的读取回 `gone` |
+| `partial.json` | 监督进程 | `{items: [{key, kind say\|think, src, parent?, text}]}`：agent 正在写的消息，每 100 ms 至多整份替换一次（`fileio.WriteAtomic`），没有正在写的就删掉（见「逐字输出」） |
 | `diffs/turn-<id>.patch` | 监督进程 | codex 一轮的最后一份 `turn/diff/updated`，`turn/completed` 时写一次 |
 | `touched.jsonl` | 监督进程 | 只追加 `{path, via edit\|cmd, base?, new?, lost?}`：agent 用工具改过的文件和命令里提到的路径，每个路径每种方式一条（见「改动」） |
 | `trees.json` | 监督进程 | `{git, git_dir?, prefix?, base?, end?}`：运行开始和结束时工作区的树（见「改动」） |
@@ -52,6 +53,11 @@
 - 运行中每秒：读 `reports.jsonl` 新增（ask → `attention=asked` + `ask`；note → `note`，并清掉 stalled）；background 方式下 stdout / stderr 超过 `spec.stall_after`（节点 `node.stall_after`，默认 15 分钟，`off` 关闭）没有字节 → `attention=stalled`，再有输出就清掉；只标记，不停。herdr 方式每 3 s 看 agent 是否在等人：Herdr 里它的 pane 是 `blocked`，或（claude）会话 transcript 末尾是没回答的 `AskUserQuestion` / `ExitPlanMode`，或最新的 Claude hook 事件是 `Notification` / `PermissionRequest` 且 transcript 之后没再长（`tend install-hook`）→ `attention=asked`（没有 `ask` 原文）；不再等时清掉，但只清自己标的，`tend run ask` 的提问留着。Herdr pane 状态和 Claude hook 这两个来源只用于 herdr 方式。
 - 读写管线：读 agent stdout 和 stderr 管道的 goroutine 只读，把字节放进内存里按字节计的有界缓冲（stdout 64 MiB，stderr 16 MiB，常数在 `internal/node/limits.go`），满了才等；写盘、解析、写 `state.json`、往 stdin 发消息都在另外的 goroutine 里做。Windows 上 agent 的这两个管道由 `proc.Pipe` 建（`CreatePipe`，缓冲 8 MiB；`os.Pipe` 只有 4 KiB，而 Node 在 Windows 上同步写管道，读的一方停一下，claude 整个就停下）。stream run 的 stdin 只由一个写 goroutine 按发送顺序写，谁发都不等 agent 读（agent 可能正等着自己的输出被读），排队超过 16 MiB 的发送失败；关 stdin 时先写完已排队的。
 - stdout 先组装成整行再处理：读管道的 goroutine 组装，一行最多 32 MiB（`maxLine`）；更长的行按到来的块原样写进日志，不解析，块之间不插别的内容。顺序是组装、scrub、写 `output.log`、解析。stderr 按行写：半行等它的换行，等满 1 s 或攒到 64 KiB 才整块写出。stdout、stderr 和 hook（setup、before_run、check、cleanup）的输出都经同一个 `rolling` 写，行不会拼在一起，轮转也按全部字节计；`rolling` 打开已有的 `output.log` 时从它的大小接着算。hook 的 stdout 和 stderr 合在一起按行写，半行在 hook 结束时写出。
+- 逐字输出：增量不进 `output.log`，由 `partials`（`internal/node/partial.go`）拼成正在写的消息，写进 `partial.json`：
+  - claude 的 `stream_event`（`--include-partial-messages`，见 [agents.md](agents.md)）：`message_start` 给出消息 id，`content_block_start` 类型是 `text` / `thinking` 的开一条，`key` 是「消息 id:块序号」，`src` 是消息 id，`text_delta` / `thinking_delta` 接上去；`input_json_delta`（工具参数的碎片）和 `signature_delta` 丢掉。按 `parent_tool_use_id` 分开记，子 agent 的消息各算各的。
+  - codex 方法名以 `delta` 结尾的通知（没有 `id`）一律不进日志；`item/agentMessage/delta` 是 say，`item/reasoning/summaryTextDelta` / `textDelta` 是 think（有摘要就只显示摘要，摘要换段时插一个换行），`key` 和 `src` 都是 `itemId`；其余增量（命令输出、文件改动、计划）丢掉。
+  - 一条消息的最终那一行（claude 的 `assistant`，它的 `message.id` 和第一个块的类型对上；codex 的 `item/completed`，条目 id 对上）写进日志**之后**，才把它从 `partial.json` 去掉，所以读的一方看到它没了，最终那一行已在日志里。claude 的 `result`、`message_stop` 和 codex 的 `turn/completed` 去掉剩下的（被打断、没有最终行的）；stdout 结束时删掉文件。
+  - 一条的文字超过 16 KiB 只留最后 16 KiB，前面加 `…`。
 - 轮次：`rolling` 每写完一行，就照 `internal/output` 的 `Parse` 数轮次（读的是 `clipLine` 送出的样子，所以和协调器翻页时读到的一样；只送开头的行不算），轮次变了就在 `marks.jsonl` 记一条 `turn`。
 - 送出的行（`run.tail{clip}`）：不超过 16 KiB 的原样；更长的 JSON 行不超过 1 MiB 时解开，每个超过 16 KiB 的字符串截到 16 KiB 并以 `…` 结尾，再编回 JSON（不转义 `<>&`），带上原行长 `size`；其余的只送前 16 KiB，标 `head`。文件里是原文（瘦身移出的字段在 blob 里或 git 里，见「瘦身」）。
 - 账号、套餐用量和 agent 自己配置所在的路径不写进 `output.log`：整行丢掉的有 claude 对 `initialize` 的回应（`request_id` 为 `init`，里面有 email、organization 和订阅类型）、claude 的 `rate_limit_event`、codex 的 `account/rateLimits/updated` 和 `hook/*`（hook 的 id 里也有配置文件的路径）；去掉字段再写的有 codex 回应里的 `codexHome`、`instructionSources`、`thread.path`（rollout 文件），`thread/started` 的 `thread.path`，claude `system init` 的 `memory_paths`。超过 32 MiB 的行只按开头的 32 MiB 预筛，可能要改写就整行不写；判断先按字节预筛，JSON 字符串里的引号一定带转义，只是提到这些词的文字不会误中；`output.log` 轮转改名失败（Windows 上有读者开着）就继续追加，下次再轮转。
@@ -157,6 +163,7 @@ claude 的工具结果里带着整份文件，codex 反复推一轮的全部 dif
 - `run.follow.watch{run, from{file, off, marks}}` 是流（见 [wire.md](wire.md)「流」），协调器的输出 hub 用它（见 [output.md](output.md)「实时」）：
   - 每 200 ms 按路径打开 `output.log`，定位到 `off`，读到末尾，关掉，不一直开着文件，Windows 上轮转不受影响；`marks.jsonl` 同样从 `marks` 这个字节位置接着读。第一条推送是 `open{cursor, mode}`；之后每条 `run.follow{file, lines[], part?, marks[], gap?, cursor}` 只含一代日志，行照 `run.tail{clip}` 截断，每行带 `at`（跟随读到它的时间），一条大约 256 KiB。
   - 只推完整的行，游标只跟着整行走。最后一行等了 1 秒还没写完（运行结束时不等），又不超过 16 KiB，就作为 `part` 推出去，不推进游标；内容没变不再推。
+  - 每一拍先读 `partial.json`，再读日志；内容和上次推的不一样，就在这一拍的行之后推一条 `run.follow{partial: {items}}`，文件没了推空的 `items`。比较的是字节，不是 `fileio.ID`：整份替换后 inode 号会被复用。打不开或读到的不是 JSON（Windows 上正赶上改名）就当没变，下一拍再读。
   - 轮转：`from.file` 是 `.1` 的 ID，或者读的过程中 `fileio.ID` 变了，就把 `.1` 从游标读完，再从新文件的 0 开始；文件比游标短（同一 ID）或者两代都对不上，推 `gap{from, to}`，从新文件的 0 开始。打开时 `from.file` 已经两代都不是，第一条推 `open{mode: gap}`，从还留着的最早一代的开头读。
   - `from` 带 `file` 或 `off` 而 `marks` 为 0 时，第一次读标记只留偏移在 `from` 之后的（这一代从 `off` 起，之后各代全部）。
   - 运行结束（`Terminal` 或 `unknown`）以后再读一遍，然后回 `done`；run 目录没了回 `gone`。推送用 `PushWait`：协调器读得慢，跟随就停下等，数据在文件里，不丢。

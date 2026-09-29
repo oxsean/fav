@@ -294,9 +294,11 @@ type hub struct {
 	pending []output.Event
 	cursor  *node.Cursor // where pending brings a watcher
 	turns   output.State
-	seen    map[string]bool // the messages shown as you
-	temps   map[string]bool // keys of temp events sent: the whole line that comes after takes the key
-	ready   chan struct{}   // the last page is in, or err
+	seen    map[string]bool         // the messages shown as you
+	temps   map[string]bool         // keys of temp events sent: the whole line that comes after takes the key
+	parts   map[string]output.Event // the messages being written, by key: their final event takes the key
+	finals  []string                // keys the last final events took: a message still listed after is not shown again
+	ready   chan struct{}           // the last page is in, or err
 	err     error
 	ended   bool
 	stop    context.CancelFunc
@@ -307,7 +309,11 @@ type outBatch struct {
 	from, to node.Cursor
 	raw      json.RawMessage // the OutputPush, encoded
 	n        int
+	temps    string // only temp events, with these keys: kept only until the next batch of the same
 }
+
+// partialKey starts the key of a message being written (node.Partial) as its temp events carry it.
+const partialKey = "p:"
 
 type outSub struct {
 	s   *wire.Stream
@@ -338,7 +344,7 @@ func (c *Coord) watchOutput(p Principal, r *wire.Request) (any, error) {
 	if h == nil {
 		ctx, stop := context.WithCancel(context.Background())
 		h = &hub{c: c, run: wp.Run, subs: map[*outSub]bool{}, seen: map[string]bool{}, temps: map[string]bool{},
-			ready: make(chan struct{}), stop: stop}
+			parts: map[string]output.Event{}, ready: make(chan struct{}), stop: stop}
 		c.outs[wp.Run] = h
 		go h.follow(ctx)
 	}
@@ -627,6 +633,7 @@ func (h *hub) take(fl node.Follow, said output.Said) {
 				lines[i].Key = k
 				delete(h.temps, k)
 			}
+			h.takeKey(&lines[i])
 		}
 		evs = append(evs, output.Join(lines, fl.Marks, max(st.Turn, 1), said, h.seen)...)
 	}
@@ -639,9 +646,76 @@ func (h *hub) take(fl node.Follow, said output.Said) {
 			}
 		}
 	}
-	h.pending = append(h.pending, evs...)
+	if fl.Partial != nil {
+		evs = append(evs, h.partials(fl.Partial.Items)...)
+	}
+	for _, e := range evs {
+		h.queue(e)
+	}
 	cursor := fl.Cursor
 	h.cursor = &cursor
+}
+
+// takeKey gives e the key of the message being written it is the final event of; the caller holds mu.
+func (h *hub) takeKey(e *output.Event) {
+	if e.Temp || e.Key != "" || e.Src == "" {
+		return
+	}
+	for k, p := range h.parts {
+		if p.Src == e.Src && p.Kind == e.Kind {
+			e.Key = k
+			delete(h.parts, k)
+			h.finals = append(h.finals, k)
+			if len(h.finals) > maxFinals {
+				h.finals = h.finals[1:]
+			}
+			return
+		}
+	}
+}
+
+// partials is the temp events for the messages being written: one for each that changed, and one without text for
+// each gone without its final event, which takes it away; the caller holds mu.
+func (h *hub) partials(items []node.Partial) []output.Event {
+	var evs []output.Event
+	listed := map[string]bool{}
+	for _, it := range items {
+		k := partialKey + it.Key
+		if slices.Contains(h.finals, k) {
+			continue
+		}
+		listed[k] = true
+		e := output.Event{Kind: it.Kind, Temp: true, Key: k, Text: it.Text, Parent: it.Parent, Turn: max(h.turns.Turn, 1), Src: it.Src}
+		if old, ok := h.parts[k]; ok && old.Text == e.Text {
+			continue
+		}
+		h.parts[k] = e
+		evs = append(evs, e)
+	}
+	for _, k := range slices.Sorted(maps.Keys(h.parts)) {
+		if !listed[k] {
+			evs = append(evs, output.Event{Kind: h.parts[k].Kind, Temp: true, Key: k})
+			delete(h.parts, k)
+		}
+	}
+	return evs
+}
+
+// queue adds e to what goes out next; a temp event replaces one with its key still waiting there. The caller holds mu.
+func (h *hub) queue(e output.Event) {
+	if e.Temp {
+		for i := len(h.pending) - 1; i >= 0; i-- {
+			if h.pending[i].Key != e.Key {
+				continue
+			}
+			if h.pending[i].Temp {
+				h.pending[i] = e
+				return
+			}
+			break
+		}
+	}
+	h.pending = append(h.pending, e)
 }
 
 // flush sends what came since the last batch, in pushes of at most maxOutputPush bytes; the caller holds mu.
@@ -668,6 +742,7 @@ func (h *hub) flush() {
 			push.Cursor, h.at, h.cursor = h.cursor, *h.cursor, nil
 		}
 		b.to = h.at
+		b.temps = tempKeys(b, push.Events)
 		b.raw, _ = json.Marshal(push)
 		h.keep(b)
 		for sb := range h.subs {
@@ -676,8 +751,28 @@ func (h *hub) flush() {
 	}
 }
 
+// tempKeys is the keys of evs, when b moves no cursor and they are all temp events.
+func tempKeys(b outBatch, evs []output.Event) string {
+	if b.from != b.to || len(evs) == 0 {
+		return ""
+	}
+	keys := make([]string, len(evs))
+	for i, e := range evs {
+		if !e.Temp {
+			return ""
+		}
+		keys[i] = e.Key
+	}
+	slices.Sort(keys)
+	return strings.Join(keys, "\x00")
+}
+
 // keep adds b to the batches kept, dropping the oldest past hubEvents or hubBytes; the caller holds mu.
 func (h *hub) keep(b outBatch) {
+	if n := len(h.batches); b.temps != "" && n > 1 && h.batches[n-1].temps == b.temps {
+		last := h.batches[n-1]
+		h.batches, h.events, h.bytes = h.batches[:n-1], h.events-last.n, h.bytes-len(last.raw)
+	}
 	h.batches = append(h.batches, b)
 	h.events, h.bytes = h.events+b.n, h.bytes+len(b.raw)
 	for len(h.batches) > 1 && (h.events > hubEvents || h.bytes > hubBytes) {

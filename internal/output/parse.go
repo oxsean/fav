@@ -147,6 +147,7 @@ func claudeLine(l string, whole bool) ([]Event, bool) {
 		Model   string `json:"model"`
 		Parent  string `json:"parent_tool_use_id"`
 		Message struct {
+			ID      string          `json:"id"`
 			Content json.RawMessage `json:"content"`
 		} `json:"message"`
 		Result     string       `json:"result"`
@@ -172,6 +173,9 @@ func claudeLine(l string, whole bool) ([]Event, bool) {
 		evs := claudeContent(m.Type, m.Message.Content, whole)
 		for i := range evs {
 			evs[i].Parent = m.Parent
+			if m.Type == "assistant" {
+				evs[i].Src = m.Message.ID
+			}
 			if m.IsReplay && evs[i].Kind == KindUser {
 				evs[i].Echo = m.UUID
 			}
@@ -486,7 +490,7 @@ func codexItemEvents(it codexItem, whole bool) ([]Event, bool) {
 		}
 		return []Event{{Kind: KindUser, Text: strings.Join(texts, "\n"), Echo: it.ClientID}}, true
 	case "agentMessage", "agent_message":
-		return []Event{{Kind: KindSay, Text: it.Text}}, true
+		return []Event{{Kind: KindSay, Text: it.Text, Src: it.ID}}, true
 	case "reasoning":
 		text := it.Text
 		if len(it.Summary) > 0 {
@@ -507,7 +511,7 @@ func codexItemEvents(it codexItem, whole bool) ([]Event, bool) {
 		if strings.TrimSpace(text) == "" {
 			return nil, true
 		}
-		return []Event{{Kind: KindThink, Text: text}}, true
+		return []Event{{Kind: KindThink, Text: text, Src: it.ID}}, true
 	case "commandExecution", "command_execution":
 		e := Event{Kind: KindCmd, Tool: it.Type, Call: it.ID, Family: FamilyOf(it.Type), Input: commandInput(it.Command), DurMS: it.DurationMS}
 		e.Title, e.More = shellTitle(it.Command)

@@ -45,7 +45,7 @@ tend journal verify [--json] | repair [-y]
 - 作答：运行中的 run 有请求时 task 对话框的主按钮是「回答」，打开回答对话框（scope `inTaskRun`）：权限请求显示工具和摘要，按钮「允许」（主）/「拒绝」/ 取消；提问每个问题一个选项选择器（← → 改选项，Tab 在问题和按钮间移动），按钮「回答」（主）/「不回答」/ 取消。running 的 stream run 另有「发消息」按钮，打开和回复同样的多行输入框，发 `run.send`。右栏和对话框列出等着的请求和最近两条消息的状态；运行中的 run 显示最后一句话，结束后显示用量。
 - 回复：run 在等时 task 对话框的主按钮是「回复」，别的已结束且有会话的 run 也有「回复」按钮；回复框是多行输入（scope `inTaskForm`：Enter 换行、Ctrl+S 发送、Tab 到按钮、Esc 放弃），发 `run.continue`。
 - 接手：打开该会话的恢复对话框；run 还在跑时对话框提示先停（`resume.check.running_run`）。
-- 状态：视图打开时连协调器（连 socket，没人持锁就自己持锁），开 `state.watch`（带任务书，搜索要查），推送由 `coord.StateFold` 折进状态（见 [coordinator.md](coordinator.md)「订阅」）：`lagged` 按副本的 seq 重开，副本接不上时不带 `after_seq` 重开。机器由 `machines.watch` 推来（协调器没有这个方法时读一次 `machine.list`），agent 列表每次连上读一次；视图没有定时轮询。选中任务的最近一次 run 和「盯在旁边」的 run 各开一个 `run.output.watch`，不再显示的就取消；带 `key` 的事件替换前一条，每个 run 最多留 1000 个事件；流结束（`done`）就不再开，断了（机器离线等）过 5 s 在下一次更新时从游标重开，`unauthorized` 丢掉这个 run 的输出。连接结束（协调器退出、保活超时）时，视图开着就马上重连并重新订阅，否则等下次打开；退出 TUI 时放锁，run 照常跑。
+- 状态：视图打开时连协调器（连 socket，没人持锁就自己持锁），开 `state.watch`（带任务书，搜索要查），推送由 `coord.StateFold` 折进状态（见 [coordinator.md](coordinator.md)「订阅」）：`lagged` 按副本的 seq 重开，副本接不上时不带 `after_seq` 重开。机器由 `machines.watch` 推来（协调器没有这个方法时读一次 `machine.list`），agent 列表每次连上读一次；视图没有定时轮询。选中任务的最近一次 run 和「盯在旁边」的 run 各开一个 `run.output.watch`，不再显示的就取消；带 `key` 的事件原地替换前一条（agent 正在写的消息就这样一段段长出来，最终的那条换上去），没有 `text` 的临时事件把它去掉，每个 run 最多留 1000 个事件；流结束（`done`）就不再开，断了（机器离线等）过 5 s 在下一次更新时从游标重开，`unauthorized` 丢掉这个 run 的输出。连接结束（协调器退出、保活超时）时，视图开着就马上重连并重新订阅，否则等下次打开；退出 TUI 时放锁，run 照常跑。
 - 协调器不可用（别的进程持锁且 socket 不通）：Tasks 视图显示原因，其它视图不受影响。
 
 ## Web UI（模式二）

@@ -643,12 +643,14 @@ func closeAll(fs []*os.File) {
 }
 
 // copyOut logs the agent's stdout a line at a time and reads each line as it goes: codex's thread id, the final
-// message, errors and denied permissions. A line longer than maxLine is logged in pieces as it comes, and not read.
+// message, errors and denied permissions. Deltas of a message being written go to partial.json instead of the log. A line longer than maxLine is logged in pieces as it comes, and not read.
 // What says who is signed in, how much of their plan is used or where the agent's own configuration lives stays out
 // of the log (scrub).
 func (s *sup) copyOut(r io.Reader, log *rolling) {
 	q := newSpool(maxSpoolOut)
 	go readLines(r, q)
+	parts := newPartials(s.dir)
+	defer parts.close()
 	for {
 		line, more, ok := q.take()
 		if !ok {
@@ -657,6 +659,9 @@ func (s *sup) copyOut(r io.Reader, log *rolling) {
 		s.heard()
 		if more {
 			copyLong(line, q, log)
+			continue
+		}
+		if parts.take(line) {
 			continue
 		}
 		var at logPos
@@ -671,6 +676,7 @@ func (s *sup) copyOut(r io.Reader, log *rolling) {
 		if mark != nil {
 			log.markAt(*mark, at)
 		}
+		parts.done(line)
 		if bytes.HasSuffix(line, []byte("\n")) {
 			s.lineAt(line, at)
 		}

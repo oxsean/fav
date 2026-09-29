@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"cmp"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"os"
@@ -37,12 +38,15 @@ type FollowParams struct {
 
 // Follow is one push of a follow: what came in one log file since the last push.
 type Follow struct {
-	File   string     `json:"file"`
-	Gap    *Gap       `json:"gap,omitempty"`   // before the lines: a stretch no longer kept
-	Lines  []TailLine `json:"lines,omitempty"` // whole lines, each with At
-	Part   *TailLine  `json:"part,omitempty"`  // the line still being written, once it waited halfLineWait; Cursor is before it
-	Marks  []Mark     `json:"marks,omitempty"` // new in marks.jsonl, wherever they are placed
-	Cursor Cursor     `json:"cursor"`
+	File  string     `json:"file"`
+	Gap   *Gap       `json:"gap,omitempty"`   // before the lines: a stretch no longer kept
+	Lines []TailLine `json:"lines,omitempty"` // whole lines, each with At
+	Part  *TailLine  `json:"part,omitempty"`  // the line still being written, once it waited halfLineWait; Cursor is before it
+	Marks []Mark     `json:"marks,omitempty"` // new in marks.jsonl, wherever they are placed
+	// the messages being written, once partial.json changed: read before the lines, so one gone from it has its final
+	// line among them or pushed before
+	Partial *Partials `json:"partial,omitempty"`
+	Cursor  Cursor    `json:"cursor"`
 }
 
 type Gap struct {
@@ -63,6 +67,7 @@ type follow struct {
 		since time.Time
 		sent  string
 	}
+	partialsSent []byte // partial.json as last pushed
 }
 
 // Follow opens a follow of p.Run's output on r; it pushes after the handler returned.
@@ -104,9 +109,16 @@ func (f *follow) loop() {
 	t := time.NewTicker(followEvery)
 	defer t.Stop()
 	for ended := false; ; {
+		parts, changed := f.partials()
 		if err := f.pass(ctx, ended); err != nil {
 			f.s.End(nil, err)
 			return
+		}
+		if changed {
+			if err := f.push(ctx, Follow{File: f.at.File, Partial: &parts}); err != nil {
+				f.s.End(nil, err)
+				return
+			}
 		}
 		if ended {
 			f.s.End(wire.EndDone, nil)
@@ -332,8 +344,22 @@ func (f *follow) newMarks() []Mark {
 	return nil
 }
 
+// partials reads partial.json; changed: it is not what was last pushed.
+func (f *follow) partials() (Partials, bool) {
+	raw, ok := readPartials(f.dir)
+	if !ok || bytes.Equal(raw, f.partialsSent) {
+		return Partials{}, false
+	}
+	var ps Partials
+	if raw != nil {
+		json.Unmarshal(raw, &ps)
+	}
+	f.partialsSent = raw
+	return ps, true
+}
+
 func (f *follow) push(ctx context.Context, fl Follow) error {
-	if fl.Gap == nil && len(fl.Lines) == 0 && fl.Part == nil && len(fl.Marks) == 0 {
+	if fl.Gap == nil && len(fl.Lines) == 0 && fl.Part == nil && len(fl.Marks) == 0 && fl.Partial == nil {
 		return nil
 	}
 	fl.Cursor = f.at

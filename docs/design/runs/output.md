@@ -14,7 +14,9 @@
 
 - **身份**：`id` 是「`file`:行首偏移:行内序号」，`file` 是日志的 `fileio.ID`。一行可以产出几个事件，靠行内序号区分。
 - **只追加**：工具的结果是单独一条 `tool_result`，用 `ref` 指向那次调用的 `call`；渲染层按 `ref` 把两条合成一条，结果先到、调用后到也能合（往前翻页时就是这样）。用量也是单独的事件，不回填到前面的事件上。
-- **临时事件**：`temp: true` 的事件没有 `id`，带 `key`；同一个 `key` 的后一条替换前一条。现在只有一种：还没写完换行的最后一行，如果它不是 JSON，就当临时事件显示；是 JSON 的就等这一行写完。
+- **临时事件**：`temp: true` 的事件没有 `id`，带 `key`；同一个 `key` 的后一条替换前一条，没有 `text` 的一条表示把它去掉。有两种：
+  - 还没写完换行的最后一行，如果它不是 JSON，就当临时事件显示；是 JSON 的就等这一行写完。`key` 是「`file`:行首偏移」。
+  - agent 正在写的消息（节点的 `partial.json`，见 [node.md](node.md)「逐字输出」），只在输出流里有：`kind` 是 `say` 或 `think`，`key` 是 `p:` 加节点给的 key。
 - **不看 provider**：按行的形状认。claude 的 stream-json 有 `type`；codex app-server 的 JSON-RPC 有 `method`，或者带 `id` 加 `result` / `error`；codex exec 的 `type` 带点（`item.completed`），或者是 `error`。fake agent 写的是 claude 的形状，照 claude 读。
 - **`at`**：行上写着时间时才有（codex 的 `emittedAtMs`），RFC 3339。
 
@@ -50,8 +52,8 @@
 - 运行自己的上报（`tend run note|ask|verdict|plan`，节点不问人就放行，`agent.OwnReport`）不出事件。解析器不在节点上，认的是名叫 `tend` 的程序，不比较路径。
 
 **不出事件的**：
-- claude：`stream_event`（增量在逐字输出做之前一律丢弃）、别的 `control_*`、`command_lifecycle`、`rate_limit_event`、`redacted_thinking`。
-- codex：增量（method 以 `delta` 结尾）、`item/started`、`item/updated`、`item.started`、`item.updated`，前缀是 `hook/` `mcpServer/` `account/` `remoteControl/` `serverRequest/` `thread/status/` `thread/goal/` `turn/diff/` 的通知，成功的 JSON-RPC 回应。
+- claude：`stream_event`（新的日志里没有了，增量进 `partial.json`；旧日志里的丢弃）、别的 `control_*`、`command_lifecycle`、`rate_limit_event`、`redacted_thinking`。
+- codex：增量（method 以 `delta` 结尾，新的日志里没有了）、`item/started`、`item/updated`、`item.started`、`item.updated`，前缀是 `hook/` `mcpServer/` `account/` `remoteControl/` `serverRequest/` `thread/status/` `thread/goal/` `turn/diff/` 的通知，成功的 JSON-RPC 回应。
 - 空行；行尾的 `\r` 去掉。多行文字保留成一条事件，拆行是渲染层的事。
 
 ## 工具事件
@@ -114,6 +116,7 @@
 - **打开**：第一个订阅者来时，先用 `run.output.page` 的读法取最后一页（200 个事件）作为第一批，再从这一页的末尾（带 `run.tail` 回的 `marks_to`）在节点上开 `run.follow.watch`。已经结束的运行也这样开：节点读到末尾就回 `done`。
 - **解析一次、编码一次**：节点推来的行用 `Parse` 读、`Join` 补全，每 100 ms 合一批，编码一次，用 `wire.Stream.PushRaw` 发给所有订阅者；一条推送不超过 256 KiB。
 - **缓冲**：留最近 2000 个事件或 1 MiB 的批次。订阅者带的 `from` 是某一批的末尾，就从下一批给起；等于最新的游标就只接上实时的；比缓冲还早，推 `open{gap}` 再给整个缓冲。
+- **正在写的消息**：节点推来的 `partial` 里每条变了的出一个临时事件（`turn` 取当前的）；最终事件到了接过它的 `key`：claude 的 `assistant` 行和 codex 的 `item/completed` 解析出的 say / think 带着来源的消息 id 或条目 id（`Event.Src`，不出现在 JSON 里），和还在写的那条 `src`、`kind` 都对上就带上它的 `key`，原地替换。已经被接过的 `key` 再出现在 `partial` 里就不管（最近 64 个）；从 `partial` 里消失、又没等到最终事件的，推一个同 `key`、没有 `text` 的临时事件把它去掉。同一批里同一个 `key` 的临时事件只留最后一条；缓冲里只有临时事件、同一组 `key` 的批次只留最新的一批。所以一个运行的临时事件最多约每 200 ms 一次（节点跟随的节拍）。
 - **慢订阅者**：流用 `FullGap`，被丢的推送记下第一条的起点；下一批之前先推一个 `gap{from, to}` 事件，别的订阅者和节点那边不受影响。
 - **关闭**：最后一个订阅者走后留 10 s（又有人来就接着用），然后取消节点上的跟随。运行结束（节点回 `done`）、节点断开或跟随出错时，所有订阅者的流随之结束，hub 删掉；下一个订阅者重新冷启动。
 - **在用**：hub 每收到节点的一批就刷新机器的 `busyAt`，模式一不会在有人看输出时因空闲断开。
