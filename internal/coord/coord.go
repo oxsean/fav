@@ -147,6 +147,7 @@ type Coord struct {
 	missing  map[string]int                     // open runs by how many lists of their node in a row lacked them
 	answered map[string]map[string]agent.Answer // by run and request: the answers given, which the state drops once taken
 	outs     map[string]*hub                    // the output hubs, by run
+	topics   map[*wire.Stream]*topic            // machines.watch and inbox.watch subscribers
 	passMu   sync.Mutex
 	wake     chan struct{}
 	// localCalls are the calls this machine's node is answering in this process: Close lets them finish
@@ -165,7 +166,7 @@ func Open(opt Options) (*Coord, error) {
 	}
 	c := &Coord{opt: opt, unlock: unlock, st: task.New(), receipts: map[string]journal.Receipt{}, subs: map[*wire.Stream]*sub{},
 		ms: map[string]*machine{}, sent: map[string]time.Time{}, acked: map[string][]string{}, ackDone: map[string]bool{}, missing: map[string]int{},
-		answered: map[string]map[string]agent.Answer{}, outs: map[string]*hub{}, wake: make(chan struct{}, 1)}
+		answered: map[string]map[string]agent.Answer{}, outs: map[string]*hub{}, topics: map[*wire.Stream]*topic{}, wake: make(chan struct{}, 1)}
 	if c.id, err = coordID(dir); err != nil {
 		unlock()
 		return nil, err
@@ -216,6 +217,7 @@ func (c *Coord) Close() {
 		sb.closed = true
 		close(sb.ch)
 	}
+	c.endTopics()
 	c.mu.Unlock()
 	c.passMu.Lock()
 	defer c.passMu.Unlock()
@@ -274,6 +276,12 @@ func (c *Coord) commit(actor journal.Actor, cmd *journal.Receipt, events ...jour
 	if c.opt.Notice != nil || len(c.opt.Config.NotifyCommand) > 0 {
 		sits = c.situations(c.touched(events))
 	}
+	var ids []string
+	concerned := map[string]bool{}
+	if c.watching(PushInbox) {
+		ids = c.touched(events)
+		c.concerned(ids, concerned) // as they stood: someone the task stops waiting for is told too
+	}
 	if err := c.st.Apply(env); err != nil {
 		return err
 	}
@@ -283,8 +291,14 @@ func (c *Coord) commit(actor journal.Actor, cmd *journal.Receipt, events ...jour
 		c.deliver(c.notices(env, sits))
 	}
 	c.publish(env)
-	if reshapes(env) {
+	all := reshapes(env)
+	if all {
 		c.recheckOutputs()
+	}
+	c.machinesMoved()
+	if len(ids) > 0 || all {
+		c.concerned(ids, concerned)
+		c.kick(PushInbox, func(p Principal) bool { return all || p.Admin || concerned[p.User] })
 	}
 	return nil
 }

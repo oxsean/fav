@@ -94,6 +94,7 @@ func (c *Coord) ensure(m *machine) {
 		return
 	}
 	m.dialing = true
+	c.machinesMoved()
 	go c.dial(m)
 }
 
@@ -122,6 +123,7 @@ func (c *Coord) dial(m *machine) {
 	} else {
 		m.conn, m.hello, m.err, m.backoff = conn, h, nil, 0
 	}
+	c.machinesMoved()
 	c.mu.Unlock()
 	c.poke()
 	if err == nil {
@@ -177,6 +179,7 @@ func (c *Coord) Attach(name string, conn Conn, check func(remote.Hello) error) e
 		m.conn.Close()
 	}
 	m.attached, m.conn, m.hello, m.err = true, conn, h, nil
+	c.machinesMoved()
 	c.mu.Unlock()
 	c.poke()
 	c.Reaffirm()
@@ -190,6 +193,7 @@ func (c *Coord) Expect(name string) {
 	defer c.mu.Unlock()
 	if c.ms[name] == nil {
 		c.ms[name] = &machine{name: name, attached: true}
+		c.machinesMoved()
 	}
 }
 
@@ -210,6 +214,7 @@ func (c *Coord) failed(m *machine, err error) {
 	m.err = err
 	m.backoff = min(max(m.backoff*2, backoffFirst), backoffMax)
 	m.retryAt = time.Now().Add(m.backoff)
+	c.machinesMoved()
 }
 
 // lost drops conn after a call on it failed at the transport; the caller does not hold mu.
@@ -320,6 +325,7 @@ func (c *Coord) Pass(ctx context.Context) {
 		case m.conn != nil && m.host != nil && now.Sub(m.busyAt) > idleClose:
 			m.conn.Close()
 			m.conn = nil
+			c.machinesMoved()
 		}
 	}
 	c.mu.Unlock()
@@ -354,6 +360,7 @@ func (c *Coord) callNode(ctx context.Context, m *machine, conn Conn, method stri
 	default:
 		c.mu.Lock()
 		m.err = err
+		c.machinesMoved()
 		c.mu.Unlock()
 	}
 	return true, err

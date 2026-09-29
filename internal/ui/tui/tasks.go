@@ -26,7 +26,7 @@ import (
 // Connector reaches the coordinator: the running one, or this process becoming it.
 type Connector func(wire.Options) (*coord.Client, error)
 
-// tasksState is the Tasks view: the coordinator's state, polled while the view shows.
+// tasksState is the Tasks view: the coordinator's state, the machines and the outputs shown, as their streams push them.
 type tasksState struct {
 	connect    Connector
 	cl         *coord.Client
@@ -45,26 +45,21 @@ type tasksState struct {
 	cursor     int
 	scroll     int
 	out        map[string]*outFeed // by run id: the runs the view shows
-	ticking    bool
-	fold       coord.StateFold   // the state as state.watch brings it; st is its St
-	gen        int               // which opening of state.watch the pushes belong to
-	stream     *wire.Watch       // the current state.watch
-	machinesAt time.Time         // when the machines were last read
-	editing    *editing          // what $EDITOR has open
-	anchor     string            // where a range of marked tasks started
-	watch      string            // a run shown under the detail, whichever task is selected
-	marked     map[string]bool   // the range: tasks an action applies to together
-	unsaved    map[string][]byte // edited text the coordinator did not take, by edit key; the next edit starts from it
-	askPick    int               // the home layout's inline answer: the option highlighted for its question
-	askDeny    bool              // it is composing a deny reason
+	fold       coord.StateFold     // the state as state.watch brings it; st is its St
+	gen        int                 // which opening of state.watch the pushes belong to
+	stream     *wire.Watch         // the current state.watch
+	mstream    *wire.Watch         // the current machines.watch
+	editing    *editing            // what $EDITOR has open
+	anchor     string              // where a range of marked tasks started
+	watch      string              // a run shown under the detail, whichever task is selected
+	marked     map[string]bool     // the range: tasks an action applies to together
+	unsaved    map[string][]byte   // edited text the coordinator did not take, by edit key; the next edit starts from it
+	askPick    int                 // the home layout's inline answer: the option highlighted for its question
+	askDeny    bool                // it is composing a deny reason
 	askReason  textinput.Model
 }
 
-const (
-	tasksEvery    = 2 * time.Second
-	machinesEvery = 5 * time.Second
-	tasksWait     = 20 * time.Second
-)
+const tasksWait = 20 * time.Second
 
 // SetCoordinator lets the Tasks view reach the coordinator; without it the view says tasks are unavailable.
 func (m *Model) SetCoordinator(connect Connector) { m.tasks.connect = connect }
@@ -81,8 +76,6 @@ type tasksConnMsg struct {
 	cl  *coord.Client
 	err error
 }
-
-type tasksTickMsg struct{}
 
 // taskDoneMsg: a command came back; then runs on success.
 // taskLoadedMsg: task.get answered; the edit form opens on the whole task.
@@ -125,39 +118,75 @@ type taskDoneMsg struct {
 	then func(*Model) tea.Cmd
 }
 
-// tasksOpen starts connecting and polling when the Tasks view shows.
+// tasksOpen starts connecting when the Tasks view shows.
 func (m *Model) tasksOpen() tea.Cmd {
 	t := &m.tasks
-	switch {
-	case t.connect == nil:
+	if t.connect == nil || t.cl != nil || t.connecting {
 		return nil
-	case t.cl == nil && !t.connecting:
-		t.connecting, t.err = true, nil
-		connect := t.connect
-		return func() tea.Msg {
-			cl, err := connect(wire.Options{})
-			return tasksConnMsg{cl, err}
-		}
-	case t.cl != nil && !t.ticking:
-		t.ticking = true
-		return tea.Batch(m.pollTasks(), tickTasks())
 	}
+	t.connecting, t.err = true, nil
+	connect := t.connect
+	return func() tea.Msg {
+		cl, err := connect(wire.Options{})
+		return tasksConnMsg{cl, err}
+	}
+}
+
+// openMachines opens machines.watch; a coordinator without it is asked machine.list once.
+func (m *Model) openMachines() tea.Cmd {
+	t := &m.tasks
+	if t.mstream != nil {
+		t.mstream.Cancel()
+		t.mstream = nil
+	}
+	cl := t.cl
+	return func() tea.Msg {
+		s := nextState(cl, cl.Watch(context.Background(), coord.MMachinesWatch, coord.TopicParams{}), 0)
+		return machinesPushMsg{cl: cl, w: s.w, pushes: s.pushes, err: s.err}
+	}
+}
+
+type machinesPushMsg struct {
+	cl     *coord.Client
+	w      *wire.Watch
+	pushes []wire.Push
+	err    error // the stream ended
+}
+
+func (msg machinesPushMsg) apply(m *Model) tea.Cmd {
+	t := &m.tasks
+	if t.cl != msg.cl || t.mstream != nil && t.mstream != msg.w {
+		msg.w.Cancel()
+		return nil
+	}
+	t.mstream = msg.w
+	for _, p := range msg.pushes {
+		var ml coord.MachineList
+		if p.Method == coord.PushMachines && p.Decode(&ml) == nil {
+			t.machines = ml.Items
+		}
+	}
+	switch {
+	case msg.err == nil:
+		return func() tea.Msg {
+			s := nextState(msg.cl, msg.w, 0)
+			return machinesPushMsg{cl: msg.cl, w: msg.w, pushes: s.pushes, err: s.err}
+		}
+	case wire.Code(msg.err) == wire.CodeUnknownMethod:
+		t.mstream = nil
+		return m.listMachines()
+	case wire.Code(msg.err) == wire.CodeLagged:
+		return m.openMachines()
+	}
+	tracef("tasks: machines watch ended: %v", msg.err)
+	t.mstream = nil
 	return nil
 }
 
-// pollTasks reads what the state stream does not bring: the machines every machinesEvery and the agents once.
-func (m *Model) pollTasks() tea.Cmd {
-	t := &m.tasks
-	if t.cl == nil {
-		return nil
-	}
-	var cmds []tea.Cmd
-	if time.Since(t.machinesAt) < machinesEvery && len(t.agents) > 0 {
-		return nil
-	}
-	t.machinesAt = time.Now()
-	cl, needAgents := t.cl, len(t.agents) == 0
-	return tea.Batch(append(cmds, func() tea.Msg {
+// listMachines reads the machines once, and the agents while they are not known.
+func (m *Model) listMachines() tea.Cmd {
+	cl := m.tasks.cl
+	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), tasksWait)
 		defer cancel()
 		var msg tasksMachinesMsg
@@ -165,28 +194,33 @@ func (m *Model) pollTasks() tea.Cmd {
 		if msg.err = cl.Call(ctx, coord.MMachineList, coord.MachinesParams{}, &ms); msg.err == nil {
 			msg.machines = ms.Machines
 		}
-		if needAgents {
-			var as coord.Agents
-			if cl.Call(ctx, coord.MAgentList, nil, &as) == nil {
-				msg.agents = as.Agents
-			}
-		}
 		return msg
-	})...)
+	}
 }
 
-func tickTasks() tea.Cmd {
-	return tea.Tick(tasksEvery, func(time.Time) tea.Msg { return tasksTickMsg{} })
+// readAgents reads the agents one can run, once per connection.
+func (m *Model) readAgents() tea.Cmd {
+	cl := m.tasks.cl
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), tasksWait)
+		defer cancel()
+		var msg tasksMachinesMsg
+		var as coord.Agents
+		msg.err = cl.Call(ctx, coord.MAgentList, nil, &as)
+		msg.agents, msg.onlyAgents = as.Agents, true
+		return msg
+	}
 }
 
 type tasksMachinesMsg struct {
-	machines []coord.Machine
-	agents   []tend.AgentProfile
-	err      error
+	machines   []coord.Machine
+	agents     []tend.AgentProfile
+	onlyAgents bool
+	err        error
 }
 
 func (msg tasksMachinesMsg) apply(m *Model) tea.Cmd {
-	if msg.err == nil {
+	if msg.err == nil && !msg.onlyAgents {
 		m.tasks.machines = msg.machines
 	}
 	if len(msg.agents) > 0 {
@@ -267,10 +301,13 @@ func (msg tasksPushMsg) apply(m *Model) tea.Cmd {
 	switch {
 	case msg.err == nil:
 		return func() tea.Msg { return nextState(msg.cl, msg.w, msg.gen) }
-	case closed(t.cl.Done()): // the coordinator went away, keepalive: the next tick connects again
-		t.stream = nil
+	case closed(t.cl.Done()): // the coordinator went away, keepalive: connect again while the view shows
+		t.stream, t.mstream = nil, nil
 		t.cl.Close()
 		t.cl = nil
+		if m.view == viewTasks {
+			return m.tasksOpen()
+		}
 		return nil
 	case wire.Code(msg.err) == wire.CodeLagged:
 		tracef("tasks: state watch lagged at %d", t.fold.Params(false).AfterSeq)
@@ -289,25 +326,7 @@ func (msg tasksConnMsg) apply(m *Model) tea.Cmd {
 		return nil
 	}
 	t.cl = msg.cl
-	open := m.openState()
-	if m.view != viewTasks {
-		return open
-	}
-	t.ticking = true
-	return tea.Batch(open, m.pollTasks(), tickTasks())
-}
-
-// apply is the one place the next tick is set, so one loop runs while the view shows.
-func (tasksTickMsg) apply(m *Model) tea.Cmd {
-	if m.view != viewTasks {
-		m.tasks.ticking = false
-		return nil
-	}
-	if m.tasks.cl == nil {
-		m.tasks.ticking = false
-		return m.tasksOpen()
-	}
-	return tea.Batch(m.pollTasks(), tickTasks())
+	return tea.Batch(m.openState(), m.openMachines(), m.readAgents())
 }
 
 func (msg taskDoneMsg) apply(m *Model) tea.Cmd {
@@ -318,11 +337,10 @@ func (msg taskDoneMsg) apply(m *Model) tea.Cmd {
 	if msg.note != "" {
 		m.flash(msg.note)
 	}
-	cmd := m.pollTasks()
 	if msg.then != nil {
-		cmd = tea.Batch(cmd, msg.then(m))
+		return msg.then(m)
 	}
-	return cmd
+	return nil
 }
 
 // reasonText: a protocol error as a short localized phrase with its detail.

@@ -78,6 +78,8 @@ var methodAccess = map[string]access{
 	MAgentDefRemove:     writer,
 	MAgentDefShare:      writer,
 	MInboxList:          reader,
+	MMachinesWatch:      reader,
+	MInboxWatch:         reader,
 	MUserOffboard:       admin,
 	MTaskSync:           internal,
 	MTaskLink:           internal,

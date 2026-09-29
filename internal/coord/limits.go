@@ -17,3 +17,10 @@ const (
 	hubBytes      = 1 << 20                // or of this many bytes, whichever is less
 	hubLinger     = 10 * time.Second       // a hub nobody watches is kept this long
 )
+
+// The snapshot topics (topics.go).
+const (
+	machinesWait  = 200 * time.Millisecond // machines.watch counts again once the kicks of this long came
+	machinesEvery = 5 * time.Second        // and this often while watched, in case a change kicked nobody
+	inboxWait     = 300 * time.Millisecond
+)

@@ -121,7 +121,7 @@ var readMethods = []string{remote.MHello, remote.MList, remote.MMessages, remote
 var Methods = []string{MStateGet, MTaskGet, MTaskCreate, MTaskEdit, MTaskStatus, MRunDispatch, MRunStop, MRunAbandon, MRunTail, MRunOutputPage, MRunOutputWatch,
 	MAgentList, MMachineList, MStateWatch, MNodeCall, MRunPreview, MRunContinue, MRunAnswer, MRunSend, MRunMessages,
 	MProjectCreate, MProjectEdit, MProjectMember, MMachineShare, MTaskStart, MTaskMove,
-	MAgentDefList, MAgentDefGet, MAgentDefSave, MAgentDefRemove, MAgentDefShare, MInboxList, MUserOffboard, MTaskSync, MTaskLink, MTaskSourceAck, MTaskGate, MTaskMerge, MTaskPlan, MTaskPlanSave, MTaskPlanApply, MTaskMessage, MTaskMessagePreview, MRunInterrupt}
+	MAgentDefList, MAgentDefGet, MAgentDefSave, MAgentDefRemove, MAgentDefShare, MInboxList, MUserOffboard, MTaskSync, MTaskLink, MTaskSourceAck, MTaskGate, MTaskMerge, MTaskPlan, MTaskPlanSave, MTaskPlanApply, MTaskMessage, MTaskMessagePreview, MRunInterrupt, MMachinesWatch, MInboxWatch}
 
 // Bulk marks the methods whose answers are large pieces fetched on demand: a connection writes them after everything
 // else (wire.Options.Bulk).
@@ -190,6 +190,10 @@ func (c *Coord) HandlerFor(p Principal) wire.Handler {
 			return ms, nil
 		case MStateWatch:
 			return c.watchState(p, r)
+		case MMachinesWatch:
+			return c.watchTopic(p, r, PushMachines)
+		case MInboxWatch:
+			return c.watchTopic(p, r, PushInbox)
 		case MRunTail:
 			var tp TailParams
 			if err := r.Decode(&tp); err != nil {
@@ -746,11 +750,16 @@ func (c *Coord) Machines(ctx context.Context, connect bool) Machines {
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	out := Machines{Machines: []Machine{}}
+	return Machines{Machines: c.machineList()}
+}
+
+// machineList is every machine and how it stands, this machine first; the caller holds mu.
+func (c *Coord) machineList() []Machine {
+	out := []Machine{}
 	for _, m := range c.ms {
-		out.Machines = append(out.Machines, c.machineView(m))
+		out = append(out, c.machineView(m))
 	}
-	slices.SortFunc(out.Machines, func(a, b Machine) int {
+	slices.SortFunc(out, func(a, b Machine) int {
 		if (a.Name == Local) != (b.Name == Local) {
 			if a.Name == Local {
 				return -1

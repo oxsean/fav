@@ -238,6 +238,7 @@ func (c *Coord) checksOf(ctx context.Context, m *machine) map[string]agent.Check
 	}
 	c.mu.Lock()
 	m.checks = out.Agents
+	c.machinesMoved()
 	c.mu.Unlock()
 	return out.Agents
 }

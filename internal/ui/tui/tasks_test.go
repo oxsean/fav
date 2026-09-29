@@ -96,7 +96,6 @@ func pump(m *Model, cmd tea.Cmd) {
 		switch msg := msg.(type) {
 		case tea.BatchMsg:
 			queue = append(queue, msg...)
-		case tasksTickMsg:
 		case interface{ apply(*Model) tea.Cmd }:
 			_, next := m.Update(msg)
 			queue = append(queue, next)
@@ -128,7 +127,7 @@ func waitFor(t *testing.T, m *Model, ok func() bool) {
 			t.Fatalf("timed out; screen:\n%s", screenText(m))
 		}
 		time.Sleep(50 * time.Millisecond)
-		pump(m, m.pollTasks())
+		pump(m, nil)
 	}
 }
 
@@ -138,6 +137,9 @@ func TestTasksViewCreatesRunsAndShowsATask(t *testing.T) {
 	if m.view != viewTasks || m.tasks.cl == nil || !m.tasks.loaded {
 		t.Fatalf("5 opens the Tasks view connected: view %v err %v", m.view, m.tasks.err)
 	}
+	waitFor(t, m, func() bool { // machines.watch pushes them
+		return len(m.tasks.machines) == 1 && m.tasks.machines[0].Name == coord.Local && len(m.tasks.agents) > 0
+	})
 	if s := screenText(m); !strings.Contains(s, "还没有任务") && !strings.Contains(s, "No tasks yet") {
 		t.Fatalf("empty view:\n%s", s)
 	}
