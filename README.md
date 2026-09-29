@@ -537,8 +537,8 @@ the invitee a participant or reader of a project (`--project`, `--access`).
 
 Tasks belong to projects. An admin creates a project; its owner adds members as participants (create, dispatch, answer,
 send) or readers (look only). Someone outside a project sees nothing of it, not even that it exists; a task outside any
-project is its creator's. Machines are private too: whoever adds a machine (the Machines page gives a node token and the
-command to run) owns it, and only they dispatch to it until they share it with people or projects. Runs on a machine use
+project is its creator's. Machines are private too: whoever adds a machine owns it (for now a server admin gives its node token:
+`tend-server token add --node <name> --owner <user>`), and only they dispatch to it until they share it with people or projects. Runs on a machine use
 its owner's claude / codex login, git identity and files — share a machine set up for that (its own OS user or a
 container), not your laptop. A run's permission requests are for the machine's owner and whoever dispatched it; a share
 can let everyone it opens to approve them too.

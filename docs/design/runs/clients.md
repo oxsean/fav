@@ -56,7 +56,7 @@ tend journal verify [--json] | repair [-y]
 - 认证：登录页列出 `/auth/logins` 给的登录方式（GitHub、OIDC），另有 token 表单。`POST /login`（表单 `token`）建一条网页会话，写 cookie `tend_session`（HttpOnly、SameSite=Strict、TLS 下 Secure、30 天）；`GET /session` 回 `{id, name, email, username, role, session}` 或 401；`POST /logout` 吊销这条会话。地址里的 `#invite-<secret>` 让登录按钮带上邀请，`#signin-<结果>` 显示登录失败的原因。`/client` 接受 header 里的 token 或这个 cookie；WebSocket 握手校验 Origin（同源）。会话被吊销或用户被停用，连接立即断开，页面回到登录页。
 - 响应头：CSP `default-src 'self'`（不允许内联脚本和 `style` 属性，宽度等动态样式经 CSSOM 设置）、`frame-ancestors 'none'`、`nosniff`、`no-referrer`、`Cache-Control: no-cache`。
 - 没有轮询：页面上的一切随 `state.watch`、`machines.watch`、`inbox.watch` 和 `run.output.watch` 的推送变化，首页的数每次重画时取当前时间。页面不调用 `setInterval`（`TestThePageRunsNoInterval`）；剩下的计时器都只响一次：防抖、重连的退避、调用超时、提示的停留、`g` 开头的两键序列。
-- 页面：首页、任务（列表、看板、树、详情、对话、改动）、运行，以及登录、终端授权、邀请。机器、Agent、团队、我四页在侧栏和标签栏里有位置，打开时写「这一页还在做」；在那之前，用户和准入、凭据、agent 定义、项目设置分别用 `tend-server admin`、`tend-server token`、`tend agent`、TUI 的项目设置完成，主题、语言、密度用快捷键和用户菜单。
+- 页面：首页、任务（列表、看板、树、详情、对话、改动）、运行，以及登录、终端授权、邀请。机器、Agent、团队、我四页在侧栏和标签栏里有位置，打开时写「这一页还在做」；在那之前，用户和准入、凭据、登记一台机器、agent 定义、项目设置分别用 `tend-server admin`、`tend-server token`、`tend-server token add --node <机器> --owner <用户>`、`tend agent`、TUI 的项目设置完成，主题、语言、密度用快捷键和用户菜单。
 
 ### 结构
 
