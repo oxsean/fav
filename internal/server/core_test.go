@@ -66,6 +66,10 @@ func TestTheFiguresActionsAndWritesUnderThePages(t *testing.T) {
 
 func TestThePagesInBothFormsAndLanguages(t *testing.T) { runModule(t, "webtest/pages_test.js") }
 
+func TestTheChangesOfARunInPagesAndOnTheTab(t *testing.T) { runModule(t, "webtest/changes_test.js") }
+
+func TestTheRunsPageAndARunsOwn(t *testing.T) { runModule(t, "webtest/runs_test.js") }
+
 func TestTheTaskPagesBoardsTreesAndDrafts(t *testing.T) { runModule(t, "webtest/tasks_test.js") }
 
 func TestTheTaskPagesAndFormsInBothFormsAndLanguages(t *testing.T) {

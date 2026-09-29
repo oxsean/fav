@@ -67,17 +67,18 @@ function kib(n) {
 function Pre({lines, cut = 0, tail = [], cls = '', copy, copyLabel}) {
   const {f} = useWords();
   return html`<div class="out-pre-wrap">
-    <pre class=${cx('out-pre', cls)}>${lines.join('\n')}${cut > 0 && html`\n<span class="t-muted">${f('out.cut', cut)}</span>`}${tail.length > 0 && '\n' + tail.join('\n')}</pre>
+    <pre class=${cx('out-pre', cls)}>${lines.join('\n')}${cut > 0 && html`${'\n'}<span class="t-muted">${f('out.cut', cut)}</span>`}${tail.length > 0 && '\n' + tail.join('\n')}</pre>
     ${copy && html`<${Button} kind="quiet" onClick=${copy}>${copyLabel}<//>`}
   </div>`;
 }
 
 const diffCls = l => (l.startsWith('+') && !l.startsWith('+++') ? 'add' : l.startsWith('-') && !l.startsWith('---') ? 'del' : l.startsWith('@@') ? 'hunk' : '');
 
-function Diff({lines, max = 0}) {
+// Diff draws diff lines, coloured by their mark; past max (when given) the rest is left out.
+export function Diff({lines, max = 0}) {
   const {f} = useWords();
   const shown = max && lines.length > max ? lines.slice(0, max) : lines;
-  return html`<div class="out-pre-wrap"><pre class="out-pre out-diff">${shown.map(l => html`<span class=${diffCls(l)}>${l}\n</span>`)}${max && lines.length > max && html`<span class="t-muted">${f('out.cut', lines.length - max)}</span>`}</pre></div>`;
+  return html`<div class="out-pre-wrap"><pre class="out-pre out-diff">${shown.map(l => html`<span class=${diffCls(l)}>${l + '\n'}</span>`)}${max > 0 && lines.length > max && html`<span class="t-muted">${f('out.cut', lines.length - max)}</span>`}</pre></div>`;
 }
 
 // body is what an open step shows below its line.
@@ -233,7 +234,7 @@ function Row({row, density, onToggle, onMore, onResend, renderAsk, copy, target,
   if (!line) return null;
   const opens = s.kind !== 'plan' || (s.plan || []).length > 0;
   return html`<div class=${cx(base, s.failed && 'out-fail')} data-key=${row.key} style=${depth}>
-    <div class="out-step">
+    <div class="out-step-line">
       <button type="button" class=${cx('out-line', line.thin && 'thin')} aria-expanded=${opens ? (row.open ? 'true' : 'false') : undefined} onClick=${opens ? toggle : undefined}>
         <span class=${cx('out-glyph', 'mono', s.failed ? 't-failed' : 't-muted')} aria-hidden="true">${line.glyph}</span>
         <span class=${cx('out-title', line.mono && 'mono', line.muted && 't-muted', line.warn && 't-warning')}>${line.text}</span>
@@ -340,8 +341,9 @@ function useFollow({scroller, keys, waits, ended, away, timers = globalThis}) {
 // setting; onMore fetches the page before (a promise); renderAsk(step) draws the answer form of a pending question;
 // target is a step to go to (a deep link); place and onPlace keep where the view was left; raw and onRaw show the
 // lines as written; copy puts text on the clipboard; tools go at the top right (the page's own buttons); children
-// (the composer) go under the timeline; linkOf(step) is the address of a step, copied for the selected one.
-export function Output({parts, density = 'standard', onDensity, onMore, onResend, renderAsk, target = '', place = null, onPlace, linkOf,
+// (the composer) go under the timeline; linkOf(step) is the address of a step, copied for the selected one. bare is a
+// preview: the timeline alone, without its tools and keys.
+export function Output({bare = false, parts, density = 'standard', onDensity, onMore, onResend, renderAsk, target = '', place = null, onPlace, linkOf,
   raw = null, onRaw, copy = text => globalThis.navigator?.clipboard?.writeText?.(text), tools, children, timers = globalThis, active: activeProp}) {
   const w = useWords();
   const {t} = w;
@@ -518,7 +520,7 @@ export function Output({parts, density = 'standard', onDensity, onMore, onResend
     const sc = scroller.current, at = sc?.querySelector?.(`[data-key="${cssKey(k)}"]`);
     if (sc && at) { if (n < 0) f.dispatch({type: 'up'}); at.scrollIntoView?.({block: 'nearest'}); }
   };
-  const active = activeProp ?? (phone || focused);
+  const active = !bare && (activeProp ?? (phone || focused));
   useActions('list', {
     end: {run: bottom},
     start: {run: () => { f.dispatch({type: 'up'}); const sc = scroller.current; if (sc) { f.mine.current++; sc.scrollTop = 0; } }},
@@ -553,9 +555,9 @@ export function Output({parts, density = 'standard', onDensity, onMore, onResend
     </span>
   </div>`;
 
-  return html`<section class=${cx('out', phone && 'out-phone')} aria-label=${t('out.label')}
+  return html`<section class=${cx('out', phone && 'out-phone', bare && 'out-bare')} aria-label=${t('out.label')}
     onFocusIn=${() => setFocused(true)} onFocusOut=${e => { if (!e.currentTarget.contains?.(e.relatedTarget)) setFocused(false); }}>
-    ${bar}
+    ${!bare && bar}
     ${m.plan && raw === null && html`<${PlanPin} step=${m.plan} />`}
     ${finding && html`<${FindBar} q=${q} setQ=${setQ} hits=${hits} at=${hit?.key} onStep=${stepHit} onClose=${closeFind} inputRef=${findInput}
       onEarlier=${latest[0]?.type === 'head' && latest[0].more ? findEarlier : null} earlier=${earlier} />`}

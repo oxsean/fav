@@ -1,0 +1,14 @@
+{"note":"the changes of a running run (output-state's r2), after output-state: the workspace changes between two pages, so the list is taken again from its start; later the file's first hunk is asked of a snapshot the workspace has moved past. Shapes as the design draft's §4.6 states them: run.changes and run.diff are not decoded strictly in Go until the node (T2c.2) and the coordinator (T4.3) have them."}
+{"step":"list"}
+{"c":{"type":"req","id":5,"method":"run.changes","params":{"run":"r2"}}}
+{"s":{"type":"res","id":5,"result":{"files":[{"path":"internal/receipt/pdf.go","op":"modify","add":48,"del":6,"bytes":6120,"agent":true}],"total":{"files":2,"add":110,"del":6},"snapshot":"w-1","next":"internal/receipt/pdf.go","git":true}}}
+{"c":{"type":"req","id":6,"method":"run.changes","params":{"run":"r2","after":"internal/receipt/pdf.go"}}}
+{"s":{"type":"res","id":6,"error":{"code":"snapshot_changed"}}}
+{"c":{"type":"req","id":7,"method":"run.changes","params":{"run":"r2"}}}
+{"s":{"type":"res","id":7,"result":{"files":[{"path":"internal/receipt/pdf.go","op":"modify","add":48,"del":6,"bytes":6120,"agent":true},{"path":"internal/receipt/pdf_test.go","op":"add","add":62,"del":0,"bytes":1840,"agent":true}],"total":{"files":2,"add":110,"del":6},"snapshot":"w-2","git":true}}}
+{"step":"refresh"}
+{"c":{"type":"req","id":8,"method":"run.changes","params":{"run":"r2"}}}
+{"s":{"type":"res","id":8,"result":{"files":[{"path":"internal/receipt/pdf.go","op":"modify","add":48,"del":6,"bytes":6120,"agent":true},{"path":"internal/receipt/pdf_test.go","op":"add","add":62,"del":0,"bytes":1840,"agent":true}],"total":{"files":2,"add":110,"del":6},"snapshot":"w-3","git":true}}}
+{"step":"diff"}
+{"c":{"type":"req","id":9,"method":"run.diff","params":{"run":"r2","path":"internal/receipt/pdf_test.go","snapshot":"w-3","hunk":0,"n":1}}}
+{"s":{"type":"res","id":9,"error":{"code":"snapshot_changed"}}}

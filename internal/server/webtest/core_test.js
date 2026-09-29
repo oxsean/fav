@@ -82,6 +82,7 @@ test('the router maps addresses to routes and back', () => {
     ['?page=tasks&task=t1&view=board', '', {page: 'tasks', view: 'board', task: 't1'}, '?page=tasks&task=t1&view=board'],
     ['?page=tasks&view=nope', '', {page: 'tasks', view: 'list'}, '?page=tasks'],
     ['?page=runs', '', {page: 'runs'}, '?page=runs'],
+    ['?page=runs&run=r2', '', {page: 'runs', run: 'r2'}, '?page=runs&run=r2'],
     ['?page=machines', '', {page: 'machines'}, '?page=machines'],
     ['?page=nope', '', {page: 'home'}, '/'],
     ['?page=inbox', '', {page: 'home'}, '/'],

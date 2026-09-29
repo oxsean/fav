@@ -339,6 +339,8 @@ button.tl-seg:hover { filter: brightness(1.15); }
 
 /* the output: a conversation's timeline */
 .out { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 6px; }
+
+.out-bare .out-view { min-height: 120px; }
 .out-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
 .out-tools-end { margin-left: auto; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .out-tools-phone { flex-wrap: nowrap; flex-direction: column; align-items: stretch; }
@@ -359,10 +361,11 @@ button.tl-seg:hover { filter: brightness(1.15); }
 .out-line { display: flex; align-items: baseline; gap: 8px; width: 100%; min-width: 0; min-height: 24px; padding: 2px 0; border: 0; background: transparent; text-align: left; font-size: 12px; }
 .out-line:hover .out-title { color: var(--accent); }
 .out-line.thin { min-height: 18px; color: var(--muted); font-size: 11px; }
-.out-step { display: flex; align-items: center; gap: 6px; min-width: 0; }
-.out-step .btn { visibility: hidden; flex: none; }
-.out-row:hover .out-step .btn, .out-step .btn:focus-visible, .out-phone .out-step .btn { visibility: visible; }
-@media (hover: none) { .out-step .btn { visibility: visible; } }
+.out-step { display: block; }
+.out-step-line { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.out-step-line .btn { visibility: hidden; flex: none; }
+.out-row:hover .out-step-line .btn, .out-step-line .btn:focus-visible, .out-phone .out-step-line .btn { visibility: visible; }
+@media (hover: none) { .out-step-line .btn { visibility: visible; } }
 .out-glyph { width: 14px; flex: none; text-align: center; }
 .out-chev { width: 14px; flex: none; color: var(--muted); }
 .out-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -427,7 +430,7 @@ button.tl-seg:hover { filter: brightness(1.15); }
 .out-new-btn.small { font-weight: 400; }
 [data-form="phone"] .out-row { font-size: 13px; }
 [data-form="phone"] .out-line { min-height: 36px; font-size: 13px; }
-[data-form="phone"] .out-step .btn { visibility: visible; }
+[data-form="phone"] .out-step-line .btn { visibility: visible; }
 [data-form="phone"] .out-new-btn { min-height: 44px; }
 [data-form="phone"] .out-scroll { border-radius: 0; border-left: 0; border-right: 0; }
 [data-form="phone"] .out-pre { max-height: 60vh; }

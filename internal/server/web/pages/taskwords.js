@@ -34,7 +34,7 @@ register('tasks', {
   'det.brief': ['任务书', 'Brief'], 'det.noBrief': ['还没有任务书', 'No brief yet'], 'det.accept': ['验收标准', 'Acceptance'],
   'det.parent': ['父任务', 'Parent'], 'det.after': ['先完成', 'Comes after'], 'det.kids': ['子任务', 'Subtasks'],
   'det.kidsN': ['%d / %d 完成', '%d of %d done'], 'det.runs': ['运行记录', 'Runs'], 'det.noRuns': ['还没有运行', 'No run yet'],
-  'det.overview': ['概览', 'Overview'], 'det.output': ['输出', 'Output'], 'det.outputOf': ['输出 · %s', 'Output · %s'],
+  'det.overview': ['概览', 'Overview'], 'det.output': ['输出', 'Output'], 'det.changes': ['改动', 'Changes'],
   'det.flow': ['工作流 · %s', 'Workflow · %s'], 'det.round': ['第 %d 轮', 'round %d'], 'det.gateHuman': ['人工验收', 'human gate'],
   'det.notes': ['工作记录', 'Workpad'], 'det.owner': ['负责人', 'Owner'], 'det.approver': ['验收人', 'Approver'], 'det.project': ['项目', 'Project'],
   'det.dir': ['目录', 'Directory'], 'det.runsOn': ['在哪跑', 'Runs on'], 'det.projectDefault': ['%s（项目默认）', '%s (project default)'],

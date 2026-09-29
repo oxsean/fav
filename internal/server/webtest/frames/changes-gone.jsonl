@@ -1,0 +1,11 @@
+{"note":"changes where not everything can be shown, after home-state: a run outside git (r4, only what the agent's tools changed), a directory run on a machine this viewer does not own (r5, four more files only the owner sees), a run whose changes were cleared (r8), and a hunk whose content was cleared. Shapes as the design draft's §4.6 states them: run.changes and run.diff are not decoded strictly in Go until the node (T2c.2) and the coordinator (T4.3) have them."}
+{"step":"lists"}
+{"c":{"type":"req","id":5,"method":"run.changes","params":{"run":"r4"}}}
+{"s":{"type":"res","id":5,"result":{"files":[{"path":"notes.txt","op":"modify","add":2,"del":1,"bytes":120,"agent":true}],"total":{"files":1,"add":2,"del":1},"git":false}}}
+{"c":{"type":"req","id":6,"method":"run.changes","params":{"run":"r5"}}}
+{"s":{"type":"res","id":6,"result":{"files":[{"path":"cmd/tend/main.go","op":"modify","add":5,"del":1,"bytes":8800,"agent":true}],"total":{"files":1,"add":5,"del":1},"snapshot":"t-5","git":true,"hidden":4}}}
+{"c":{"type":"req","id":7,"method":"run.changes","params":{"run":"r8"}}}
+{"s":{"type":"res","id":7,"error":{"code":"gone"}}}
+{"step":"diff"}
+{"c":{"type":"req","id":8,"method":"run.diff","params":{"run":"r4","path":"notes.txt","hunk":0,"n":1}}}
+{"s":{"type":"res","id":8,"error":{"code":"gone"}}}

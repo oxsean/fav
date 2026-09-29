@@ -172,3 +172,59 @@
 .det-run-go.on { background: var(--accent-soft); }
 .conv { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 [data-form="phone"] .page-body .conv { height: 100%; }
+
+/* the changes tab */
+.chg { display: grid; gap: 8px; align-content: start; min-width: 0; }
+.chg-runs { display: flex; }
+.chg-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; }
+.chg-head-phone .chips { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; flex-basis: 100%; }
+.chg-sum { display: inline-flex; align-items: baseline; gap: 8px; font-weight: 600; }
+.chg-at { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; font-size: 11px; }
+.chg-warn { margin: 0; padding: 6px 10px; border-radius: 6px; background: var(--surface-alt); font-size: 12px; }
+.chg-list { display: grid; gap: 6px; min-width: 0; }
+.chg-group { display: grid; gap: 1px; min-width: 0; }
+.chg-dir { margin: 4px 0 2px; font-size: 11px; font-weight: 600; color: var(--muted); }
+.chg-files { list-style: none; margin: 0; padding: 0; display: grid; gap: 1px; min-width: 0; }
+.chg-file { min-width: 0; border-radius: 6px; }
+.chg-file.open { background: var(--surface-alt); }
+.chg-row { display: flex; align-items: center; gap: 8px; width: 100%; min-width: 0; min-height: 28px; padding: 2px 8px; border: 0; background: transparent; text-align: left; font-size: 12px; }
+.chg-row:disabled { opacity: 1; cursor: default; }
+.chg-row:hover:not(:disabled) .chg-path { color: var(--accent); }
+.chg-glyph { width: 12px; flex: none; color: var(--muted); }
+.chg-op { width: 12px; flex: none; text-align: center; }
+.chg-op.op-add { color: var(--success); }
+.chg-op.op-delete { color: var(--failed); }
+.chg-path { flex: 1; min-width: 0; }
+.chg-n { flex: none; font-size: 11px; white-space: nowrap; }
+.chg-body { display: grid; gap: 4px; padding: 0 8px 8px 28px; min-width: 0; }
+.chg-note { margin: 0; padding: 0 8px 6px 28px; font-size: 11px; }
+.chg-body .chg-note { padding: 0; }
+[data-form="phone"] .chg-row { min-height: 44px; font-size: 13px; }
+[data-form="phone"] .chg-body, [data-form="phone"] .chg-note { padding-left: 8px; }
+
+/* the runs page and a run's own */
+.runs { position: relative; display: flex; flex-direction: column; gap: var(--gap); min-height: 0; flex: 1; }
+.runs-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.runs-head-phone { display: grid; gap: 8px; }
+.runs-head-phone .chips { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+.runs-machines { margin: 0; font-size: 13px; }
+.runs-body { flex: 1; min-height: 0; display: flex; }
+.runs-split { display: grid; grid-template-columns: minmax(0, 1fr) minmax(360px, 440px); grid-template-rows: minmax(0, 1fr); gap: var(--gap); }
+.runs-list { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.runs-list .table { flex: 1; min-height: 0; }
+.runs-preview { min-height: 0; display: flex; flex-direction: column; gap: 8px; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: var(--pad); }
+.runs-pv-head { display: flex; align-items: center; gap: 8px; min-width: 0; font-weight: 600; }
+.runs-pv-task { flex: 1; min-width: 0; font-weight: 400; }
+.runs-pv-facts { flex: none; }
+.runs-pv-out { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.runs-pv-acts { flex: none; display: flex; flex-wrap: wrap; gap: 6px; }
+.runs-one { padding: 0; }
+.runs-one > .run { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 4px var(--pad) 0; }
+.run-scroll { flex: 1; min-height: 0; overflow-y: auto; padding-bottom: var(--pad); }
+.run-facts { align-content: start; }
+.run-phone { display: flex; flex-direction: column; gap: 8px; min-height: 100%; }
+.run-tabs { flex: none; display: flex; }
+.run-pane { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.run-acts { flex: none; display: flex; flex-wrap: wrap; gap: 6px; }
+[data-form="phone"] .run-acts .btn { flex: 1; }
+.runs-phone { padding-bottom: 16px; }

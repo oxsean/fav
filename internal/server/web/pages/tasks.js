@@ -18,6 +18,8 @@ import {dayStart} from '../core/select.js';
 import {Task, sitState, sitWord, who} from './task.js';
 import {TaskForm, Dispatch, Move, PlanReview, Gate, DRAFT_KEY} from './taskforms.js';
 import {Conversation} from './conversation.js';
+import {RunChanges} from './changes.js';
+import {RunPage} from './runs.js';
 import './taskwords.js';
 
 // ⚠️ Where this browser keeps the viewer's task filter.
@@ -34,7 +36,7 @@ const when = (at, now) => { const t = Date.parse(at); return Number.isNaN(t) ? '
 
 // Tasks: intent is a signal the app sets to {kind: new | search} for the page to act on; storage keeps the filter and
 // a new task's draft in this browser.
-export function Tasks({store, commands, toasts, wire, router, session, clock = () => Date.now(), storage, intent, prefs, copy}) {
+export function Tasks({store, commands, toasts, wire, router, session, clock = () => Date.now(), storage, intent, prefs, copy, changes}) {
   const w = useWords();
   const {t, f} = w;
   const phone = usePhone();
@@ -46,7 +48,8 @@ export function Tasks({store, commands, toasts, wire, router, session, clock = (
   const route = useSignalValue(router.route);
   const want = useSignalValue(intent);
   const [filter, setFilter] = useState(() => readFilter(storage));
-  const [pane, setPaneState] = useState(() => { try { return storage?.getItem(PANE_KEY) === 'overview' ? 'overview' : 'output'; } catch { return 'output'; } });
+  const [pane, setPaneState] = useState(() => { try { const p = storage?.getItem(PANE_KEY); return ['overview', 'changes'].includes(p) ? p : 'output'; } catch { return 'output'; } });
+  const [runTab, setRunTab] = useState('output');
   const setPane = v => { setPaneState(v); try { storage?.setItem(PANE_KEY, v); } catch {} };
   const [collapsed, setCollapsed] = useState(() => new Set());
   const [modal, setModal] = useState(null);
@@ -215,8 +218,9 @@ export function Tasks({store, commands, toasts, wire, router, session, clock = (
   const conv = () => task && prefs && html`<${Conversation} store=${store} commands=${commands} toasts=${toasts} prefs=${prefs} task=${task}
     run=${runOf} target=${route.event || ''} copy=${copy} />`;
   const showRun = id => router.go({page: 'tasks', view: route.view || 'list', task: picked, run: id}, {replace: !phone});
+  const taskChanges = changes && task && (() => html`<${RunChanges} changes=${changes} runs=${tk.runsOf(st, task.id)} />`);
   const detail = picked && html`<${Task} store=${store} task=${task} now=${now} busy=${busy(task)} onAct=${act} onGo=${id => go(id, {push: phone})}
-    output=${prefs ? conv : null} onRun=${prefs ? showRun : null} run=${runOf} pane=${runOf ? 'output' : pane} onPane=${setPane} onClose=${phone || view === 'board' ? undefined : () => go('')} />`;
+    output=${prefs ? conv : null} changes=${taskChanges} onRun=${prefs ? showRun : null} run=${runOf} pane=${runOf && pane === 'overview' ? 'output' : pane} onPane=${setPane} onClose=${phone || view === 'board' ? undefined : () => go('')} />`;
   const nav = phone && picked && html`<span class="det-nav">
     <${Button} kind="quiet" icon="up" label=${t('ui.prev')} disabled=${at <= 0} onClick=${() => step(-1)} />
     <${Button} kind="quiet" icon="down" label=${t('ui.next')} disabled=${at < 0 || at >= order.length - 1} onClick=${() => step(1)} />
@@ -258,7 +262,9 @@ export function Tasks({store, commands, toasts, wire, router, session, clock = (
       ${head}${body}
       <button type="button" class="fab" aria-label=${t('tasks.new')} onClick=${() => open({kind: 'form', mode: 'new'})}><${Icon} name="plus" size=${22} /></button>
       ${picked && html`<${Drawer} title=${task?.title || picked} onClose=${() => router.go({page: 'tasks', view: route.view || 'list'})} extra=${nav}>${detail}<//>`}
-      ${picked && task && runOf && prefs && html`<${Drawer} title=${f('det.outputOf', runOf)} onClose=${() => router.go({page: 'tasks', view: route.view || 'list', task: picked})}>${conv()}<//>`}
+      ${picked && task && runOf && st.runs[runOf] && prefs && html`<${Drawer} title=${f('runs.of', runOf, task.title)} onClose=${() => router.go({page: 'tasks', view: route.view || 'list', task: picked})}>
+        <${RunPage} store=${store} commands=${commands} toasts=${toasts} prefs=${prefs} copy=${copy} changes=${changes} run=${st.runs[runOf]} now=${now}
+          tab=${runTab} onTab=${setRunTab} target=${route.event || ''} onTask=${() => router.go({page: 'tasks', view: route.view || 'list', task: picked})} /><//>`}
       ${dialogs}
     </div>`;
   }

@@ -1,5 +1,5 @@
 // router maps the address to a route and back. A route is {page, task?, run?, view?, event?, auth?}: run is the run
-// whose conversation the task page shows; event and auth are one-time: event (from #task-<id>/r-<run>/e-<event>) is
+// whose conversation the task page shows, or the run the runs page has open; event and auth are one-time: event (from #task-<id>/r-<run>/e-<event>) is
 // the step to scroll to, auth a fragment (#device-, #invite-, #signin-) the page acts on; neither is written back.
 import {signal} from '../vendor/signals-core.mjs';
 
@@ -23,6 +23,7 @@ export function parse(search = '', hash = '') {
     if (q.get('task')) route.task = q.get('task');
     if (q.get('task') && q.get('run')) route.run = q.get('run');
   }
+  if (page === 'runs' && q.get('run')) route.run = q.get('run');
   const frag = hash.replace(/^#/, '');
   const task = frag.match(/^task-([^/]+)(?:\/r-([^/]+))?(?:\/e-(.+))?$/);
   if (task) {
@@ -55,6 +56,7 @@ export function format(route) {
     if (route.task && route.run) q.set('run', route.run);
     if (route.view && route.view !== 'list') q.set('view', route.view);
   }
+  if (route.page === 'runs' && route.run) q.set('run', route.run);
   const s = q.toString();
   return s ? `?${s}` : '/';
 }

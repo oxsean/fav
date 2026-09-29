@@ -10,6 +10,8 @@ import {runnable} from '../core/actions.js';
 import * as sel from '../core/select.js';
 import {Home} from './home.js';
 import {Tasks} from './tasks.js';
+import {Runs} from './runs.js';
+import {createChanges} from '../core/changes.js';
 import './words.js';
 
 const goes = {home: {page: 'home'}, tasks: {page: 'tasks', view: 'list'}, board: {page: 'tasks', view: 'board'}, runs: {page: 'runs'},
@@ -29,7 +31,7 @@ function finder(store, machines, go) {
     const tasks = Object.values(st.tasks).filter(x => `${x.title} ${x.id}`.toLowerCase().includes(s))
       .map(x => ({kind: 'task', id: x.id, title: x.title, sub: x.id, run: () => go({page: 'tasks', task: x.id})}));
     const runs = Object.values(st.runs).filter(r => r.id.toLowerCase().includes(s))
-      .map(r => ({kind: 'run', id: r.id, title: st.tasks[r.task]?.title || r.task, sub: r.id, run: () => go({page: 'tasks', task: r.task})}));
+      .map(r => ({kind: 'run', id: r.id, title: st.tasks[r.task]?.title || r.task, sub: r.id, run: () => go({page: 'runs', run: r.id})}));
     const ms = machines.filter(m => m.name.toLowerCase().includes(s))
       .map(m => ({kind: 'machine', id: m.name, title: m.name, sub: m.state, run: () => go({page: 'machines'})}));
     return [...tasks, ...runs, ...ms];
@@ -37,8 +39,9 @@ function finder(store, machines, go) {
 }
 
 // App: router, keys, nav and toasts are core's; prefs core/prefs.js's; session is who signed in; fetchOutput(run) the
-// last events of a run; storage is the browser's (the task page keeps its filter and draft there); onLogout signs out.
-export function App({store, commands, toasts, wire, router, keys, nav, prefs, session, clock, fetchOutput, storage, onLogout, copy}) {
+// last events of a run; storage is the browser's (the task page keeps its filter and draft there); onLogout signs out;
+// changes reads what runs changed (core/changes.js; one over wire when not given).
+export function App({store, commands, toasts, wire, router, keys, nav, prefs, session, clock, fetchOutput, storage, onLogout, copy, changes: given}) {
   const {t, f} = useWords();
   const route = useSignalValue(router.route);
   const machines = useSignalValue(store.machines);
@@ -49,6 +52,7 @@ export function App({store, commands, toasts, wire, router, keys, nav, prefs, se
   const [modal, setModal] = useState(null);
   // intent is what the task page is asked to do once it is up: open a new task or its search.
   const intent = useMemo(() => signal(null), []);
+  const changes = useMemo(() => given || createChanges({wire}), [wire, given]);
   const go = to => router.go(to);
   const toTasks = kind => { if (route.page !== 'tasks') go({page: 'tasks', view: 'list'}); intent.value = {kind}; };
 
@@ -78,8 +82,10 @@ export function App({store, commands, toasts, wire, router, keys, nav, prefs, se
     ? html`<${Home} store=${store} commands=${commands} toasts=${toasts} clock=${clock} fetchOutput=${fetchOutput} onOpen=${onOpen} onNavigate=${onNavigate} />`
     : route.page === 'tasks'
       ? html`<${Tasks} store=${store} commands=${commands} toasts=${toasts} wire=${wire} router=${router} session=${session} clock=${clock} storage=${storage}
-        intent=${intent} prefs=${prefs} copy=${copy} />`
-      : html`<${Soon} page=${route.page} />`;
+        intent=${intent} prefs=${prefs} copy=${copy} changes=${changes} />`
+      : route.page === 'runs'
+        ? html`<${Runs} store=${store} commands=${commands} toasts=${toasts} router=${router} prefs=${prefs} copy=${copy} changes=${changes} storage=${storage} clock=${clock} />`
+        : html`<${Soon} page=${route.page} />`;
 
   return html`<${Shell} keys=${keys} wire=${wire} nav=${nav} toasts=${toasts} page=${route.page} onNavigate=${onNavigate}
     counts=${counts} spent=${{tokens: day.tokens, usd: day.usd}} user=${session} userMenu=${userMenu}

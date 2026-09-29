@@ -64,7 +64,8 @@ function RunRow({run, now, onRun, on}) {
 // (a function of nothing that draws the conversation) a desktop shows it as a second pane, open by default once the
 // task has run, under a head folded into one line so the timeline keeps the height; onRun(id) shows a run's
 // conversation (on a phone, on a screen of its own); run is the one shown; onClose, when given, closes the pane.
-export function Task({store, task, now, busy = false, onAct, onGo, output, onRun, run = '', pane = 'output', onPane = () => {}, onClose}) {
+// changes, like output, draws the changes tab beside it.
+export function Task({store, task, now, busy = false, onAct, onGo, output, changes, onRun, run = '', pane = 'output', onPane = () => {}, onClose}) {
   const w = useWords();
   const {t, f} = w;
   const phone = usePhone();
@@ -85,12 +86,14 @@ export function Task({store, task, now, busy = false, onAct, onGo, output, onRun
   const more = acts.more.filter(id => !['edit', 'dispatch'].includes(id) || phone);
   const direct = phone ? [] : acts.more.filter(id => ['edit', 'dispatch'].includes(id));
   const tabs = !phone && !!output && runs.length > 0;
-  const shown = tabs ? pane : 'overview';
+  const panes = ['overview', 'output', ...(changes ? ['changes'] : [])];
+  const shown = tabs && panes.includes(pane) ? pane : 'overview';
   const close = onClose && html`<${Button} kind="quiet" icon="close" label=${t('ui.close')} onClick=${onClose} />`;
   const menu = ids => ids.length > 0 && html`<${Menu} label=${t('do.more')} items=${ids.map(id => ({label: actLabel(w, id, sit), kind: id === 'cancel' ? 'danger' : '', onClick: () => onAct(id, task)}))} />`;
   const tabBar = tabs && html`<${Tabs} label=${task.title} value=${shown} onChange=${onPane} idPrefix=${'det-' + task.id}
-      tabs=${[{id: 'overview', label: t('det.overview')}, {id: 'output', label: t('det.output'), count: runs.length}]} />`;
-  if (shown === 'output') {
+      tabs=${[{id: 'overview', label: t('det.overview')}, {id: 'output', label: t('det.output'), count: runs.length},
+        ...(changes ? [{id: 'changes', label: t('det.changes')}] : [])]} />`;
+  if (shown !== 'overview') {
     const meta = [task.id, project?.name, stage && f('gate.stage', stage.name, task.loops || 0)].filter(Boolean).join(' · ');
     return html`<article class="det det-out" aria-label=${task.title}>
       <header class="det-bar">
@@ -99,7 +102,7 @@ export function Task({store, task, now, busy = false, onAct, onGo, output, onRun
         ${tabBar}
         <span class="det-bar-acts">${acts.primary && button(acts.primary, 'primary')}${menu([...direct, ...more])}${close}</span>
       </header>
-      <div class="det-pane" role="tabpanel" id=${'det-' + task.id + '-output-pane'}>${output()}</div>
+      <div class="det-pane" role="tabpanel" id=${'det-' + task.id + '-' + shown + '-pane'}>${shown === 'changes' ? html`<div class="run-scroll">${changes()}</div>` : output()}</div>
     </article>`;
   }
   const top = html`<header class="det-head">
