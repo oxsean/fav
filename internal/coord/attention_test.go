@@ -186,7 +186,7 @@ func TestAPermissionIsAnsweredThroughTheCoordinator(t *testing.T) {
 	if !w.Stream || w.Requests[0].Summary != "make deploy" || w.Attention != task.AttentionPermission || !w.NeedsYou() {
 		t.Fatalf("%+v", w)
 	}
-	if err := e.call(MRunAnswer, Answer{Run: r.ID, Answer: agent.Answer{Request: "nope", Allow: true}}, nil); wire.Code(err) != wire.CodeConflict {
+	if err := e.call(MRunAnswer, Answer{Run: r.ID, Answer: agent.Answer{Request: "nope", Allow: true}}, nil); wire.Code(err) != wire.CodeRequestGone {
 		t.Fatalf("a request it does not wait on: %v", err)
 	}
 	e.must(MRunAnswer, Answer{Run: r.ID, Answer: agent.Answer{Request: w.Requests[0].ID, Allow: true}}, nil)
@@ -217,7 +217,7 @@ func TestAMessageGoesToARunningRunAndAQuestionNeedsItsAnswers(t *testing.T) {
 	if len(end.Sends) != 1 || end.Sends[0].State != agent.SendSeen {
 		t.Fatalf("%+v", end.Sends)
 	}
-	if err := e.call(MRunSend, SendMessage{Run: r.ID, Text: "late"}, nil); wire.Code(err) != wire.CodeConflict {
+	if err := e.call(MRunSend, SendMessage{Run: r.ID, Text: "late"}, nil); wire.Code(err) != wire.CodeCannotSend {
 		t.Fatalf("an ended run takes no message: %v", err)
 	}
 }

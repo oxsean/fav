@@ -286,45 +286,9 @@ func (c *Coord) runContinue(who Principal, r *wire.Request) (string, []journal.E
 		if err != nil {
 			return "", nil, err
 		}
-		if !c.canUse(who, prev.Machine, prev.Project) {
-			return "", nil, forbidden("machine " + prev.Machine)
-		}
-		if prev.Session == "" {
-			return "", nil, bad("run " + prev.ID + " has no session")
-		}
-		if open := c.st.OpenRun(prev.Task); open != nil {
-			return "", nil, conflict("open run " + open.ID)
-		}
-		prof := prev.Profile
-		if p.Agent != "" {
-			var ok bool
-			if prof, ok = c.profile(p.Agent); !ok {
-				return "", nil, notFound("agent " + p.Agent)
-			}
-			if prof.Provider != prev.Profile.Provider {
-				return "", nil, bad("agent " + p.Agent + " is not " + prev.Profile.Provider)
-			}
-		}
-		if err := c.canContinue(prof, prev.Machine); err != nil {
+		run, err := c.continuation(who, prev, p.Text, p.Agent)
+		if err != nil {
 			return "", nil, err
-		}
-		run := task.Run{ID: node.NewRunID(), Task: prev.Task, Machine: prev.Machine, Agent: firstOf(p.Agent, prev.Agent), Profile: prof,
-			Dir: prev.Dir, From: prev.Machine, Brief: p.Text, Title: prev.Title, Runner: node.RunnerBackground, Resume: prev.Session,
-			Parent: prev.ID, Project: runTask(c.st, prev).Project, Dispatcher: who.User}
-		if w := prev.Work; w != nil && w.Merge == "" { // in the same worktree (a read-only copy is made anew)
-			cp := *w
-			cp.Setup = nil
-			run.Work = &cp
-		}
-		if t := runTask(c.st, prev); t.Flow != nil { // it goes on in the task's stage
-			run.Stage, run.Judge, run.Check = t.Stage, prev.Judge, prev.Check
-			if st := t.Flow.StageOf(t.Stage); st != nil && st.Role == "review" {
-				reviewer(&run.Profile, run.Work != nil && run.Work.ReadOnly)
-			}
-		}
-		if prev.Planner {
-			run.Stage, run.Planner = task.StagePlan, true
-			readOnly(&run.Profile)
 		}
 		return run.ID, []journal.Event{journal.NewEvent(task.ERunQueued, run)}, nil
 	}
@@ -363,6 +327,52 @@ func (c *Coord) runContinue(who Principal, r *wire.Request) (string, []journal.E
 	run := task.Run{ID: node.NewRunID(), Task: t.ID, Machine: machine, Agent: name, Profile: prof, Dir: p.Dir, From: machine,
 		Brief: p.Text, Title: title, Runner: node.RunnerBackground, Resume: p.Session, Dispatcher: who.User}
 	return run.ID, []journal.Event{journal.NewEvent(task.ETaskCreated, t), journal.NewEvent(task.ERunQueued, run)}, nil
+}
+
+// continuation is the run that goes on with prev's session with text, as who; agentName "" keeps prev's agent. The
+// caller holds mu.
+func (c *Coord) continuation(who Principal, prev *task.Run, text, agentName string) (task.Run, error) {
+	if !c.canUse(who, prev.Machine, prev.Project) {
+		return task.Run{}, forbidden("machine " + prev.Machine)
+	}
+	if prev.Session == "" {
+		return task.Run{}, bad("run " + prev.ID + " has no session")
+	}
+	if open := c.st.OpenRun(prev.Task); open != nil {
+		return task.Run{}, conflict("open run " + open.ID)
+	}
+	prof := prev.Profile
+	if agentName != "" {
+		var ok bool
+		if prof, ok = c.profile(agentName); !ok {
+			return task.Run{}, notFound("agent " + agentName)
+		}
+		if prof.Provider != prev.Profile.Provider {
+			return task.Run{}, bad("agent " + agentName + " is not " + prev.Profile.Provider)
+		}
+	}
+	if err := c.canContinue(prof, prev.Machine); err != nil {
+		return task.Run{}, err
+	}
+	run := task.Run{ID: node.NewRunID(), Task: prev.Task, Machine: prev.Machine, Agent: firstOf(agentName, prev.Agent), Profile: prof,
+		Dir: prev.Dir, From: prev.Machine, Brief: text, Title: prev.Title, Runner: node.RunnerBackground, Resume: prev.Session,
+		Parent: prev.ID, Project: runTask(c.st, prev).Project, Dispatcher: who.User}
+	if w := prev.Work; w != nil && w.Merge == "" { // in the same worktree (a read-only copy is made anew)
+		cp := *w
+		cp.Setup = nil
+		run.Work = &cp
+	}
+	if t := runTask(c.st, prev); t.Flow != nil { // it goes on in the task's stage
+		run.Stage, run.Judge, run.Check = t.Stage, prev.Judge, prev.Check
+		if st := t.Flow.StageOf(t.Stage); st != nil && st.Role == "review" {
+			reviewer(&run.Profile, run.Work != nil && run.Work.ReadOnly)
+		}
+	}
+	if prev.Planner {
+		run.Stage, run.Planner = task.StagePlan, true
+		readOnly(&run.Profile)
+	}
+	return run, nil
 }
 
 // canContinue: prof's agent can go on with a session in the background, and machine's tend can start that, as far as

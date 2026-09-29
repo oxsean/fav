@@ -92,7 +92,7 @@ runner 方式：
   - codex：`item/commandExecution/requestApproval`、`item/fileChange/requestApproval` 回 `acceptForSession`（不用长期写进 execpolicy 的 `acceptWithExecpolicyAmendment`）；`item/permissions/requestApproval` 仍只授予这一轮。
 - 回答写进 stdin 之后请求才从 `state.requests` 去掉；没写进去（输入已关、排队已满、写失败）就留着，标 `failed`，可以再答一次。
 - 实际能力 `state.caps{steer, after, interrupt, answer_scope, questions, continue, takeover}`：agent 启动时写一次。stream run 有 `steer`、`interrupt`、`answer_scope`、`questions`，provider 能续会话时还有 `after`；`continue` 是 provider 能续会话、而且不是 herdr 方式；`takeover` 是 provider 能在终端里续（claude、codex）。协调器照搬到 `Run.caps`。
-- 正在做 `state.doing`：`rolling` 数轮次时，每个工具事件（`tool`、`cmd`、`edit`、`mcp`）的 `title` 记成 `doing`，这一轮的 result 清空，run 结束也清空；和 `last` 一起每秒最多写一次 state，随 `run_observed` 进 `Run.doing`。
+- 正在做 `state.doing`：`rolling` 数轮次时，每个工具事件（`tool`、`cmd`、`edit`、`mcp`）的 `title` 记成 `doing`，这一轮的 result 清空，run 结束也清空；和 `last` 一起每秒最多写一次 state，随 `run_observed` 进 `Run.doing`。`state.turn` 是 `rolling` 数到的轮次，随它写，进 `Run.turn`；`run.interrupt` 按它点名一轮。
 - 节点 `run.answer`：请求不在 `state.requests` 里 → `conflict request_gone`；同一请求已在 `answers.jsonl` 里、而且没标 `failed` → 直接回快照。`run.send`：不是 stream run 或已不在 starting / running → `conflict cannot_send`；同 id 已有 → 直接回快照。快照的 `sends` = `state.sends` 加上 `inbox.jsonl` 里监督进程还没取的（queued；run 已结束或 unknown 时算 failed）。
 - 最后一句话（`last`，500 字节内）和用量（`usage{input, cache_read, cache_write, output, cost_usd, turns}`）：claude 取 assistant 文本和每个 `result` 的 usage 累加、`total_cost_usd` 取最新；codex exec 取 `turn.completed` 的 usage；普通命令行取最后一行。每秒最多写一次 state。
 

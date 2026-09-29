@@ -64,6 +64,7 @@ type Answer struct {
 	Decision string            `json:"decision,omitempty"` // "" is Allow's
 	Message  string            `json:"message,omitempty"`  // why it was denied
 	Answers  map[string]string `json:"answers,omitempty"`  // question → the chosen option labels (", " between) or own words
+	By       string            `json:"by,omitempty"`       // who answered
 }
 
 // Settled is a with Allow as its decision says.
@@ -99,13 +100,26 @@ const (
 	SendFailed = "failed" // the agent ended before it went out
 )
 
-// Send is a message for a running agent and how far it got.
+// Send modes: how a message for a running run goes in.
+const (
+	SendSteer     = "steer"     // into the running turn ("" too)
+	SendAfter     = "after"     // once the turn ended and the run exited, a new run continues its session with it
+	SendInterrupt = "interrupt" // the turn is interrupted first, then as after
+)
+
+// Send is a message for a running agent and how far it got. The coordinator keeps an after or interrupt message
+// itself: it never goes to the node.
 type Send struct {
 	ID    string    `json:"id"`
 	Text  string    `json:"text"`
 	State string    `json:"state"`
+	Mode  string    `json:"mode,omitempty"`
+	By    string    `json:"by,omitempty"` // who sent it
 	At    time.Time `json:"at"`
 }
+
+// Carried: the coordinator keeps s for the run that continues the one it was sent to.
+func (s Send) Carried() bool { return s.Mode == SendAfter || s.Mode == SendInterrupt }
 
 // Verdicts a run reports on the work it was given to judge (tend run verdict).
 const (

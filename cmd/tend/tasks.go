@@ -1092,11 +1092,11 @@ func cmdTaskGate(args []string) error {
 	})
 }
 
-// cmdTaskMessage gives a task words: into its running implementer's turn, as a waiting run's reply, else to its
-// workpad for the next stage.
+// cmdTaskMessage gives a task words where task.Route takes them: to its running run, as the reply that continues its
+// last run, or onto its workpad for the next stage.
 func cmdTaskMessage(args []string) error {
 	fs := newFlags("task")
-	toRun := fs.Bool("to-run", false, i18n.T("cli.task.flag_to_run"))
+	mode := fs.String("mode", "", i18n.T("cli.task.flag_mode"))
 	pos, err := parseMixed(fs, args)
 	if err != nil {
 		return err
@@ -1114,7 +1114,7 @@ func cmdTaskMessage(args []string) error {
 			return err
 		}
 		var res coord.MessageResult
-		if err := write(cl, coord.MTaskMessage, coord.TaskMessage{ID: id, Text: strings.Join(pos[1:], " "), ToRun: *toRun}, &res); err != nil {
+		if err := write(cl, coord.MTaskMessage, coord.TaskMessage{ID: id, Text: strings.Join(pos[1:], " "), Mode: *mode}, &res); err != nil {
 			return err
 		}
 		fmt.Print(i18n.F(messageKeys[res.To], id, res.Run))
@@ -1122,8 +1122,8 @@ func cmdTaskMessage(args []string) error {
 	})
 }
 
-var messageKeys = map[string]string{coord.MessageToRun: "cli.task.message_run", coord.MessageToReply: "cli.task.message_reply",
-	coord.MessageToWorkpad: "cli.task.message_workpad"}
+var messageKeys = map[string]string{task.RouteRun: "cli.task.message_run", task.RouteReply: "cli.task.message_reply",
+	task.RouteWorkpad: "cli.task.message_workpad"}
 
 func cmpOr(a, b string) string {
 	if a != "" {

@@ -9,7 +9,7 @@ tend task add "标题" [--brief-file f | --brief s] [--dir d] [--machine m] [--a
 tend task gate <id> --pass | --rework "意见"
 tend task merge <id>                # 在父任务工作树里解决冲突后重新合并
 tend task plan <id> [--agent a] [--machine m] | draft <id> [--save f | --apply | --discard]
-tend task message <id> <text> [--to-run]
+tend task message <id> <text> [--mode steer|after|interrupt]
 tend task list [--all] | show <id> | edit <id> … | done <id> | reopen <id> | cancel <id> | start <id> | move <id> [--parent t] [--after t,…]
 tend run start <task> [--machine m] [--agent a] [--wait] [--force] | stop <run> | abandon <run> | list [--task t] | show <run> | logs <run> [-f]
 tend run continue <run> <text> | --session <id> <text> [--file f] [--agent a] [--wait]

@@ -121,7 +121,7 @@ var readMethods = []string{remote.MHello, remote.MList, remote.MMessages, remote
 var Methods = []string{MStateGet, MTaskGet, MTaskCreate, MTaskEdit, MTaskStatus, MRunDispatch, MRunStop, MRunAbandon, MRunTail, MRunOutputPage,
 	MAgentList, MMachineList, MStateWatch, MNodeCall, MRunPreview, MRunContinue, MRunAnswer, MRunSend, MRunMessages,
 	MProjectCreate, MProjectEdit, MProjectMember, MMachineShare, MTaskStart, MTaskMove,
-	MAgentDefList, MAgentDefGet, MAgentDefSave, MAgentDefRemove, MAgentDefShare, MInboxList, MUserOffboard, MTaskSync, MTaskLink, MTaskSourceAck, MTaskGate, MTaskMerge, MTaskPlan, MTaskPlanSave, MTaskPlanApply, MTaskMessage}
+	MAgentDefList, MAgentDefGet, MAgentDefSave, MAgentDefRemove, MAgentDefShare, MInboxList, MUserOffboard, MTaskSync, MTaskLink, MTaskSourceAck, MTaskGate, MTaskMerge, MTaskPlan, MTaskPlanSave, MTaskPlanApply, MTaskMessage, MTaskMessagePreview, MRunInterrupt}
 
 // Bulk marks the methods whose answers are large pieces fetched on demand: a connection writes them after everything
 // else (wire.Options.Bulk).
@@ -251,6 +251,8 @@ func (c *Coord) HandlerFor(p Principal) wire.Handler {
 			return c.command(p, r, c.planApply, taskView)
 		case MTaskMessage:
 			return c.command(p, r, c.taskMessage, messageView)
+		case MTaskMessagePreview:
+			return c.messagePreview(p, r)
 		case MRunDispatch:
 			return c.command(p, r, c.runDispatch, runView)
 		case MRunContinue:
@@ -269,6 +271,8 @@ func (c *Coord) HandlerFor(p Principal) wire.Handler {
 			return c.command(p, r, c.runAnswer, runView)
 		case MRunSend:
 			return c.command(p, r, c.runSend, runView)
+		case MRunInterrupt:
+			return c.command(p, r, c.runInterrupt, runView)
 		case MProjectCreate:
 			return c.command(p, r, c.projectCreate, projectView)
 		case MProjectEdit:

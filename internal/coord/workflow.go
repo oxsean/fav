@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 
+	"github.com/oxsean/fav/internal/agent"
 	"github.com/oxsean/fav/internal/journal"
 	"github.com/oxsean/fav/internal/node"
 	"github.com/oxsean/fav/internal/task"
@@ -23,19 +24,23 @@ type TaskGate struct {
 	ExpectedRev int    `json:"expected_rev,omitempty"`
 }
 
-// TaskMessage is task.message: words for a task, which go where its state takes them.
+// TaskMessage is task.message: words for a task, which go where task.Route takes them.
 type TaskMessage struct {
-	ID    string `json:"id"`
-	Text  string `json:"text"`
-	ToRun bool   `json:"to_run,omitempty"` // into a reviewer's or tester's current turn too
+	ID     string      `json:"id"`
+	Text   string      `json:"text"`
+	Mode   string      `json:"mode,omitempty"`   // how it goes into a running run, as run.send's; "": into the turn when the run takes that, else after it
+	Expect *task.Route `json:"expect,omitempty"` // the route its sender saw: when it goes elsewhere now, route_changed
 }
 
-// Where a task message went.
-const (
-	MessageToRun     = "run"     // into the running run's turn
-	MessageToReply   = "reply"   // a reply that continues the run that waits
-	MessageToWorkpad = "workpad" // kept for the next stage
-)
+// MessagePreview is task.message.preview: where a message for task ID would go now.
+type MessagePreview struct {
+	ID string `json:"id"`
+}
+
+// MessageRoute answers task.message.preview.
+type MessageRoute struct {
+	Route task.Route `json:"route"`
+}
 
 // MessageResult says where a message went.
 type MessageResult struct {
@@ -219,8 +224,8 @@ func (c *Coord) taskGate(who Principal, r *wire.Request) (string, []journal.Even
 	return t.ID, events, nil
 }
 
-// taskMessage sends words to a task where its state takes them: into an implementing run's turn (or any run's, with
-// ToRun), as the reply a waiting run needs, else onto the workpad for the next stage. The caller holds mu.
+// taskMessage sends words to a task where task.Route says: to its running run, as the reply that continues its last
+// run, or onto the workpad for the next stage. The caller holds mu.
 //
 // Its answer is "<where>|<run>" (messageView reads it back), as command wants an id.
 func (c *Coord) taskMessage(who Principal, r *wire.Request) (string, []journal.Event, error) {
@@ -236,22 +241,42 @@ func (c *Coord) taskMessage(who Principal, r *wire.Request) (string, []journal.E
 	if err != nil {
 		return "", nil, err
 	}
+	route := c.st.Route(t)
+	if e := p.Expect; e != nil && (e.To != route.To || e.Run != route.Run || e.Stage != route.Stage || e.Version != route.Version) {
+		return "", nil, &wire.Error{Code: wire.CodeRouteChanged, Detail: route.To}
+	}
 	params := func(v any) *wire.Request { b, _ := json.Marshal(v); return &wire.Request{Method: r.Method, Params: b} }
-	if open := c.st.OpenRun(t.ID); open != nil && open.State == task.Running && open.Stream {
-		st := t.Flow.StageOf(open.Stage)
-		if st == nil || st.Role == "implement" || p.ToRun {
-			id, events, err := c.runSend(who, params(SendMessage{Run: open.ID, Text: p.Text}))
-			return MessageToRun + "|" + id, events, err
+	switch route.To {
+	case task.RouteRun:
+		run := c.st.Runs[route.Run]
+		if p.Mode == "" && !(run.Stream && run.CapsNow().Steer) {
+			p.Mode = agent.SendAfter
 		}
+		id, events, err := c.runSend(who, params(SendMessage{Run: run.ID, Text: p.Text, Mode: p.Mode}))
+		return task.RouteRun + "|" + id, events, err
+	case task.RouteReply:
+		id, events, err := c.runContinue(who, params(Continue{Run: route.Run, Text: p.Text}))
+		return task.RouteReply + "|" + id, events, err
+	case task.RouteWorkpad:
+		return task.RouteWorkpad + "|", []journal.Event{journal.NewEvent(task.ETaskNoted,
+			task.TaskNote{ID: t.ID, Note: task.Note{Stage: t.Stage, Kind: task.NoteMessage, Text: p.Text, By: who.User}})}, nil
 	}
-	sit := c.st.Situation(t)
-	if last := c.st.Runs[sit.Run]; last != nil && !task.Open(last.State) && last.Session != "" &&
-		(sit.Reason == task.AttentionAsked || sit.Reason == task.AttentionPermission) {
-		id, events, err := c.runContinue(who, params(Continue{Run: last.ID, Text: p.Text}))
-		return MessageToReply + "|" + id, events, err
+	return "", nil, cannotSend(route.Why)
+}
+
+// messagePreview is where a message for a task would go now.
+func (c *Coord) messagePreview(who Principal, r *wire.Request) (MessageRoute, error) {
+	var p MessagePreview
+	if err := r.Decode(&p); err != nil {
+		return MessageRoute{}, err
 	}
-	return MessageToWorkpad + "|", []journal.Event{journal.NewEvent(task.ETaskNoted,
-		task.TaskNote{ID: t.ID, Note: task.Note{Stage: t.Stage, Kind: task.NoteMessage, Text: p.Text, By: who.User}})}, nil
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	t := c.st.Tasks[p.ID]
+	if !canRead(c.st, who, t) {
+		return MessageRoute{}, notFound(p.ID)
+	}
+	return MessageRoute{Route: c.st.Route(t)}, nil
 }
 
 func messageView(_ *task.State, id string) any {

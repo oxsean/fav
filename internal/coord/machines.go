@@ -527,9 +527,14 @@ func (c *Coord) converge(ctx context.Context, m *machine) {
 		var s node.Snapshot
 		var ok bool
 		var err error
-		if in.answer != nil {
+		switch {
+		case in.answer != nil:
 			ok, err = c.callNode(ctx, m, conn, node.MRunAnswer, node.AnswerParams{Run: in.run, Answer: *in.answer}, &s)
-		} else {
+		case in.interrupt != nil:
+			var got node.Interrupted
+			ok, err = c.callNode(ctx, m, conn, node.MRunInterrupt, *in.interrupt, &got)
+			s = got.Snapshot
+		default:
 			ok, err = c.callNode(ctx, m, conn, node.MRunSend, node.SendParams{Run: in.run, Send: *in.send}, &s)
 		}
 		if !ok {
@@ -596,7 +601,7 @@ func observation(s node.Snapshot) task.Observation {
 	}
 	return task.Observation{Plan: plan, ID: s.Run, State: s.State.State, ExitCode: s.ExitCode, Reason: s.Reason, Detail: s.Detail,
 		Attention: s.Attention, Ask: s.Ask, Note: s.Note, Last: s.Last, Usage: s.Usage, Stream: s.Stream, Requests: s.Requests,
-		Sends: s.Sends, Caps: s.Caps, Doing: s.Doing, Verdict: s.Verdict, Check: s.Check, Work: s.Work, Provider: s.Provider, Session: s.Session, Pane: s.Pane, NodeRev: s.Rev,
+		Sends: s.Sends, Caps: s.Caps, Doing: s.Doing, Turn: s.Turn, Verdict: s.Verdict, Check: s.Check, Work: s.Work, Provider: s.Provider, Session: s.Session, Pane: s.Pane, NodeRev: s.Rev,
 		StartedAt: s.StartedAt, EndedAt: s.EndedAt}
 }
 

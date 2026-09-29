@@ -58,7 +58,7 @@ func (e *env) scene(kind, project, owner string, n int) (taskID, runID string) {
 	switch kind {
 	case "running", "running_solo":
 		events = []journal.Event{ev(task.ETaskCreated, tk), ev(task.ERunQueued, run), ev(task.ERunStarting, task.RunStarting{ID: runID}),
-			ev(task.ERunObserved, task.Observation{ID: runID, State: task.Running, NodeRev: 1, Stream: true, Attention: task.AttentionPermission, Caps: caps,
+			ev(task.ERunObserved, task.Observation{ID: runID, State: task.Running, NodeRev: 1, Stream: true, Attention: task.AttentionPermission, Caps: caps, Turn: 1,
 				Requests: []agent.Request{{ID: "q1", Kind: agent.RequestPermission, Tool: "Bash", AllowRun: true},
 					{ID: "q2", Kind: agent.RequestQuestion, Questions: []agent.Question{{Question: "which?", Options: []string{"a", "b"}}}}}})}
 	case "ended":
@@ -97,6 +97,10 @@ func (e *env) act(p Principal, act, taskID, runID string) error {
 	switch act {
 	case task.ActSteer:
 		return call(MRunSend, SendMessage{Run: runID, Text: "hello"})
+	case task.ActAfter:
+		return call(MRunSend, SendMessage{Run: runID, Text: "then this", Mode: agent.SendAfter})
+	case task.ActInterrupt:
+		return call(MRunInterrupt, Interrupt{Run: runID})
 	case task.ActAnswer: // one of its requests: the question, else the permission
 		if err := call(MRunAnswer, Answer{Run: runID, Answer: agent.Answer{Request: "q2", Allow: true, Answers: map[string]string{"which?": "a"}}}); err == nil {
 			return nil

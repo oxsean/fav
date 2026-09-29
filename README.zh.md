@@ -417,7 +417,7 @@ effort 和禁用的工具进 agent 的命令行，正文放在任务书前面。
 会话里接着改，任务书是评审意见。run 自己的汇报（`tend run note|ask|verdict|plan`）不用等批准，codex 在 workspace-write 沙箱里也能写自己的 run 目录。写了 `check: true` 的阶段在 agent 结束后在那台机器上跑项目的 `hooks.check`（比如 `mise run gate`），
 失败就算返工；节点要打开 `node.allow_hooks` 才接这种 run。退回超过 `max_loops` 次、结论是 blocked、或预算用完，任务停下等人。最后一关是
 人工验收：验收人放行（`tend task gate <id> --pass`），任务相关的人都能带着意见打回（`--rework "…"`）。`tend task message <id> "…"`
-会插进正在实现的 run、回复在等你的 run，否则记进任务的工作记录，每个阶段的任务书都会带上它。项目可以用 Markdown 定义自己的工作流：
+会进正在运行的 run、接着这个阶段上一个 run 的会话，否则记进任务的工作记录，每个阶段的任务书都会带上它。项目可以用 Markdown 定义自己的工作流：
 frontmatter 写阶段，每个 `## <阶段名>` 小节是那个阶段的任务书模板（`{{task.brief}}`、`{{task.acceptance}}`、
 `{{#rework}}…{{rework.notes}}…{{/rework}}`、`{{workpad}}`）。任务拿到工作流时就定下来，之后改定义不影响它。
 

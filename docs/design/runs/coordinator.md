@@ -61,9 +61,10 @@ run `state` 转移表（终态单调，重复事件无副作用）：
 
 ## 事件
 
-`task_created` `task_edited` `task_status_set` `run_queued` `run_starting` `run_observed{state, exit_code, reason, detail, attention, ask, note, last, usage, stream, requests, sends, caps, doing, session, node_rev}` `run_stop_requested` `run_canceled` `run_abandoned` `run_answered{id, answer}` `run_sent{id, send}`。
+`task_created` `task_edited` `task_status_set` `run_queued` `run_starting` `run_observed{state, exit_code, reason, detail, attention, ask, note, last, usage, stream, requests, sends, caps, doing, turn, session, node_rev}` `run_stop_requested` `run_canceled` `run_abandoned` `run_answered{id, answer}` `run_sent{id, send}` `run_interrupt_requested{id, turn, ask, by}`。
 
-- `run_observed` 带节点的 `requests` 整体覆盖；`sends` 按 id 合并（节点说的为准，协调器排着的保留）；`answers` 里请求已不在 `requests` 的删掉（节点取走了，或不再等）。run 结束时 `requests`、`answers` 清空，还是 queued 的消息改 failed。
+- `run_observed` 带节点的 `requests` 整体覆盖；`sends` 按 id 合并（节点说的为准，协调器排着的保留）；`answers` 里请求已不在 `requests` 的删掉（节点取走了，或不再等）。run 结束时 `requests`、`answers` 清空，还是 queued 的消息改 failed，但有会话时 `after`、`interrupt` 方式的留着（见下面「续接」）。
+- `run_queued` 带 `takes` 时，父运行里这些消息改 sent。`run_answered` 替换同一请求之前的回答。`run_sent` 的 id 已有时只改它的 `state`（协调器宣布留着的消息失败）。`run_interrupt_requested` 只在 run 未结束时记进 `Run.interrupt`（最新的一次）。
 
 ## 命令与收据
 
@@ -78,7 +79,12 @@ run `state` 转移表（终态单调，重复事件无副作用）：
 - 派发：机器已连上且没超过并发上限（`machines.<名>.slots`，默认 2）、目录不冲突 → `run_starting` → `run.start{spec}`（`command_id` = run id）。
 - 对账：连上节点或每 5 s，对「有未结束 run、有待 ack 的 run、或有还在节点上跑的 abandoned run」的机器调 `run.list{coordinator, ack, runs}`，按 `node_rev` 差分，生成 `run_observed`。`runs` 只列协调器还关心的 run（这台机器上没 ack 的：未结束、abandoned、没有结束时间、或结束不到 7 天）；一个都没有时发 `["-"]`（不匹配任何 run），旧节点忽略它、照旧全列。每个节点调用各自 20 s 超时；超时只记错误，不断连接。
 - 节点拒绝启动（`conflict`，detail 以 `dir_busy <run>` 或 `slots n/m` 开头，见 [node.md](node.md)「run 目录」）不算失败：run 留在 starting，10 s 后重发。
-- 回答和消息：`run.answer` 只收 run 未结束、请求在 `requests` 里、还没回答过的（问题类允许时每个问题都要有回答，否则 `bad_request answers`）；`run.send` 只收 running 且 `stream` 的 run（否则 `conflict cannot_send`），消息 id 是 `m_` + 随机。两者都是带收据的命令，只写事件；对账时对节点列表里还在跑的 run，把请求仍在节点 `requests` 里的回答、节点 `sends` 里没有的 queued 消息发 `run.answer` / `run.send`（同一项 10 s 内不重发），应答的快照直接折成 `run_observed`。
+- 回答和消息：
+  - `run.answer`：run 已结束或请求不在 `requests` 里 → `request_gone`；已经有人回答、回答也送到了 → `request_gone`，`detail` 是先答的人（两人同时答，后到的拿到这个）；回答没送到（请求标了 `failed`）时，新的回答（选项可以不同）替换旧的。问题类允许时每个问题都要有回答（否则 `bad_request answers`）；`allow_run` 要请求带 `allow_run`、能力里有 `answer_scope`（否则 `bad_request decision`），已连上的节点没有 `answer_scope` feature → `proto node_outdated`。回答记下 `by`。
+  - `run.send{run, text, mode}`：`steer`（默认）插进这一轮，要 running、`stream`、能力 `steer`；`after` 等这一轮完、run 退出后续接它的会话，要 running、能力 `after`；`interrupt` 先打断这一轮，再同 `after`，另要能力 `interrupt`、`run.turn` ≥ 1，已连上的节点没有 `interrupt` feature → `proto node_outdated`。条件不满足 → `cannot_send`，`detail` 是方式。消息 id 是 `m_` + 随机，记下 `mode` 和 `by`；`interrupt` 同时写 `run_interrupt_requested`（当前轮次）。
+  - `run.interrupt{run, turn}`：`turn` 缺省取 `run.turn`；run 不在跑、没有 `interrupt` 能力 → `conflict cannot_interrupt`；`turn` 已过去 → `conflict turn_over`；同一轮已经要求过 → 不写事件，直接回。节点那边的 id 是 `int_<turn>`，重发是同一个请求。
+  - 都是带收据的命令，只写事件。对账时对节点列表里还在跑的 run：请求仍在节点 `requests` 里的回答发 `run.answer`；节点 `sends` 里没有的 `steer` 消息发 `run.send`（`after`、`interrupt` 的消息不发给节点）；`Run.interrupt` 的轮次不早于节点的 `turn`、节点有 `interrupt` feature 时发 `run.interrupt{run, turn, id}`。同一项 10 s 内不重发，应答的快照直接折成 `run_observed`。
+- 续接：`flow()` 每次先看已结束、还留着 `after` / `interrupt` 消息的 run，按 `seq` 顺序：以第一条消息的发送人身份续接它的会话（同 `run.continue`），任务书是这些消息的原文，空行隔开，新 run 的 `takes` 是它们的 id。run 是被 `run.stop` 停的、任务已结束、任务在它之后排过别的 run、或续接不了（没有权限、不能续会话、旧节点）时，这些消息写 `run_sent` 改 failed。续接先提交，任务才不会在这之前算作结束。
 - abandoned 的 run 在节点快照成终态之前（节点这次没列出它也算）仍占着目录和 slot，同目录的下一个 run 不派发。
 - 协调器已结束（含 abandoned / canceled）、节点是终态或 unknown 的 run 进 `ack`。
 - 退避期内的机器，`run.tail` / `run.output.page` / `node.call` 直接回 `offline`，不重拨；只有 `machine.list{connect}` 清退避。
@@ -106,7 +112,7 @@ run `state` 转移表（终态单调，重复事件无副作用）：
 
 - **能力**：`Run.CapsNow()`：有节点报上来的实际能力（`Run.caps`）就用它，没有就按 provider 和 runner 算计划中的（herdr 的运行、`command` 这类不开双向流的 provider 不能插话；没报能力的旧节点以 `stream` 为准）。
 - **候选动作**：`internal/task` 里的纯函数，只看状态和能力。
-  - 运行：`State.RunActions(r)`，取 `steer`（运行中的双向流，能插话）、`answer`（有没答的请求，或回答没送到的）、`allow_run`（有带 `allow_run` 的权限请求，并且能力里有 `answer_scope`）、`stop`、`abandon`、`continue`（已结束、有会话、能续接、任务没有开着的运行）、`takeover`（已结束、有会话、能在终端恢复）。
+  - 运行：`State.RunActions(r)`，取 `steer`（运行中的双向流，能插话）、`after`（运行中，能在这一轮后续接）、`interrupt`（运行中，能打断，已经数到第一轮）、`answer`（有没答的请求，或回答没送到的）、`allow_run`（有带 `allow_run` 的权限请求，并且能力里有 `answer_scope`）、`stop`、`abandon`、`continue`（已结束、有会话、能续接、任务没有开着的运行）、`takeover`（已结束、有会话、能在终端恢复）。
   - 任务：`State.TaskActions(t)`，取 `dispatch` `start` `stop` `pass` `rework` `ack` `keep` `merge` `done` `backlog` `cancel` `reopen` `plan` `review` `edit` `move` `child` `message`，名字和 Web 的操作表一致。
 - **按人筛**（`internal/coord/afford.go`）：每个候选拿对应方法的判断试跑一遍，只判不提交（`dry`），所以筛的规则就是方法本身的规则（项目角色、`canUse`、`canApprove`、机器主人、审批人、节点有没有需要的方法）。`answer` 试每个没答的请求，有一个能答就给；`takeover` 没有方法，只给机器主人。
 - **消息去哪里**：`State.Route(t)`，按顺序取第一条成立的：
@@ -116,6 +122,8 @@ run `state` 转移表（终态单调，重复事件无副作用）：
   4. 都不行：`{to: none, why}`，`why` 取 `finished`、`starting`（运行还没开始）、`busy`（运行在跑但不收消息）、`no_session`。
 
   `version` 是这条去向从哪个 seq 起成立：接收的运行排队时的 seq（`run.seq`），workpad 是阶段的 `stage_seq`。
+
+  `task.message{id, text, mode, expect}` 照这张表送：`run` 走 `run.send`（`mode` 缺省时能插话就 `steer`，否则 `after`），`reply` 走 `run.continue`，`workpad` 记一条 `message` 笔记，`none` 回 `cannot_send`，`detail` 是 `why`。带了 `expect`（发送方看到的 `route`）而 `to`、`run`、`stage`、`version` 有一项不同 → `route_changed`，`detail` 是现在的 `to`，什么都不写。`task.message.preview{id}` 回 `{route}`，能读任务的人都能调。
 - **待处理项**：`State.Pending(t)`，只在 Go 里算。
   - 形状：`Pending{id, kind, reason?, task, run?, request?, version}`。
   - 开着的运行有没答的请求：每个请求一项，`kind` 为 `permission` 或 `question`，`id` 是 `<run>/<request>`。

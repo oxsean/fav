@@ -102,9 +102,9 @@ const treeWords = {
   'note.message': ['留言', 'message'], 'note.gate': ['验收', 'gate'], 'note.rework': ['退回', 'rework'],
   'verdict.pass': ['通过', 'pass'], 'verdict.rework': ['要返工', 'rework'], 'verdict.blocked': ['无法判断', 'blocked'],
   checkFailed: ['check 失败（exit {0}）', 'check failed (exit {0})'], runEnded: ['结束：{0}', 'ended: {0}'],
-  messageTask: ['给这个任务留言', 'Message this task'], send: ['发送', 'Send'], toRun: ['也发进正在评审/测试的 run', 'Into the reviewing or testing run too'],
+  messageTask: ['给这个任务留言', 'Message this task'], send: ['发送', 'Send'],
   'to.run': ['会发进正在运行的 run。', 'Goes into the running run.'], 'to.reply': ['会作为回复，接着运行等你的 run。', 'Goes as the reply that continues the run that waits.'],
-  'to.workpad': ['会记进工作记录，下一个阶段的 agent 会看到。', 'Goes on the workpad; the next stage sees it.'],
+  'to.workpad': ['会记进工作记录，下一个阶段的 agent 会看到。', 'Goes on the workpad; the next stage sees it.'], 'to.none': ['现在发不进去：run 还没开始，或者不收消息。', 'Nothing takes a message now: the run has not started, or takes none.'],
   'sent.run': ['已发进 run', 'Sent into the run'], 'sent.reply': ['已回复，run 继续', 'Replied; the run goes on'], 'sent.workpad': ['已记进工作记录', 'Put on the workpad'],
   defaultWorkflow: ['默认工作流', 'Default workflow'], customWorkflows: ['自定义工作流', 'Custom workflows'], newWorkflow: ['新建工作流', 'New workflow'],
   editWorkflow: ['编辑工作流', 'Edit workflow'], workflowSaved: ['工作流已保存', 'Workflow saved'], noCustomWorkflows: ['没有自定义工作流；内置 feature、fix、docs。', 'None; feature, fix and docs are built in.'],
@@ -292,23 +292,23 @@ const Tree = (() => {
     return `<details data-tool="workpad" ${items.length ? 'open' : ''}><summary class="pointer meta-label">${t('workpad')} (${items.length})</summary>${items.length ? `<ol class="plain workpad">${items.map(x => x.html).join('')}</ol>` : `<p class="muted">${t('workpadEmpty')}</p>`}</details>`;
   }
 
-  // messageTo is where a task message goes now, as coord.taskMessage decides it.
+  // messageTo is where a task message goes now, as task.Route decides it.
   function messageTo(task) {
-    const running = Object.values(ui.state.runs).find(r => r.task === task.id && r.state === 'running' && r.stream);
-    if (running) {
-      const st = task.flow?.stages.find(s => s.name === running.stage);
-      return {to: !st || st.role === 'implement' ? 'run' : 'workpad', toRun: !!st && st.role !== 'implement'};
+    const runs = Object.values(ui.state.runs).filter(r => r.task === task.id);
+    const open = runs.find(r => openStates.has(r.state));
+    if (open) {
+      const caps = open.caps || {};
+      return {to: open.state === 'running' && (caps.steer && open.stream || caps.after) ? 'run' : 'none'};
     }
-    const s = sit(task), last = ui.state.runs[s.run];
-    if (last && !openStates.has(last.state) && last.session && (s.reason === 'asked' || s.reason === 'permission')) return {to: 'reply'};
-    return {to: 'workpad'};
+    const last = runs.filter(r => r.stage === task.stage && r.stage !== 'merge' && (r.seq || 0) > (task.stage_seq || 0)).sort((a, b) => b.seq - a.seq)[0];
+    return {to: last && last.session && last.caps?.continue ? 'reply' : 'workpad'};
   }
 
   function messageBox(task) {
     const where = messageTo(task);
     return `<form id="tree-message-form" class="stack" data-id="${esc(task.id)}" data-command="${commandID()}"><div class="form-error" role="alert" hidden></div>
       <label>${t('messageTask')}<textarea name="text" id="task-message-text" rows="2">${esc(ui.drafts.get('task:' + task.id) || '')}</textarea><small id="message-to">${t('to.' + where.to)}</small></label>${sendHint()}
-      <div class="flex">${where.toRun ? `<label class="choice"><input type="checkbox" name="to_run" value="1">${t('toRun')}</label>` : ''}<button type="submit">${t('send')}</button></div></form>`;
+      <div class="flex"><button type="submit" ${where.to === 'none' ? 'disabled' : ''}>${t('send')}</button></div></form>`;
   }
 
   function gateForm(task) {
@@ -730,7 +730,7 @@ const Tree = (() => {
       case 'tree-message-form': {
         const text = String(fd.get('text') || '').trim();
         if (!text) { const e = form.querySelector('.form-error'); e.hidden = false; e.textContent = t('replyEmpty'); break; }
-        const r = await api.taskMessage({id: form.dataset.id, text, to_run: fd.has('to_run')}, command);
+        const r = await api.taskMessage({id: form.dataset.id, text}, command);
         ui.drafts.delete('task:' + form.dataset.id); form.reset(); form.dataset.command = commandID(); toast(t('sent.' + r.to));
         if (r.run) ui.run = r.run;
         break;

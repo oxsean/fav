@@ -103,9 +103,10 @@ max_loops: 2
 
 | 任务当时 | 消息去哪 |
 |---|---|
-| 开发阶段的 run 正在跑 | `run send` 插进当前这一轮 |
-| 评审或测试阶段的 run 正在跑 | 默认进 workpad，留给下一轮开发；也可以选「插给评审者」 |
-| 没有 run 在跑（排队、等你） | 进 workpad；如果任务在等你回复，这条消息就是回复 |
+| 有 run 正在跑，收消息 | 发给它：插进当前这一轮，或者这一轮完了续接（也可以先打断） |
+| run 还没开始，或在跑但不收消息 | 发不了 |
+| 这个阶段上一个 run 已结束、能续会话 | 作为回复续接它 |
+| 其余 | 进 workpad，留给下一个阶段 |
 
 发送框上直接写明这条消息会去哪（例如「会插进 Dev 当前这一轮」「会留给下一轮开发」），不用一个意义不明的开关。
 
@@ -119,7 +120,7 @@ max_loops: 2
 - **verdict**：自报：要 verdict 的 run 任务书末尾会告诉 agent 用 `tend run verdict pass|rework|blocked "摘要"`，写进 `reports.jsonl`，节点的观测带回协调器。provider 结构化输出（见 [overview.md](overview.md)「待核实」）和 `findings` 未实现。作废重评见 [execution.md](execution.md)「实现」。
 - **check hook**：项目 `hooks.check`，阶段写了 `check: true` 才跑；节点监督进程在 agent 退出码 0 之后在工作目录里跑它（30 分钟上限），输出接进 `output.log`，结果 `{argv, exit, tail}` 随观测回来。节点要 `node.allow_hooks`（或 `allow_bypass`）才接受带 hook 的 run；节点 feature `verdict`、`check` 由协商决定，旧节点会被拒绝派发。
 - **人工闸门**：`task.gate{id, pass, notes, expected_rev}`。放行只有验收人（没有就是负责人）或管理员可以（模式一不限）；任何能写任务的人都能打回，意见记成 `gate` 笔记。`expected_rev` 不等于当前 `rev` 回 conflict。走 workflow 的任务 `task.set_status done` 一律拒绝，只能由最后一个阶段完成；需求有未决变化时放行最后一关也被拒。
-- **消息**：`task.message{id, text, to_run}` 按上文「消息与插话」路由，回答 `{to: run|reply|workpad, run}`；进 workpad 的记成 `message` 笔记。
+- **消息**：`task.message{id, text, mode, expect}` 按上文「消息与插话」路由（规则是 `task.Route`，见 [coordinator.md](../runs/coordinator.md)「能做什么、等谁」），回答 `{to: run|reply|workpad, run}`；进 workpad 的记成 `message` 笔记。
 - **workpad**：`workflow.Workpad` 按时间列出各阶段 run 的 verdict 或结束方式、失败的 check（输出尾部）、留言和闸门决定，上限 8 KiB（保留最新的）；`rework` 笔记不重复列出（它就是那个 run 的结论）。
 - **预算**：workflow 的 `budget` 只在派发前检查（已结束的 run 的费用估计和时长），不中途停 run。
-- **界面**：网页任务表单选 workflow，详情页显示阶段条、第几轮、workpad、放行 / 退回、写明去向的留言框，走 workflow 的任务不显示「标记完成」；项目设置里选默认 workflow、编辑自定义 workflow。CLI：`tend task add --workflow`、`tend task gate <id> --pass | --rework "…"`、`tend task message <id> "…" [--to-run]`、`tend run verdict`。进度评论多一行 `Stages: implement → **review** → accept (round 2)`。
+- **界面**：网页任务表单选 workflow，详情页显示阶段条、第几轮、workpad、放行 / 退回、写明去向的留言框，走 workflow 的任务不显示「标记完成」；项目设置里选默认 workflow、编辑自定义 workflow。CLI：`tend task add --workflow`、`tend task gate <id> --pass | --rework "…"`、`tend task message <id> "…" [--mode steer|after|interrupt]`、`tend run verdict`。进度评论多一行 `Stages: implement → **review** → accept (round 2)`。

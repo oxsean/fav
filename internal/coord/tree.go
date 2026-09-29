@@ -3,7 +3,10 @@ package coord
 import (
 	"errors"
 	"slices"
+	"sort"
+	"strings"
 
+	"github.com/oxsean/fav/internal/agent"
 	"github.com/oxsean/fav/internal/journal"
 	"github.com/oxsean/fav/internal/task"
 	"github.com/oxsean/fav/internal/wire"
@@ -211,6 +214,12 @@ func (c *Coord) principal(user string) (Principal, bool) {
 // their owner would; one that cannot go is held with the reason. The caller holds mu.
 func (c *Coord) flow() {
 	for range 10 {
+		if carried := c.carryOn(); len(carried) > 0 { // before its task counts as ended
+			if c.commit(journal.System, nil, carried...) != nil {
+				return
+			}
+			continue
+		}
 		var events []journal.Event
 		for _, t := range c.st.Completing() {
 			events = append(events, c.finish(t)...)
@@ -238,6 +247,63 @@ func (c *Coord) flow() {
 			return
 		}
 	}
+}
+
+// carryOn continues each ended run's session with the messages sent to go after its turn, as their first sender; the
+// messages fail when nothing may go on from it: it was stopped, its task is finished, a later run of the task started,
+// or the continuation cannot start. The caller holds mu.
+func (c *Coord) carryOn() []journal.Event {
+	var ended []*task.Run
+	for _, r := range c.st.Runs {
+		if !task.Open(r.State) && slices.ContainsFunc(r.Sends, carried) {
+			ended = append(ended, r)
+		}
+	}
+	sort.Slice(ended, func(i, j int) bool {
+		return ended[i].Seq < ended[j].Seq || ended[i].Seq == ended[j].Seq && ended[i].ID < ended[j].ID
+	})
+	var events []journal.Event
+	for _, r := range ended {
+		var sends []agent.Send
+		for _, m := range r.Sends {
+			if carried(m) {
+				sends = append(sends, m)
+			}
+		}
+		t := c.st.Tasks[r.Task]
+		run, err := task.Run{}, error(conflict("stopped"))
+		if who, ok := c.principal(sends[0].By); ok && r.Want != "stop" && t != nil && !task.Finished(t.Status) && !c.later(r) {
+			texts := make([]string, len(sends))
+			for i, m := range sends {
+				texts[i] = m.Text
+			}
+			run, err = c.continuation(who, r, strings.Join(texts, "\n\n"), "")
+		}
+		if err != nil {
+			for _, m := range sends {
+				m.State = agent.SendFailed
+				events = append(events, journal.NewEvent(task.ERunSent, task.RunSend{ID: r.ID, Send: m}))
+			}
+			continue
+		}
+		for _, m := range sends {
+			run.Takes = append(run.Takes, m.ID)
+		}
+		events = append(events, journal.NewEvent(task.ERunQueued, run))
+	}
+	return events
+}
+
+func carried(m agent.Send) bool { return m.State == agent.SendQueued && m.Carried() }
+
+// later: another run of r's task was queued after it.
+func (c *Coord) later(r *task.Run) bool {
+	for _, x := range c.st.Runs {
+		if x.Task == r.Task && x.Seq > r.Seq {
+			return true
+		}
+	}
+	return false
 }
 
 func holdOf(id string, err error) task.TaskHold {

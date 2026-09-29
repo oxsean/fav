@@ -156,6 +156,7 @@ type State struct {
 	Sends     []agent.Send       `json:"sends,omitempty"`    // messages for it and how far they got
 	Caps      *agent.RunCaps     `json:"caps,omitempty"`     // what it can do, once started
 	Doing     string             `json:"doing,omitempty"`    // the tool call it is at in its turn
+	Turn      int                `json:"turn,omitempty"`     // the turn its output is at (run.interrupt names it)
 	StartedAt *time.Time         `json:"started_at,omitzero"`
 	EndedAt   *time.Time         `json:"ended_at,omitzero"`
 }

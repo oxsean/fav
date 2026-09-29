@@ -87,7 +87,7 @@ func (g *journalGen) workspace(t string) *agent.Workspace {
 
 func (g *journalGen) event() journal.Event {
 	ev := journal.NewEvent
-	switch g.n(27) {
+	switch g.n(28) {
 	case 0, 1:
 		id := "t" + strconv.Itoa(len(g.tasks))
 		if g.chance(5) && len(g.tasks) > 0 {
@@ -143,6 +143,9 @@ func (g *journalGen) event() journal.Event {
 			Dir: g.of("/w", "/d"), Stage: g.of("", "build", "review", task.StageMerge, task.StagePlan), Planner: g.chance(10), Judge: g.chance(10), Work: g.workspace(t)}
 		if g.chance(40) && len(g.runs) > 1 {
 			r.Parent = g.pick(g.runs, "r")
+			if g.chance(50) {
+				r.Takes = g.some([]string{"m1", "m2", "m3"}, "m")
+			}
 		}
 		return ev(task.ERunQueued, r)
 	case 6:
@@ -150,7 +153,7 @@ func (g *journalGen) event() journal.Event {
 	case 7, 8, 9, 10:
 		o := task.Observation{ID: g.pick(g.runs, "r"), State: g.of(task.Starting, task.Running, task.Running, task.Unknown, task.Exited, task.Exited, task.Stopped, task.Failed),
 			NodeRev: g.n(6), Attention: g.of("", "", task.AttentionAsked, task.AttentionPermission, task.AttentionStalled), Last: g.of("", "l"), Doing: g.of("", "go test"),
-			Stream: g.chance(50), Reason: g.of("", "", "quota", task.WhyMergeConflict), Session: g.of("", "", "s1"), Provider: agent.ProviderFake}
+			Stream: g.chance(50), Reason: g.of("", "", "quota", task.WhyMergeConflict), Session: g.of("", "", "s1"), Provider: agent.ProviderFake, Turn: g.n(3)}
 		if o.State == task.Exited {
 			code := g.of("0", "0", "1")
 			c, _ := strconv.Atoi(code)
@@ -163,7 +166,7 @@ func (g *journalGen) event() journal.Event {
 			o.Sends = []agent.Send{{ID: g.of("m1", "m2"), Text: "hi", State: g.of(agent.SendSent, agent.SendSeen)}}
 		}
 		if g.chance(30) {
-			o.Caps = &agent.RunCaps{Steer: g.chance(50), Continue: g.chance(50)}
+			o.Caps = &agent.RunCaps{Steer: g.chance(50), After: g.chance(50), Interrupt: g.chance(50), Continue: g.chance(50)}
 		}
 		if g.chance(20) {
 			o.Verdict = &agent.Verdict{Verdict: g.of(agent.VerdictPass, agent.VerdictRework, agent.VerdictBlocked), At: *g.when()}
@@ -194,9 +197,10 @@ func (g *journalGen) event() journal.Event {
 	case 13:
 		return ev(task.ERunAbandoned, task.RunRef{ID: g.pick(g.runs, "r")})
 	case 14:
-		return ev(task.ERunAnswered, task.RunAnswer{ID: g.pick(g.runs, "r"), Answer: agent.Answer{Request: g.of("q1", "q2"), Allow: g.chance(50), Decision: g.of("", agent.DecisionAllowRun)}})
+		return ev(task.ERunAnswered, task.RunAnswer{ID: g.pick(g.runs, "r"), Answer: agent.Answer{Request: g.of("q1", "q2"), Allow: g.chance(50), Decision: g.of("", agent.DecisionAllowRun), By: g.user()}})
 	case 15:
-		return ev(task.ERunSent, task.RunSend{ID: g.pick(g.runs, "r"), Send: agent.Send{ID: g.of("m1", "m2", "m3"), Text: "t", State: agent.SendQueued}})
+		return ev(task.ERunSent, task.RunSend{ID: g.pick(g.runs, "r"), Send: agent.Send{ID: g.of("m1", "m2", "m3"), Text: "t",
+			State: g.of(agent.SendQueued, agent.SendQueued, agent.SendFailed), Mode: g.of("", agent.SendAfter, agent.SendInterrupt), By: g.user()}})
 	case 16:
 		d := task.TaskMove{ID: g.pick(g.tasks, "t")}
 		if g.chance(50) {
@@ -240,6 +244,8 @@ func (g *journalGen) event() journal.Event {
 			return ev(task.EProjectEdited, task.ProjectEdit{ID: g.pick(g.projects, "p"), Name: ptr("n"), Context: ptr(g.of("", "c"))})
 		}
 		return ev(task.EMemberSet, task.MemberSet{Project: g.pick(g.projects, "p"), User: g.of("u_a", "u_b"), Role: g.of("", task.RoleParticipant, task.RoleReader)})
+	case 26:
+		return ev(task.ERunInterrupt, task.RunInterrupt{ID: g.pick(g.runs, "r"), Turn: 1 + g.n(2), Ask: g.of("int_1", "int_2"), By: g.user()})
 	case 25:
 		return ev(task.EMachineShared, task.Share{Machine: g.of("m1", "m2"), Users: g.some([]string{"u_a", "u_b"}, "u"), Projects: g.some(g.projects, "p")})
 	default:

@@ -141,3 +141,37 @@ func TestAMessageGoesWhereTheFirstRuleThatHoldsSays(t *testing.T) {
 		}
 	}
 }
+
+func TestWhatARunCarriesOnOutlivesItAndGoesOutWithTheNext(t *testing.T) {
+	ev := journal.NewEvent
+	zero := 0
+	s := New()
+	apply(t, s, ev(ETaskCreated, Task{ID: "t", Title: "x", Status: StatusTodo}), ev(ERunQueued, Run{ID: "r", Task: "t", Machine: "m"}),
+		ev(ERunObserved, Observation{ID: "r", State: Running, NodeRev: 1, Stream: true, Turn: 1}),
+		ev(ERunSent, RunSend{ID: "r", Send: agent.Send{ID: "steer", Text: "a", State: agent.SendQueued}}),
+		ev(ERunSent, RunSend{ID: "r", Send: agent.Send{ID: "after", Text: "b", State: agent.SendQueued, Mode: agent.SendAfter}}),
+		ev(ERunSent, RunSend{ID: "r", Send: agent.Send{ID: "lost", Text: "c", State: agent.SendQueued, Mode: agent.SendAfter}}),
+		ev(ERunInterrupt, RunInterrupt{ID: "r", Turn: 1, Ask: "int_1"}),
+		ev(ERunAnswered, RunAnswer{ID: "r", Answer: agent.Answer{Request: "q", Allow: true}}),
+		ev(ERunAnswered, RunAnswer{ID: "r", Answer: agent.Answer{Request: "q", Decision: agent.DecisionDeny, By: "u"}}))
+	r := s.Runs["r"]
+	if r.Turn != 1 || r.Interrupt == nil || r.Interrupt.Ask != "int_1" || len(r.Answers) != 1 || r.Answers[0].By != "u" {
+		t.Fatalf("%+v", r)
+	}
+	apply(t, s, ev(ERunObserved, Observation{ID: "r", State: Exited, NodeRev: 2, ExitCode: &zero, Session: "s", Turn: 1}),
+		ev(ERunSent, RunSend{ID: "r", Send: agent.Send{ID: "lost", State: agent.SendFailed}}))
+	states := func() (out []string) {
+		for _, m := range s.Runs["r"].Sends {
+			out = append(out, m.ID+" "+m.State)
+		}
+		return out
+	}
+	if got := states(); !slices.Equal(got, []string{"steer failed", "after queued", "lost failed"}) {
+		t.Fatalf("at its end: %v", got)
+	}
+	apply(t, s, ev(ERunQueued, Run{ID: "next", Task: "t", Machine: "m", Parent: "r", Resume: "s", Takes: []string{"after"}}),
+		ev(ERunInterrupt, RunInterrupt{ID: "r", Turn: 2, Ask: "int_2"}))
+	if got := states(); !slices.Equal(got, []string{"steer failed", "after sent", "lost failed"}) || s.Runs["r"].Interrupt.Turn != 1 {
+		t.Fatalf("carried on: %v %+v", got, s.Runs["r"].Interrupt)
+	}
+}

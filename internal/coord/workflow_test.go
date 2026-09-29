@@ -84,7 +84,7 @@ func TestAFeatureIsReviewedSentBackAndWaitsForItsApprover(t *testing.T) {
 	}
 	var m MessageResult
 	e.must(MTaskMessage, TaskMessage{ID: x.ID, Text: "also TSV next time"}, &m)
-	if m.To != MessageToWorkpad {
+	if m.To != task.RouteWorkpad {
 		t.Fatalf("no run: a message is kept: %+v", m)
 	}
 	if err := e.call(MTaskStatus, task.TaskStatus{ID: x.ID, Status: task.StatusDone}, nil); wire.Code(err) != wire.CodeConflict {

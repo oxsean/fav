@@ -813,14 +813,18 @@ func (s *sup) spent(t agent.Usage) {
 	s.out.usage, s.out.dirty = &u, true
 }
 
-// flushOut writes what the agent said and spent since the last write.
+// flushOut writes what the agent said and spent since the last write, and the turn its output is at.
 func (s *sup) flushOut() {
+	turn := 0
+	if s.log != nil {
+		turn = s.log.turn().Turn
+	}
 	s.mu.Lock()
-	dirty, last, usage, doing := s.out.dirty, s.out.last, s.out.usage, s.out.doing
+	dirty, last, usage, doing := s.out.dirty || turn != s.st.Turn, s.out.last, s.out.usage, s.out.doing
 	s.out.dirty = false
 	s.mu.Unlock()
 	if dirty {
-		s.keep(func(st *State) { st.Last, st.Usage, st.Doing = last, usage, doing })
+		s.keep(func(st *State) { st.Last, st.Usage, st.Doing, st.Turn = last, usage, doing, turn })
 	}
 }
 

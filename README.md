@@ -435,7 +435,7 @@ approval, and a codex run in a workspace-write sandbox may write its run directo
 `mise run gate`) on the machine after the agent is done — a failure is a rework; the node takes such runs only with
 `node.allow_hooks`. After `max_loops` reworks, a blocked verdict or a spent budget the task waits for someone. The last
 stage is a human gate: its approver passes it (`tend task gate <id> --pass`), anyone on the task may send it back with
-notes (`--rework "…"`). `tend task message <id> "…"` goes into the implementing run, answers a run that waits, or is kept
+notes (`--rework "…"`). `tend task message <id> "…"` goes into the running run, continues the stage's last run, or is kept
 on the task's workpad for the next stage — what every stage's brief carries along. A project defines its own workflows
 as Markdown: the stages in the front matter, a `## <stage>` section per stage for its brief (`{{task.brief}}`,
 `{{task.acceptance}}`, `{{#rework}}…{{rework.notes}}…{{/rework}}`, `{{workpad}}`). A task keeps the workflow it was given.

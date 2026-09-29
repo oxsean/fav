@@ -59,9 +59,12 @@ const (
 	CodeBusy          = "busy"
 	CodeCanceled      = "canceled"
 	CodeInternal      = "internal"
-	CodeLagged        = "lagged"      // a stream fell behind: open it again from its cursor
-	CodeGone          = "gone"        // what a stream follows is no more, or its machine went away
-	CodeUnsupported   = "unsupported" // the other end has no such stream
+	CodeLagged        = "lagged"        // a stream fell behind: open it again from its cursor
+	CodeGone          = "gone"          // what a stream follows is no more, or its machine went away
+	CodeUnsupported   = "unsupported"   // the other end has no such stream
+	CodeRequestGone   = "request_gone"  // answered already (Detail: by whom, when known) or no longer asked
+	CodeCannotSend    = "cannot_send"   // nothing takes a message that way now (Detail: why)
+	CodeRouteChanged  = "route_changed" // a message's route is not the one its sender saw (Detail: where it goes now)
 
 	CodeOffline = "offline" // ssh could not connect
 	CodeAuth    = "auth"    // ssh refused the key

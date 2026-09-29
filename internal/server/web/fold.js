@@ -23,7 +23,7 @@ globalThis.Fold = (() => {
     if (o.detail) r.detail = o.detail;
     if ((o.node_rev || 0) > 0) {
       r.attention = o.attention; r.ask = o.ask; r.note = o.note; r.last = o.last; r.usage = o.usage;
-      r.stream = o.stream; r.requests = o.requests; r.caps = o.caps; r.doing = o.doing; r.verdict = o.verdict; r.checked = o.check; r.worked = o.work; r.plan = o.plan;
+      r.stream = o.stream; r.requests = o.requests; r.caps = o.caps; r.doing = o.doing; r.turn = o.turn; r.verdict = o.verdict; r.checked = o.check; r.worked = o.work; r.plan = o.plan;
       const node = o.sends || [];
       r.sends = [...node, ...(r.sends || []).filter(m => !node.some(x => x.id === m.id))];
       r.answers = (r.answers || []).filter(a => (r.requests || []).some(q => q.id === a.request));
@@ -34,7 +34,8 @@ globalThis.Fold = (() => {
     if (o.ended_at) r.ended_at = o.ended_at;
     if (!openStates.has(r.state)) {
       r.requests = undefined; r.answers = undefined;
-      r.sends = (r.sends || []).map(m => m.state === 'queued' ? {...m, state: 'failed'} : m);
+      const carried = m => (m.mode === 'after' || m.mode === 'interrupt') && !!r.session; // a continuation takes it
+      r.sends = (r.sends || []).map(m => m.state === 'queued' && !carried(m) ? {...m, state: 'failed'} : m);
     }
   }
 
@@ -107,6 +108,10 @@ globalThis.Fold = (() => {
       case 'run_queued':
         s.runs[d.id] = {...d, state: 'queued', want: 'run', queued_at: at, seq};
         queuedWork(s, s.runs[d.id]);
+        if (s.runs[d.parent] && (d.takes || []).length) { // what it carries went out with it
+          const p = s.runs[d.parent];
+          p.sends = (p.sends || []).map(m => d.takes.includes(m.id) ? {...m, state: 'sent'} : m);
+        }
         break;
       case 'plan_drafted': {
         const t = need(s.tasks, d.id, 'task');
@@ -146,12 +151,18 @@ globalThis.Fold = (() => {
       }
       case 'run_answered': {
         const r = need(s.runs, d.id, 'run');
-        if (!(r.answers || []).some(a => a.request === d.answer.request)) r.answers = [...(r.answers || []), d.answer];
+        r.answers = [...(r.answers || []).filter(a => a.request !== d.answer.request), d.answer]; // a later answer replaces
         break;
       }
       case 'run_sent': {
         const r = need(s.runs, d.id, 'run');
         if (!(r.sends || []).some(m => m.id === d.send.id)) r.sends = [...(r.sends || []), d.send];
+        else r.sends = r.sends.map(m => m.id === d.send.id ? {...m, state: d.send.state} : m); // one the coordinator kept failed
+        break;
+      }
+      case 'run_interrupt_requested': {
+        const r = need(s.runs, d.id, 'run');
+        if (openStates.has(r.state)) r.interrupt = d;
         break;
       }
       case 'task_moved': {

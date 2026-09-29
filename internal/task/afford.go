@@ -63,13 +63,15 @@ func (r *Run) CapsNow() agent.RunCaps {
 
 // Run actions: what can be done with a run, before who may do it is known.
 const (
-	ActSteer    = "steer"     // run.send into the running turn
-	ActAnswer   = "answer"    // run.answer to one of its requests
-	ActAllowRun = "allow_run" // run.answer with DecisionAllowRun
-	ActStop     = "stop"      // run.stop
-	ActAbandon  = "abandon"   // run.abandon
-	ActContinue = "continue"  // run.continue in its session
-	ActTakeover = "takeover"  // its session resumed in a terminal; no method: the machine's owner copies the command
+	ActSteer     = "steer"     // run.send into the running turn
+	ActAfter     = "after"     // run.send to go on from once the turn ended
+	ActInterrupt = "interrupt" // run.interrupt of the turn it is at
+	ActAnswer    = "answer"    // run.answer to one of its requests
+	ActAllowRun  = "allow_run" // run.answer with DecisionAllowRun
+	ActStop      = "stop"      // run.stop
+	ActAbandon   = "abandon"   // run.abandon
+	ActContinue  = "continue"  // run.continue in its session
+	ActTakeover  = "takeover"  // its session resumed in a terminal; no method: the machine's owner copies the command
 )
 
 // Task actions, as the web client names them.
@@ -117,6 +119,8 @@ func (s *State) RunActions(r *Run) []string {
 		}
 	}
 	add(r.State == Running && r.Stream && caps.Steer, ActSteer)
+	add(r.State == Running && caps.After, ActAfter)
+	add(r.State == Running && caps.Interrupt && r.Turn > 0, ActInterrupt)
 	qs := r.Unanswered()
 	add(len(qs) > 0, ActAnswer)
 	add(caps.AnswerScope && slices.ContainsFunc(qs, func(q agent.Request) bool { return q.Kind == agent.RequestPermission && q.AllowRun }), ActAllowRun)

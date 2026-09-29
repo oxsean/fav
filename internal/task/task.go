@@ -125,14 +125,17 @@ type Run struct {
 	Attention  string             `json:"attention,omitempty"` // asked | permission | stalled
 	Ask        string             `json:"ask,omitempty"`
 	Note       string             `json:"note,omitempty"`
-	Last       string             `json:"last,omitempty"`     // the newest thing its agent said
-	Usage      *agent.Usage       `json:"usage,omitempty"`    // what its agent spent
-	Stream     bool               `json:"stream,omitempty"`   // it takes answers and messages while it runs
-	Requests   []agent.Request    `json:"requests,omitempty"` // what it waits on, as its node last said
-	Answers    []agent.Answer     `json:"answers,omitempty"`  // given, not yet taken by the node
-	Sends      []agent.Send       `json:"sends,omitempty"`    // messages for it and how far they got
-	Caps       *agent.RunCaps     `json:"caps,omitempty"`     // what it can do, as its node found it once it started
-	Doing      string             `json:"doing,omitempty"`    // the tool call its turn is at
+	Last       string             `json:"last,omitempty"`      // the newest thing its agent said
+	Usage      *agent.Usage       `json:"usage,omitempty"`     // what its agent spent
+	Stream     bool               `json:"stream,omitempty"`    // it takes answers and messages while it runs
+	Requests   []agent.Request    `json:"requests,omitempty"`  // what it waits on, as its node last said
+	Answers    []agent.Answer     `json:"answers,omitempty"`   // given, not yet taken by the node
+	Sends      []agent.Send       `json:"sends,omitempty"`     // messages for it and how far they got
+	Caps       *agent.RunCaps     `json:"caps,omitempty"`      // what it can do, as its node found it once it started
+	Doing      string             `json:"doing,omitempty"`     // the tool call its turn is at
+	Turn       int                `json:"turn,omitempty"`      // the turn its output is at, as its node last said
+	Interrupt  *RunInterrupt      `json:"interrupt,omitempty"` // the latest ask to end a turn
+	Takes      []string           `json:"takes,omitempty"`     // the messages of the run it continues that it carries
 	Provider   string             `json:"provider,omitempty"`
 	Session    string             `json:"session,omitempty"`
 	Pane       string             `json:"pane,omitempty"`
@@ -155,7 +158,16 @@ const (
 	ERunAbandoned = "run_abandoned"
 	ERunAnswered  = "run_answered"
 	ERunSent      = "run_sent"
+	ERunInterrupt = "run_interrupt_requested" // RunInterrupt: someone asked to end a turn of the run
 )
+
+// RunInterrupt asks the node to end turn Turn of run ID; Ask is the node's id for the ask (a repeat is a no-op).
+type RunInterrupt struct {
+	ID   string `json:"id"`
+	Turn int    `json:"turn"`
+	Ask  string `json:"ask"`
+	By   string `json:"by,omitempty"`
+}
 
 // RunAnswer: the user answered a request of run ID.
 type RunAnswer struct {
@@ -221,6 +233,7 @@ type Observation struct {
 	Sends     []agent.Send       `json:"sends,omitempty"`
 	Caps      *agent.RunCaps     `json:"caps,omitempty"`
 	Doing     string             `json:"doing,omitempty"`
+	Turn      int                `json:"turn,omitempty"`
 	Verdict   *agent.Verdict     `json:"verdict,omitempty"`
 	Check     *agent.CheckResult `json:"check,omitempty"`
 	Work      *agent.Work        `json:"work,omitempty"`
@@ -372,6 +385,14 @@ func (s *State) apply(e journal.Event, seq int64, at time.Time) error {
 		r.State, r.Want, r.QueuedAt, r.Seq = Queued, "run", at, seq
 		s.Runs[r.ID] = &r
 		s.queuedWork(&r)
+		if p := s.Runs[r.Parent]; p != nil && len(r.Takes) > 0 { // what it carries went out with it
+			p.Sends = slices.Clone(p.Sends)
+			for i := range p.Sends {
+				if slices.Contains(r.Takes, p.Sends[i].ID) {
+					p.Sends[i].State = agent.SendSent
+				}
+			}
+		}
 	case ERunStarting:
 		var d RunStarting
 		if err := json.Unmarshal(e.Data, &d); err != nil {
@@ -426,10 +447,8 @@ func (s *State) apply(e journal.Event, seq int64, at time.Time) error {
 		if err := json.Unmarshal(e.Data, &d); err != nil {
 			return err
 		}
-		return s.run(e, func(r *Run) {
-			if !slices.ContainsFunc(r.Answers, func(a agent.Answer) bool { return a.Request == d.Answer.Request }) {
-				r.Answers = append(r.Answers, d.Answer)
-			}
+		return s.run(e, func(r *Run) { // a later answer to the same request replaces the one that did not reach the agent
+			r.Answers = append(slices.DeleteFunc(slices.Clone(r.Answers), func(a agent.Answer) bool { return a.Request == d.Answer.Request }), d.Answer)
 		})
 	case ERunSent:
 		var d RunSend
@@ -437,8 +456,22 @@ func (s *State) apply(e journal.Event, seq int64, at time.Time) error {
 			return err
 		}
 		return s.run(e, func(r *Run) {
-			if !slices.ContainsFunc(r.Sends, func(m agent.Send) bool { return m.ID == d.Send.ID }) {
+			i := slices.IndexFunc(r.Sends, func(m agent.Send) bool { return m.ID == d.Send.ID })
+			if i < 0 {
 				r.Sends = append(r.Sends, d.Send)
+				return
+			}
+			r.Sends = slices.Clone(r.Sends) // the coordinator's word on a message it kept: it failed
+			r.Sends[i].State = d.Send.State
+		})
+	case ERunInterrupt:
+		var d RunInterrupt
+		if err := json.Unmarshal(e.Data, &d); err != nil {
+			return err
+		}
+		return s.run(e, func(r *Run) {
+			if Open(r.State) {
+				r.Interrupt = &d
 			}
 		})
 	default:
@@ -507,7 +540,7 @@ func (r *Run) observe(o Observation) {
 	}
 	if o.NodeRev > 0 { // what the node says now; the coordinator's own observations carry none of it
 		r.Attention, r.Ask, r.Note, r.Last, r.Usage = o.Attention, o.Ask, o.Note, o.Last, o.Usage
-		r.Stream, r.Requests, r.Caps, r.Doing = o.Stream, o.Requests, o.Caps, o.Doing
+		r.Stream, r.Requests, r.Caps, r.Doing, r.Turn = o.Stream, o.Requests, o.Caps, o.Doing, o.Turn
 		r.Verdict, r.Checked, r.Worked, r.Plan = o.Verdict, o.Check, o.Work, o.Plan
 		r.Sends = mergeSends(r.Sends, o.Sends)
 		r.Answers = slices.DeleteFunc(slices.Clone(r.Answers), func(a agent.Answer) bool { // taken, or no longer asked
@@ -526,11 +559,11 @@ func (r *Run) observe(o Observation) {
 	if o.EndedAt != nil {
 		r.EndedAt = o.EndedAt
 	}
-	if !Open(r.State) { // nothing waits any more, and what never went out will not
+	if !Open(r.State) { // nothing waits any more, and what never went out will not, but for what a continuation carries
 		r.Requests, r.Answers = nil, nil
 		r.Sends = slices.Clone(r.Sends)
 		for i := range r.Sends {
-			if r.Sends[i].State == agent.SendQueued {
+			if r.Sends[i].State == agent.SendQueued && !(r.Sends[i].Carried() && r.Session != "") {
 				r.Sends[i].State = agent.SendFailed
 			}
 		}

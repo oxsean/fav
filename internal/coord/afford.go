@@ -38,6 +38,10 @@ func (c *Coord) runAllows(p Principal, r *task.Run, act string) bool {
 	switch act {
 	case task.ActSteer:
 		return dry(p, c.runSend, SendMessage{Run: r.ID, Text: "x"})
+	case task.ActAfter:
+		return dry(p, c.runSend, SendMessage{Run: r.ID, Text: "x", Mode: agent.SendAfter})
+	case task.ActInterrupt:
+		return dry(p, c.runInterrupt, Interrupt{Run: r.ID})
 	case task.ActAnswer:
 		return slices.ContainsFunc(r.Unanswered(), func(q agent.Request) bool { return dry(p, c.runAnswer, answerFor(r, q, "")) })
 	case task.ActAllowRun:
