@@ -186,7 +186,7 @@ deadline=$(($(date +%s) + 90))
 until [ "$(jq_runs "print(len([r for r in rs if r['id']=='$gated'][0].get('requests') or []))")" = 1 ] || [ "$(date +%s)" -gt "$deadline" ]; do sleep 2; done
 "$tend" run answer "$gated" --allow >/dev/null && "$tend" run send "$gated" "srv e2e message" >/dev/null
 wait_runs
-check "$last permission answered" "$(jq_runs "print([r['state']+str(r.get('exit_code'))+':'+','.join(m['state'] for m in r.get('sends') or []) for r in rs if r['id']=='$gated'][0])")" "exited0:sent"
+check "$last permission answered" "$(jq_runs "print([r['state']+str(r.get('exit_code'))+':'+','.join(m['state'] for m in r.get('sends') or []) for r in rs if r['id']=='$gated'][0])")" "exited0:seen"
 check "$last agent heard it" "$("$tend" run logs "$gated" | grep -c -e 'allowed Bash' -e 'heard: srv e2e message')" 2
 
 for p in $pids; do kill "$p" 2>/dev/null; done

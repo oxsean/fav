@@ -3,7 +3,7 @@
 # TEND_HOME / CLAUDE_CONFIG_DIR / CODEX_HOME in a throwaway directory, so no real session or run is touched. Each host
 # runs a fake agent to its end (it ends on a question, which a reply continues in the same session), one run is
 # stopped, and the runs' sessions must be listed by `sessions host:<name>`. Each host also runs one that waits for a
-# permission, which is answered with `run answer` and sent a message with `run send` while it runs.
+# permission, which is answered with `run answer` and sent a message with `run send` while it runs, which the agent takes in (seen).
 # Hosts: mba (macOS), linux (container on mba), wsl and win (lg-win); pass names to run a subset.
 # Needs tend installed on every remote (`tend hosts install <name>`) at the same protocol.
 set -u
@@ -141,7 +141,7 @@ while [ "$(jq_runs "print(sum(1 for r in rs if r['agent']=='gated' and r['state'
 done
 for h in "$@"; do
 	run=$(jq_runs "print([r['id'] for r in rs if r['machine']=='$h' and r['agent']=='gated'][0])")
-	check "$h permission answered" "$(jq_runs "print([r['state']+str(r.get('exit_code'))+':'+','.join(m['state'] for m in r.get('sends') or []) for r in rs if r['id']=='$run'][0])")" "exited0:sent"
+	check "$h permission answered" "$(jq_runs "print([r['state']+str(r.get('exit_code'))+':'+','.join(m['state'] for m in r.get('sends') or []) for r in rs if r['id']=='$run'][0])")" "exited0:seen"
 	check "$h agent heard it" "$("$tend" run logs "$run" | grep -c -e 'allowed Bash' -e "heard: e2e message on $h")" 2
 done
 
