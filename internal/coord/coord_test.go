@@ -487,44 +487,20 @@ func TestANodeThatRefusesARunFailsIt(t *testing.T) {
 	}
 }
 
-func TestSubscribersGetEveryEnvelopeInOrder(t *testing.T) {
+func TestAStateWatchGetsEveryEnvelopeInOrder(t *testing.T) {
 	e := newEnv(t, tend.Config{})
 	e.start()
 	e.task("before", "quick")
-	var mu sync.Mutex
-	var seqs []int64
-	cli, _ := wire.Pipe(wire.Options{OnPush: func(method string, params json.RawMessage) {
-		var env journal.Envelope
-		json.Unmarshal(params, &env)
-		mu.Lock()
-		seqs = append(seqs, env.Seq)
-		mu.Unlock()
-	}}, wire.Options{Handler: e.c.Handler()})
-	defer cli.Close()
-	var s Subscribed
-	if err := cli.Call(context.Background(), MSubscribe, SubscribeParams{}, &s); err != nil || s.Seq != 1 {
-		t.Fatalf("%+v %v", s, err)
-	}
+	w := watchState(t, e.cli, WatchParams{})
+	var f StateFold
+	w.fold(&f, 1)
 	for i := 0; i < 5; i++ {
 		e.task("after", "quick")
 	}
-	deadline := time.Now().Add(5 * time.Second)
-	for {
-		mu.Lock()
-		got := append([]int64(nil), seqs...)
-		mu.Unlock()
-		if len(got) == 6 {
-			for i, q := range got {
-				if q != int64(i+1) {
-					t.Fatalf("%v", got)
-				}
-			}
-			return
+	for i := int64(2); i <= 6; i++ {
+		if env := w.journal(); env.Seq != i {
+			t.Fatalf("seq %d, want %d", env.Seq, i)
 		}
-		if time.Now().After(deadline) {
-			t.Fatalf("%v", got)
-		}
-		time.Sleep(20 * time.Millisecond)
 	}
 }
 

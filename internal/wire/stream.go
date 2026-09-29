@@ -91,13 +91,54 @@ func (s *Stream) Context() context.Context { return s.ctx }
 // Push queues one push; it does not wait for the write. It fails once the stream has ended.
 func (s *Stream) Push(method string, params any) error { return s.PushMark(method, params, nil) }
 
-// PushMark is Push with a mark that a GapError hands back when this push is dropped.
-func (s *Stream) PushMark(method string, params any, mark any) error {
+func (s *Stream) frame(method string, params any) ([]byte, error) {
 	p, err := json.Marshal(params)
+	if err != nil {
+		return nil, err
+	}
+	return encode(&Frame{Type: TypePush, ID: s.id, Method: method, Params: p})
+}
+
+// PushWait is Push for a provider that can wait: while the queue has no room it waits (the other end reads slowly)
+// instead of applying Full.
+func (s *Stream) PushWait(ctx context.Context, method string, params any) error {
+	b, err := s.frame(method, params)
 	if err != nil {
 		return err
 	}
-	b, err := encode(&Frame{Type: TypePush, ID: s.id, Method: method, Params: p})
+	c, l := s.c, s.lane
+	for {
+		c.wmx.Lock()
+		if s.ended {
+			c.wmx.Unlock()
+			return s.why
+		}
+		if l.bytes == 0 || l.bytes+len(b) <= s.opt.Queue {
+			ok := c.putLocked(l, &pending{b: b, method: method})
+			c.wmx.Unlock()
+			if !ok {
+				return c.Err()
+			}
+			c.wake()
+			return nil
+		}
+		if l.room == nil {
+			l.room = make(chan struct{}, 1)
+		}
+		room := l.room
+		c.wmx.Unlock()
+		select {
+		case <-room:
+		case <-s.ctx.Done():
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+}
+
+// PushMark is Push with a mark that a GapError hands back when this push is dropped.
+func (s *Stream) PushMark(method string, params any, mark any) error {
+	b, err := s.frame(method, params)
 	if err != nil {
 		return err
 	}
@@ -268,8 +309,17 @@ func cancelFrame(id int64) []byte {
 	return b
 }
 
-// Next is the next push; once the stream has ended, io.EOF when its provider finished it, else why it ended.
+// Next is the next push, a queued one even when ctx has ended; once the stream has ended, io.EOF when its provider
+// finished it, else why it ended.
 func (w *Watch) Next(ctx context.Context) (Push, error) {
+	select {
+	case p := <-w.q:
+		if w.dropped() {
+			return Push{}, w.Err()
+		}
+		return p, nil
+	default:
+	}
 	select {
 	case p := <-w.q:
 		if w.dropped() {

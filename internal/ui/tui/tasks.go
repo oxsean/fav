@@ -4,9 +4,8 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
-	"encoding/json"
+	"errors"
 	"strings"
-	"sync/atomic"
 	"time"
 
 	"charm.land/bubbles/v2/textinput"
@@ -15,7 +14,6 @@ import (
 
 	"github.com/oxsean/fav/internal/coord"
 	"github.com/oxsean/fav/internal/i18n"
-	"github.com/oxsean/fav/internal/journal"
 	"github.com/oxsean/fav/internal/output"
 	"github.com/oxsean/fav/internal/paths"
 	"github.com/oxsean/fav/internal/remote"
@@ -48,9 +46,9 @@ type tasksState struct {
 	scroll     int
 	out        map[string]runOutput // by run id
 	ticking    bool
-	polling    bool
-	feed       *feed             // journal pushes of the current connection
-	subscribed bool              // the state follows the pushes; a full read is needed only after a gap
+	fold       coord.StateFold   // the state as state.watch brings it; st is its St
+	gen        int               // which opening of state.watch the pushes belong to
+	stream     *wire.Watch       // the current state.watch
 	machinesAt time.Time         // when the machines were last read
 	editing    *editing          // what $EDITOR has open
 	anchor     string            // where a range of marked tasks started
@@ -60,33 +58,6 @@ type tasksState struct {
 	askPick    int               // the home layout's inline answer: the option highlighted for its question
 	askDeny    bool              // it is composing a deny reason
 	askReason  textinput.Model
-}
-
-// feed carries the coordinator's journal pushes from the connection to the model; lost is set when it overflowed.
-type feed struct {
-	ch   chan journal.Envelope
-	lost atomic.Bool
-}
-
-func newFeed() *feed { return &feed{ch: make(chan journal.Envelope, 512)} }
-
-func (f *feed) options() wire.Options {
-	return wire.Options{OnPush: func(method string, params json.RawMessage) {
-		var env journal.Envelope
-		if method == coord.PushRefetch {
-			tracef("tasks: refetch pushed")
-			f.lost.Store(true)
-			return
-		}
-		if method != coord.PushJournal || json.Unmarshal(params, &env) != nil {
-			return
-		}
-		select {
-		case f.ch <- env:
-		default:
-			f.lost.Store(true)
-		}
-	}}
 }
 
 type runOutput struct {
@@ -115,13 +86,6 @@ func (m *Model) CloseCoordinator() {
 type tasksConnMsg struct {
 	cl  *coord.Client
 	err error
-}
-
-type tasksStateMsg struct {
-	st       *task.State
-	machines []coord.Machine
-	agents   []tend.AgentProfile
-	err      error
 }
 
 type tasksTickMsg struct{}
@@ -182,10 +146,9 @@ func (m *Model) tasksOpen() tea.Cmd {
 		return nil
 	case t.cl == nil && !t.connecting:
 		t.connecting, t.err = true, nil
-		connect, f := t.connect, newFeed()
-		t.feed, t.subscribed = f, false
+		connect := t.connect
 		return func() tea.Msg {
-			cl, err := connect(f.options())
+			cl, err := connect(wire.Options{})
 			return tasksConnMsg{cl, err}
 		}
 	case t.cl != nil && !t.ticking:
@@ -195,11 +158,11 @@ func (m *Model) tasksOpen() tea.Cmd {
 	return nil
 }
 
-// pollTasks reads what the pushes do not bring: the whole state when it is not followed yet or a push was lost, the
-// machines every machinesEvery, and the selected run's output while it runs.
+// pollTasks reads what the state stream does not bring: the machines every machinesEvery, the agents once, and the
+// selected run's output while it runs.
 func (m *Model) pollTasks() tea.Cmd {
 	t := &m.tasks
-	if t.cl == nil || t.polling {
+	if t.cl == nil {
 		return nil
 	}
 	var cmds []tea.Cmd
@@ -211,41 +174,17 @@ func (m *Model) pollTasks() tea.Cmd {
 			cmds = append(cmds, readOutput(t.cl, r.ID, !task.Open(r.State)))
 		}
 	}
-	if t.subscribed && !t.feed.lost.Load() && t.st != nil {
-		if time.Since(t.machinesAt) < machinesEvery {
-			return tea.Batch(cmds...)
-		}
-		t.machinesAt = time.Now()
-		cl := t.cl
-		return tea.Batch(append(cmds, func() tea.Msg {
-			ctx, cancel := context.WithTimeout(context.Background(), tasksWait)
-			defer cancel()
-			var ms coord.Machines
-			err := cl.Call(ctx, coord.MMachineList, coord.MachinesParams{}, &ms)
-			return tasksMachinesMsg{machines: ms.Machines, err: err}
-		})...)
+	if time.Since(t.machinesAt) < machinesEvery && len(t.agents) > 0 {
+		return tea.Batch(cmds...)
 	}
-	tracef("tasks: full read (subscribed=%v lost=%v)", t.subscribed, t.feed.lost.Load())
-	t.polling = true
-	t.feed.lost.Store(false)
 	t.machinesAt = time.Now()
 	cl, needAgents := t.cl, len(t.agents) == 0
-	cmds = append(cmds, func() tea.Msg {
+	return tea.Batch(append(cmds, func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), tasksWait)
 		defer cancel()
-		var msg tasksStateMsg
-		st := task.New()
-		msg.err = cl.Call(ctx, coord.MStateGet, nil, st)
-		if wire.Code(msg.err) == wire.CodeInternal { // too big for one frame: without the briefs (search misses them)
-			st = task.New()
-			msg.err = cl.Call(ctx, coord.MStateGet, coord.StateParams{NoBriefs: true}, st)
-		}
-		if msg.err != nil {
-			return msg
-		}
-		msg.st = st
+		var msg tasksMachinesMsg
 		var ms coord.Machines
-		if cl.Call(ctx, coord.MMachineList, coord.MachinesParams{}, &ms) == nil {
+		if msg.err = cl.Call(ctx, coord.MMachineList, coord.MachinesParams{}, &ms); msg.err == nil {
 			msg.machines = ms.Machines
 		}
 		if needAgents {
@@ -255,8 +194,7 @@ func (m *Model) pollTasks() tea.Cmd {
 			}
 		}
 		return msg
-	})
-	return tea.Batch(cmds...)
+	})...)
 }
 
 func tickTasks() tea.Cmd {
@@ -265,6 +203,7 @@ func tickTasks() tea.Cmd {
 
 type tasksMachinesMsg struct {
 	machines []coord.Machine
+	agents   []tend.AgentProfile
 	err      error
 }
 
@@ -272,92 +211,96 @@ func (msg tasksMachinesMsg) apply(m *Model) tea.Cmd {
 	if msg.err == nil {
 		m.tasks.machines = msg.machines
 	}
+	if len(msg.agents) > 0 {
+		m.tasks.agents = msg.agents
+	}
 	return nil
 }
 
-// subscribe asks for the journal after seq on cl; the pushes then arrive on f.
-func subscribe(cl *coord.Client, f *feed, seq int64) tea.Cmd {
-	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), tasksWait)
-		defer cancel()
-		err := cl.Call(ctx, coord.MSubscribe, coord.SubscribeParams{AfterSeq: seq}, nil)
-		return tasksSubscribedMsg{cl: cl, f: f, err: err}
-	}
-}
-
-type tasksSubscribedMsg struct {
-	cl  *coord.Client
-	f   *feed
-	err error
-}
-
-func (msg tasksSubscribedMsg) apply(m *Model) tea.Cmd {
+// openState opens state.watch from what the fold holds: a resume after its seq, or a snapshot.
+func (m *Model) openState() tea.Cmd {
 	t := &m.tasks
-	if t.cl != msg.cl || t.feed != msg.f {
-		return nil
+	if t.stream != nil {
+		t.stream.Cancel()
+		t.stream = nil
 	}
-	if msg.err != nil {
-		t.subscribed = false
-		return nil
+	t.gen++
+	cl, gen, params := t.cl, t.gen, t.fold.Params(false)
+	return func() tea.Msg {
+		return nextState(cl, cl.Watch(context.Background(), coord.MStateWatch, params), gen)
 	}
-	return waitPush(msg.cl, msg.f)
 }
 
-// waitPush waits for the next journal pushes (all that are there) or the end of the connection.
-func waitPush(cl *coord.Client, f *feed) tea.Cmd {
-	return func() tea.Msg {
-		select {
-		case env := <-f.ch:
-			envs := []journal.Envelope{env}
-			for len(envs) < cap(f.ch) {
-				select {
-				case env := <-f.ch:
-					envs = append(envs, env)
-					continue
-				default:
-				}
-				break
-			}
-			return tasksPushMsg{cl: cl, f: f, envs: envs}
-		case <-cl.Done():
-			return tasksPushMsg{cl: cl, f: f, closed: true}
-		}
+// nextState waits for the next pushes of w, all that are there, or its end.
+func nextState(cl *coord.Client, w *wire.Watch, gen int) tasksPushMsg {
+	msg := tasksPushMsg{cl: cl, w: w, gen: gen}
+	p, err := w.Next(context.Background())
+	if err != nil {
+		msg.err = err
+		return msg
 	}
+	msg.pushes = append(msg.pushes, p)
+	now, cancel := context.WithCancel(context.Background())
+	cancel()
+	for len(msg.pushes) < 512 {
+		p, err := w.Next(now)
+		if errors.Is(err, context.Canceled) {
+			break
+		}
+		if err != nil {
+			msg.err = err
+			break
+		}
+		msg.pushes = append(msg.pushes, p)
+	}
+	return msg
 }
 
 type tasksPushMsg struct {
 	cl     *coord.Client
-	f      *feed
-	envs   []journal.Envelope
-	closed bool
+	w      *wire.Watch
+	gen    int
+	pushes []wire.Push
+	err    error // the stream ended
 }
 
-// apply folds the pushed envelopes into the state; a gap in seq makes the next poll read the whole state.
+// apply folds the pushes into the state; a push the copy cannot take opens the stream again for a snapshot, and one
+// that fell behind opens it again from the copy.
 func (msg tasksPushMsg) apply(m *Model) tea.Cmd {
 	t := &m.tasks
-	if t.cl != msg.cl || t.feed != msg.f {
+	if t.cl != msg.cl || t.gen != msg.gen {
 		return nil
 	}
-	if msg.closed {
-		t.subscribed = false
-		return nil
-	}
-	for _, env := range msg.envs {
-		switch {
-		case t.st == nil || env.Seq <= t.st.Seq:
-		case env.Seq == t.st.Seq+1 && t.st.Apply(env) == nil:
-			tracef("tasks: push %d (%d events)", env.Seq, len(env.Events))
-		default:
-			tracef("tasks: gap at push %d after %d", env.Seq, t.st.Seq)
-			msg.f.lost.Store(true)
+	t.stream = msg.w
+	changed := false
+	for _, p := range msg.pushes {
+		c, err := t.fold.Apply(p)
+		if err != nil {
+			tracef("tasks: state push %s refused: %v", p.Method, err)
+			t.fold.Reset()
+			return m.openState()
 		}
+		changed = changed || c
 	}
-	m.filterTasks()
-	cmd := waitPush(msg.cl, msg.f)
-	if msg.f.lost.Load() && m.view == viewTasks && !t.polling {
-		cmd = tea.Batch(cmd, m.pollTasks())
+	if changed {
+		t.err, t.st, t.loaded = nil, t.fold.St, true
+		m.filterTasks()
 	}
-	return cmd
+	switch {
+	case msg.err == nil:
+		return func() tea.Msg { return nextState(msg.cl, msg.w, msg.gen) }
+	case closed(t.cl.Done()): // the coordinator went away, keepalive: the next tick connects again
+		t.stream = nil
+		t.cl.Close()
+		t.cl = nil
+		return nil
+	case wire.Code(msg.err) == wire.CodeLagged:
+		tracef("tasks: state watch lagged at %d", t.fold.Params(false).AfterSeq)
+		return m.openState()
+	}
+	t.stream = nil
+	t.err = msg.err
+	return nil
 }
 
 func readOutput(cl *coord.Client, run string, ended bool) tea.Cmd {
@@ -378,35 +321,12 @@ func (msg tasksConnMsg) apply(m *Model) tea.Cmd {
 		return nil
 	}
 	t.cl = msg.cl
+	open := m.openState()
 	if m.view != viewTasks {
-		return nil
+		return open
 	}
 	t.ticking = true
-	return tea.Batch(m.pollTasks(), tickTasks())
-}
-
-func (msg tasksStateMsg) apply(m *Model) tea.Cmd {
-	t := &m.tasks
-	t.polling = false
-	if msg.err != nil {
-		t.err = msg.err
-		if t.cl != nil && closed(t.cl.Done()) { // the connection ended (the coordinator went away, keepalive): connect again
-			t.cl.Close()
-			t.cl = nil
-		}
-	} else {
-		t.err, t.st, t.loaded = nil, msg.st, true
-		t.machines = msg.machines
-		if len(msg.agents) > 0 {
-			t.agents = msg.agents
-		}
-		m.filterTasks()
-	}
-	if msg.err == nil && !t.subscribed && t.cl != nil && t.feed != nil {
-		t.subscribed = true // the pushes after msg.st.Seq are replayed, so the state is followed from here
-		return subscribe(t.cl, t.feed, msg.st.Seq)
-	}
-	return nil
+	return tea.Batch(open, m.pollTasks(), tickTasks())
 }
 
 // apply is the one place the next tick is set, so one loop runs while the view shows.

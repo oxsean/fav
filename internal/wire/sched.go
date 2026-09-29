@@ -37,7 +37,8 @@ type lane struct {
 	q      []*pending
 	bytes  int
 	oob    int
-	queued bool // in its class's ring
+	queued bool          // in its class's ring
+	room   chan struct{} // a PushWait waiting for the queue to shrink
 }
 
 // dropMethod removes the queued frames of method and returns the mark of the first one.
@@ -132,6 +133,12 @@ func (c *Conn) pop() *pending {
 			l.q[0] = nil
 			l.q = l.q[1:]
 			l.bytes -= len(o.b)
+			if l.room != nil {
+				select {
+				case l.room <- struct{}{}:
+				default:
+				}
+			}
 			if o.oob {
 				l.oob--
 			}

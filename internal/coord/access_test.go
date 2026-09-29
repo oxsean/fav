@@ -105,23 +105,11 @@ func TestCommandIDsBelongToTheirCaller(t *testing.T) {
 func TestPushesLeaveACommandsResultWithItsCaller(t *testing.T) {
 	e := newEnv(t, tend.Config{})
 	e.start()
-	got := make(chan journal.Envelope, 1)
-	cli, _ := wire.Pipe(wire.Options{OnPush: func(_ string, params json.RawMessage) {
-		var env journal.Envelope
-		json.Unmarshal(params, &env)
-		got <- env
-	}}, wire.Options{Handler: e.c.HandlerFor(Principal{User: "bob", Admin: true})})
-	defer cli.Close()
-	if err := callAs(cli, MSubscribe, "", SubscribeParams{}, nil); err != nil {
-		t.Fatal(err)
-	}
+	w := watchState(t, e.as(Principal{User: "bob", Admin: true}), WatchParams{})
+	var f StateFold
+	w.fold(&f, 0)
 	e.task("ann's task", "quick")
-	select {
-	case env := <-got:
-		if c := env.Command; c == nil || c.ID == "" || c.Method != MTaskCreate || c.Result != nil || c.Digest != "" {
-			t.Fatalf("a push names the command, nothing more: %+v", c)
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("no push")
+	if c := w.journal().Command; c == nil || c.ID == "" || c.Method != MTaskCreate || c.Result != nil || c.Digest != "" {
+		t.Fatalf("a push names the command, nothing more: %+v", c)
 	}
 }

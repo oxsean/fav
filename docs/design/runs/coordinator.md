@@ -51,7 +51,7 @@ run `state` 转移表（终态单调，重复事件无副作用）：
 
 - 「显示为运行中」= 有 state ∈ {starting, running, unknown} 的 run；task 只存 backlog / todo / done / canceled。
 - 一个 task 同时最多一个未结束 run；同一（机器, 目录）同时最多一个 starting / running run，其余排队；目录比较按目标机器的规则（Windows 不分大小写、`\` 与 `/` 等同）。
-- 任务书上限 256 KiB（`bad_request brief`）：它在 journal 里占一行，在 `state.get` 里占一帧。
+- 任务书上限 256 KiB（`bad_request brief`）：它在 journal 里占一行，在 `state.get` 和快照的一批里都要放得下。
 - run 冻结 `from`（任务目录所属的机器，模式一默认本机）；派发时从 `from` 映射到目标机器；`from` 还没握过手就先连它，这一轮不派。
 - `want=stop` 持久化；每次连上节点先发 `run.stop`，直到节点快照是终态。
 - 用时：运行时长只用节点时间，排队时长只用协调器时间。
@@ -88,10 +88,14 @@ run `state` 转移表（终态单调，重复事件无副作用）：
 
 ## 订阅
 
-- `state.get` 返回 `{tasks, runs, seq}`；`no_briefs` 去掉任务书（CLI 和 Web UI 用，任务书按需 `task.get`）。TUI 取全量（搜索要查任务书），超帧时回退到 `no_briefs`；编辑一律先 `task.get`。
-- `subscribe{after_seq}`：锁内登记实时通道并记当前尾 seq H；锁外从文件补发 `(after_seq, H]`；再排空实时通道（丢弃 seq ≤ H 的）。
-- 慢客户端（通道满 256）断开，客户端按 seq 重订。
-- 同一条连接重复 `subscribe` → `conflict "subscribed"`，原订阅照旧有效（Web 的 `api.js` 忽略这个错误）。
+- `state.get` 返回整份状态 `{seq, tasks, runs, projects, shares, agent_defs}`，给一次性读取（CLI）；`no_briefs` 去掉任务书，任务书按需 `task.get`；编辑一律先 `task.get`。
+- `state.watch{after_seq?, no_briefs?}` 是一个流（[wire.md](wire.md)「流」），跟随状态的客户端（TUI、Web UI、CLI 的 `--wait`）都用它，流在 `ClassState` 一级：
+  - 锁内登记实时通道并记下日志的尾 seq H；锁外决定怎么开始，再接上实时通道，丢掉 seq ≤ 已发出部分的。
+  - 能续传就续传：带 `after_seq`、它不超过 H、`(after_seq, H]` 不多于 `maxReplay`（10000）条、其中没有 `reshapes` 的事件。推 `open{mode: resume}`，回放这一段，再接实时信封。
+  - 否则推 `open{mode: snapshot}`，然后按表推 `snapshot{part, items}`（`part` 是 `task.State` 的 JSON 名：`projects`、`tasks`、`runs`、`shares`、`agent_defs`，`items` 按 id；每批不超过 `snapshotBatch`（1 MiB），每张表至少推一次，空表也推），最后 `live{seq}`，之后是实时信封。另预留 `affordances` 这个 part（按人计算，客户端收下不折叠）。
+  - 实时信封是 `journal`，按人过滤（`visibleEnv`），每个 seq 都到，没有可见事件时是空的。`reshapes` 的信封不单独推：推 `reset{}`，接着推新的快照和 `live`，这个信封只体现在新快照里。所以客户端的副本停在它的 seq 上时一定是它之后做的快照，断线续传不会跳过撤权。
+  - 推送用 `PushWait`：客户端读得慢时协调器等，不丢；实时通道积压超过 `stateQueue`（256）条，流以 `lagged` 结束，客户端按自己的 seq 重开。协调器关闭时流以 `gone` 结束。常数在 `internal/coord/limits.go`。
+  - 客户端这边的折叠是 `coord.StateFold`：`open` 为 snapshot 或收到 `reset` 时开始一份新副本，`live` 时换上，`journal` 按 seq 折进去；遇到不认识的 part、seq 断档或折叠出错，丢掉副本，不带 `after_seq` 重开。
 
 ## 通知
 

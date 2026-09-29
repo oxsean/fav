@@ -91,7 +91,7 @@
    - 模式二的连接缺身份时一律拒绝。
    - 防止 server 的数据目录被当成模式一 home 的检查只在 `tend-server` 一侧：`coord/events.jsonl` 有事件而 `tend.db` 不存在时拒绝启动（见 [storage.md](storage.md)「迁移」）。`tend` 不拦：server 停着时 `TEND_HOME=<server 数据目录> tend …` 会在那里起一个 JSONL 协调器，以本机主人身份写 `events.jsonl`，有了 `tend.db` 的 server 会忽略这些写入。
 2. **方法授权表**：`coord.Methods` 里的每个方法都有一条规则，没有规则的默认拒绝。`coord` 的测试断言每个方法都有规则，做法和 `keys_test.go` 一样。
-3. **可见性过滤只有一个入口**：`visibleState(principal, state)`。`state.get`、`task.get`、`subscribe`、`run.tail`、`run.output.page`、`run.messages`、`machine.list`、`agent.list` 都走它。
+3. **可见性过滤只有一个入口**：`visibleState(principal, state)`。`state.get`、`task.get`、`state.watch`、`run.tail`、`run.output.page`、`run.messages`、`machine.list`、`agent.list` 都走它。
 4. **订阅保持 seq 连续**。
    - 仍然一个 `seq` 一个信封。
    - 信封里的事件按人过滤成子集，子集为空也照发，客户端只推进 `seq`。
@@ -100,7 +100,8 @@
    - 历史补发和实时推送用同一条规则。
    - 事件属于哪个项目，由协调器在推送时按当前状态解析（run → task → project），不靠事件自带；对象从不删除，所以总能解析。
    - 推送里的命令名只发给调用者本人，以及看得到其中某个事件的人。
-   - `member_set`、`project_edited`、`machine_shared`、`agentdef_shared`、`agentdef_removed`、改了项目或负责人的 `task_edited` 之后，每个订阅者再收到一次 `refetch` 推送，重读状态，丢掉不再可见的数据。网页和 TUI 平时自己折叠信封（网页用 `fold.js`，和 Go 的折叠用同一批 Go 生成的信封对照测试），只在 `refetch`、seq 断档或遇到不认识的对象时整量重读。
+   - `member_set`、`project_edited`、`machine_shared`、`agentdef_shared`、`agentdef_removed`、改了项目或负责人的 `task_edited` 不单独推：`state.watch` 在同一个流里推 `reset`，接着推这个人的新快照，丢掉不再可见的数据；续传的那一段里有这些事件时也改给快照（见 [runs/coordinator.md](../runs/coordinator.md)「订阅」）。网页和 TUI 平时自己折叠信封（网页用 `fold.js`，和 Go 的折叠用同一批 Go 生成的信封对照测试），只在 seq 断档或遇到不认识的对象时整量重读。
+   - 连接上的身份在连上时定下；server 的 `sweep`（每几秒）发现凭据的主人被停用、或管理员身份被授予或撤销时断开这条连接，客户端按新身份重连。
 5. **收据按 `(principal, command_id)` 存**。重放之前先检查当前的读权限；有权就返回第一次的结果。
 6. **原生会话的两条旁路收紧**。
    - `node.call`（读会话列表、对话、全文，以及建项目时列目录的 `node.dirs`）只给机器主人和管理员。

@@ -40,7 +40,7 @@ const (
 	MRunOutputPage  = "run.output.page"
 	MAgentList      = "agent.list"
 	MMachineList    = "machine.list"
-	MSubscribe      = "subscribe"
+	MStateWatch     = "state.watch"
 	MNodeCall       = "node.call"
 	MTaskGet        = "task.get"
 	MRunPreview     = "run.preview"
@@ -70,10 +70,15 @@ const (
 	MAgentDefShare  = "agentdef.share"
 	MInboxList      = "inbox.list"
 	MUserOffboard   = "user.offboard"
-	PushJournal     = "journal"
-	PushRefetch     = "refetch" // what the subscriber may see changed: fetch the state again
 	defaultSlots    = 2
-	subscribeQueue  = 256
+)
+
+// state.watch pushes after open.
+const (
+	PushSnapshot = "snapshot" // a batch of one table (Snapshot)
+	PushLive     = "live"     // the snapshot is complete (Live)
+	PushJournal  = "journal"  // one envelope, the viewer's part of it
+	PushReset    = "reset"    // what the viewer may see changed: a new snapshot follows
 )
 
 // ErrLocked: another process is the coordinator.
@@ -130,7 +135,7 @@ type Coord struct {
 	mu       sync.Mutex
 	st       *task.State
 	receipts map[string]journal.Receipt
-	subs     map[*wire.Conn]*sub
+	subs     map[*wire.Stream]*sub
 	ms       map[string]*machine
 	sent     map[string]time.Time // runs whose run.start went out, when
 	acked    map[string][]string  // per machine: ended runs recorded, to acknowledge
@@ -152,7 +157,7 @@ func Open(opt Options) (*Coord, error) {
 	if err != nil {
 		return nil, err
 	}
-	c := &Coord{opt: opt, unlock: unlock, st: task.New(), receipts: map[string]journal.Receipt{}, subs: map[*wire.Conn]*sub{},
+	c := &Coord{opt: opt, unlock: unlock, st: task.New(), receipts: map[string]journal.Receipt{}, subs: map[*wire.Stream]*sub{},
 		ms: map[string]*machine{}, sent: map[string]time.Time{}, acked: map[string][]string{}, ackDone: map[string]bool{}, missing: map[string]int{},
 		wake: make(chan struct{}, 1)}
 	if c.id, err = coordID(dir); err != nil {
@@ -199,9 +204,10 @@ func (c *Coord) Close() {
 			m.conn.Close()
 		}
 	}
-	for conn, s := range c.subs {
-		delete(c.subs, conn)
-		close(s.ch)
+	for s, sb := range c.subs {
+		delete(c.subs, s)
+		sb.closed = true
+		close(sb.ch)
 	}
 	c.mu.Unlock()
 	c.passMu.Lock()

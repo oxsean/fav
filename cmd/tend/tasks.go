@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -20,7 +19,6 @@ import (
 	"github.com/oxsean/fav/internal/agent"
 	"github.com/oxsean/fav/internal/coord"
 	"github.com/oxsean/fav/internal/i18n"
-	"github.com/oxsean/fav/internal/journal"
 	"github.com/oxsean/fav/internal/node"
 	"github.com/oxsean/fav/internal/paths"
 	"github.com/oxsean/fav/internal/remote"
@@ -510,8 +508,7 @@ func cmdRunStart(args []string) error {
 	if err != nil {
 		return err
 	}
-	events := make(chan journal.Envelope, 64)
-	return withCoord(journalPushes(events), func(cl *coord.Client) error {
+	return withCoord(wire.Options{}, func(cl *coord.Client) error {
 		st, err := readState(cl)
 		if err != nil {
 			return err
@@ -532,67 +529,59 @@ func cmdRunStart(args []string) error {
 		if !*wait {
 			return nil
 		}
-		return waitRun(cl, r.ID, st.Seq, events)
+		return waitRun(cl, r.ID)
 	})
 }
 
-// journalPushes are options that pass the coordinator's journal pushes to events.
-func journalPushes(events chan<- journal.Envelope) wire.Options {
-	return wire.Options{OnPush: func(method string, params json.RawMessage) {
-		var env journal.Envelope
-		if method == coord.PushJournal && json.Unmarshal(params, &env) == nil {
-			select {
-			case events <- env:
-			default:
-			}
-		}
-	}}
-}
-
 // waitRun prints r's states as they change until it ends; a run that did not exit 0 is an error.
-func waitRun(cl *coord.Client, id string, after int64, events <-chan journal.Envelope) error {
-	ctx, cancel := callTimeout()
-	err := cl.Call(ctx, coord.MSubscribe, coord.SubscribeParams{AfterSeq: after}, nil)
-	cancel()
-	if err != nil {
-		return err
-	}
+func waitRun(cl *coord.Client, id string) error {
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs, os.Interrupt, syscall.SIGTERM)
 	defer signal.Stop(sigs)
-	st, err := readState(cl)
-	if err != nil {
-		return err
-	}
-	last := ""
-	tick := time.NewTicker(2 * time.Second)
-	defer tick.Stop()
-	for {
-		r := st.Runs[id]
-		if r != nil && r.State != last {
-			last = r.State
-			fmt.Print(i18n.F("cli.run.now", time.Now().Format("15:04:05"), r.ID, runState(r)))
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() {
+		select {
+		case <-sigs:
+			cancel()
+		case <-ctx.Done():
 		}
-		if r != nil && !task.Open(r.State) {
-			if r.State == task.Exited && r.ExitCode != nil && *r.ExitCode == 0 {
+	}()
+	var f coord.StateFold
+	last := ""
+	for {
+		w := cl.Watch(ctx, coord.MStateWatch, f.Params(true))
+		for {
+			p, err := w.Next(ctx)
+			if ctx.Err() != nil {
+				fmt.Print(i18n.F("cli.run.detached", id))
 				return nil
 			}
-			return i18n.E("cli.run.ended_badly", r.ID, runState(r), orDash(r.Reason))
-		}
-		select {
-		case env := <-events:
-			if env.Seq > st.Seq {
-				st.Apply(env)
+			if wire.Code(err) == wire.CodeLagged {
+				break
 			}
-		case <-tick.C: // the in-process coordinator's pushes can be missed when the queue is full
-			if fresh, err := readState(cl); err == nil {
-				st = fresh
+			if err != nil {
+				return err
 			}
-		case <-sigs:
-			fmt.Print(i18n.F("cli.run.detached", id))
-			return nil
-		case <-cl.Done():
-			return cl.Err()
+			if _, err := f.Apply(p); err != nil {
+				f.Reset()
+				w.Cancel()
+				break
+			}
+			r := (*task.Run)(nil)
+			if f.St != nil {
+				r = f.St.Runs[id]
+			}
+			if r != nil && r.State != last {
+				last = r.State
+				fmt.Print(i18n.F("cli.run.now", time.Now().Format("15:04:05"), r.ID, runState(r)))
+			}
+			if r != nil && !task.Open(r.State) {
+				if r.State == task.Exited && r.ExitCode != nil && *r.ExitCode == 0 {
+					return nil
+				}
+				return i18n.E("cli.run.ended_badly", r.ID, runState(r), orDash(r.Reason))
+			}
 		}
 	}
 }

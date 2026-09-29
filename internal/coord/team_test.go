@@ -6,9 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"sync"
 	"testing"
-	"time"
 
 	"github.com/oxsean/fav/internal/agent"
 	"github.com/oxsean/fav/internal/journal"
@@ -68,20 +66,9 @@ func (e *env) taskAs(p Principal, id, project string, agentName string) *task.Ta
 func TestSomeoneOutsideAProjectSeesNothingOfIt(t *testing.T) {
 	e := team(t, tend.Config{})
 	e.start()
-	var mu sync.Mutex
-	var pushed []journal.Envelope
-	watcher, _ := wire.Pipe(wire.Options{OnPush: func(method string, params json.RawMessage) {
-		var env journal.Envelope
-		if method == PushJournal && json.Unmarshal(params, &env) == nil {
-			mu.Lock()
-			pushed = append(pushed, env)
-			mu.Unlock()
-		}
-	}}, wire.Options{Handler: e.c.HandlerFor(cy)})
-	defer watcher.Close()
-	if err := callAs(watcher, MSubscribe, "", SubscribeParams{}, nil); err != nil {
-		t.Fatal(err)
-	}
+	watcher := watchState(t, e.as(cy), WatchParams{})
+	var cyFold StateFold
+	watcher.fold(&cyFold, 0)
 
 	e.project()
 	tk := e.taskAs(bob, "b1", "p1", "quick")
@@ -132,24 +119,20 @@ func TestSomeoneOutsideAProjectSeesNothingOfIt(t *testing.T) {
 		}
 	}
 
-	deadline := time.Now().Add(5 * time.Second)
-	for {
-		mu.Lock()
-		got := slices.Clone(pushed)
-		mu.Unlock()
-		if n := len(got); n > 0 && got[n-1].Seq == e.c.State().Seq {
-			for i, env := range got {
-				if env.Seq != int64(i+1) || len(env.Events) != 0 || env.Command != nil {
-					b, _ := json.Marshal(env)
-					t.Fatalf("cy gets every seq and nothing in it: %s", b)
-				}
+	for end := e.c.State().Seq; cyFold.St.Seq < end; {
+		p := watcher.next()
+		if p.Method == PushJournal {
+			var env journal.Envelope
+			if p.Decode(&env); len(env.Events) != 0 || env.Command != nil {
+				t.Fatalf("cy gets every seq and nothing in it: %s", p.Params)
 			}
-			break
 		}
-		if time.Now().After(deadline) {
-			t.Fatalf("pushes to cy: %d, state at %d", len(got), e.c.State().Seq)
+		if _, err := cyFold.Apply(p); err != nil {
+			t.Fatal(err)
 		}
-		time.Sleep(20 * time.Millisecond)
+	}
+	if n := len(cyFold.St.Tasks) + len(cyFold.St.Runs) + len(cyFold.St.Projects); n != 0 {
+		t.Fatalf("cy's copy holds %d things", n)
 	}
 
 	var ms Machines
@@ -289,55 +272,27 @@ func TestOnlyTheOwnerOrTheDispatcherGrantsAPermission(t *testing.T) {
 	}
 }
 
-func TestMembershipChangesTellSubscribersToFetchAgain(t *testing.T) {
+func TestMembershipChangesResetStateWatches(t *testing.T) {
 	e := team(t, tend.Config{})
 	e.start()
 	e.project()
-	got := make(chan string, 16)
-	w, _ := wire.Pipe(wire.Options{OnPush: func(method string, _ json.RawMessage) { got <- method }}, wire.Options{Handler: e.c.HandlerFor(bob)})
-	defer w.Close()
-	if err := callAs(w, MSubscribe, "", SubscribeParams{AfterSeq: e.c.State().Seq}, nil); err != nil {
-		t.Fatal(err)
-	}
+	w := watchState(t, e.as(bob), WatchParams{AfterSeq: e.c.State().Seq})
 	if err := callAs(e.as(ann), MProjectMember, "m-cy", task.MemberSet{Project: "p1", User: cy.User, Role: task.RoleReader}, nil); err != nil {
 		t.Fatal(err)
 	}
-	deadline := time.After(5 * time.Second)
-	for {
-		select {
-		case m := <-got:
-			if m == PushRefetch {
-				return
-			}
-		case <-deadline:
-			t.Fatal("no refetch")
-		}
+	for w.next().Method != PushReset {
 	}
 }
 
-func TestHandingOverATaskOutsideAProjectTellsSubscribersToFetchAgain(t *testing.T) {
+func TestHandingOverATaskOutsideAProjectResetsStateWatches(t *testing.T) {
 	e := team(t, tend.Config{})
 	e.start()
 	tk := e.taskAs(bob, "b1", "", "")
-	got := make(chan string, 16)
-	w, _ := wire.Pipe(wire.Options{OnPush: func(method string, _ json.RawMessage) { got <- method }}, wire.Options{Handler: e.c.HandlerFor(bob)})
-	defer w.Close()
-	if err := callAs(w, MSubscribe, "", SubscribeParams{AfterSeq: e.c.State().Seq}, nil); err != nil {
-		t.Fatal(err)
-	}
+	w := watchState(t, e.as(bob), WatchParams{AfterSeq: e.c.State().Seq})
 	if err := callAs(e.as(bob), MTaskEdit, "e1", task.TaskEdit{ID: tk.ID, Owner: ptr(root.User)}, nil); err != nil {
 		t.Fatal(err)
 	}
-	deadline := time.After(5 * time.Second)
-	for {
-		select {
-		case m := <-got:
-			if m == PushRefetch {
-				return
-			}
-		case <-deadline:
-			t.Fatal("no refetch")
-		}
+	for w.next().Method != PushReset {
 	}
 }
 

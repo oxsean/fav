@@ -244,6 +244,46 @@ func New() *State {
 		AgentDefs: map[string]*AgentDef{}}
 }
 
+// The tables of a snapshot of the state, by their JSON names; PartAffordances is the viewer's own and not folded.
+const (
+	PartProjects    = "projects"
+	PartTasks       = "tasks"
+	PartRuns        = "runs"
+	PartShares      = "shares"
+	PartAgentDefs   = "agent_defs"
+	PartAffordances = "affordances"
+)
+
+// Take puts one batch of a snapshot's table into s; a table not known here is an error.
+func (s *State) Take(part string, items map[string]json.RawMessage) error {
+	switch part {
+	case PartProjects:
+		return take(s.Projects, items)
+	case PartTasks:
+		return take(s.Tasks, items)
+	case PartRuns:
+		return take(s.Runs, items)
+	case PartShares:
+		return take(s.Shares, items)
+	case PartAgentDefs:
+		return take(s.AgentDefs, items)
+	case PartAffordances:
+		return nil
+	}
+	return fmt.Errorf("snapshot of %q", part)
+}
+
+func take[V any](into map[string]*V, items map[string]json.RawMessage) error {
+	for id, b := range items {
+		v := new(V)
+		if err := json.Unmarshal(b, v); err != nil {
+			return fmt.Errorf("%s: %w", id, err)
+		}
+		into[id] = v
+	}
+	return nil
+}
+
 // Apply folds one envelope in.
 func (s *State) Apply(env journal.Envelope) error {
 	if s.Projects == nil {

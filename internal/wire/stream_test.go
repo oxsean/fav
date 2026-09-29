@@ -345,3 +345,27 @@ func TestASlowStreamDoesNotHoldBackAnswersPingsOrState(t *testing.T) {
 		t.Fatalf("behind the output: the ping answer came %dth, the state push %dth", ping, journal)
 	}
 }
+
+func TestPushWaitWaitsForRoomInsteadOfLagging(t *testing.T) {
+	s, p := stalled(t, StreamOptions{Full: FullLag, Queue: 100})
+	done := make(chan error, 1)
+	go func() {
+		for i := range 20 {
+			if err := s.PushWait(context.Background(), "n", num{i}); err != nil {
+				done <- err
+				return
+			}
+		}
+		done <- nil
+	}()
+	select {
+	case err := <-done:
+		t.Fatalf("PushWait did not wait for a reader: %v", err)
+	case <-time.After(50 * time.Millisecond):
+	}
+	p.start()
+	got := p.methods(21)
+	if err := <-done; err != nil || got[20] != `n{"n":19}` {
+		t.Fatal(err, got)
+	}
+}

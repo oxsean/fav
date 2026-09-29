@@ -119,7 +119,7 @@ var readMethods = []string{remote.MHello, remote.MList, remote.MMessages, remote
 
 // Methods are the client methods.
 var Methods = []string{MStateGet, MTaskGet, MTaskCreate, MTaskEdit, MTaskStatus, MRunDispatch, MRunStop, MRunAbandon, MRunTail, MRunOutputPage,
-	MAgentList, MMachineList, MSubscribe, MNodeCall, MRunPreview, MRunContinue, MRunAnswer, MRunSend, MRunMessages,
+	MAgentList, MMachineList, MStateWatch, MNodeCall, MRunPreview, MRunContinue, MRunAnswer, MRunSend, MRunMessages,
 	MProjectCreate, MProjectEdit, MProjectMember, MMachineShare, MTaskStart, MTaskMove,
 	MAgentDefList, MAgentDefGet, MAgentDefSave, MAgentDefRemove, MAgentDefShare, MInboxList, MUserOffboard, MTaskSync, MTaskLink, MTaskSourceAck, MTaskGate, MTaskMerge, MTaskPlan, MTaskPlanSave, MTaskPlanApply, MTaskMessage}
 
@@ -188,8 +188,8 @@ func (c *Coord) HandlerFor(p Principal) wire.Handler {
 			ms.Machines = slices.DeleteFunc(ms.Machines, func(m Machine) bool { return !c.canSee(p, m.Name) })
 			c.mu.Unlock()
 			return ms, nil
-		case MSubscribe:
-			return c.subscribe(p, r)
+		case MStateWatch:
+			return c.watchState(p, r)
 		case MRunTail:
 			var tp TailParams
 			if err := r.Decode(&tp); err != nil {

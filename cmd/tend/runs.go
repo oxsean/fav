@@ -13,7 +13,6 @@ import (
 	"github.com/oxsean/fav/internal/capture"
 	"github.com/oxsean/fav/internal/coord"
 	"github.com/oxsean/fav/internal/i18n"
-	"github.com/oxsean/fav/internal/journal"
 	"github.com/oxsean/fav/internal/node"
 	"github.com/oxsean/fav/internal/render"
 	"github.com/oxsean/fav/internal/task"
@@ -114,8 +113,7 @@ func cmdRunContinue(args []string) error {
 		}
 		p.Machine, p.Provider, p.Session, p.Dir, p.Title = r.Host, r.Provider, r.SessionID, r.Cwd, r.Title
 	}
-	events := make(chan journal.Envelope, 64)
-	return withCoord(journalPushes(events), func(cl *coord.Client) error {
+	return withCoord(wire.Options{}, func(cl *coord.Client) error {
 		st, err := readState(cl)
 		if err != nil {
 			return err
@@ -133,7 +131,7 @@ func cmdRunContinue(args []string) error {
 		if !*wait {
 			return nil
 		}
-		return waitRun(cl, r.ID, st.Seq, events)
+		return waitRun(cl, r.ID)
 	})
 }
 

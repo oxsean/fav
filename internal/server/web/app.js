@@ -715,13 +715,13 @@ async function refreshData() {
     if(!ui.authenticated)return;
     ui.state=state;ui.machines=machines.machines;ui.agents=agents.agents;ui.lastSync=new Date();ui.machineSync=new Date();ui.loading=false;
     if(!ui.state.tasks[ui.task]){ui.task=Object.keys(ui.state.tasks)[0]||'';ui.run='';}
-    ui.focusTask=ui.task;ui.unsubscribe?.();ui.unsubscribe=api.subscribe({after_seq:state.seq},receiveJournal,()=>{scheduleSync();refreshMachines();});
+    ui.focusTask=ui.task;ui.unsubscribe?.();ui.unsubscribe=api.watchState(()=>({after_seq:ui.state.seq,no_briefs:true}),receiveJournal,state=>{ui.state=state;stateChanged();refreshMachines();});
     renderShell();Tree.stateChanged();await enterPage();
   } catch(error){ui.loading=false;ui.error=errorText(error);renderPage();}
 }
 let journalRenderTimer,syncTimer;
-// receiveJournal folds each pushed envelope into the state; a gap, an event about something the page does not hold, or
-// a refetch push reads the state again.
+// receiveJournal folds each pushed envelope into the state; a gap or an event about something the page does not hold
+// reads the state again. What this viewer may see changing comes as a whole new state instead.
 function receiveJournal(envelope) {
   if(envelope.seq<=ui.state.seq)return;
   if(envelope.seq!==ui.state.seq+1)return scheduleSync();

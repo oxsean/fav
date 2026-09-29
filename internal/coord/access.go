@@ -60,7 +60,7 @@ var methodAccess = map[string]access{
 	MTaskGet:        reader,
 	MAgentList:      reader,
 	MMachineList:    reader,
-	MSubscribe:      reader,
+	MStateWatch:     reader,
 	MRunTail:        reader,
 	MRunOutputPage:  reader,
 	MRunMessages:    reader,

@@ -90,6 +90,18 @@ func (d *Directory) live(id string) bool {
 	return ok
 }
 
+// owner is the live holder of credential id, false when the credential or its holder is no longer let in.
+func (d *Directory) owner(id string) (store.User, bool) {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	c, ok := d.creds[id]
+	if !ok {
+		return store.User{}, false
+	}
+	u, ok := d.users[c.Owner]
+	return u, ok && !u.Disabled
+}
+
 // MachineOwner is the user who owns machine: the owner of its node token, or of the last one of a retired machine.
 func (d *Directory) MachineOwner(machine string) string {
 	d.mu.RLock()

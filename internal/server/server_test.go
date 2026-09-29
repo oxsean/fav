@@ -296,3 +296,40 @@ func TestANodeTokenStaysWithTheMachineThatFirstUsedIt(t *testing.T) {
 	}
 	r.waitMachine("n1", coord.MachineConnected)
 }
+
+func TestAClientWhoseAdminRoleChangesIsDisconnected(t *testing.T) {
+	r := newRig(t)
+	if err := r.team.AddAdmit(store.Admit{Kind: store.AdmitDomain, Value: "corp.example", Role: store.RoleMember}); err != nil {
+		t.Fatal(err)
+	}
+	u, err := r.team.Admit(store.Identity{Provider: "gitea", Issuer: "https://g.example/", Subject: "7", Username: "bo", Email: "bo@corp.example", EmailVerified: true}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tok, _, err := r.team.NewCredential(store.KindToken, "bo", u.ID, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(100 * time.Millisecond) // a sweep reads the new token
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	c, err := dial.Dial(ctx, r.url, RoleClient, tok, wire.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	select {
+	case <-c.Done():
+		t.Fatal("dropped before anything changed")
+	case <-time.After(200 * time.Millisecond):
+	}
+	admin := store.RoleAdmin
+	if err := r.team.SetUser(u.ID, &admin, nil); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-c.Done():
+	case <-time.After(10 * time.Second):
+		t.Fatal("a connection keeps the identity it came with after its holder became an admin")
+	}
+}

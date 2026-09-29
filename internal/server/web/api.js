@@ -5,7 +5,7 @@
 const api = (() => {
   const callWait = 30000;
   let ws = null, opening = null, nextID = 1, buffer = '';
-  const pending = new Map(), journal = new Set(), refetch = new Set(), closeListeners = new Set();
+  const pending = new Map(), streams = new Map(), closeListeners = new Set();
 
   const err = (code, detail = '') => Object.assign(new Error(detail || code), {code, detail});
 
@@ -14,7 +14,11 @@ const api = (() => {
   function receive(line) {
     let f;
     try { f = JSON.parse(line); } catch (_) { return; }
-    if (f.type === 'res') {
+    if (f.type === 'res' && streams.has(f.id)) {
+      const s = streams.get(f.id);
+      streams.delete(f.id);
+      s.end(f.error ? err(f.error.code, f.error.detail || '') : null);
+    } else if (f.type === 'res') {
       const p = pending.get(f.id);
       if (!p) return;
       pending.delete(f.id);
@@ -24,10 +28,8 @@ const api = (() => {
     } else if (f.type === 'req') { // the server's keepalive; nothing else is served here
       send(f.method === 'ping' ? {type: 'res', id: f.id}
         : {type: 'res', id: f.id, error: {code: 'unknown_method', detail: f.method}});
-    } else if (f.type === 'push' && f.method === 'journal') {
-      for (const fn of journal) fn(f.params);
-    } else if (f.type === 'push' && f.method === 'refetch') { // what this viewer may see changed
-      for (const fn of refetch) fn();
+    } else if (f.type === 'push' && f.id) {
+      streams.get(f.id)?.push(f.method, f.params);
     }
   }
 
@@ -53,6 +55,7 @@ const api = (() => {
         const current = ws === s; // a socket dropped on logout is no loss
         if (current) ws = null;
         for (const [id, p] of pending) { clearTimeout(p.timer); p.reject(err('closed')); pending.delete(id); }
+        for (const [id, st] of streams) { streams.delete(id); st.end(err('closed')); }
         if (!open) { reject(err('offline')); return; }
         if (current) for (const fn of closeListeners) fn();
       };
@@ -74,6 +77,38 @@ const api = (() => {
       if (commandID) frame.command_id = commandID;
       try { send(frame); } catch (e) { clearTimeout(timer); pending.delete(id); reject(err('closed', String(e))); }
     });
+  }
+
+  // watch opens a stream: its pushes go to push(method, params) until end(err) (null when the server finished it).
+  async function watch(method, params, push, end) {
+    await connect();
+    const id = nextID++;
+    streams.set(id, {push, end});
+    try { send({type: 'req', id, method, params: params ?? {}}); } catch (e) { streams.delete(id); end(err('closed', String(e))); }
+    return () => {
+      if (!streams.delete(id)) return;
+      try { send({type: 'cancel', id}); } catch (_) {}
+    };
+  }
+
+  // watchState follows the state: onState(state) with each whole snapshot, onJournal(envelope) with each envelope
+  // after it. params() gives the opening's parameters (after_seq: what the page holds); a stream that fell behind
+  // opens again from there.
+  function watchState(params, onJournal, onState) {
+    let stop = null, stopped = false, next = null;
+    const tables = ['projects', 'tasks', 'runs', 'shares', 'agent_defs'];
+    const push = (method, p) => {
+      if (method === 'open') next = p.mode === 'resume' ? null : Object.fromEntries(tables.map(t => [t, {}]));
+      else if (method === 'reset') next = Object.fromEntries(tables.map(t => [t, {}]));
+      else if (method === 'snapshot') { if (next && next[p.part]) Object.assign(next[p.part], p.items); }
+      else if (method === 'live') { const st = next; next = null; if (st) onState({seq: p.seq, ...st}); }
+      else if (method === 'journal' && !next) onJournal(p);
+    };
+    const open = () => watch('state.watch', params(), push, e => {
+      if (!stopped && e?.code === 'lagged') open().then(s => { stop = s; });
+    });
+    open().then(s => { if (stopped) s(); else stop = s; }).catch(() => {});
+    return () => { stopped = true; stop?.(); };
   }
 
   const write = method => (params, options) => {
@@ -111,7 +146,7 @@ const api = (() => {
     async logout() {
       const s = ws;
       ws = null;
-      try { await http('/logout', ''); } finally { journal.clear(); refetch.clear(); s?.close(); }
+      try { await http('/logout', ''); } finally { s?.close(); }
     },
     connect,
     onClose(fn) { closeListeners.add(fn); },
@@ -131,14 +166,7 @@ const api = (() => {
     machineList: params => call('machine.list', params),
     nodeCall: params => call('node.call', params),
     agentList: () => call('agent.list'),
-    subscribe(params, listener, onRefetch) {
-      journal.clear();
-      refetch.clear();
-      journal.add(listener);
-      if (onRefetch) refetch.add(onRefetch);
-      call('subscribe', params).catch(() => {});
-      return () => { journal.delete(listener); refetch.delete(onRefetch); };
-    },
+    watchState,
     runMessages: async params => page(await call('run.messages', params)),
     projectCreate: write('project.create'),
     projectEdit: write('project.edit'),

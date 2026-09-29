@@ -81,15 +81,15 @@ type Server struct {
 	opt     Options
 	logins  map[string]*auth.Provider
 	mu      sync.Mutex
-	conns   map[*wire.Conn]string // live connections by the credential they came with
-	flows   map[string]flow       // sign-ins in progress, by state
+	conns   map[*wire.Conn]held // live connections
+	flows   map[string]flow     // sign-ins in progress, by state
 	devices map[string]*deviceAuth
 	limit   *limiter
 	syncer  *Syncer
 }
 
 func New(opt Options) *Server {
-	s := &Server{opt: opt, logins: map[string]*auth.Provider{}, conns: map[*wire.Conn]string{}, flows: map[string]flow{},
+	s := &Server{opt: opt, logins: map[string]*auth.Provider{}, conns: map[*wire.Conn]held{}, flows: map[string]flow{},
 		devices: map[string]*deviceAuth{}, limit: newLimiter(), syncer: opt.Syncer}
 	for _, l := range opt.Config.Logins {
 		p, err := auth.New(l)
@@ -114,11 +114,22 @@ func (s *Server) sweep() {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	for c, id := range s.conns {
-		if !s.opt.Dir.live(id) {
+	for c, h := range s.conns {
+		if !s.opt.Dir.live(h.cred) {
 			c.Close()
+		} else if h.client { // who the holder is changed (made or no longer an admin): they connect again as that
+			if u, ok := s.opt.Dir.owner(h.cred); !ok || principal(u) != h.as {
+				c.Close()
+			}
 		}
 	}
+}
+
+// held is what a connection came with: its credential and, for a client, who it acts as.
+type held struct {
+	cred   string
+	client bool
+	as     coord.Principal
 }
 
 // credential is what r signs in with: a bearer header, or for a client the browser's session cookie.
@@ -136,9 +147,9 @@ func (s *Server) credential(r *http.Request, role string) (store.Credential, sto
 	return store.Credential{}, store.User{}, false
 }
 
-func (s *Server) track(c *wire.Conn, cred string) {
+func (s *Server) track(c *wire.Conn, h held) {
 	s.mu.Lock()
-	s.conns[c] = cred
+	s.conns[c] = h
 	s.mu.Unlock()
 }
 
@@ -173,7 +184,7 @@ func (s *Server) handleNode(w http.ResponseWriter, r *http.Request) {
 	opt := s.opt.Coord.NodeOptions()
 	opt.Keepalive = keepalive
 	c := wire.New(websocket.NetConn(r.Context(), ws, websocket.MessageText), opt)
-	s.track(c, cred.ID)
+	s.track(c, held{cred: cred.ID})
 	defer s.untrack(c)
 	s.team().Touch(cred.ID)
 	err = s.opt.Coord.Attach(cred.Name, c, func(h remote.Hello) error {
@@ -206,7 +217,7 @@ func (s *Server) handleClient(w http.ResponseWriter, r *http.Request) {
 	ws.SetReadLimit(wire.MaxFrame + 1)
 	s.team().Touch(cred.ID)
 	c := wire.New(websocket.NetConn(r.Context(), ws, websocket.MessageText), wire.Options{Handler: s.audited(r, u, s.opt.Coord.HandlerFor(principal(u))), Bulk: coord.Bulk, Keepalive: keepalive})
-	s.track(c, cred.ID)
+	s.track(c, held{cred: cred.ID, client: true, as: principal(u)})
 	defer s.untrack(c)
 	<-c.Done()
 }
