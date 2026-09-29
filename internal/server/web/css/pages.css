@@ -72,6 +72,8 @@
 .tasks-pane { position: relative; min-height: 0; overflow-y: auto; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 4px var(--pad) var(--pad); }
 .task-cell { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .task-cell .ell { font-weight: 600; }
+/* A narrow list gives up the id before the title. */
+.task-cell > .mono { flex-shrink: 100; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .bc-top { display: flex; align-items: center; gap: 8px; font-size: 11px; }
 .bc-top .chip { margin-left: auto; }
 .bc-title { font-weight: 600; font-size: 13px; overflow-wrap: anywhere; }
@@ -120,9 +122,9 @@
 .brief-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 10px; }
 .brief-label { font-size: 12px; font-weight: 600; }
 .brief-preview { min-height: 120px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px; }
-.dir-list { display: grid; gap: 4px; }
+.dir-list { display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; }
 .dir-pick { display: flex; align-items: center; gap: 8px; min-height: 30px; padding: 3px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); text-align: left; font-size: 12px; }
-.dir-pick .ell { flex: 1; }
+.dir-pick .ell { flex: 1; min-width: 0; }
 .dir-pick.on { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
 .dir-kind { flex: none; font-size: 11px; color: var(--muted); }
 .choice-rows { display: grid; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; background: var(--surface); }

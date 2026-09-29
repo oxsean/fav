@@ -132,6 +132,8 @@ button.kpi:hover { background: var(--surface-hover); }
 .page-foot { flex: none; padding: 10px 16px calc(14px + env(safe-area-inset-bottom)); background: var(--surface); border-top: 1px solid var(--border); }
 
 .toasts-phone { left: 16px; right: 16px; bottom: 68px; justify-items: stretch; }
+/* A sheet or a full-screen page keeps its actions at the bottom: toasts go under its head instead. */
+body:has(.sheet-layer, .page-over) .toasts-phone { top: calc(var(--top) + 8px + env(safe-area-inset-top)); bottom: auto; }
 [data-form="phone"] .toast { font-size: 14px; }
 [data-form="phone"] .toast-text { flex: 1; min-width: 0; }
 .toast .btn.quiet { color: var(--surface); min-height: 36px; }
