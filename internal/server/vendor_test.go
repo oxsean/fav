@@ -153,15 +153,15 @@ func TestImportsAreRelativeAndRunDownTheLayers(t *testing.T) {
 	}
 }
 
-func TestTheModulesAreServedAsJavaScript(t *testing.T) {
+func TestTheModulesAndStylesAreServedByType(t *testing.T) {
 	r := newRig(t)
-	for _, p := range []string{"/vendor/preact.mjs", "/core/wire.js"} {
+	for p, kind := range map[string]string{"/vendor/preact.mjs": "text/javascript", "/core/wire.js": "text/javascript", "/ui/shell.js": "text/javascript", "/css/base.css": "text/css"} {
 		resp, err := http.Get(r.url + p)
 		if err != nil {
 			t.Fatal(err)
 		}
 		resp.Body.Close()
-		if resp.StatusCode != 200 || !strings.HasPrefix(resp.Header.Get("Content-Type"), "text/javascript") {
+		if resp.StatusCode != 200 || !strings.HasPrefix(resp.Header.Get("Content-Type"), kind) {
 			t.Errorf("%s: %d %s", p, resp.StatusCode, resp.Header.Get("Content-Type"))
 		}
 	}

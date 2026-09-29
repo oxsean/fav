@@ -55,6 +55,8 @@ func TestTheCoreWireSpeaksTheFrames(t *testing.T) { runModule(t, "webtest/wire_t
 
 func TestTheCoreKeysRouterAndWords(t *testing.T) { runModule(t, "webtest/core_test.js") }
 
+func TestTheSharedComponentsInBothForms(t *testing.T) { runModule(t, "webtest/ui_test.js") }
+
 // The store folds a state.watch as the coordinator folds the same snapshot and envelopes.
 func TestTheStoreFoldsAStateWatchAsTheCoordinatorDoes(t *testing.T) {
 	cases := runModule(t, "webtest/store_test.js")

@@ -1,6 +1,7 @@
 // keys dispatches key presses through a stack of scopes: modal, drawer, list, page, global. A component pushes its
 // scope when it mounts and pops it when it unmounts; the first scope with a binding for the key that applies runs it.
 // Keys are spelled as the action table spells them: "n", "Shift+D", "Mod+K", "g h" (g, then h), "Esc", "Space".
+import {signal} from '../vendor/signals-core.mjs';
 
 export const levels = ['modal', 'drawer', 'list', 'page', 'global'];
 
@@ -25,8 +26,10 @@ const inInput = new Set(['Esc', 'Mod+Enter']);
 
 export function createKeys({timers = globalThis, sequenceWait = 1200} = {}) {
   let scopes = [], pending = '', timer = null, nextID = 1;
+  // changed goes up whenever a scope comes or goes, for what shows the keys in force (the key bar).
+  const changed = signal(0);
 
-  // push adds a scope of bindings [{key, run, when?}] at a level and returns what removes it. blocks: no scope below
+  // push adds a scope of bindings [{key, run, when?, label?}] at a level and returns what removes it. blocks: no scope below
   // it sees a key (a modal keeps the page's keys from acting behind it).
   function push(level, bindings, {blocks = false} = {}) {
     if (!levels.includes(level)) throw new Error(`keys: no level ${level}`);
@@ -42,7 +45,11 @@ export function createKeys({timers = globalThis, sequenceWait = 1200} = {}) {
     }
     const scope = {id: nextID++, level, bindings, blocks};
     scopes.push(scope);
-    return () => { scopes = scopes.filter(s => s !== scope); };
+    changed.value++;
+    return () => {
+      scopes = scopes.filter(s => s !== scope);
+      changed.value++;
+    };
   }
 
   // ordered: modal first, and within a level the latest pushed first; a blocking scope hides those after it.
@@ -90,5 +97,11 @@ export function createKeys({timers = globalThis, sequenceWait = 1200} = {}) {
     return !!b;
   }
 
-  return {push, handle, active: () => ordered().flatMap(s => s.bindings.filter(b => !b.when || b.when()))};
+  // active is the bindings a press would run now, each key once, in the order the scopes are searched.
+  function active() {
+    const seen = new Set();
+    return ordered().flatMap(s => s.bindings.filter(b => (!b.when || b.when()) && !seen.has(b.key) && seen.add(b.key)));
+  }
+
+  return {push, handle, changed, active};
 }

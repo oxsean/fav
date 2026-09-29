@@ -21,6 +21,28 @@
           "sha256": "d07bdcda966d10713433c84a91ad75c237ab90960381f9773531a0f869e41107"
         }
       ]
+    },
+    {
+      "name": "preact",
+      "version": "10.29.8",
+      "integrity": "sha512-ej2aVZ+vZ8WO7tvlQWRM9N63A0KzF9q4mWJfDUHgYaIofWY9hu74QdnQrjoPMmZi2/nZ5gN0bJCQF49xQqx09Q==",
+      "license": {
+        "from": "LICENSE",
+        "to": "LICENSES/preact.txt",
+        "upstream": "1fe6958409c8c257a70c587a18b6f7f412b179b456630790d30b2ec9a8e4b7d4",
+        "sha256": "1fe6958409c8c257a70c587a18b6f7f412b179b456630790d30b2ec9a8e4b7d4"
+      },
+      "files": [
+        {
+          "from": "test-utils/dist/testUtils.mjs",
+          "to": "test-utils.mjs",
+          "imports": {
+            "preact": "../../web/vendor/preact.mjs"
+          },
+          "upstream": "17a3bfef8f2d7d552b3b5e3f4cc9a92ab82338a9f51607a620267dac71fcd8f3",
+          "sha256": "eea53193eabce4d53cb05c84874dc2567ea19b200a8744303afaac0128f6d210"
+        }
+      ]
     }
   ]
 }

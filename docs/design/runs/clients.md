@@ -52,7 +52,7 @@ tend journal verify [--json] | repair [-y]
 
 页面的合并和改名（计划）见 [ui.md](../tasks/ui.md)「页面结构与用词（计划）」。
 
-- 文件：`internal/server/web/`（`index.html`、`app.css`、`api.js`、`fold.js`、`team.js`、`tree.js`、`home.js`、`look.js`、`palette.js`、`app.js`），`go:embed` 进二进制，无构建步骤、无外部依赖。新界面的底座（`core/`、`vendor/`）见下文「新界面的底座」。
+- 文件：`internal/server/web/`（`index.html`、`app.css`、`api.js`、`fold.js`、`team.js`、`tree.js`、`home.js`、`look.js`、`palette.js`、`app.js`），`go:embed` 进二进制，无构建步骤、无外部依赖。新界面的底座（`core/`、`ui/`、`css/`、`vendor/`）见下文「新界面的底座」。
   - `api.js` 是唯一的通信层（wire 帧走 `/client` WebSocket，每条请求 30 s 超时后发 `cancel`，应答 server 的 `ping`）。
   - `fold.js` 把推送的信封折进页面的状态（照搬 `task.State.Apply`，`fold_test.go` 用 Go 生成的信封对照）。
   - `team.js` 是团队相关的页面（登录方式、项目与成员、机器的主人与分享、账号、管理）。
@@ -78,9 +78,9 @@ tend journal verify [--json] | repair [-y]
 
 新界面（Preact + htm + signals，原生 ES 模块，无构建链）的底座和旧页面放在同一个目录里，被一起 embed，但旧的 `index.html` 不加载它。页面接上以后，旧文件一次删掉。
 
-- **内嵌的第三方文件**：`web/vendor/`，放 npm 上的 `preact.mjs`、`hooks.mjs`、`htm.mjs`、`signals-core.mjs`，许可证在 `LICENSES/`。只给测试用的 `preact-render-to-string` 放在 `webtest/vendor/`，不进二进制。
+- **内嵌的第三方文件**：`web/vendor/`，放 npm 上的 `preact.mjs`、`hooks.mjs`、`htm.mjs`、`signals-core.mjs`，许可证在 `LICENSES/`。只给测试用的 `preact-render-to-string` 和 preact 的 `test-utils` 放在 `webtest/vendor/`，不进二进制。
   - `tools/vendorweb` 按各自的 `manifest.json` 下载 tarball，核对 npm 的 `integrity`，取出文件和 LICENSE，把上游和写出后的 sha256 记回 manifest。
-  - 只允许一种改写：manifest 里某个文件的 `imports` 声明「裸模块名 → 相对路径」，比如 `hooks.mjs` 的 `preact` → `./preact.mjs`。render-to-string 指向 `../../web/vendor/preact.mjs`，这样它和组件用的是同一个 preact 实例，hooks 才挂得上。
+  - 只允许一种改写：manifest 里某个文件的 `imports` 声明「裸模块名 → 相对路径」，比如 `hooks.mjs` 的 `preact` → `./preact.mjs`。render-to-string 和 test-utils 指向 `../../web/vendor/preact.mjs`，这样它和组件用的是同一个 preact 实例，hooks 才挂得上。
   - 文件里出现没有声明的裸 import，或者声明的改写一处都没命中，工具就报错。
   - 版本升级：改 manifest 里的 `version`、清掉 `integrity`，再运行 `go run ./tools/vendorweb`。
 - **分层**：`vendor` ← `core` ← `ui` ← `pages`，每层只 import 自己和下面的层，`ui` 不直接 import `core/wire.js`；入口 `main.js` 不受限制。所有 import 都是相对路径，不用 import map。`web/package.json` 的 `{"type":"module"}` 让 node 把这些 `.js` 当 ES 模块跑。
@@ -107,11 +107,24 @@ tend journal verify [--json] | repair [-y]
     - 键名的写法和操作表一致：`n`、`Shift+D`、`Mod+K`（⌘ 或 Ctrl）、`g h`（先按 g，1.2 s 内按 h）、`Esc`、`Space`；`Alt` 组合不认。
     - 正在组字的按键不处理。输入框里只有 `Esc` 和 `Mod+Enter` 会交给作用域。`；` `，` `？` `、` 当作 `;` `,` `?` `/`。
     - 同一个作用域里一个键只能绑一次，一个键也不能同时是另一个序列的开头。
+    - `active()` 列出此刻按下会生效的绑定，每个键一次，按查找顺序；`changed` 这个 signal 在推入、弹出作用域时加一，键栏据此重画。
+  - `layout.js`：宽度不到 `PHONE_BELOW`（720 px）是手机形态，否则是电脑形态，放在 `form` 这个 signal 里，由入口按 media query 设置；电脑上宽度不到 `NAV_OPEN_FROM`（1200 px）时侧栏默认收起。`createNav` 管侧栏开合：用户选过一次就记在浏览器里（`tend-nav`），之后不再随宽度变；存储不可用时照常工作，只是不记。`mac` 决定 `Mod` 显示成 ⌘ 还是 Ctrl。
+  - `toasts.js`：底部的提示。带撤销的留 `UNDO_WAIT`（6 s），普通的 4 s；`undo()` 撤销最新一条可撤销的。
   - `router.js`：地址 ↔ `{page, task?, view?, auth?}`。页面有 `home`、`tasks`（`view` 取 `list` / `board` / `tree`）、`runs`、`machines`、`agents`、`team`、`me`。旧的 `inbox` → 首页，`settings` → 我，`projects` → 团队；`#task-<id>` 打开任务页并选中它；`#device-`、`#invite-`、`#signin-<结果>[?参数]` 解析成 `auth`，生成地址时不带它们。
   - `i18n.js`：每个模块用 `register(模块, {键: [zh, en]})` 注册自己的词表。两个模块用了同一个键、缺一种语言、两种语言的 `%s` / `%d` 顺序不同，都会报错。
+- **`ui/`**（共用组件）：每个组件从一开始就有电脑和手机两种形态，读 `form` 决定画哪一种，页面不用分两份写。样式在 `css/base.css`（尺寸变量、字体、外框）和 `css/components.css`，颜色只用皮肤 token；手机形态的样式挂在外框的 `data-form="phone"` 下，密度挂在 `:root[data-density]` 上。
+  - `Shell`：电脑上是 56 px 顶栏（品牌、搜索框和 `Mod+K`、在跑 / 排队 / 离线计数、当前用户）、左侧栏（七个页面，`[` 或底部按钮开合，收起时只剩图标，等你的数目变成角标；下方是新建任务）和 32 px 键栏；手机上是 52 px 顶栏（server 名可点开切换）和底部四个标签：等你、任务、运行、我。机器页归在「运行」标签下，Agent 和团队归在「我」下。连接断开时顶部出横幅，可立即重连；server 已升级时提示刷新。它也提供按键的上下文。
+  - 键栏只列此刻生效、带说明的绑定；同一说明的键合成一项（`j k 上下一条`），连续的数字写成 `1–9`。手机上不画键帽。
+  - `Button`（primary / quiet / danger，`on` 是按下的开关）、`Chip`、`Segmented`、`Tabs`（方向键移动，只有选中的一项在 Tab 顺序里）、`Status`（形状加颜色区分状态，屏幕阅读器读状态名）、`Panel`、`Stat`。手机上按钮高 44 px，筛选项横向滚动。
+  - `Table`：列表都用它。电脑上是表格，表头可排序（升、降、取消）；手机上每行变成一张卡片，列的 `mobile` 决定它在卡片的哪个位置。选中按 id 记，排序和推送之后不丢。`j` / `k` / 方向键移动，`Enter` 打开，`Space` 展开，`1`–`9` 选择。超过 `VIRTUAL_ABOVE`（200）行只画可见的一段，选中项移出视野时滚过去。
+  - `ExpandItem`：原地展开的一条（等你处理的事）。收起时显示状态、问题、等了多久和快捷操作；手机上只留第一个操作，展开 / 收起写成文字。
+  - `Modal`：电脑上是居中的对话框；手机上从底部升起（sheet），长表单（`full`）占满整屏并带返回。它推一个 `blocks` 的 `modal` 作用域：`Esc` 关闭，`Mod+Enter` 执行主操作，页面的键被挡住；焦点移进来、`Tab` 在里面循环，关闭后回到打开前的元素。`Drawer` 在电脑上是右侧面板，手机上占满整屏。
+  - `Toasts`：`Mod+Z` 或按钮撤销最新一条。
+  - 手机上左右切换用上一个 / 下一个按钮，不用滑动手势。
 - **测试**（`webtest/`，不在 `web/` 下）：
   - Go 用 `runModule` 在 node 里跑 `*_test.js`，每个 JS 用例是一个子测试。
   - 假 server（`fake.js`）在进程内模拟 WebSocket 和时钟，回放 `webtest/frames/*.jsonl`：一行一个动作。`c` 是客户端应该发出的帧，`s` 是 server 发的帧，`raw` 是原样发出的一段文字，另外还有 `connect` / `refuse` / `drop` / `dialing` / `wait_ms` / `step` / `note`。
   - 第 3 期 wire 流和 `state.watch` 的 Go 测试也读这批文件：取 `c` 当输入，拿 `s` 对照输出，其余的行属于客户端，跳过。
   - store 回放 `state-snapshot.jsonl` 得到的状态，和 Go 按同样规则折叠同一文件的结果对照；快照里的对象严格按 `task.State` 的类型解码，多出的字段算失败。
+  - 组件（`ui_test.js`）：用 render-to-string 把一套样例按两种形态、两种语言各画一遍，检查每个 class 在 CSS 里有规则、没有漏译的键、两种形态各有自己的结构；交互在 `dom.js` 的假文档里用 `act` 驱动：列表的键、排序、1000 行的窗口，对话框的按键和焦点，提示的撤销和时限，侧栏开合，手机标签栏，方向键。
   - 结构测试：vendor 的校验和，改写只出现在声明过的地方；import 只用相对路径并且合乎分层；每个帧文件都被某个测试回放；皮肤 token 递归检查（跳过 `vendor/`）。
