@@ -85,8 +85,7 @@ func newEnv(t *testing.T, cfg tend.Config) *env {
 		tend.AgentProfile{Name: "quick", Provider: agent.ProviderFake, Args: []string{"--steps", "1", "--every", "50ms"}},
 		tend.AgentProfile{Name: "slow", Provider: agent.ProviderFake, Args: []string{"--steps", "1", "--every", "50ms", "--ask"}})
 	e.cfg = cfg
-	t.Cleanup(e.stop)
-	t.Cleanup(func() { killRuns(e.home); clearRuns(e.home) })
+	t.Cleanup(func() { e.stop(); killRuns(e.home); clearRuns(e.home) }) // the coordinator first: it could start a queued run after the sweep
 	return e
 }
 
