@@ -28,3 +28,6 @@ async function played(play, steps = {}) {
   r.flush();
   return r;
 }
+
+// outputs is a rig that has played output-state: a task whose conversation is two runs, one of them asking.
+export const outputs = steps => played((r, s) => r.srv.play('output-state', s), steps);

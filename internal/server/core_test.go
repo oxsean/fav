@@ -16,6 +16,7 @@ import (
 
 	"github.com/oxsean/fav/internal/coord"
 	"github.com/oxsean/fav/internal/journal"
+	"github.com/oxsean/fav/internal/output"
 	"github.com/oxsean/fav/internal/task"
 )
 
@@ -69,6 +70,65 @@ func TestTheTaskPagesBoardsTreesAndDrafts(t *testing.T) { runModule(t, "webtest/
 
 func TestTheTaskPagesAndFormsInBothFormsAndLanguages(t *testing.T) {
 	runModule(t, "webtest/taskpages_test.js")
+}
+
+// The timeline lays out events as output.Items does: the real transcripts in internal/output's testdata, and the
+// shapes they lack (a group broken by a parent, a question among reads, a result before its call, a temp event).
+func TestTheTimelineLaysOutEventsAsOutputItems(t *testing.T) {
+	byName := map[string][]output.Event{}
+	for _, name := range []string{"claude.jsonl", "codex-app-server.jsonl"} {
+		b, err := os.ReadFile(filepath.Join("..", "output", "testdata", name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		evs, _, _ := output.Parse("f:1", 0, string(b), output.State{})
+		if len(output.Items(evs)) < 10 {
+			t.Fatalf("%s: %d items", name, len(output.Items(evs)))
+		}
+		byName[name] = evs
+	}
+	ev := func(id, kind, family string, more ...string) output.Event {
+		e := output.Event{ID: id, Kind: kind, Family: family}
+		for _, m := range more {
+			k, v, _ := strings.Cut(m, "=")
+			switch k {
+			case "call":
+				e.Call = v
+			case "ref":
+				e.Ref = v
+			case "parent":
+				e.Parent = v
+			case "request":
+				e.Request = v
+			case "temp":
+				e.Temp, e.Key = true, v
+			}
+		}
+		return e
+	}
+	byName["shapes"] = []output.Event{
+		ev("1", output.KindToolResult, "", "ref=c1"), ev("2", output.KindTool, output.FamilyRead, "call=c1"),
+		ev("3", output.KindTool, output.FamilySearch, "call=c2"), ev("4", output.KindTool, output.FamilyRead, "call=c3", "parent=a"),
+		ev("5", output.KindTool, output.FamilyRead, "call=c4", "parent=a"), ev("6", output.KindTool, "ask", "call=c5", "request=q"),
+		ev("7", output.KindTool, output.FamilyRead, "call=c6", "request=r"), ev("", output.KindSay, "", "temp=f:9"),
+		ev("8", output.KindTool, output.FamilyRead, "call=c7"), ev("9", output.KindToolResult, "", "ref=zz"), ev("10", output.KindToolResult, "", "ref=c7"),
+		ev("11", output.KindTool, output.FamilySearch, "call=c8"),
+	}
+	b, _ := json.Marshal(byName)
+	path := filepath.Join(t.TempDir(), "events.json")
+	if err := os.WriteFile(path, b, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cases := runModule(t, "webtest/output_test.js", path)
+	var got map[string][]output.Item
+	if err := json.Unmarshal(cases["items as output.Items lays them"].Data, &got); err != nil {
+		t.Fatal(err)
+	}
+	for name, evs := range byName {
+		if want := output.Items(evs); !reflect.DeepEqual(got[name], want) {
+			t.Errorf("%s: the timeline laid out\n%v\noutput.Items\n%v", name, got[name], want)
+		}
+	}
 }
 
 // The store folds a state.watch as the coordinator folds the same snapshot and envelopes.

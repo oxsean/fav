@@ -11,6 +11,7 @@ import {Modal} from '../ui/overlay.js';
 import {Spark, Bars, Timeline, Meter} from '../ui/charts.js';
 import {TextInput} from '../ui/input.js';
 import {useListKeys} from '../ui/table.js';
+import {AnswerForm, quickOf, isPermission} from '../ui/answer.js';
 import * as sel from '../core/select.js';
 import {tokens, money, duration, clock as hhmm, usageTokens} from '../core/format.js';
 import {why} from './words.js';
@@ -44,6 +45,7 @@ export function Home({store, commands, toasts, clock = () => Date.now(), fetchOu
   const machines = useSignalValue(store.machines);
   const inbox = useSignalValue(store.inbox);
   const hidden = useSignalValue(commands.hidden);
+  const aff = useSignalValue(store.affordances);
   useSignalValue(commands.pending);
   const [as, setAs] = useState('');
   const [selected, setSelected] = useState('');
@@ -87,15 +89,12 @@ export function Home({store, commands, toasts, clock = () => Date.now(), fetchOu
   const openRun = v => !!v?.run && sel.openStates.includes(v.run.state);
   const busy = v => !!v && (commands.state('task:' + v.task?.id) === 'pending' || commands.state('run:' + v.run?.id) === 'pending');
 
-  // choices are what 1–9 does on an item: the options of its one question, or allow and deny.
+  // choices are what 1–9 does on an item: allow and deny (and allow for the run, when offered), or the options of its
+  // one single-choice question.
+  const scopeOf = v => (aff.runs?.[v?.run?.id] || []).includes('allow_run');
   const choices = v => {
     if (!v || v.group !== 'answer' || !v.req || !v.run) return [];
-    if (v.req.kind === 'permission' || v.x.reason === 'permission') {
-      return [{label: t('home.allow'), kind: 'primary', go: () => answer(v, {allow: true})}, {label: t('home.deny'), go: () => answer(v, {allow: false})}];
-    }
-    const qs = v.req.questions || [];
-    if (qs.length !== 1 || qs[0].multi) return [];
-    return (qs[0].options || []).slice(0, 9).map(o => ({label: o, go: () => answer(v, {allow: true, answers: {[qs[0].question]: o}})}));
+    return quickOf(t, v.req, {scope: scopeOf(v)}).map(q => ({label: q.label, kind: q.kind, go: () => answer(v, q.params)}));
   };
 
   useListKeys({ids, selected, onSelect: setSelected, onOpen: id => onOpen(id), onToggle: id => setOpen(open === id ? '' : id),
@@ -139,12 +138,9 @@ export function Home({store, commands, toasts, clock = () => Date.now(), fetchOu
         onToggle=${() => { setSelected(v.x.task); setOpen(open === v.x.task ? '' : v.x.task); }}
         state=${stateOf(v.group, v.x.reason)} title=${title(v)} sub=${sub(v)} age=${duration(now - Date.parse(v.x.since))}
         agePct=${(now - Date.parse(v.x.since)) / waitFull * 100} actions=${busy(v) ? [] : quick(v)}>
-        <${WaitBody} v=${v} choices=${choices(v)} busy=${busy(v)} fetchOutput=${fetchOutput} onOpen=${onOpen} onClose=${() => setOpen('')}
+        <${WaitBody} v=${v} busy=${busy(v)} scope=${scopeOf(v)} fetchOutput=${fetchOutput} onOpen=${onOpen} onClose=${() => setOpen('')}
           onDone=${canDone(v) ? () => markDone(v) : null} onRetry=${canRetry(v) ? () => askRetry(v) : null}
-          onDeny=${text => answer(v, {allow: false, message: text})} onOwn=${text => {
-            const q = v.req?.questions?.[0];
-            if (q) answer(v, {allow: true, answers: {[q.question]: text}}); else reply(v, text);
-          }} />
+          onAnswer=${p => answer(v, p)} onReply=${text => reply(v, text)} />
       <//>`) : html`<p class="empty">${t('home.none')}</p>`}
   <//>`;
 
@@ -239,8 +235,9 @@ export function Home({store, commands, toasts, clock = () => Date.now(), fetchOu
   </div>`;
 }
 
-// WaitBody is an open waiting item: what it asks or how it failed, what it just did, and the ways to answer.
-function WaitBody({v, choices, busy, fetchOutput, onOpen, onClose, onDone, onRetry, onDeny, onOwn}) {
+// WaitBody is an open waiting item: what it asks or how it failed, what it just did, and the ways to answer: the
+// answer form for a request (every question, allow for the run when offered), a reply for a run that ended asking.
+function WaitBody({v, busy, scope, fetchOutput, onOpen, onClose, onDone, onRetry, onAnswer, onReply}) {
   const {t} = useWords();
   const [steps, setSteps] = useState(null);
   const [text, setText] = useState('');
@@ -254,22 +251,20 @@ function WaitBody({v, choices, busy, fetchOutput, onOpen, onClose, onDone, onRet
     }, () => live && setSteps([]));
     return () => { live = false; };
   }, [v.run?.id]);
-  const permission = v.req && (v.req.kind === 'permission' || v.x.reason === 'permission');
+  const permission = isPermission(v.req);
   const q = v.req?.questions?.[0];
-  const detail = v.group === 'answer' ? (permission ? v.req.summary : v.run?.ask !== q?.question ? v.run?.ask : '') : v.group === 'error'
+  const detail = v.group === 'answer' ? (v.req ? (permission ? '' : v.run?.ask !== q?.question ? v.run?.ask : '') : v.run?.ask) : v.group === 'error'
     ? [v.run?.detail, v.run?.checked?.tail].filter(Boolean).join('\n') : v.run?.last;
-  const sendOwn = () => { if (text.trim()) { permission ? onDeny(text.trim()) : onOwn(text.trim()); setText(''); } };
+  const sendReply = () => { if (text.trim()) { onReply(text.trim()); setText(''); } };
   return html`<div class="wait-body">
     ${detail && html`<pre class="box">${detail}</pre>`}
     ${steps?.length > 0 && html`<div class="wait-steps"><span class="lbl">${t('home.did')}</span>
       ${steps.map(s => html`<div class="step"><span class="mono step-glyph">${s.glyph}</span><span class="mono ell">${s.text}</span></div>`)}</div>`}
-    ${choices.length > 0 && html`<div class="wait-choices" role="group" aria-label=${q?.question || t('home.answer')}>
-      ${choices.map((c, i) => html`<button type="button" class=${cx('choice', c.kind)} disabled=${busy} onClick=${c.go}><span class="mono choice-n">${i + 1}</span>${c.label}</button>`)}
-    </div>`}
-    ${v.group === 'answer' && v.run && html`<div class="wait-own">
-      <${TextInput} label=${t(permission ? 'home.denyWhy' : q ? 'home.ownWords' : 'home.reply')} value=${text} onInput=${setText}
-        onKeyDown=${e => { if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); sendOwn(); } }} />
-      <${Button} kind=${permission ? '' : 'primary'} disabled=${busy || !text.trim()} onClick=${sendOwn}>${t(permission ? 'home.deny' : 'home.send')}<//>
+    ${v.group === 'answer' && v.req && html`<${AnswerForm} req=${v.req} scope=${scope} busy=${busy} onAnswer=${onAnswer} />`}
+    ${v.group === 'answer' && !v.req && v.run && html`<div class="wait-own">
+      <${TextInput} label=${t('home.reply')} value=${text} onInput=${setText}
+        onKeyDown=${e => { if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); sendReply(); } }} />
+      <${Button} kind="primary" disabled=${busy || !text.trim()} onClick=${sendReply}>${t('home.send')}<//>
     </div>`}
     <div class="wait-foot">
       ${onDone && html`<${Button} kind="primary" keyName="Shift+D" disabled=${busy} onClick=${onDone}>${t('home.done')}<//>`}

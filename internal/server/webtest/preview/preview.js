@@ -1,6 +1,6 @@
 // preview runs the page (web/pages/boot.js) on a fake server for tools/webpreview, which serves this at /: a socket that answers from the frame
 // files by method, a fetch that answers the sign-in and device calls, and the clock of the home frames. ?frames=tasks
-// plays the task pages' frames instead of the home's.
+// plays the task pages' frames instead of the home's, ?frames=output a conversation's (open ?page=tasks&task=t1).
 import {boot} from '../../web/pages/boot.js';
 
 // ⚠️ The moment the home frames are written for.
@@ -9,16 +9,24 @@ const NOW = Date.parse('2026-09-30T14:32:00Z');
 const lines = async name => (await (await fetch(`webtest/frames/${name}.jsonl`)).text()).split('\n').filter(Boolean).map(l => JSON.parse(l));
 
 // answers maps each request method of the frame files to what the server sent for it: the result, then the pushes on
-// its stream, remapped to the ids the page uses.
+// its stream, remapped to the ids the page uses; a method asked of a run is answered per run, and
+// a run the files do not ask of as the first one they do.
 const sets = {home: ['home-state', 'output-page', 'home-commands'],
-  tasks: ['tasks-state', 'tasks-create', 'tasks-dispatch', 'tasks-plan', 'tasks-acts', 'tasks-board']};
+  tasks: ['tasks-state', 'tasks-create', 'tasks-dispatch', 'tasks-plan', 'tasks-acts', 'tasks-board'],
+  output: ['output-state', 'output-conv', 'output-send', 'output-answer']};
+const keyOf = f => (f.params?.run ? f.method + ' ' + f.params.run : f.method);
 
 async function answers(names) {
   const out = {};
   for (const name of names) {
     const asked = {};
     for (const l of await lines(name)) {
-      if (l.c?.type === 'req') { asked[l.c.id] = l.c.method; out[l.c.method] ||= {res: null, pushes: []}; }
+      if (l.c?.type === 'req') {
+        const k = keyOf(l.c);
+        asked[l.c.id] = k;
+        out[k] ||= {res: null, pushes: []};
+        out[l.c.method] ||= out[k];
+      }
       const f = l.s, m = f && asked[f.id];
       if (!m || out[m].done) continue;
       if (f.type === 'res') out[m].res = f;
@@ -35,7 +43,7 @@ function socket(table) {
       for (const line of data.split('\n').filter(Boolean)) {
         const f = JSON.parse(line);
         if (f.type !== 'req') continue;
-        const a = table[f.method];
+        const a = table[keyOf(f)] || table[f.method];
         setTimeout(() => {
           if (!a) { s.reply({type: 'res', id: f.id, result: {}}); return; }
           if (a.res) s.reply({...a.res, id: f.id});

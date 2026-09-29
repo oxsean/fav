@@ -175,7 +175,8 @@ test('what a run is doing: its node first, then its note, then what it said; que
   const store = {state: {tasks: {t: {id: 't', title: 'T', status: 'todo'}, q: {id: 'q', title: 'Q', status: 'todo'}},
     runs: {a: {id: 'a', task: 't', machine: 'm', agent: 'claude', state: 'running', started_at: '2026-09-30T14:00:00Z', doing: '$ go test ./...', note: 'n', last: 'l'},
       b: {id: 'b', task: 'q', machine: 'm', agent: 'claude', state: 'queued', queued_at: '2026-09-30T14:10:00Z'}}},
-  rev: {runs: signal(0), tasks: signal(0)}, machines: signal([{name: 'm', state: 'connected', slots: 1, active: 1}]), inbox: signal([])};
+  rev: {runs: signal(0), tasks: signal(0)}, machines: signal([{name: 'm', state: 'connected', slots: 1, active: 1}]), inbox: signal([]),
+  affordances: signal({runs: {}, tasks: {}})};
   const commands = createCommands({wire: {call: () => new Promise(() => {})}});
   const keys = createKeys();
   const s = drawn(html`<${KeysContext.Provider} value=${keys}><${Home} store=${store} commands=${commands} toasts=${createToasts()} clock=${() => NOW} onOpen=${() => {}} onNavigate=${() => {}} /><//>`, 'desktop', 'zh');

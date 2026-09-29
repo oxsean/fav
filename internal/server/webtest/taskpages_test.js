@@ -17,7 +17,7 @@ import {words} from '../web/core/i18n.js';
 import {html, KeysContext} from '../web/ui/base.js';
 import {App} from '../web/pages/app.js';
 import {DRAFT_KEY, TaskForm, Dispatch, Move, PlanReview, Gate} from '../web/pages/taskforms.js';
-import {FILTER_KEY} from '../web/pages/tasks.js';
+import {FILTER_KEY, PANE_KEY} from '../web/pages/tasks.js';
 import {install} from './dom.js';
 import {settle} from './fake.js';
 import {NOW, tasks} from './rig.js';
@@ -41,7 +41,9 @@ function fakeHistory(url) {
   return {location: loc, history: {pushState: (_, __, u) => set(u), replaceState: (_, __, u) => set(u)}};
 }
 
+// app opens tasks on their overview unless the storage it is given says otherwise.
 function app(r, {url = '/?page=tasks', storage = memory()} = {}) {
+  if (storage.getItem(PANE_KEY) === null) storage.setItem(PANE_KEY, 'overview');
   const keys = createKeys({timers: r.clk});
   const toasts = createToasts({timers: r.clk});
   let n = 0;

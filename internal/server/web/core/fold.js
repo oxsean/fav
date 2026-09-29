@@ -372,4 +372,19 @@ function situation(s, t) {
   return held(s, t) || {kind: 'queued', reason: 'ready'};
 }
 
-export {apply, situation, stageOf, nextStage, parts};
+// conversation is the runs of the conversation run is in, from its first: the run no parent of which the state holds,
+// then every run that answers one of them, by seq (task.State.Conversation, T3.3).
+function conversation(s, id) {
+  const rootOf = r => {
+    const seen = new Set();
+    while (r.parent && s.runs[r.parent] && !seen.has(r.id)) { seen.add(r.id); r = s.runs[r.parent]; }
+    return r.id;
+  };
+  const r = s.runs[id];
+  if (!r) return [];
+  const root = rootOf(r);
+  return Object.values(s.runs).filter(x => x.task === r.task && rootOf(x) === root)
+    .sort((a, b) => (a.seq || 0) - (b.seq || 0) || String(a.queued_at || '').localeCompare(String(b.queued_at || '')));
+}
+
+export {apply, situation, stageOf, nextStage, parts, conversation};

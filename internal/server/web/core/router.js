@@ -1,5 +1,6 @@
-// router maps the address to a route and back. A route is {page, task?, view?, auth?}: auth is a one-time fragment
-// (#device-, #invite-, #signin-) the page acts on and then drops from the address.
+// router maps the address to a route and back. A route is {page, task?, run?, view?, event?, auth?}: run is the run
+// whose conversation the task page shows; event and auth are one-time: event (from #task-<id>/r-<run>/e-<event>) is
+// the step to scroll to, auth a fragment (#device-, #invite-, #signin-) the page acts on; neither is written back.
 import {signal} from '../vendor/signals-core.mjs';
 
 export const pages = ['home', 'tasks', 'runs', 'machines', 'agents', 'team', 'me'];
@@ -20,13 +21,17 @@ export function parse(search = '', hash = '') {
     const view = q.get('view');
     route.view = views.includes(view) ? view : 'list';
     if (q.get('task')) route.task = q.get('task');
+    if (q.get('task') && q.get('run')) route.run = q.get('run');
   }
   const frag = hash.replace(/^#/, '');
-  const task = frag.match(/^task-(.+)$/);
+  const task = frag.match(/^task-([^/]+)(?:\/r-([^/]+))?(?:\/e-(.+))?$/);
   if (task) {
     route.page = 'tasks';
     route.view ||= 'list';
     route.task = decodeURIComponent(task[1]);
+    delete route.run;
+    if (task[2]) route.run = decodeURIComponent(task[2]);
+    if (task[2] && task[3]) route.event = decodeURIComponent(task[3]);
     return route;
   }
   const auth = frag.match(/^([a-z]+)-(.+)$/);
@@ -38,12 +43,16 @@ export function parse(search = '', hash = '') {
   return route;
 }
 
-// format is the address of a route, without its auth fragment.
+// link is the deep link to a step of a run: #task-<id>/r-<run>/e-<event>.
+export const link = (task, run, event) => `#task-${encodeURIComponent(task)}/r-${encodeURIComponent(run)}/e-${encodeURIComponent(event)}`;
+
+// format is the address of a route, without its one-time parts.
 export function format(route) {
   const q = new URLSearchParams();
   if (route.page && route.page !== 'home') q.set('page', route.page);
   if (route.page === 'tasks') {
     if (route.task) q.set('task', route.task);
+    if (route.task && route.run) q.set('run', route.run);
     if (route.view && route.view !== 'list') q.set('view', route.view);
   }
   const s = q.toString();
@@ -58,6 +67,7 @@ export function createRouter({location, history}) {
     go(to, {replace = false} = {}) {
       const next = {...to};
       delete next.auth;
+      delete next.event;
       const url = format(next);
       (replace ? history.replaceState : history.pushState).call(history, null, '', url);
       route.value = parse(url === '/' ? '' : url, '');

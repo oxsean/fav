@@ -38,7 +38,7 @@ function finder(store, machines, go) {
 
 // App: router, keys, nav and toasts are core's; prefs core/prefs.js's; session is who signed in; fetchOutput(run) the
 // last events of a run; storage is the browser's (the task page keeps its filter and draft there); onLogout signs out.
-export function App({store, commands, toasts, wire, router, keys, nav, prefs, session, clock, fetchOutput, storage, onLogout}) {
+export function App({store, commands, toasts, wire, router, keys, nav, prefs, session, clock, fetchOutput, storage, onLogout, copy}) {
   const {t, f} = useWords();
   const route = useSignalValue(router.route);
   const machines = useSignalValue(store.machines);
@@ -77,7 +77,8 @@ export function App({store, commands, toasts, wire, router, keys, nav, prefs, se
   const page = route.page === 'home'
     ? html`<${Home} store=${store} commands=${commands} toasts=${toasts} clock=${clock} fetchOutput=${fetchOutput} onOpen=${onOpen} onNavigate=${onNavigate} />`
     : route.page === 'tasks'
-      ? html`<${Tasks} store=${store} commands=${commands} toasts=${toasts} wire=${wire} router=${router} session=${session} clock=${clock} storage=${storage} intent=${intent} />`
+      ? html`<${Tasks} store=${store} commands=${commands} toasts=${toasts} wire=${wire} router=${router} session=${session} clock=${clock} storage=${storage}
+        intent=${intent} prefs=${prefs} copy=${copy} />`
       : html`<${Soon} page=${route.page} />`;
 
   return html`<${Shell} keys=${keys} wire=${wire} nav=${nav} toasts=${toasts} page=${route.page} onNavigate=${onNavigate}

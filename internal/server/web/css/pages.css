@@ -45,12 +45,6 @@
 .wait-steps { display: grid; gap: 2px; }
 .step { display: flex; gap: 8px; font-size: 12px; min-width: 0; }
 .step-glyph { width: 12px; flex: none; color: var(--muted); }
-.wait-choices { display: flex; flex-wrap: wrap; gap: 6px; }
-.choice { display: inline-flex; align-items: center; gap: 8px; min-height: 30px; padding: 3px 12px 3px 6px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); font-size: 12px; }
-.choice:hover:not(:disabled) { border-color: var(--accent); }
-.choice.primary { border-color: var(--accent); color: var(--accent); font-weight: 600; }
-.choice:disabled { opacity: .5; cursor: default; }
-.choice-n { min-width: 18px; height: 18px; display: grid; place-items: center; border-radius: 4px; background: var(--surface-alt); font-size: 11px; color: var(--muted); }
 .wait-own { display: flex; align-items: flex-end; gap: 8px; }
 .wait-own .field { flex: 1; }
 .wait-foot { display: flex; flex-wrap: wrap; gap: 6px; }
@@ -60,7 +54,6 @@
 [data-form="phone"] .run-row .run-time { grid-column: 3; grid-row: 1; }
 [data-form="phone"] .run-row .run-cost { display: none; }
 [data-form="phone"] .run-row .btn, [data-form="phone"] .run-row .run-stop { grid-column: 2 / -1; justify-self: start; }
-[data-form="phone"] .choice { min-height: 44px; font-size: 14px; }
 [data-form="phone"] .wait-own { flex-direction: column; align-items: stretch; }
 [data-form="phone"] .auth-card { padding: 20px 16px; border-radius: 10px; }
 
@@ -159,3 +152,13 @@
 [data-form="phone"] .plan-row { min-height: 52px; padding: 8px 12px; font-size: 14px; }
 [data-form="phone"] .dir-pick { min-height: 44px; font-size: 14px; }
 .tasks-board { min-height: 0; overflow: auto; }
+
+.det-out { display: flex; flex-direction: column; gap: 10px; min-height: 100%; height: 100%; }
+.det-out .det-pane { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.tasks-pane:has(.det-out) { display: flex; flex-direction: column; overflow: hidden; padding-bottom: 0; }
+.tasks-split:has(.det-out) { grid-template-columns: minmax(0, .75fr) minmax(520px, 1.25fr); }
+.det-run-go { cursor: pointer; border-radius: 4px; }
+.det-run-go:hover { background: var(--surface-hover); }
+.det-run-go.on { background: var(--accent-soft); }
+.conv { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+[data-form="phone"] .page-body .conv { height: 100%; }

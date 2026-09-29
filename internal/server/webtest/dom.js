@@ -42,7 +42,7 @@ class Text extends Node {
 }
 
 const events = ['click', 'dblclick', 'keydown', 'keyup', 'input', 'change', 'scroll', 'focus', 'blur', 'submit', 'pointerdown', 'mousedown',
-  'dragstart', 'dragover', 'dragleave', 'drop', 'dragend'];
+  'dragstart', 'dragover', 'dragleave', 'drop', 'dragend', 'wheel', 'touchstart', 'touchmove', 'touchend', 'focusin', 'focusout'];
 
 class Element extends Node {
   constructor(doc, ns, tag) {
@@ -56,6 +56,12 @@ class Element extends Node {
     this.listeners = {};
     this.scrollTop = 0;
     this.clientHeight = 0;
+    const el = this;
+    this.classList = {
+      contains: c => el.className.split(' ').includes(c),
+      add: c => { if (!el.classList.contains(c)) el.setAttribute('class', (el.className + ' ' + c).trim()); },
+      remove: c => el.setAttribute('class', el.className.split(' ').filter(x => x && x !== c).join(' ')),
+    };
   }
   setAttribute(k, v) { this.attributes.set(k, String(v)); }
   getAttribute(k) { return this.attributes.has(k) ? this.attributes.get(k) : null; }
@@ -95,6 +101,16 @@ class Element extends Node {
     if (sel.startsWith('.')) return this.all(e => e.className.split(' ').includes(sel.slice(1)));
     return this.all(e => e.localName === sel);
   }
+  // querySelectorAll takes what find does, with an attribute's value quoted ([data-key="x"]) and one :not(.c).
+  querySelectorAll(sel) {
+    const not = /^(.*):not\(\.([\w-]+)\)$/.exec(sel);
+    if (not) return this.querySelectorAll(not[1]).filter(e => !e.classList.contains(not[2]));
+    const q = /^\[([\w-]+)="((?:[^"\\]|\\.)*)"\]$/.exec(sel);
+    if (q) return this.find(`[${q[1]}=${q[2].replace(/\\(.)/g, '$1')}]`);
+    return this.find(sel);
+  }
+  querySelector(sel) { return this.querySelectorAll(sel)[0] || null; }
+  get firstElementChild() { return this.children[0] || null; }
   one(sel) {
     const got = this.find(sel);
     if (got.length !== 1) throw new Error(`${sel}: ${got.length} elements`);
@@ -102,6 +118,21 @@ class Element extends Node {
   }
 }
 for (const t of events) Element.prototype['on' + t] = null;
+for (const k of ['clientWidth', 'scrollHeight', 'offsetTop', 'offsetHeight']) Object.defineProperty(Element.prototype, k, {value: 0, writable: true, configurable: true});
+
+// layout lays the elements that have a data-key attribute out one under another inside the element with class
+// scroller, each as tall as height(el) says; the scroller's scrollHeight is their sum. It returns the undo.
+export function layout(scroller, height) {
+  const rows = root => root.find('[data-key]');
+  const top = el => { let y = 0; for (const r of rows(el.ownerDocument.body)) { if (r === el) return y; y += height(r); } return 0; };
+  const props = {
+    offsetTop: {get() { return this.hasAttribute('data-key') ? top(this) : 0; }, configurable: true},
+    offsetHeight: {get() { return this.hasAttribute('data-key') ? height(this) : 0; }, configurable: true},
+    scrollHeight: {get() { return this.className.split(' ').includes(scroller) ? rows(this).reduce((a, r) => a + height(r), 0) : 0; }, configurable: true},
+  };
+  Object.defineProperties(Element.prototype, props);
+  return () => { for (const k of Object.keys(props)) Object.defineProperty(Element.prototype, k, {value: 0, writable: true, configurable: true}); };
+}
 
 export function createDocument() {
   const doc = {activeElement: null};

@@ -4,7 +4,7 @@
 // does is the task page's (onAct): this only says which ones there are.
 import {useEffect} from '../vendor/hooks.mjs';
 import {html, cx, usePhone, useWords} from '../ui/base.js';
-import {Button} from '../ui/controls.js';
+import {Button, Tabs} from '../ui/controls.js';
 import {Status} from '../ui/status.js';
 import {Markdown} from '../ui/markdown.js';
 import {Menu} from '../ui/menu.js';
@@ -45,11 +45,12 @@ function TaskLink({state, id, onGo}) {
   return html`<button type="button" class="det-link" onClick=${() => onGo(id)}><${Status} state=${sitState(situation(state, x))} /><span class="ell">${x.title}</span><span class="mono t-muted">${id}</span></button>`;
 }
 
-function RunRow({run, now}) {
+function RunRow({run, now, onRun, on}) {
   const w = useWords();
   const began = Date.parse(run.started_at || run.queued_at), ended = run.ended_at ? Date.parse(run.ended_at) : now;
   const said = sel.doing(run) || run.detail || run.reason || '';
-  return html`<div class="det-run">
+  return html`<div class=${cx('det-run', onRun && 'det-run-go', on && 'on')} role=${onRun ? 'button' : undefined} tabindex=${onRun ? 0 : undefined}
+    onClick=${onRun && (() => onRun(run.id))} onKeyDown=${onRun && (e => { if (e.key === 'Enter') { e.preventDefault(); onRun(run.id); } })}>
     <${Status} state=${run.state} />
     <span class="det-run-main"><span class="mono">${run.id}</span> <span class="t-muted">${who(run)}${run.stage ? ' · ' + run.stage : ''}</span>
       ${said && html`<span class=${cx('det-run-said', 'ell', /^\$ |^go |^npm /.test(said) && 'mono')}>${said}</span>`}
@@ -59,8 +60,10 @@ function RunRow({run, now}) {
   </div>`;
 }
 
-// Task: acts lists what can be done (core/tasks.js actionsFor); busy is a write about it that is out.
-export function Task({store, task, now, busy = false, onAct, onGo}) {
+// Task: acts lists what can be done (core/tasks.js actionsFor); busy is a write about it that is out. With output
+// (a function of nothing that draws the conversation) a desktop shows it as a second pane, open by default once the
+// task has run; onRun(id) shows a run's conversation (on a phone, on a screen of its own); run is the one shown.
+export function Task({store, task, now, busy = false, onAct, onGo, output, onRun, run = '', pane = 'output', onPane = () => {}}) {
   const w = useWords();
   const {t, f} = w;
   const phone = usePhone();
@@ -80,8 +83,9 @@ export function Task({store, task, now, busy = false, onAct, onGo}) {
   const button = (id, kind) => html`<${Button} kind=${kind} keyName=${phone ? '' : actionKeys[id] || ''} disabled=${busy} onClick=${() => onAct(id, task)}>${actLabel(w, id, sit)}<//>`;
   const more = acts.more.filter(id => !['edit', 'dispatch'].includes(id) || phone);
   const direct = phone ? [] : acts.more.filter(id => ['edit', 'dispatch'].includes(id));
-  return html`<article class="det" aria-label=${task.title}>
-    <header class="det-head">
+  const tabs = !phone && !!output && runs.length > 0;
+  const shown = tabs ? pane : 'overview';
+  const top = html`<header class="det-head">
       <div class="det-sit"><${Status} state=${sitState(sit)} label=${sitWord(w, sit)} />${stage && html`<span class="chip">${f('gate.stage', stage.name, task.loops || 0)}</span>`}</div>
       <h2 class="det-title">${task.title}</h2>
       <div class="det-meta mono">${task.id}${project ? ' · ' + project.name : ''}${task.kind === 'requirement' ? ' · ' + t('det.requirement') : ''}</div>
@@ -91,6 +95,15 @@ export function Task({store, task, now, busy = false, onAct, onGo}) {
       ${direct.map(id => button(id, ''))}
       ${more.length > 0 && html`<${Menu} label=${t('do.more')} items=${more.map(id => ({label: actLabel(w, id, sit), kind: id === 'cancel' ? 'danger' : '', onClick: () => onAct(id, task)}))} />`}
     </div>
+    ${tabs && html`<${Tabs} label=${task.title} value=${shown} onChange=${onPane} idPrefix=${'det-' + task.id}
+      tabs=${[{id: 'overview', label: t('det.overview')}, {id: 'output', label: t('det.output'), count: runs.length}]} />`}`;
+  if (shown === 'output') {
+    return html`<article class="det det-out" aria-label=${task.title}>${top}
+      <div class="det-pane" role="tabpanel" id=${'det-' + task.id + '-output-pane'}>${output()}</div>
+    </article>`;
+  }
+  return html`<article class="det" aria-label=${task.title}>
+    ${top}
     ${task.source?.pending && html`<div class="det-note"><b>${f('det.sourceNew', task.source.pending.rev)}</b><${Markdown} text=${task.source.pending.text} /></div>`}
     ${task.source?.closed && !task.source.closed_acked && html`<div class="det-note">${t('det.sourceClosed')}</div>`}
     ${task.draft && html`<div class="det-note">${f('det.draft', task.draft.plan?.tasks?.length || 0)}</div>`}
@@ -124,7 +137,8 @@ export function Task({store, task, now, busy = false, onAct, onGo}) {
       ${tk.inOrder(kids).map(x => html`<${TaskLink} state=${st} id=${x.id} onGo=${onGo} />`)}
     <//>`}
     <${Section} title=${t('det.runs')} count=${runs.length || undefined}>
-      ${runs.length ? html`<div class="det-runs">${runs.map(r => html`<${RunRow} key=${r.id} run=${r} now=${now} />`)}</div>` : html`<p class="t-muted">${t('det.noRuns')}</p>`}
+      ${runs.length ? html`<div class="det-runs">${runs.map(r => html`<${RunRow} key=${r.id} run=${r} now=${now} on=${r.id === run}
+        onRun=${onRun && (id => { onRun(id); onPane('output'); })} />`)}</div>` : html`<p class="t-muted">${t('det.noRuns')}</p>`}
     <//>
     ${task.notes?.length > 0 && html`<${Section} title=${t('det.notes')}>
       <ul class="det-notes">${task.notes.slice(-10).reverse().map(n => html`<li><span class="mono t-muted">${clock(n.at)} ${n.stage || ''} ${n.kind}</span> ${n.text}</li>`)}</ul>
