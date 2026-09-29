@@ -76,6 +76,7 @@ A hung TUI: on macOS `sample <pid>` prints its stacks; SIGQUIT prints them to th
 | `internal/wire` | the protocol: JSON frames over any two-way stream, either end may call, answers out of order, cancel, keepalive |
 | `internal/remote` | other machines' sessions over `wire`: methods and types (`proto.go`), answering side (`local.go`), ssh `Client`, `Hosts` cache, `Source` |
 | `internal/agent` | provider adapters (claude, codex, fake, command): launch, resume, fork, capabilities |
+| `internal/output` | a run's `output.log` read into events: the one reader of claude, codex and plain text, tool families and titles, turns, the timeline's grouping; `agent.OwnReport` tells the run's own reports |
 | `internal/tracker` | issue trackers behind one `Tracker` interface: Gitea and GitHub (`gitea.go`), GitLab, a shared REST layer; issues, comments, close, label; webhook checks per kind (`hook.go`); `trackertest` is a fake speaking all three with faults for tests; tend-server only |
 | `internal/defs` | agent definitions: Markdown with a YAML front matter (`Parse`, `Format`, `Check`, `Import` on the client only, `Compile` into a profile) |
 | `internal/workflow` | workflows: Markdown definitions (`Parse`, `Check`, the embedded built-ins, `Resolve`), a stage's brief from its template, the task's workpad; the stage rules themselves are `task` (`flow.go`) and `coord` (`workflow.go`) |
@@ -109,6 +110,7 @@ A hung TUI: on macOS `sample <pid>` prints its stacks; SIGQUIT prints them to th
 | `internal/journal`, `internal/task`, `internal/coord` | `docs/design/runs/coordinator.md`; the task features they carry in `docs/design/tasks/` |
 | `internal/node`, `internal/proc` | `docs/design/runs/node.md`, `docs/design/tasks/execution.md` |
 | `internal/agent` | `docs/design/runs/agents.md` |
+| `internal/output` | `docs/design/runs/output.md` |
 | `internal/defs`, `internal/workflow` | `docs/design/tasks/agent-definitions.md`, `docs/design/tasks/workflows.md`, `docs/design/tasks/planning.md` |
 | `internal/server`, `internal/auth`, `cmd/tend-server` | `docs/design/runs/deployment.md`, `docs/design/tasks/team.md`, `docs/design/tasks/storage.md`; the Web UI `docs/design/runs/clients.md`, `docs/design/tasks/ui.md`, `docs/design/tasks/board.md` |
 | `internal/tracker` | `docs/design/tasks/trackers.md` |

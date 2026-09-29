@@ -28,6 +28,7 @@
 | [runs/coordinator.md](runs/coordinator.md) | 协调器：持锁、事件日志、状态、命令与收据、调度与对账、订阅、通知 |
 | [runs/node.md](runs/node.md) | 节点：run 目录、监督进程、观察、会话绑定、双向流 |
 | [runs/agents.md](runs/agents.md) | agent 适配器 |
+| [runs/output.md](runs/output.md) | 运行输出：事件、工具的 family 和摘要、轮次、分组 |
 | [runs/deployment.md](runs/deployment.md) | 两种部署与安全边界 |
 | [runs/clients.md](runs/clients.md) | CLI、TUI、Web UI |
 

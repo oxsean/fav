@@ -87,6 +87,12 @@ func controlError(id, msg string) any {
 	return map[string]any{"type": "control_response", "response": map[string]any{"subtype": "error", "request_id": id, "error": msg}}
 }
 
+// ownReport tells a command that runs nothing but this tend's own run reports.
+func ownReport(command string) bool {
+	self, err := os.Executable()
+	return err == nil && agent.OwnReport(command, self)
+}
+
 // proto is how a stream run's agent speaks on stdin and stdout.
 type proto interface {
 	begin(brief string)                     // send the brief

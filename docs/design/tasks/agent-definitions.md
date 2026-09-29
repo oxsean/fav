@@ -66,7 +66,7 @@ budget: {usd: 3, minutes: 40}
 run 自己的回报（`tend run note|ask|verdict|plan`）写 run 目录，沙箱不该拦它：
 
 - codex 是 workspace-write 时，第一个 `turn/start` 带上 `thread/start` 返回的 `sandboxPolicy`，`writableRoots` 追加 run 目录（run 目录在 `~/.agent/tend` 下，默认不可写）；read-only 什么都写不了，靠下一条。
-- agent 请求执行的命令恰好是任务书写的那个 tend 的 `run note|ask|verdict|plan`（`shell.POSIX.Split` 能整条读成普通词；codex 的 `/bin/zsh -lc '…'` 外壳先剥掉；`plan -` 只接受带引号标记的 heredoc），节点直接批准，不进「等你」：codex 的 `requestApproval`、claude 的 `can_use_tool`（Bash）都一样。多一个词（`;`、展开、重定向、别的命令）就照常等人批。
+- agent 请求执行的命令恰好是任务书写的那个 tend 的 `run note|ask|verdict|plan`（`shell.POSIX.Split` 能整条读成普通词；codex 的 `/bin/zsh -lc '…'` 外壳先剥掉；`plan -` 只接受带引号标记的 heredoc），节点直接批准，不进「等你」：codex 的 `requestApproval`、claude 的 `can_use_tool`（Bash）都一样。多一个词（`;`、展开、重定向、别的命令）就照常等人批。判断在 `agent.OwnReport`，节点传自己那个 tend 的路径；运行输出的解析器不在节点上，不传路径，认名叫 `tend` 的程序，这些请求不出提问事件（[../runs/output.md](../runs/output.md)「运行输出」）。
 
 ### 实现
 
