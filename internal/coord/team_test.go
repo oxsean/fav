@@ -314,6 +314,32 @@ func TestMembershipChangesTellSubscribersToFetchAgain(t *testing.T) {
 	}
 }
 
+func TestHandingOverATaskOutsideAProjectTellsSubscribersToFetchAgain(t *testing.T) {
+	e := team(t, tend.Config{})
+	e.start()
+	tk := e.taskAs(bob, "b1", "", "")
+	got := make(chan string, 16)
+	w, _ := wire.Pipe(wire.Options{OnPush: func(method string, _ json.RawMessage) { got <- method }}, wire.Options{Handler: e.c.HandlerFor(bob)})
+	defer w.Close()
+	if err := callAs(w, MSubscribe, "", SubscribeParams{AfterSeq: e.c.State().Seq}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := callAs(e.as(bob), MTaskEdit, "e1", task.TaskEdit{ID: tk.ID, Owner: ptr(root.User)}, nil); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.After(5 * time.Second)
+	for {
+		select {
+		case m := <-got:
+			if m == PushRefetch {
+				return
+			}
+		case <-deadline:
+			t.Fatal("no refetch")
+		}
+	}
+}
+
 func TestTheLocalOwnerKeepsEverythingInModeOne(t *testing.T) {
 	e := newEnv(t, tend.Config{})
 	e.start()

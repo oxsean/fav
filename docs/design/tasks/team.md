@@ -100,7 +100,7 @@
    - 历史补发和实时推送用同一条规则。
    - 事件属于哪个项目，由协调器在推送时按当前状态解析（run → task → project），不靠事件自带；对象从不删除，所以总能解析。
    - 推送里的命令名只发给调用者本人，以及看得到其中某个事件的人。
-   - `member_set`、`project_edited`、`machine_shared`、改了项目的 `task_edited` 之后，每个订阅者再收到一次 `refetch` 推送，重读状态，丢掉不再可见的数据。网页和 TUI 平时自己折叠信封（网页用 `fold.js`，和 Go 的折叠用同一批 Go 生成的信封对照测试），只在 `refetch`、seq 断档或遇到不认识的对象时整量重读。
+   - `member_set`、`project_edited`、`machine_shared`、`agentdef_shared`、`agentdef_removed`、改了项目或负责人的 `task_edited` 之后，每个订阅者再收到一次 `refetch` 推送，重读状态，丢掉不再可见的数据。网页和 TUI 平时自己折叠信封（网页用 `fold.js`，和 Go 的折叠用同一批 Go 生成的信封对照测试），只在 `refetch`、seq 断档或遇到不认识的对象时整量重读。
 5. **收据按 `(principal, command_id)` 存**。重放之前先检查当前的读权限；有权就返回第一次的结果。
 6. **原生会话的两条旁路收紧**。
    - `node.call`（读会话列表、对话、全文，以及建项目时列目录的 `node.dirs`）只给机器主人和管理员。

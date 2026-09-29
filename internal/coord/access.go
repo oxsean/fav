@@ -348,7 +348,7 @@ func reshapes(env journal.Envelope) bool {
 			return true
 		case task.ETaskEdited:
 			var d task.TaskEdit
-			if json.Unmarshal(e.Data, &d) == nil && d.Project != nil {
+			if json.Unmarshal(e.Data, &d) == nil && (d.Project != nil || d.Owner != nil) {
 				return true
 			}
 		}
