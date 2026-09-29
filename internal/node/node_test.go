@@ -243,6 +243,21 @@ func TestAVeryLongLineIsLoggedInPieces(t *testing.T) {
 	}
 }
 
+func TestClaudesInitializeAnswerStaysOutOfTheLog(t *testing.T) {
+	account := `"account":{"email":"someone@example.com","organization":"Example"}`
+	short := `{"type":"control_response","response":{"subtype":"success","request_id":"init","response":{` + account + `}}}`
+	long := `{"type":"control_response","response":{"subtype":"success","request_id":"init","response":{` + account +
+		`,"commands":"` + strings.Repeat("x", 200<<10) + `"}}}`
+	other := `{"type":"control_response","response":{"subtype":"success","request_id":"stop","response":{}}}`
+	said := `{"type":"assistant","message":{"content":[{"type":"text","text":"the log says \"request_id\":\"init\""}]}}`
+	var out strings.Builder
+	s := &sup{dir: t.TempDir()}
+	s.copyOut(strings.NewReader(short+"\n"+long+"\n"+other+"\n"+said+"\n"), &out)
+	if want := other + "\n" + said + "\n"; out.String() != want {
+		t.Fatalf("logged %d bytes: %.300q", out.Len(), out.String())
+	}
+}
+
 func TestAnUnknownRunCanBeAcknowledged(t *testing.T) {
 	n := New(t.TempDir())
 	n.Launch = noLaunch

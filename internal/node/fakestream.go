@@ -51,8 +51,8 @@ func fakeStream(o fakeOpts) error {
 			case m["type"] == "control_request":
 				req, _ := m["request"].(map[string]any)
 				switch req["subtype"] {
-				case "initialize":
-					emit(controlResponse(fmt.Sprint(m["request_id"]), map[string]any{}))
+				case "initialize": // claude's answer carries the signed-in account
+					emit(controlResponse(fmt.Sprint(m["request_id"]), map[string]any{"account": map[string]any{"email": "fake@example.com"}}))
 				case "interrupt":
 					interrupted = true
 					emit(controlResponse(fmt.Sprint(m["request_id"]), map[string]any{}))

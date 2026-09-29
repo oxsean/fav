@@ -103,6 +103,19 @@ func TestAMessageReachesARunningAgent(t *testing.T) {
 	}
 }
 
+func TestAStreamRunsLogLeavesOutTheAccount(t *testing.T) {
+	n := New(t.TempDir())
+	s := start(t, n, StartParams{Task: "t_1", Profile: fake("--steps", "1", "--every", "10ms", "--permission", "Bash:ls"), Brief: "b"})
+	req := waiting(t, n, s.Run)
+	if _, err := n.Answer(AnswerParams{Run: s.Run, Answer: agent.Answer{Request: req.ID, Allow: true}}); err != nil {
+		t.Fatal(err)
+	}
+	wait(t, n, s.Run, func(s Snapshot) bool { return Terminal(s.State.State) })
+	if log := logOf(t, n, s.Run); strings.Contains(log, "fake@example.com") || !strings.Contains(log, `"type":"result"`) {
+		t.Fatalf("output.log:\n%s", log)
+	}
+}
+
 func TestAStopInterruptsAStreamRunGently(t *testing.T) {
 	n := New(t.TempDir())
 	s := start(t, n, StartParams{Task: "t_1", Profile: fake("--steps", "100", "--every", "100ms"), Brief: "b"})

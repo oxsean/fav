@@ -16,12 +16,15 @@ func newProto(s *sup) proto {
 	return claudeProto{s}
 }
 
+// initRequest is the id of the initialize request; its answer carries the signed-in account (initAnswer).
+const initRequest = "init"
+
 // claudeProto is claude's stream-json: user messages in, control requests (can_use_tool) out and answered with
 // control responses.
 type claudeProto struct{ s *sup }
 
 func (c claudeProto) begin(brief string) {
-	c.s.in.send(controlRequest("init", map[string]any{"subtype": "initialize", "hooks": nil}))
+	c.s.in.send(controlRequest(initRequest, map[string]any{"subtype": "initialize", "hooks": nil}))
 	c.s.in.send(userMessage(brief))
 }
 

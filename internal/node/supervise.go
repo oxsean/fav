@@ -614,15 +614,20 @@ func closeAll(fs []*os.File) {
 }
 
 // copyOut writes the agent's stdout to the log and reads it as it goes: codex's thread id, the final message, errors
-// and denied permissions; a line longer than the buffer goes to the log in pieces and is not read.
+// and denied permissions; a line longer than the buffer goes to the log in pieces and is not read. Claude's answer to
+// initialize stays out of the log.
 func (s *sup) copyOut(r io.Reader, w io.Writer) {
 	br := bufio.NewReaderSize(r, 64<<10)
-	piece := false
+	piece, drop := false, false
 	for {
 		line, err := br.ReadSlice('\n')
-		if len(line) > 0 {
+		full := err == nil && !piece
+		if !piece {
+			drop = initAnswer(line, full)
+		}
+		if len(line) > 0 && !drop {
 			w.Write(line)
-			if err == nil && !piece {
+			if full {
 				s.line(line)
 			}
 		}
@@ -631,6 +636,25 @@ func (s *sup) copyOut(r io.Reader, w io.Writer) {
 			return
 		}
 	}
+}
+
+// initAnswer tells claude's control_response to the initialize request, which carries the
+// signed-in account: from the whole line, or from the first piece of a longer one, where a quote inside a JSON string
+// is always escaped.
+func initAnswer(line []byte, full bool) bool {
+	if !bytes.Contains(line, []byte(`"control_response"`)) || !bytes.Contains(line, []byte(`"request_id":"`+initRequest+`"`)) {
+		return false
+	}
+	if !full {
+		return bytes.Contains(line, []byte(`"type":"control_response"`))
+	}
+	var m struct {
+		Type     string `json:"type"`
+		Response struct {
+			RequestID string `json:"request_id"`
+		} `json:"response"`
+	}
+	return json.Unmarshal(line, &m) == nil && m.Type == "control_response" && m.Response.RequestID == initRequest
 }
 
 // event is the part of a claude stream-json or codex exec --json line the supervisor reads.
