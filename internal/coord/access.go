@@ -304,7 +304,8 @@ func (c *Coord) sees(p Principal, e journal.Event) bool {
 		return p.Admin || c.st.Projects[s.Project].Role(p.User) != ""
 	case task.EMachineShared:
 		return c.canSee(p, s.Machine)
-	case task.ETaskMoved, task.ETaskHeld, task.ETaskSourced, task.ETaskSourceAcked, task.ETaskStaged, task.ETaskNoted:
+	case task.ETaskMoved, task.ETaskHeld, task.ETaskSourced, task.ETaskSourceAcked, task.ETaskStaged, task.ETaskNoted,
+		task.ETaskLinked, task.EPlanDrafted, task.EPlanApplied:
 		return canRead(c.st, p, c.st.Tasks[s.ID])
 	case task.ETaskStarted:
 		var d task.TaskStart

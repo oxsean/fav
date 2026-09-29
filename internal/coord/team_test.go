@@ -435,3 +435,20 @@ func TestTheRunsOfARetiredMachineWaitForAnAdmin(t *testing.T) {
 		t.Fatalf("%+v", inbox(root))
 	}
 }
+
+func TestTaskEventsReachWhoeverReadsTheTask(t *testing.T) {
+	e := team(t, tend.Config{})
+	e.start()
+	e.project()
+	tk := e.taskAs(bob, "b1", "p1", "quick")
+	about, _ := json.Marshal(map[string]string{"id": tk.ID})
+	for _, typ := range []string{task.EPlanDrafted, task.EPlanApplied, task.ETaskLinked} {
+		ev := journal.Event{Type: typ, Data: about}
+		e.c.mu.Lock()
+		reader, outsider := e.c.sees(dee, ev), e.c.sees(cy, ev)
+		e.c.mu.Unlock()
+		if !reader || outsider {
+			t.Errorf("%s: the project's reader sees it %v, someone outside %v", typ, reader, outsider)
+		}
+	}
+}
