@@ -1,144 +1,89 @@
 package render
 
 import (
-	"encoding/json"
 	"strconv"
 	"strings"
+
+	"github.com/oxsean/fav/internal/i18n"
+	"github.com/oxsean/fav/internal/output"
 )
 
-// RunOutput is a run's output as lines to read: what claude's stream-json and codex's app-server or exec JSON say, one
-// line each, with the protocol's own traffic (requests, answers, partial text) left out; other text stays as it is.
-// Prefixes: "> " the user, "+ " a tool call, "$ " a command, "~ " changed files, "- " a system event, "= " the result,
-// "! " an error.
-func RunOutput(text string) []string {
+// RunOutputLines are a run's events as lines to read. Prefixes: "> " the user, "+ " a tool call, "$ " a command,
+// "~ " changed files, "? " a question or approval, "- " a warning, "= " the result, "! " an error or what a failed
+// call ended with; the agent's words as they are. Thoughts, system lines and a call's result that did not fail are
+// left out.
+func RunOutputLines(evs []output.Event) []string {
 	var out []string
-	for l := range strings.Lines(text) {
-		l = strings.TrimRight(l, "\r\n")
-		if strings.TrimSpace(l) == "" {
-			continue
+	add := func(prefix, text string) {
+		for l := range strings.Lines(text) {
+			if l = strings.TrimRight(l, "\r\n"); strings.TrimSpace(l) != "" {
+				out = append(out, prefix+l)
+				prefix = ""
+			}
 		}
-		for _, x := range outputLine(l) {
-			for s := range strings.Lines(x) {
-				if s = strings.TrimRight(s, "\r\n"); s != "" {
-					out = append(out, s)
-				}
+	}
+	for _, e := range evs {
+		switch e.Kind {
+		case output.KindUser:
+			add("> ", e.Text)
+		case output.KindSay, output.KindRaw:
+			add("", e.Text)
+		case output.KindTool, output.KindCmd, output.KindEdit, output.KindMCP:
+			add(callLine(e))
+			if e.Error && e.Kind != output.KindTool {
+				add("! ", lastLine(e.Output))
+			}
+		case output.KindToolResult:
+			if e.Error {
+				add("! ", lastLine(e.Output))
+			}
+		case output.KindSys:
+			if e.Level == "warning" {
+				add("- ", e.Text)
+			}
+		case output.KindError:
+			add("! ", e.Text)
+		case output.KindResult:
+			if e.Error {
+				add("! ", e.Text)
+			} else {
+				add("= ", e.Text)
 			}
 		}
 	}
 	return out
 }
 
-type outputEvent struct {
-	Type    string          `json:"type"`
-	Subtype string          `json:"subtype"`
-	Result  json.RawMessage `json:"result"`
-	Message struct {
-		Content []struct {
-			Type  string          `json:"type"`
-			Text  string          `json:"text"`
-			Name  string          `json:"name"`
-			Input json.RawMessage `json:"input"`
-		} `json:"content"`
-	} `json:"message"`
-	Method string          `json:"method"`
-	ID     json.RawMessage `json:"id"`
-	Params struct {
-		Item    outputItem `json:"item"`
-		Message string     `json:"message"`
-	} `json:"params"`
-	Item outputItem `json:"item"`
-}
-
-type outputItem struct {
-	Type      string `json:"type"`
-	Text      string `json:"text"`
-	Command   string `json:"command"`
-	ExitCode  *int   `json:"exitCode"`
-	ExitCode2 *int   `json:"exit_code"`
-	Changes   []struct {
-		Path string `json:"path"`
-	} `json:"changes"`
-}
-
-func outputLine(l string) []string {
-	var e outputEvent
-	if !strings.HasPrefix(l, "{") || json.Unmarshal([]byte(l), &e) != nil {
-		return []string{l}
+// callLine is a call's prefix and title, with what the title leaves out and a command's exit code.
+func callLine(e output.Event) (string, string) {
+	title := e.Title
+	if n := e.More; n > 0 {
+		switch e.Family {
+		case output.FamilyShell:
+			title += " " + i18n.F("tasks.output_more_lines", n)
+		case output.FamilyEdit:
+			title += " " + i18n.F("tasks.output_more_files", n)
+		case output.FamilyAsk:
+			title += " " + i18n.F("tasks.output_more_questions", n)
+		}
+	}
+	if e.Exit != nil {
+		title += " (exit " + strconv.Itoa(*e.Exit) + ")"
 	}
 	switch {
-	case e.Method != "":
-		switch e.Method {
-		case "item/completed":
-			return itemLine(e.Params.Item)
-		case "error", "warning":
-			return []string{"! " + e.Params.Message}
-		}
-		return nil
-	case e.ID != nil && e.Type == "":
-		return nil
-	case e.Type == "assistant" || e.Type == "user":
-		var out []string
-		for _, b := range e.Message.Content {
-			switch {
-			case b.Type == "text" && e.Type == "user":
-				out = append(out, "> "+b.Text)
-			case b.Type == "text":
-				out = append(out, b.Text)
-			case b.Type == "tool_use":
-				out = append(out, "+ "+b.Name+" "+string(b.Input))
-			}
-		}
-		return out
-	case e.Type == "system":
-		return []string{"- " + e.Subtype}
-	case e.Type == "result":
-		var result string
-		json.Unmarshal(e.Result, &result)
-		return []string{"= " + firstNonEmpty(result, e.Subtype)}
-	case e.Type == "item.completed":
-		return itemLine(e.Item)
-	case e.Type == "stream_event" || strings.HasPrefix(e.Type, "control_") || strings.Contains(e.Type, "."):
-		return nil
+	case e.Family == output.FamilyAsk:
+		return "? ", title
+	case e.Family == output.FamilyShell:
+		return "$ ", title
+	case e.Family == output.FamilyEdit:
+		return "~ ", title
+	case e.Family == output.FamilyMCP || e.Tool == "":
+		return "+ ", title
 	}
-	return []string{l}
+	return "+ ", strings.TrimSpace(e.Tool + " " + title)
 }
 
-func itemLine(it outputItem) []string {
-	switch it.Type {
-	case "agentMessage", "agent_message", "reasoning":
-		return []string{it.Text}
-	case "userMessage":
-		return []string{"> " + it.Text}
-	case "commandExecution", "command_execution":
-		s := "$ " + it.Command
-		if c := firstCode(it.ExitCode, it.ExitCode2); c != nil {
-			s += " (exit " + strconv.Itoa(*c) + ")"
-		}
-		return []string{s}
-	case "fileChange", "file_change":
-		var paths []string
-		for _, c := range it.Changes {
-			paths = append(paths, c.Path)
-		}
-		return []string{"~ " + strings.Join(paths, " ")}
-	}
-	return nil
-}
-
-func firstCode(cs ...*int) *int {
-	for _, c := range cs {
-		if c != nil {
-			return c
-		}
-	}
-	return nil
-}
-
-func firstNonEmpty(ss ...string) string {
-	for _, s := range ss {
-		if s != "" {
-			return s
-		}
-	}
-	return ""
+func lastLine(s string) string {
+	lines := strings.Split(strings.TrimRight(s, "\r\n"), "\n")
+	return lines[len(lines)-1]
 }

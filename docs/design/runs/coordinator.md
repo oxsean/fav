@@ -80,7 +80,7 @@ run `state` 转移表（终态单调，重复事件无副作用）：
 - 回答和消息：`run.answer` 只收 run 未结束、请求在 `requests` 里、还没回答过的（问题类允许时每个问题都要有回答，否则 `bad_request answers`）；`run.send` 只收 running 且 `stream` 的 run（否则 `conflict cannot_send`），消息 id 是 `m_` + 随机。两者都是带收据的命令，只写事件；对账时对节点列表里还在跑的 run，把请求仍在节点 `requests` 里的回答、节点 `sends` 里没有的 queued 消息发 `run.answer` / `run.send`（同一项 10 s 内不重发），应答的快照直接折成 `run_observed`。
 - abandoned 的 run 在节点快照成终态之前（节点这次没列出它也算）仍占着目录和 slot，同目录的下一个 run 不派发。
 - 协调器已结束（含 abandoned / canceled）、节点是终态或 unknown 的 run 进 `ack`。
-- 退避期内的机器，`run.tail` / `node.call` 直接回 `offline`，不重拨；只有 `machine.list{connect}` 清退避。
+- 退避期内的机器，`run.tail` / `run.output.page` / `node.call` 直接回 `offline`，不重拨；只有 `machine.list{connect}` 清退避。
 - 节点连不上：失败后 5 s 起翻倍，最多 5 分钟；`machine.list` 回原因和下次重试时间。
 - 模式一：有未结束 run 的机器保持连接；其余空闲 5 分钟断开。
 - 连上节点后在后台调一次 `node.agents`，结果挂在机器上（`machine.list` 的 `agents`）；`machine.list{connect}` 和 `run.preview` 会重新取。

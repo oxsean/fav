@@ -150,7 +150,7 @@ func TestARunWatchedBesideStaysUnderTheDetail(t *testing.T) {
 	}
 	waitFor(t, m, func() bool {
 		o, ok := m.tasks.out[m.tasks.watch]
-		return ok && o.text != "" && strings.Contains(screenText(m), m.tasks.watch)
+		return ok && len(o.events) > 0 && strings.Contains(screenText(m), m.tasks.watch)
 	})
 	if s := screenText(m); !strings.Contains(s, "first") || !strings.Contains(s, "step two") {
 		t.Fatalf("the watched run's task and output stay in sight:\n%s", s)

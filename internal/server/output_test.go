@@ -7,103 +7,69 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/oxsean/fav/internal/output"
 )
 
-// A codex run in stream mode writes the app-server's JSON-RPC lines: the timeline shows its messages, commands, file
-// changes, approvals and the turn's end, and leaves out the protocol's bookkeeping.
-func TestTheTimelineReadsCodexAppServerLines(t *testing.T) {
-	lines := `{"id":1,"result":{"userAgent":"tend/0.155.1"}}
-{"method":"thread/started","params":{"thread":{"id":"th1"}}}
-{"method":"mcpServer/startupStatus/updated","params":{"name":"gitea","status":"ready"}}
-{"method":"turn/started","params":{"turn":{"id":"tu1"}}}
-{"method":"warning","params":{"message":"Skill descriptions were shortened"}}
-{"method":"hook/started","params":{"hook":"SessionStart"}}
-{"method":"item/started","params":{"item":{"type":"userMessage","id":"u1","content":[{"type":"text","text":"Plan the task"}]}}}
+// The page draws the events internal/output read: a call and its result as one card, codex's usage on the result
+// after it, a failed command open, an approval as the call it asks about, a line no one knows as it was written.
+func TestThePageDrawsTheEventsOfARun(t *testing.T) {
+	lines := `{"method":"thread/started","params":{"thread":{"id":"th1"}}}
 {"method":"item/completed","params":{"item":{"type":"userMessage","id":"u1","content":[{"type":"text","text":"Plan the task"}]}}}
-{"method":"item/agentMessage/delta","params":{"itemId":"m1","delta":"I will"}}
-{"method":"item/completed","params":{"item":{"type":"agentMessage","id":"m1","text":"I will read the repository first."}}}
-{"method":"item/completed","params":{"item":{"type":"reasoning","id":"rs1","summary":[],"content":[]}}}
-{"method":"item/completed","params":{"item":{"type":"reasoning","id":"rs2","summary":["Checking main.go"],"content":[]}}}
-{"method":"item/completed","params":{"item":{"type":"commandExecution","id":"e1","command":"/bin/zsh -lc pwd","aggregatedOutput":"/work\n","exitCode":0}}}
+{"method":"item/completed","params":{"item":{"type":"agentMessage","id":"m1","text":"I will read <the> repository first."}}}
+{"method":"item/completed","params":{"item":{"type":"commandExecution","id":"e1","command":"/bin/zsh -lc 'go vet ./...'","aggregatedOutput":"vet: bad\n","exitCode":1}}}
 {"method":"item/commandExecution/requestApproval","id":0,"params":{"itemId":"e2","command":"/bin/zsh -lc 'go test ./...'","reason":"write the build cache"}}
-{"method":"serverRequest/resolved","params":{"requestId":0}}
-{"method":"item/commandExecution/outputDelta","params":{"itemId":"e2","delta":"ok"}}
-{"method":"item/completed","params":{"item":{"type":"fileChange","id":"f1","changes":[{"path":"main.go","kind":{"type":"update"},"diff":"@@ -1 +1 @@\n-a\n+b"}]}}}
-{"method":"item/completed","params":{"item":{"type":"mcpToolCall","id":"c1","server":"gitea","tool":"issue_read","arguments":{"number":6},"result":{"content":[{"type":"text","text":"issue 6"}]}}}}
+{"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_1","name":"Bash","input":{"command":"ls"}}]}}
+{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_1","content":"main.go"}]}}
 {"method":"thread/tokenUsage/updated","params":{"tokenUsage":{"total":{"inputTokens":186000,"cachedInputTokens":156288,"outputTokens":2052}}}}
-{"method":"account/rateLimits/updated","params":{}}
-{"method":"thread/status/changed","params":{"status":"idle"}}
 {"method":"turn/completed","params":{"turn":{"id":"tu1","status":"completed","error":null}}}
 {"method":"something/new","params":{"x":1}}
-{"id":9,"error":{"code":-32600,"message":"bad request"}}`
-	type event struct {
-		Kind, Text, Name, Input, Result string
-		Exit                            *int
-	}
-	var got []event
-	runTimeline(t, lines, "codex", &got)
-	zero := 0
-	want := []event{
-		{Kind: "systemEvent", Text: "thread/started"},
-		{Kind: "systemEvent", Text: "turn/started"},
-		{Kind: "systemEvent", Text: "Skill descriptions were shortened"},
-		{Kind: "user", Text: "Plan the task"},
-		{Kind: "assistant", Text: "I will read the repository first."},
-		{Kind: "assistant", Text: "Checking main.go"},
-		{Kind: "tool", Name: "command", Input: "/bin/zsh -lc pwd", Result: "/work\n", Exit: &zero},
-		{Kind: "systemEvent", Text: "approval: /bin/zsh -lc 'go test ./...' · write the build cache"},
-		{Kind: "tool", Name: "file_change", Input: "main.go", Result: "@@ -1 +1 @@\n-a\n+b"},
-		{Kind: "tool", Name: "gitea.issue_read", Input: "{\n  \"number\": 6\n}", Result: "issue 6"},
-		{Kind: "result", Text: "29712 input · 156288 cached · 2052 output tokens"},
-		{Kind: "raw", Text: `{"method":"something/new","params":{"x":1}}`},
-		{Kind: "raw", Text: `{"id":9,"error":{"code":-32600,"message":"bad request"}}`},
-	}
-	if len(got) != len(want) {
-		t.Fatalf("%d events, want %d: %+v", len(got), len(want), got)
-	}
-	for i := range want {
-		g, w := got[i], want[i]
-		if g.Kind != w.Kind || g.Text != w.Text || g.Name != w.Name || g.Input != w.Input || g.Result != w.Result ||
-			(g.Exit == nil) != (w.Exit == nil) || (g.Exit != nil && *g.Exit != *w.Exit) {
-			t.Errorf("event %d: %+v, want %+v", i, g, w)
+`
+	evs, _, _ := output.Parse("f", 0, lines, output.State{})
+	html := drawEvents(t, evs)
+	for _, want := range []string{
+		"Plan the task", "I will read &lt;the&gt; repository first.",
+		`<details class="tool-card failed" data-tool="f:`, `go vet ./... · exit 1</summary>`, "vet: bad",
+		"go test ./...</summary>",
+		"ls</summary><pre>{\n  &quot;command&quot;: &quot;ls&quot;\n}\n\nmain.go</pre>",
+		"29k in, 156k cached, 2k out",
+		"{&quot;method&quot;:&quot;something/new&quot;",
+	} {
+		if !strings.Contains(html, want) {
+			t.Errorf("the page lacks %q:\n%s", want, html)
 		}
 	}
-}
-
-// A codex exec run's lines keep reading as before.
-func TestTheTimelineStillReadsCodexExecLines(t *testing.T) {
-	lines := `{"type":"thread.started","thread_id":"th1"}
-{"type":"item.completed","item":{"type":"agent_message","text":"done"}}
-{"type":"turn.completed","usage":{"input_tokens":12,"cached_input_tokens":2,"output_tokens":3}}`
-	var got []struct{ Kind, Text string }
-	runTimeline(t, lines, "codex", &got)
-	if len(got) != 3 || got[0].Kind != "systemEvent" || got[1].Text != "done" || got[2].Text != "10 input · 2 cached · 3 output tokens" {
-		t.Fatalf("%+v", got)
+	if n := strings.Count(html, "main.go"); n != 1 {
+		t.Errorf("a result joins its call: main.go shows %d times", n)
+	}
+	if strings.Contains(html, "usage") {
+		t.Errorf("usage shows on the result only:\n%s", html)
 	}
 }
 
-func runTimeline(t *testing.T, lines, provider string, out any) {
+// drawEvents runs app.js's renderEvents on evs.
+func drawEvents(t *testing.T, evs []output.Event) string {
 	t.Helper()
-	nodeBin := nodeJS(t)
 	b, err := os.ReadFile(filepath.Join("web", "app.js"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	src := string(b)
-	start, end := strings.Index(src, "function normalizeOutput("), strings.Index(src, "\nfunction renderEvent(")
+	start, end := strings.Index(src, "function renderEvents("), strings.Index(src, "\n// toast says message")
 	if start < 0 || end < start {
-		t.Fatal("app.js has no normalizeOutput before renderEvent")
+		t.Fatal("app.js has no renderEvents before toast")
 	}
-	script := src[start:end] + `
-const events=normalizeOutput(require('fs').readFileSync(0,'utf8'),process.argv[1]).map(({index,raw,...e})=>e);
-process.stdout.write(JSON.stringify(events));`
-	cmd := exec.Command(nodeBin, "-e", script, provider)
-	cmd.Stdin = strings.NewReader(lines)
-	res, err := cmd.Output()
+	in, _ := json.Marshal(evs)
+	script := `const words={usageTokens:'{0} in, {1} cached, {2} out'};const t=k=>words[k]||k;
+const esc=s=>String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+const tokens=n=>n>=1e6?(n/1e6).toFixed(1)+'M':n>=1000?Math.floor(n/1000)+'k':String(n||0);
+` + src[start:end] + `
+process.stdout.write(renderEvents(JSON.parse(require('fs').readFileSync(0,'utf8'))));`
+	cmd := exec.Command(nodeJS(t), "-e", script)
+	cmd.Stdin = strings.NewReader(string(in))
+	out, err := cmd.Output()
 	if err != nil {
 		t.Fatalf("node: %v", err)
 	}
-	if err := json.Unmarshal(res, out); err != nil {
-		t.Fatal(err)
-	}
+	return string(out)
 }

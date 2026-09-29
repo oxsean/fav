@@ -109,6 +109,7 @@ const words = {
   not_found: ['对象已不存在，请刷新。', 'This item no longer exists. Refresh the view.'], bad_request: ['参数不完整，请检查输入。', 'Check the form for missing or invalid values.'],
   authInvalid: ['token 无效或已吊销。', 'The token is not valid or was revoked.'],
   user: ['用户', 'User'], assistant: ['助手', 'Assistant'], systemEvent: ['系统', 'System'], tool: ['工具', 'Tool'], result: ['结果', 'Result'],
+  think: ['思考', 'Thinking'], outputError: ['错误', 'Error'], usageTokens: ['输入 {0} tokens，缓存命中 {1}，输出 {2}', '{0} tokens in, {1} from cache, {2} out'],
   chars: ['字', 'characters'], steps: ['步骤', 'steps'], duration: ['用时', 'Duration'], cost: ['费用', 'Cost'], noCost: ['未提供费用', 'Cost not provided'],
   stoppedHelp: ['运行已结束；任务状态需要手动更新。', 'This run has ended. Update the task status separately.'],
   noMachines: ['暂无机器', 'No machines'], noMachinesHelp: ['在服务器配置节点后，连接状态会出现在这里。', 'Configure nodes on the server to see connection states here.'],
@@ -210,61 +211,38 @@ function markdown(source) {
   }
   endList();if(code)html+=`<pre>${esc(codeLines.join('\n'))}</pre>`;return html;
 }
-function normalizeOutput(text,provider) {
-  const events=[], toolsByID=new Map();let usage;
-  text.split('\n').filter(Boolean).forEach((line,index)=>{
-    const base={index:index+1,raw:line};let event;
-    try {event=JSON.parse(line);}catch(_){events.push({...base,kind:'text',text:line});return;}
-    if(provider==='claude') {
-      if(event.type==='assistant'||event.type==='user') {
-        for(const block of event.message?.content||[]) {
-          if(block.type==='text')events.push({...base,kind:event.type==='user'?'user':'assistant',text:block.text});
-          else if(block.type==='tool_use'){const item={...base,kind:'tool',name:block.name,input:JSON.stringify(block.input,null,2),result:''};events.push(item);toolsByID.set(block.id,item);}
-          else if(block.type==='tool_result'){const item=toolsByID.get(block.tool_use_id);const result=typeof block.content==='string'?block.content:JSON.stringify(block.content,null,2);if(item)item.result=result;else events.push({...base,kind:'tool',name:block.tool_use_id,input:'',result});}
-          else events.push({...base,kind:'raw',text:JSON.stringify(block)});
-        }
-      } else if(event.type==='system')events.push({...base,kind:'systemEvent',text:`${event.subtype||event.type} · ${event.model||''}`});
-      else if(event.type==='result')events.push({...base,kind:'result',text:event.result||event.subtype,cost:event.total_cost_usd,duration:event.duration_ms});
-      else if(event.type==='stream_event'&&event.event?.delta?.text)events.push({...base,kind:'assistant',text:event.event.delta.text});
-      else events.push({...base,kind:'raw',text:line});
-    } else if(provider==='codex'&&(event.method||event.jsonrpc||('id' in event&&('result' in event||'error' in event)))) {
-      const m=event.method||'',p=event.params||{},item=p.item;
-      if(!m){if(event.error)events.push({...base,kind:'raw',text:line});return;}
-      if(m==='item/completed'&&item){
-        if(item.type==='userMessage')events.push({...base,kind:'user',text:(item.content||[]).map(c=>c.text||'').join('\n')});
-        else if(item.type==='agentMessage')events.push({...base,kind:'assistant',text:item.text||''});
-        else if(item.type==='reasoning'){const s=(item.summary||[]).map(x=>typeof x==='string'?x:x.text||'').join('\n');if(s)events.push({...base,kind:'assistant',text:s});}
-        else if(item.type==='commandExecution')events.push({...base,kind:'tool',name:'command',input:item.command||'',result:item.aggregatedOutput||'',exit:item.exitCode??undefined});
-        else if(item.type==='fileChange')events.push({...base,kind:'tool',name:'file_change',input:(item.changes||[]).map(c=>c.path).join('\n'),result:(item.changes||[]).map(c=>c.diff||'').join('\n')});
-        else if(item.type==='mcpToolCall')events.push({...base,kind:'tool',name:`${item.server}.${item.tool}`,input:JSON.stringify(item.arguments??{},null,2),result:(item.result?.content||[]).map(c=>c.text??JSON.stringify(c)).join('\n')||(item.error?JSON.stringify(item.error):'')});
-        else events.push({...base,kind:'raw',text:line});
-      }
-      else if(m.endsWith('/requestApproval'))events.push({...base,kind:'systemEvent',text:`approval: ${p.command||(p.changes?Object.keys(p.changes).join(' '):'')}${p.reason?' · '+p.reason:''}`});
-      else if(m==='warning'||m==='error')events.push({...base,kind:'systemEvent',text:p.message||p.error?.message||m});
-      else if(m==='thread/started'||m==='turn/started')events.push({...base,kind:'systemEvent',text:m});
-      else if(m==='thread/tokenUsage/updated')usage=p.tokenUsage?.total;
-      else if(m==='turn/completed'){const u=usage,e=p.turn?.error;events.push({...base,kind:'result',text:e?e.message||JSON.stringify(e):`${u?u.inputTokens-(u.cachedInputTokens||0):'—'} input · ${u?.cachedInputTokens??'—'} cached · ${u?.outputTokens??'—'} output tokens`});}
-      else if(!(m==='item/started'||/delta$/i.test(m)||/^(hook|mcpServer|account|remoteControl|serverRequest|thread\/status)\//.test(m)))events.push({...base,kind:'raw',text:line});
-    } else if(provider==='codex') {
-      const item=event.item;
-      if(item?.type==='agent_message'||item?.type==='reasoning')events.push({...base,kind:'assistant',text:item.text});
-      else if(item?.type==='command_execution')events.push({...base,kind:'tool',name:'command_execution',input:item.command,result:item.aggregated_output,exit:item.exit_code});
-      else if(item?.type==='file_change'||item?.type==='mcp_tool_call')events.push({...base,kind:'tool',name:item.type,input:JSON.stringify(item,null,2)});
-      else if(event.type==='turn.completed')events.push({...base,kind:'result',text:`${event.usage?event.usage.input_tokens-(event.usage.cached_input_tokens||0):'—'} input · ${event.usage?.cached_input_tokens??'—'} cached · ${event.usage?.output_tokens??'—'} output tokens`});
-      else if(['thread.started','turn.started'].includes(event.type))events.push({...base,kind:'systemEvent',text:event.type});
-      else events.push({...base,kind:'raw',text:line});
-    } else events.push({...base,kind:'text',text:line});
-  });
-  return events;
+// renderEvents lays out a page of run.output.page events: a call and its result as one card, the usage codex reports
+// apart on the result after it.
+function renderEvents(events) {
+  const results=new Map(),calls=new Set();let usage;
+  for(const e of events){if(e.call)calls.add(e.call);if(e.kind==='tool_result'&&e.ref)results.set(e.ref,e);}
+  return events.map(e=>{
+    if(e.kind==='sys'&&e.name==='usage'){usage=e.usage;return '';}
+    if(e.kind==='tool_result'&&calls.has(e.ref))return '';
+    if(e.kind==='result'&&!e.usage&&usage)e={...e,usage};
+    return renderEvent(e,results.get(e.call));
+  }).join('');
 }
-function renderEvent(event) {
-  const header=`<div class="event-meta"><strong>${t(event.kind==='text'||event.kind==='raw'?'output':event.kind)}</strong><span class="mono">#${event.index}</span></div>`;
+const eventLabels={user:'user',say:'assistant',think:'think',tool:'tool',tool_result:'tool',cmd:'tool',edit:'tool',mcp:'tool',sys:'systemEvent',result:'result',error:'outputError'};
+function renderEvent(e,result) {
+  const label=eventLabels[e.kind]||'output',key=esc(e.id||e.key||'');
+  const header=`<div class="event-meta"><strong>${t(label)}</strong></div>`;
   let body;
-  if(event.kind==='tool')body=`<details class="tool-card" data-tool="${event.index}"><summary>${esc(event.name)}${event.exit!==undefined?` · exit ${event.exit}`:''}</summary><pre>${esc(event.input)}${event.result?`\n\n${esc(event.result)}`:''}</pre></details>`;
-  else if(event.kind==='result')body=`<div class="result-card">${esc(event.text)}<div class="muted">${event.cost!==undefined?`${t('cost')} $${Number(event.cost).toFixed(4)}`:t('noCost')}${event.duration!==undefined?` · ${t('duration')} ${(event.duration/1000).toFixed(1)}s`:''}</div></div>`;
-  else if(event.kind==='raw')body=`<details class="tool-card"><summary>${t('raw')}</summary><pre>${esc(event.text)}</pre></details>`;
-  else body=`<div class="event-body">${esc(event.text).replace(/\n/g,'<br>')}</div>`;
-  return `<article class="timeline-event ${event.kind}">${header}${body}</article>`;
+  if(label==='tool'){
+    const input=e.kind==='cmd'?e.input?.command||'':e.kind==='edit'?(e.files||[]).join('\n'):e.input!==undefined?JSON.stringify(e.input,null,2):'';
+    const out=[e.diff,e.output,result?.output].filter(Boolean).join('\n\n'),failed=e.error||result?.error;
+    const exit=e.exit!==undefined&&e.exit!==null?` · exit ${e.exit}`:'';
+    body=`<details class="tool-card${failed?' failed':''}" data-tool="${key}"${failed?' open':''}><summary>${esc(e.title||e.tool||e.ref||'')}${e.more?` (+${e.more})`:''}${exit}</summary><pre>${esc(input)}${out?`\n\n${esc(out)}`:''}</pre></details>`;
+  }
+  else if(e.kind==='result'){
+    const u=e.usage,used=u?t('usageTokens').replace('{0}',tokens((u.input||0)+(u.cache_write||0))).replace('{1}',tokens(u.cache_read)).replace('{2}',tokens(u.output)):'';
+    body=`<div class="result-card${e.error?' failed':''}">${esc(e.text||'')}<div class="muted">${[e.cost?`${t('cost')} $${Number(e.cost).toFixed(4)}`:t('noCost'),used,e.dur_ms?`${t('duration')} ${(e.dur_ms/1000).toFixed(1)}s`:''].filter(Boolean).join(' · ')}</div></div>`;
+  }
+  else if(e.kind==='raw')body=`<details class="tool-card" data-tool="${key}"><summary>${t('raw')}</summary><pre>${esc(e.text)}</pre></details>`;
+  else if(e.kind==='think')body=`<details class="tool-card" data-tool="${key}"><summary>${t('think')}</summary><pre>${esc(e.text)}</pre></details>`;
+  else if(e.kind==='sys')body=`<div class="event-body">${esc([e.text||e.name,e.model].filter(Boolean).join(' · '))}</div>`;
+  else body=`<div class="event-body${e.temp?' muted':''}">${esc(e.text||'').replace(/\n/g,'<br>')}</div>`;
+  return `<article class="timeline-event ${label}">${header}${body}</article>`;
 }
 // toast says message; with back, for 6 s a button and ⌘Z / Ctrl+Z take the action back.
 function toast(message, back) {
@@ -470,9 +448,10 @@ function outputContents(run) {
   const data=!ui.follow&&ui.frozenOutput?.id===run.id?ui.frozenOutput.data:ui.outputs.get(run.id);
   if(!data)return statePanel('refresh',t('loading'),'');
   if(data.error)return statePanel('error',t('loadError'),esc(data.error),'retry-output',t('retry'));
-  if(!data.text)return statePanel('tasks',t('noOutput'),t('noOutputHelp'));
-  const top=`<div class="load-older">${data.done?`<small class="muted">${t('beginning')}</small>`:button('older-output',t('older'),ui.busy.has('older-output')?'disabled':'')}</div>`;
-  return top+(ui.raw?`<pre class="raw-output">${esc(data.text)}</pre>`:normalizeOutput(data.text,run.provider).map(renderEvent).join(''));
+  if(ui.raw&&data.raw===undefined)return statePanel('refresh',t('loading'),'');
+  if(!data.events.length&&!data.raw)return statePanel('tasks',t('noOutput'),t('noOutputHelp'));
+  const top=`<div class="load-older">${data.from<=data.earliest?`<small class="muted">${t('beginning')}</small>`:button('older-output',t('older'),ui.busy.has('older-output')?'disabled':'')}</div>`;
+  return top+(ui.raw?`<pre class="raw-output">${esc(data.raw)}</pre>`:renderEvents(data.events));
 }
 function renderOutput() {
   const el=document.querySelector('#output-view'),run=selectedRun();if(!el||!run)return;
@@ -797,30 +776,42 @@ async function loadDetail() {
     if(ui.tab==='output')await fetchOutput();if(ui.tab==='conversation')await fetchChat();
   }catch(error){ui.detailError=errorText(error);if(ui.tab==='brief')renderDetail();else toast(ui.detailError);}
 }
+// fetchOutput reads the selected run's latest page of events, or with older the page before what it holds; a latest
+// page joins what is held at the offset where it starts, reading pages back to it when more came than one holds.
 async function fetchOutput(older=false) {
   const run=selectedRun();if(!run||!ui.online||!ui.authenticated)return;
   const key=`tail-${run.id}`;if(ui.busy.has(key))return;
   ui.busy.add(key);if(older)ui.busy.add('older-output');
-  const current=ui.outputs.get(run.id),encoder=new TextEncoder(),decoder=new TextDecoder();
+  const current=ui.outputs.get(run.id),raw=ui.raw,page=params=>api.runOutputPage({run:run.id,n:200,raw,...params});
+  const join=(a,b)=>({...b,events:[...a.events,...b.events],from:a.from,raw:raw?(a.raw||'')+(b.raw||''):undefined});
+  const held=current&&!current.error&&(current.raw!==undefined)===raw?current:null;
   try{
-    let page=await api.runTail({run:run.id,before:older?current?.from??-1:-1,max:65536,file:current?.file});
-    if(!ui.authenticated)return;
-    let result=page;
-    if(current?.file===page.file&&!current.error) {
-      const oldBytes=encoder.encode(current.text);let bytes=encoder.encode(page.text);
-      if(older){result={...page,text:page.text+current.text};if(ui.frozenOutput?.id===run.id)ui.frozenOutput.data={...page,text:page.text+ui.frozenOutput.data.text};ui.prepending=true;}
-      else {
-        const end=current.from+oldBytes.length;let attempts=0;
-        while(page.from>end&&!page.done&&attempts++<20){const previous=await api.runTail({run:run.id,before:page.from,max:65536,file:page.file});page={...previous,text:previous.text+page.text};}
-        bytes=encoder.encode(page.text);
-        if(page.from<=end&&page.from+bytes.length>=current.from){const delta=decoder.decode(bytes.slice(Math.max(0,end-page.from)));result={...current,text:current.text+delta};if(delta&&!ui.follow)ui.pending+=delta.split('\n').filter(Boolean).length;}
-        else result=page;
-      }
+    let result;
+    if(older&&held){
+      const before=await page({before:held.from,file:held.file});
+      result=join(before,held);
+      if(ui.frozenOutput?.id===run.id&&ui.frozenOutput.data.events)ui.frozenOutput.data=join(before,ui.frozenOutput.data);
+      ui.prepending=true;
+    } else {
+      let p=await page({before:-1,file:held?.file});
+      if(held){
+        let attempts=0;
+        while(p.from>held.to&&p.from>p.earliest&&attempts++<20)p=join(await page({before:p.from,file:p.file}),p);
+        const kept=held.events.filter(e=>!e.temp&&e.off<p.from),fresh=p.events.filter(e=>!e.temp&&e.off>=held.to).length;
+        const keptRaw=raw?new TextDecoder().decode(new TextEncoder().encode(held.raw).slice(0,Math.max(0,p.from-held.from))):undefined;
+        result=p.from>=held.from&&p.from<=held.to?{...p,events:[...kept,...p.events],from:held.from,raw:raw?keptRaw+(p.raw||''):undefined}:p;
+        if(fresh&&!ui.follow)ui.pending+=fresh;
+      } else result=p;
     }
+    if(!ui.authenticated)return;
+    if(raw)result.raw=result.raw||'';else delete result.raw;
     ui.outputs.set(run.id,result);
     if(selectedRun()?.id===run.id&&(ui.follow||older||!current)){renderOutput();}
     else updateFollowLabel();
-  }catch(error){if(!current)ui.outputs.set(run.id,{error:errorText(error)});if(selectedRun()?.id===run.id)renderOutput();if(current)toast(errorText(error));}
+  }catch(error){
+    if(error.code==='stale'&&current){ui.outputs.delete(run.id);ui.busy.delete(key);ui.busy.delete('older-output');return fetchOutput();}
+    if(!current)ui.outputs.set(run.id,{error:errorText(error)});if(selectedRun()?.id===run.id)renderOutput();if(current)toast(errorText(error));
+  }
   finally{ui.busy.delete(key);ui.busy.delete('older-output');}
 }
 async function fetchChat(older=false) {
@@ -898,7 +889,7 @@ document.addEventListener('click',async event=>{
       case 'close-modal':closeModal();break;
       case 'discard':closeModal(true);break;
       case 'keep-editing':restoreTaskForm();break;
-      case 'toggle-raw':ui.raw=!ui.raw;renderDetail();break;
+      case 'toggle-raw':ui.raw=!ui.raw;ui.outputs.delete(selectedRun()?.id);ui.frozenOutput=null;renderDetail();await fetchOutput();break;
       case 'toggle-follow':if(ui.follow)pauseFollow();else{ui.follow=true;ui.pending=0;ui.frozenOutput=null;renderOutput();}updateFollowLabel();break;
       case 'older-output':pauseFollow();await fetchOutput(true);break;
       case 'older-chat':await fetchChat(true);break;

@@ -127,7 +127,7 @@ const api = (() => {
     runAnswer: write('run.answer'),
     runSend: write('run.send'),
     runPreview: params => call('run.preview', params),
-    runTail: params => call('run.tail', params),
+    runOutputPage: params => call('run.output.page', params),
     machineList: params => call('machine.list', params),
     nodeCall: params => call('node.call', params),
     agentList: () => call('agent.list'),

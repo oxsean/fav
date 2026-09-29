@@ -39,13 +39,13 @@ tend journal verify [--json] | repair [-y]
 - Tasks 视图：第 5 个 tab（`5`）。一行一个 task：状态图标、标题、最近 run 的状态和机器；筛选行位置显示谁在协调、每台机器的连接和负载。需要你的 task 排最前（等得最久的在前、图标换成警示），然后是未完成、已结束；标题带「N 个等你处理」。
 - 键：`w` 新建 task（表单：标题、目录、机器、档案、任务书）；`e` 编辑；`x` 标完成 / 重新打开；Enter 打开 task 对话框：`跑起来`（选机器、档案，Enter 执行）、`停止`、`放弃`（已开始的 run）、`接手`、`查看会话`；`X` 停止当前 run（确认）；`Space` 到会话视图看最近一次 run 的对话（现有 probe）。表单和运行对话框的键在键表里（scope `inTaskForm` / `inTaskRun`），← → 改选项，Space 不改。
 - 编辑表单打开前先 `task.get` 取整条 task，保存时只提交改过的字段；标题上限 1 KiB，任务书 256 KiB。模式二的新建表单不预填本机目录。
-- 右栏：任务书、最近 4 次 run、最近一次 run 的输出（`run.tail`，经 `render.RunOutput` 读成可读的行再 `render.Sanitize`：claude stream-json 和 codex app-server / exec JSON 各取一句话，协议自己的请求、应答和半截文字不显示；前缀 `> ` 用户、`+ ` 工具调用、`$ ` 命令、`~ ` 改动的文件、`- ` 系统事件、`= ` 结果、`! ` 错误；原始行用 `tend run logs` 看）；最近一次 run 下面是原因（`render.RunReason` + 原话）、提问或进展、下一步（`render.RunHint`）。
+- 右栏：任务书、最近 4 次 run、最近一次 run 的输出（`run.output.page` 的事件，经 `render.RunOutputLines` 读成可读的行再 `render.Sanitize`：前缀 `> ` 用户、`+ ` 工具调用、`$ ` 命令、`~ ` 改动的文件、`? ` 提问和审批、`- ` 警告、`= ` 结果、`! ` 错误和失败的调用的最后一行；思考、系统行和成功的结果不显示；摘要略掉的行数、文件数、问题数由 i18n 写出；原始行用 `tend run logs` 看）；最近一次 run 下面是原因（`render.RunReason` + 原话）、提问或进展、下一步（`render.RunHint`）。
 - 状态文字后面带 attention（等你回复 / 等你批准 / 长时间没有输出），图标换成警示。
 - 运行对话框打开和改选项时调 `run.preview`，在目录下面列出检查结果、blocker（红）和 notes；不拦 Enter。
 - 作答：运行中的 run 有请求时 task 对话框的主按钮是「回答」，打开回答对话框（scope `inTaskRun`）：权限请求显示工具和摘要，按钮「允许」（主）/「拒绝」/ 取消；提问每个问题一个选项选择器（← → 改选项，Tab 在问题和按钮间移动），按钮「回答」（主）/「不回答」/ 取消。running 的 stream run 另有「发消息」按钮，打开和回复同样的多行输入框，发 `run.send`。右栏和对话框列出等着的请求和最近两条消息的状态；运行中的 run 显示最后一句话，结束后显示用量。
 - 回复：run 在等时 task 对话框的主按钮是「回复」，别的已结束且有会话的 run 也有「回复」按钮；回复框是多行输入（scope `inTaskForm`：Enter 换行、Ctrl+S 发送、Tab 到按钮、Esc 放弃），发 `run.continue`。
 - 接手：打开该会话的恢复对话框；run 还在跑时对话框提示先停（`resume.check.running_run`）。
-- 状态：视图打开时连协调器（连 socket，没人持锁就自己持锁），先 `state.get`，再 `subscribe{after_seq}`，之后把推来的日志信封按 seq 折进状态；seq 断档或推送通道（512）溢出 → 下一拍重新 `state.get`。机器每 5 s `machine.list`，选中 run 的输出每 2 s `run.tail`。连接结束（协调器退出、保活超时）就重连并重新订阅；退出 TUI 时放锁，run 照常跑。
+- 状态：视图打开时连协调器（连 socket，没人持锁就自己持锁），先 `state.get`，再 `subscribe{after_seq}`，之后把推来的日志信封按 seq 折进状态；seq 断档或推送通道（512）溢出 → 下一拍重新 `state.get`。机器每 5 s `machine.list`，选中 run 的输出每 2 s `run.output.page`（最后 100 个事件）。连接结束（协调器退出、保活超时）就重连并重新订阅；退出 TUI 时放锁，run 照常跑。
 - 协调器不可用（别的进程持锁且 socket 不通）：Tasks 视图显示原因，其它视图不受影响。
 
 ## Web UI（模式二）
@@ -64,9 +64,9 @@ tend journal verify [--json] | repair [-y]
   - 界面文字在它们自己的 `zh` / `en` 表里（不走 Go 的 i18n）。
 - 认证：登录页列出 `/auth/logins` 给的登录方式（GitHub、OIDC），另有 token 表单。`POST /login`（表单 `token`）建一条网页会话，写 cookie `tend_session`（HttpOnly、SameSite=Strict、TLS 下 Secure、30 天）；`GET /session` 回 `{id, name, email, username, role, session}` 或 401；`POST /logout` 吊销这条会话。地址里的 `#invite-<secret>` 让登录按钮带上邀请，`#signin-<结果>` 显示登录失败的原因。`/client` 接受 header 里的 token 或这个 cookie；WebSocket 握手校验 Origin（同源）。会话被吊销或用户被停用，连接立即断开，页面回到登录页。
 - 响应头：CSP `default-src 'self'`（不允许内联脚本和 `style` 属性，宽度等动态样式由脚本经 CSSOM 设置）、`frame-ancestors 'none'`、`nosniff`、`no-referrer`、`Cache-Control: no-cache`。
-- 数据：进入时 `state.get{no_briefs}` + `machine.list` + `agent.list`，然后 `subscribe{after_seq}`；推送的信封由 `fold.js` 折进状态，50 ms 去抖后重绘；seq 断档、折叠遇到不认识的对象、或收到 `refetch` 推送时，100 ms 去抖后重新 `state.get{no_briefs}`（`refetch` 另外重读机器）。改过任务书的 task 丢掉缓存；任务书用 `task.get` 按需取。机器每 5 s `machine.list`；选中 run 的输出每 2 s `run.tail`（`max` 64 KiB）；对话用 `run.messages`（每页 40 条，按时间正序显示，往前翻页）。
+- 数据：进入时 `state.get{no_briefs}` + `machine.list` + `agent.list`，然后 `subscribe{after_seq}`；推送的信封由 `fold.js` 折进状态，50 ms 去抖后重绘；seq 断档、折叠遇到不认识的对象、或收到 `refetch` 推送时，100 ms 去抖后重新 `state.get{no_briefs}`（`refetch` 另外重读机器）。改过任务书的 task 丢掉缓存；任务书用 `task.get` 按需取。机器每 5 s `machine.list`；选中 run 的输出每 2 s `run.output.page`（最后 200 个事件，同一份日志时从上次的 `to` 接上，一页装不下就往前补页；「原始行」时带 `raw`）；对话用 `run.messages`（每页 40 条，按时间正序显示，往前翻页）。
 - run 详情：等着的请求各一个表单（权限：工具和摘要，「允许」/「拒绝」；提问：每个问题一组单选，「回答」/「不回答」；选中的选项在重新渲染时保留），running 的 stream run 有发消息框（草稿按 run 存），最近三条消息和状态；运行中显示最后一句话，有用量就显示用量。其余：attention 徽章、原因和原话、提问（Markdown）或进展、下一步；已结束且有会话、任务没有未结束 run 时有回复框（草稿按 run 存在内存里，重新渲染不丢、保持焦点），发 `run.continue`。列表行多一个 attention 徽章。「待处理」计数 = 需要你的 task 数（同上文「CLI」里的定义），点它把 run 筛选设为「等你处理」；需要你的 task 排在列表最前、等得最久的在前。
-- run 的输出按 provider 归一成时间线（`app.js` 的 `normalizeOutput`，`output_test.go` 用 node 跑它）：codex app-server 的 JSON-RPC 行取 `item/completed` 的 userMessage / agentMessage / reasoning 摘要 / commandExecution（带退出码）/ fileChange / mcpToolCall，外加审批请求、警告、线程和轮次开始；`item/started`、各种 delta 和 `hook/` `mcpServer/` `account/` `remoteControl/` `serverRequest/` `thread/status/` 丢弃；不认识的行和 JSON-RPC 错误原样显示。结果行的 token 取最后一条 `thread/tokenUsage/updated`，input 扣掉 `cachedInputTokens`、cached 单列（codex exec 的 JSON 同样）。
+- run 的输出是 `run.output.page` 给的事件（[output.md](output.md)「运行输出」），`app.js` 的 `renderEvents` 画成时间线：调用和它的结果（按 `ref`）合成一张卡，失败的卡默认展开；codex 单独报的用量显示在它后面的结果上；思考和认不出的行收在「思考」「原始行」里。`output_test.go` 用 node 跑 `renderEvents`，事件由 `internal/output` 生成。
 - 派发框：选好机器和档案后调 `run.preview`，列出 blockers 和 notes（不禁用提交）。
 - 写操作都带 `command_id`（每次打开对话框生成一个，重试沿用）：新建、编辑（先 `task.get`，只提交改过的字段）、派发（`runner=background`）、停止、放弃（只对 unknown 的 run 提供）、完成（有进行中的 run 时先确认）、重开、取消。
 - 断线：横幅提示、写操作禁用，1 s 起翻倍到 30 s 带抖动重连，重连后重新取全量；401 回登录页。

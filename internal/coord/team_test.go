@@ -108,6 +108,7 @@ func TestSomeoneOutsideAProjectSeesNothingOfIt(t *testing.T) {
 	}{
 		{MTaskGet, task.RunRef{ID: tk.ID}, wire.CodeNotFound},
 		{MRunTail, TailParams{Run: r.ID, Before: -1}, wire.CodeNotFound},
+		{MRunOutputPage, OutputPageParams{Run: r.ID, Before: -1}, wire.CodeNotFound},
 		{MRunMessages, RunMessages{Run: r.ID, Before: -1, N: 10}, wire.CodeNotFound},
 		{MNodeCall, NodeCall{Machine: Local, Method: remote.MList}, wire.CodeUnauthorized},
 		{MRunPreview, Dispatch{Task: tk.ID}, wire.CodeNotFound},

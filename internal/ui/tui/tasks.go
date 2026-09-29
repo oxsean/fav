@@ -16,7 +16,7 @@ import (
 	"github.com/oxsean/fav/internal/coord"
 	"github.com/oxsean/fav/internal/i18n"
 	"github.com/oxsean/fav/internal/journal"
-	"github.com/oxsean/fav/internal/node"
+	"github.com/oxsean/fav/internal/output"
 	"github.com/oxsean/fav/internal/paths"
 	"github.com/oxsean/fav/internal/remote"
 	"github.com/oxsean/fav/internal/render"
@@ -90,15 +90,15 @@ func (f *feed) options() wire.Options {
 }
 
 type runOutput struct {
-	text string
-	end  bool // the run had ended when this was read: no need to read it again
+	events []output.Event
+	end    bool // the run had ended when this was read: no need to read it again
 }
 
 const (
 	tasksEvery    = 2 * time.Second
 	machinesEvery = 5 * time.Second
 	tasksWait     = 20 * time.Second
-	tailBytes     = 16 << 10
+	outputEvents  = 100
 )
 
 // SetCoordinator lets the Tasks view reach the coordinator; without it the view says tasks are unavailable.
@@ -127,10 +127,10 @@ type tasksStateMsg struct {
 type tasksTickMsg struct{}
 
 type runOutMsg struct {
-	run  string
-	text string
-	end  bool
-	err  error
+	run    string
+	events []output.Event
+	end    bool
+	err    error
 }
 
 // taskDoneMsg: a command came back; then runs on success.
@@ -364,9 +364,9 @@ func readOutput(cl *coord.Client, run string, ended bool) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), tasksWait)
 		defer cancel()
-		var tail node.Tail
-		err := cl.Call(ctx, coord.MRunTail, coord.TailParams{Run: run, Before: -1, Max: tailBytes}, &tail)
-		return runOutMsg{run: run, text: render.Sanitize(tail.Text), end: ended, err: err}
+		var page coord.OutputPage
+		err := cl.Call(ctx, coord.MRunOutputPage, coord.OutputPageParams{Run: run, Before: -1, N: outputEvents}, &page)
+		return runOutMsg{run: run, events: page.Events, end: ended, err: err}
 	}
 }
 
@@ -429,7 +429,7 @@ func (msg runOutMsg) apply(m *Model) tea.Cmd {
 	if m.tasks.out == nil {
 		m.tasks.out = map[string]runOutput{}
 	}
-	m.tasks.out[msg.run] = runOutput{text: msg.text, end: msg.end}
+	m.tasks.out[msg.run] = runOutput{events: msg.events, end: msg.end}
 	return nil
 }
 
@@ -1109,11 +1109,11 @@ func (m *Model) taskDetailIn(x *task.Task, w, h int) []string {
 	return panel(i18n.T("tasks.detail"), body, w, h)
 }
 
-// outputLines are the last room lines of r's output as render.RunOutput reads it, wrapped to inner.
+// outputLines are the last room lines of r's output as render.RunOutputLines reads its events, wrapped to inner.
 func (m *Model) outputLines(r *task.Run, inner, room int) []string {
 	o, ok := m.tasks.out[r.ID]
 	var lines []string
-	for _, l := range render.RunOutput(o.text) {
+	for _, l := range render.RunOutputLines(o.events) {
 		lines = append(lines, render.Wrap(render.Sanitize(l), inner)...)
 	}
 	switch {

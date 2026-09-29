@@ -118,7 +118,7 @@ var readMethods = []string{remote.MHello, remote.MList, remote.MMessages, remote
 	remote.MChecks, remote.MLive, remote.MEcho, node.MDirs}
 
 // Methods are the client methods.
-var Methods = []string{MStateGet, MTaskGet, MTaskCreate, MTaskEdit, MTaskStatus, MRunDispatch, MRunStop, MRunAbandon, MRunTail,
+var Methods = []string{MStateGet, MTaskGet, MTaskCreate, MTaskEdit, MTaskStatus, MRunDispatch, MRunStop, MRunAbandon, MRunTail, MRunOutputPage,
 	MAgentList, MMachineList, MSubscribe, MNodeCall, MRunPreview, MRunContinue, MRunAnswer, MRunSend, MRunMessages,
 	MProjectCreate, MProjectEdit, MProjectMember, MMachineShare, MTaskStart, MTaskMove,
 	MAgentDefList, MAgentDefGet, MAgentDefSave, MAgentDefRemove, MAgentDefShare, MInboxList, MUserOffboard, MTaskSync, MTaskLink, MTaskSourceAck, MTaskGate, MTaskMerge, MTaskPlan, MTaskPlanSave, MTaskPlanApply, MTaskMessage}
@@ -198,6 +198,8 @@ func (c *Coord) HandlerFor(p Principal) wire.Handler {
 			var out node.Tail
 			err = c.call(ctx, run.Machine, node.MRunTail, node.TailParams{Run: tp.Run, Before: tp.Before, Max: tp.Max, File: tp.File}, &out)
 			return out, err
+		case MRunOutputPage:
+			return c.outputPage(ctx, p, r)
 		case MRunMessages:
 			return c.runMessages(ctx, p, r)
 		case MNodeCall:

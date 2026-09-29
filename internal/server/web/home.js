@@ -50,7 +50,7 @@ const Home = (() => {
   function preview() {
     const r = ui.state.runs[runs.pick];
     if (!r) return `<p class="muted">${t('pickRun')}</p>`;
-    const data = runs.tails.get(r.id), events = data?.text ? normalizeOutput(data.text, r.provider).slice(-12).map(renderEvent).join('') : '';
+    const data = runs.tails.get(r.id), events = data?.events?.length ? renderEvents(data.events.slice(-12)) : '';
     const why = [r.reason, r.exit_code !== undefined && r.exit_code !== null && !openStates.has(r.state) ? 'exit ' + r.exit_code : ''].filter(Boolean).map(esc).join(' · ');
     return `<div class="stack"><div class="flex">${badge(r.state)}<strong>${esc(ui.state.tasks[r.task]?.title || r.task)}</strong></div><p class="muted mono">${esc(r.id)} · ${esc(r.machine)} / ${esc(r.agent)}${why ? ' · ' + why : ''}</p>
       ${r.note || r.last ? `<p>${esc(r.note || r.last)}</p>` : ''}${r.ask ? `<p class="home-ask">${esc(r.ask)}</p>` : ''}
@@ -59,7 +59,7 @@ const Home = (() => {
   }
 
   async function tail(id) {
-    try { runs.tails.set(id, await api.runTail({run: id, before: -1, max: 16384})); } catch (error) { runs.tails.set(id, {error: errorText(error)}); }
+    try { runs.tails.set(id, await api.runOutputPage({run: id, before: -1, n: 40})); } catch (error) { runs.tails.set(id, {error: errorText(error)}); }
     if (ui.page === 'runs' && runs.pick === id) render();
   }
 

@@ -37,6 +37,7 @@ const (
 	MRunStop        = "run.stop"
 	MRunAbandon     = "run.abandon"
 	MRunTail        = "run.tail"
+	MRunOutputPage  = "run.output.page"
 	MAgentList      = "agent.list"
 	MMachineList    = "machine.list"
 	MSubscribe      = "subscribe"

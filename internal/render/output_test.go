@@ -3,35 +3,53 @@ package render
 import (
 	"strings"
 	"testing"
+
+	"github.com/oxsean/fav/internal/i18n"
+	"github.com/oxsean/fav/internal/output"
 )
 
-func TestRunOutputReadsAgentLines(t *testing.T) {
-	cases := []struct{ name, in, want string }{
-		{"plain text stays", "step one", "step one"},
-		{"claude init", `{"type":"system","subtype":"init","session_id":"s"}`, "- init"},
-		{"claude text", `{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"fake step 1 of 30"}]}}`, "fake step 1 of 30"},
-		{"claude tool", `{"type":"assistant","message":{"content":[{"type":"tool_use","id":"t1","name":"Bash","input":{"command":"go test ./..."}}]}}`, `+ Bash {"command":"go test ./..."}`},
-		{"claude user text", `{"type":"user","message":{"content":[{"type":"text","text":"try again"}]}}`, "> try again"},
-		{"claude tool result", `{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"t1","content":"ok"}]}}`, ""},
-		{"claude protocol", `{"type":"control_request","request_id":"ask-1","request":{"subtype":"can_use_tool"}}`, ""},
-		{"claude protocol answer", `{"type":"control_response","response":{"subtype":"success"}}`, ""},
-		{"claude partial", `{"type":"stream_event","event":{"delta":{"text":"fa"}}}`, ""},
-		{"claude result", `{"type":"result","subtype":"success","result":"Done: 3 files changed."}`, "= Done: 3 files changed."},
-		{"codex message", `{"method":"item/completed","params":{"item":{"type":"agentMessage","text":"All green."}}}`, "All green."},
-		{"codex command", `{"method":"item/completed","params":{"item":{"type":"commandExecution","command":"go vet ./...","exitCode":1}}}`, "$ go vet ./... (exit 1)"},
-		{"codex files", `{"method":"item/completed","params":{"item":{"type":"fileChange","changes":[{"path":"a.go"},{"path":"b.go"}]}}}`, "~ a.go b.go"},
-		{"codex noise", `{"method":"item/agentMessage/delta","params":{"delta":"Al"}}`, ""},
-		{"codex answer", `{"id":3,"result":{}}`, ""},
-		{"codex exec message", `{"type":"item.completed","item":{"type":"agent_message","text":"Fixed."}}`, "Fixed."},
-		{"codex exec command", `{"type":"item.completed","item":{"type":"command_execution","command":"ls","exit_code":0}}`, "$ ls (exit 0)"},
-		{"unknown json stays", `{"hello":"world"}`, `{"hello":"world"}`},
+func TestRunOutputLinesReadEvents(t *testing.T) {
+	zero, one := 0, 1
+	evs := []output.Event{
+		{Kind: output.KindSys, Name: "init"},
+		{Kind: output.KindUser, Text: "fix it"},
+		{Kind: output.KindThink, Text: "hmm"},
+		{Kind: output.KindSay, Text: "two\n\nlines"},
+		{Kind: output.KindTool, Tool: "Bash", Family: output.FamilyShell, Title: "go test ./...", More: 2, Call: "t1"},
+		{Kind: output.KindToolResult, Ref: "t1", Output: "ok\n"},
+		{Kind: output.KindTool, Tool: "Read", Family: output.FamilyRead, Title: "a.go", Call: "t2"},
+		{Kind: output.KindToolResult, Ref: "t2", Output: "x\nno such file\n", Error: true},
+		{Kind: output.KindTool, Tool: "Edit", Family: output.FamilyEdit, Title: "a.go +1 −2"},
+		{Kind: output.KindTool, Tool: "Bash", Family: output.FamilyAsk, Request: "r1", Title: "rm -rf build"},
+		{Kind: output.KindTool, Tool: "AskUserQuestion", Family: output.FamilyAsk, Title: "Which db?", More: 1},
+		{Kind: output.KindCmd, Family: output.FamilyShell, Title: "go vet ./...", Exit: &one, Output: "bad\nworse\n", Error: true},
+		{Kind: output.KindCmd, Family: output.FamilyShell, Title: "ls", Exit: &zero, Output: "a\n"},
+		{Kind: output.KindEdit, Family: output.FamilyEdit, Title: "a.go +2 −1", Files: []string{"a.go", "b.go"}, More: 1},
+		{Kind: output.KindMCP, Family: output.FamilyMCP, Title: "gitea.issue_read 6"},
+		{Kind: output.KindSys, Name: "warning", Level: "warning", Text: "descriptions shortened"},
+		{Kind: output.KindSys, Name: "usage", Usage: &output.Usage{Input: 1}},
+		{Kind: output.KindError, Text: "quota"},
+		{Kind: output.KindResult, Text: "Done."},
+		{Kind: output.KindResult, Text: "usage limit", Error: true},
+		{Kind: output.KindResult},
+		{Kind: output.KindRaw, Text: `{"hello":"world"}`},
+		{Kind: output.KindSay, Temp: true, Text: "half"},
 	}
-	for _, c := range cases {
-		if got := strings.Join(RunOutput(c.in), "\n"); got != c.want {
-			t.Errorf("%s: got %q, want %q", c.name, got, c.want)
-		}
+	want := []string{
+		"> fix it", "two", "lines",
+		"$ go test ./... " + i18n.F("tasks.output_more_lines", 2),
+		"+ Read a.go", "! no such file",
+		"~ a.go +1 −2",
+		"? rm -rf build", "? Which db? " + i18n.F("tasks.output_more_questions", 1),
+		"$ go vet ./... (exit 1)", "! worse",
+		"$ ls (exit 0)",
+		"~ a.go +2 −1 " + i18n.F("tasks.output_more_files", 1),
+		"+ gitea.issue_read 6",
+		"- descriptions shortened",
+		"! quota", "= Done.", "! usage limit",
+		`{"hello":"world"}`, "half",
 	}
-	if got := RunOutput("a\n\n{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"two\\nlines\"}]}}\n"); strings.Join(got, "|") != "a|two|lines" {
-		t.Fatalf("lines split, blanks dropped: %q", got)
+	if got := RunOutputLines(evs); strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("got\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
 	}
 }
