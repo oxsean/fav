@@ -54,7 +54,7 @@ export function createChanges({wire, now = () => Date.now()}) {
   async function read(run) {
     let files = [], head = null, after = '';
     for (;;) {
-      const p = await wire.call('run.changes', after ? {run, after} : {run});
+      const p = await wire.call('run.changes', after ? {run, after, ...(head.snapshot ? {snapshot: head.snapshot} : {})} : {run});
       if (head && (p.snapshot || '') !== head.snapshot) throw Object.assign(new Error('snapshot_changed'), {code: 'snapshot_changed'});
       head ||= {total: p.total || {files: 0, add: 0, del: 0}, snapshot: p.snapshot || '', git: !!p.git, hidden: p.hidden || 0};
       files = [...files, ...(p.files || [])];
