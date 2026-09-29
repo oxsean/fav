@@ -25,6 +25,7 @@ type watched struct {
 	t      *testing.T
 	w      *wire.Watch
 	pushes chan wire.Push
+	head   *wire.Push // the open push, read before watchState returned
 }
 
 func watchState(t *testing.T, cli *wire.Conn, wp WatchParams) *watched {
@@ -42,11 +43,17 @@ func watchState(t *testing.T, cli *wire.Conn, wp WatchParams) *watched {
 			w.pushes <- p
 		}
 	}()
+	open := w.next() // the coordinator has the watch: what the test does next comes after its start
+	w.head = &open
 	return w
 }
 
 func (w *watched) next() wire.Push {
 	w.t.Helper()
+	if p := w.head; p != nil {
+		w.head = nil
+		return *p
+	}
 	select {
 	case p, ok := <-w.pushes:
 		if !ok {
