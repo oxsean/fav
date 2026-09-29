@@ -26,7 +26,10 @@ export function createWords() {
     return t(key).replace(/%[sd]/g, () => String(args[i++] ?? ''));
   }
 
-  return {lang, register, t, f, has: key => table.has(key), keys: () => [...table.keys()], moduleOf: key => table.get(key)?.module};
+  // both is a key's text in every language, for searching by either.
+  const both = key => (table.has(key) ? langs.map(l => table.get(key)[l]) : [key]);
+
+  return {lang, register, t, f, both, has: key => table.has(key), keys: () => [...table.keys()], moduleOf: key => table.get(key)?.module};
 }
 
 // pick is the language a browser asks for, of the two the page speaks.

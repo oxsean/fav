@@ -2,7 +2,7 @@
 // is a card that shows the columns the table marks for it. Keys move the selection, which is kept by record id, so it
 // survives a sort or a push; above VIRTUAL_ABOVE rows only those in view are drawn.
 import {useState, useMemo, useRef, useEffect} from '../vendor/hooks.mjs';
-import {html, cx, usePhone, useKeys, useWords} from './base.js';
+import {html, cx, usePhone, useActions, useWords} from './base.js';
 
 export const VIRTUAL_ABOVE = 200;
 const overscan = 8;
@@ -22,10 +22,9 @@ export function scrollFor({index, rowHeight, top, height}) {
   return null;
 }
 
-const digits = ['1', '2', '3', '4', '5', '6', '7', '8', '9'];
-
-// useListKeys gives a list its keys: j / k (and the arrows) move the selection, Enter opens, Space expands, 1–9 pick.
-export function useListKeys({ids, selected, onSelect, onOpen, onToggle, onPick, active = true}) {
+// useListKeys gives a list its keys: next / previous move the selection, open, toggle (expand) and pick (1–9) act on it;
+// pickLabel names what picking does on this list, canPick(id) whether the selection has anything to pick.
+export function useListKeys({ids, selected, onSelect, onOpen, onToggle, onPick, pickLabel, canPick, active = true}) {
   const move = step => {
     if (!ids.length) return;
     const i = ids.indexOf(selected);
@@ -33,15 +32,13 @@ export function useListKeys({ids, selected, onSelect, onOpen, onToggle, onPick, 
     onSelect?.(ids[j]);
   };
   const has = () => ids.includes(selected);
-  useKeys('list', [
-    {key: 'j', label: 'keys.move', run: () => move(1)},
-    {key: 'k', label: 'keys.move', run: () => move(-1)},
-    {key: 'ArrowDown', run: () => move(1)},
-    {key: 'ArrowUp', run: () => move(-1)},
-    ...(onOpen ? [{key: 'Enter', label: 'keys.open', run: () => onOpen(selected), when: has}] : []),
-    ...(onToggle ? [{key: 'Space', label: 'keys.toggle', run: () => onToggle(selected), when: has}] : []),
-    ...(onPick ? digits.map(d => ({key: d, label: 'keys.pick', run: () => onPick(Number(d), selected), when: has})) : []),
-  ], {active});
+  useActions('list', {
+    next: {run: () => move(1)},
+    prev: {run: () => move(-1)},
+    open: onOpen && {run: () => onOpen(selected), when: has},
+    toggle: onToggle && {run: () => onToggle(selected), when: has},
+    pick: onPick && {run: key => onPick(Number(key), selected), when: () => has() && (!canPick || canPick(selected)), label: pickLabel},
+  }, {active});
 }
 
 const sortMark = {asc: '▲', desc: '▼'};

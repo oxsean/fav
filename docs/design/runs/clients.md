@@ -112,15 +112,45 @@ tend journal verify [--json] | repair [-y]
   - `toasts.js`：底部的提示。带撤销的留 `UNDO_WAIT`（6 s），普通的 4 s；`undo()` 撤销最新一条可撤销的。
   - `router.js`：地址 ↔ `{page, task?, view?, auth?}`。页面有 `home`、`tasks`（`view` 取 `list` / `board` / `tree`）、`runs`、`machines`、`agents`、`team`、`me`。旧的 `inbox` → 首页，`settings` → 我，`projects` → 团队；`#task-<id>` 打开任务页并选中它；`#device-`、`#invite-`、`#signin-<结果>[?参数]` 解析成 `auth`，生成地址时不带它们。
   - `i18n.js`：每个模块用 `register(模块, {键: [zh, en]})` 注册自己的词表。两个模块用了同一个键、缺一种语言、两种语言的 `%s` / `%d` 顺序不同，都会报错。
+  - `actions.js`：页面唯一的操作表。每个操作有 id、键、作用域层级、分组；`bar` 的进键栏，`palette: false` 的不进命令面板（移动、数字、面板自己）。键位就是设计稿 §6.6 的键表：`g h/t/b/r/m/a/p/s` 去各页，`Mod+K` 命令面板，`?` 快捷键，`/` 搜索，`n` 新建，`[` 侧栏，`Mod+Z` 撤销，`Shift+T/L/M` 主题 / 语言 / 密度（全局）；`v` `d` `e` `x` `Shift+D`（页面）；`j` `k`（别名方向键）`Space` `Enter` `1`–`9`（列表）；`End` `Home` `Shift+O` `Mod+F`（输出）。一个键只属于一个操作。
+    - 组件不直接写键：用 `useActions(层级, {id: {run, when?, label?}})` 绑定自己能做的操作，键从表里来；`label` 让页面换一个更贴切的说法（首页的数字叫「作答」，`d` 叫「重试」）。哪些绑定生效（`when`）随页面变了，作用域就重新推入，键栏跟着变。
+    - 命令面板列出此刻生效的操作（`runnable(keys.active())`），按中文名、英文名、id、键都能搜到，开头匹配的排前面；快捷键页按分组列出整张表。
+  - `commands.js`：页面的写操作。发出时按 key 记为 pending；可撤销的写（标记完成）在列表里先藏起来，应答之后等那张列表下一次变化再放出来，免得闪回；没收到应答（`timeout` / `offline` / `closed`）记为 `unknown`，`retry` 用同一个 command id 重发，coordinator 的回执保证不做两次。状态本身只来自 journal 的折叠。
+  - `http.js`：普通 HTTP：`/session`（未登录是 null）、`/login`（表单提交 token）、`/logout`、`/auth/logins`、`/auth/invite`、`/api/device`。写请求带 `X-Tend`，网络不通报 `offline`。
+  - `prefs.js`：语言、主题（跟随系统 / 浅色 / 深色）、密度（紧凑 / 标准 / 宽松）和皮肤，沿用旧页面的存储键（`tend-lang`、`tend-theme`、`tend-look`），切换界面不丢；存储不可用时用默认值。
+  - `format.js`：数字的写法（`312k` tok、`$3.18`、`1h 04m`、`14:32`）。token 数是 input + cache_write + output，不含读缓存。
+  - `select.js`：页面上的数，全是纯函数，输入是 store 的状态、机器、inbox 和当前时间。首页每个数的来源见下面「首页」。
 - **`ui/`**（共用组件）：每个组件从一开始就有电脑和手机两种形态，读 `form` 决定画哪一种，页面不用分两份写。样式在 `css/base.css`（尺寸变量、字体、外框）和 `css/components.css`，颜色只用皮肤 token；手机形态的样式挂在外框的 `data-form="phone"` 下，密度挂在 `:root[data-density]` 上。
   - `Shell`：电脑上是 56 px 顶栏（品牌、搜索框和 `Mod+K`、在跑 / 排队 / 离线计数、当前用户）、左侧栏（七个页面，`[` 或底部按钮开合，收起时只剩图标，等你的数目变成角标；下方是新建任务）和 32 px 键栏；手机上是 52 px 顶栏（server 名可点开切换）和底部四个标签：等你、任务、运行、我。机器页归在「运行」标签下，Agent 和团队归在「我」下。连接断开时顶部出横幅，可立即重连；server 已升级时提示刷新。它也提供按键的上下文。
-  - 键栏只列此刻生效、带说明的绑定；同一说明的键合成一项（`j k 上下一条`），连续的数字写成 `1–9`。手机上不画键帽。
+  - 键栏只列此刻生效、操作表里标了 `bar` 的操作；同一说明的键合成一项（`j k 上下一条`），连续的数字写成 `1–9`。手机上不画键帽。
   - `Button`（primary / quiet / danger，`on` 是按下的开关）、`Chip`、`Segmented`、`Tabs`（方向键移动，只有选中的一项在 Tab 顺序里）、`Status`（形状加颜色区分状态，屏幕阅读器读状态名）、`Panel`、`Stat`。手机上按钮高 44 px，筛选项横向滚动。
   - `Table`：列表都用它。电脑上是表格，表头可排序（升、降、取消）；手机上每行变成一张卡片，列的 `mobile` 决定它在卡片的哪个位置。选中按 id 记，排序和推送之后不丢。`j` / `k` / 方向键移动，`Enter` 打开，`Space` 展开，`1`–`9` 选择。超过 `VIRTUAL_ABOVE`（200）行只画可见的一段，选中项移出视野时滚过去。
   - `ExpandItem`：原地展开的一条（等你处理的事）。收起时显示状态、问题、等了多久和快捷操作；手机上只留第一个操作，展开 / 收起写成文字。
   - `Modal`：电脑上是居中的对话框；手机上从底部升起（sheet），长表单（`full`）占满整屏并带返回。它推一个 `blocks` 的 `modal` 作用域：`Esc` 关闭，`Mod+Enter` 执行主操作，页面的键被挡住；焦点移进来、`Tab` 在里面循环，关闭后回到打开前的元素。`Drawer` 在电脑上是右侧面板，手机上占满整屏。
   - `Toasts`：`Mod+Z` 或按钮撤销最新一条。
   - 手机上左右切换用上一个 / 下一个按钮，不用滑动手势。
+  - `Menu`：按钮下弹出的一小列选项，打开时占住按键（方向键移动、`Esc` 关闭，焦点回到按钮）。顶栏的用户菜单放语言、主题、密度和退出登录。
+  - `TextInput` / `TextArea`：上面是标签，下面是说明或错误。
+  - 图表（`charts.js`）：`Spark`（数字下面的小折线，可画成阶梯）、`Bars`（按天并排、每天按部分堆叠，部分按顺序取色）、`Timeline`（每台机器一条泳道，运行按重叠排成几行，颜色是运行的状态；右端是现在）、`Meter`（一条按部分分色的横条）。尺寸用 style 对象设置，走 CSSOM，不产生 style 属性。
+  - `Palette` / `Help`：命令面板和快捷键页，手机上占满整屏。键栏右端提示 `⌘K 全部命令 · ? 快捷键`。
+- **`pages/`**：
+  - `boot.js`：页面启动。读偏好并写到 `<html>`（`lang`、`data-theme`、`data-density`，皮肤样式表的地址），按 media query 设形态，建按键、路由、HTTP；问 `/session`：没登录画登录页，`#device-<码>` 画终端登录确认，否则连 `/client`、开 store 的三个 watch，画应用。登录结果、邀请这类一次性片段用过就从地址里去掉；页面隐藏时交给 `wire.setVisible`。socket、fetch、存储和时钟都可以从参数传入，预览和测试靠它换成假的。入口 `main.js` 只调用它。
+  - `auth.js`：登录页（各登录方式的按钮，邀请时写明谁邀请、什么身份、加入哪个项目、何时失效，下面是 token 登录）；登录被拒（`not_admitted` / `disabled`）时说明是哪个账号、为什么，可以换账号或复制账号信息；终端登录确认（核对设备码，显示设备名、来源地址、请求时间，允许或拒绝；码已用过或过期时说明）。
+  - `app.js`：登录后的页面：外框、全局操作（去各页、命令面板、快捷键、主题、语言、密度）、命令面板里的任务 / 运行 / 机器搜索。还没做的页面先显示「这一页还在做」。
+  - `home.js`：首页，见下。
+- **首页**：
+  - 上面四个数：
+    - 等你：inbox 的条数，按「要回答（asked、permission）/ 出错 / 待验收（accept、ended、draft）/ 其他（dispatch、source_changed、source_closed）」分组计数；最久一条等了多久。
+    - 在跑 / 排队：状态是 starting、running、unknown 的运行数 / queued 的运行数；已连接机器的 `active` / `slots` 之和；今天从第一个整点起每小时最多同时几个运行（小折线）和全天的峰值。
+    - 今天结束：今天 0 点以后结束的运行数，按结束状态分，平均时长（开始到结束）。
+    - 今天花费：今天用量的 `cost_usd` 之和（只有 claude 给估算）和 token 数，小折线是近 7 天每天的值。用量按结束时间归日，没结束的按开始时间，再没有就按排队时间。
+  - 等你：inbox 按上面的分组排，组内等得最久的在前；可以只看「我负责」「我验收」（inbox 项的 `as`）。每一条收起时写原因：问题本身、要执行的工具和命令、失败的 `detail`、结束时的 `last`；快捷操作：问题只有一个单选时前三个选项（`1`–`3`，其余在「其他…」里），权限请求是允许 / 拒绝，待验收是完成（`Shift+D`，可撤销），出错是重试（`d`，先确认）。展开后显示详情、它刚做的三步（`run.output.page` 取最后 20 个事件里的工具调用）、全部选项、自己写的回答（权限请求时是拒绝理由）。
+  - 在跑 / 排队：先是在跑的（开始早的在前），再是排队的（排得早的在前）。每行写它现在在做什么：节点报的当前动作 `doing`，没有就用 `note`，再没有用 `last`；排队的写它在等什么（等机器接手时带那台机器的 `active/slots`，等同目录的运行、等前置任务等）。还有时长、花费（没有美元就写 token）和停止（先确认）。
+  - 最近结束：今天结束的最近 8 个，写怎么结束的（正常、check 没过、退出码、出错、停止等）。
+  - 今天的运行：每台机器一条泳道，从 08:00（更早有运行就从那个整点）到现在；离线、满载的机器在名字下注明。
+  - 近 7 天用量：每天的 token 按 provider 堆叠，另写 claude 估算的美元。近 7 天运行结果：结束状态的比例条。
+  - 手机上首页只有等你和在跑 / 排队两块，上下排，图表不画。
+  - 首页的数不靠定时器刷新：每次重画时取当前时间。
 - **测试**（`webtest/`，不在 `web/` 下）：
   - Go 用 `runModule` 在 node 里跑 `*_test.js`，每个 JS 用例是一个子测试。
   - 假 server（`fake.js`）在进程内模拟 WebSocket 和时钟，回放 `webtest/frames/*.jsonl`：一行一个动作。`c` 是客户端应该发出的帧，`s` 是 server 发的帧，`raw` 是原样发出的一段文字，另外还有 `connect` / `refuse` / `drop` / `dialing` / `wait_ms` / `step` / `note`。
@@ -128,3 +158,7 @@ tend journal verify [--json] | repair [-y]
   - store 回放 `state-snapshot.jsonl` 得到的状态，和 Go 按同样规则折叠同一文件的结果对照；快照里的对象严格按 `task.State` 的类型解码，多出的字段算失败。
   - 组件（`ui_test.js`）：用 render-to-string 把一套样例按两种形态、两种语言各画一遍，检查每个 class 在 CSS 里有规则、没有漏译的键、两种形态各有自己的结构；交互在 `dom.js` 的假文档里用 `act` 驱动：列表的键、排序、1000 行的窗口，对话框的按键和焦点，提示的撤销和时限，侧栏开合，手机标签栏，方向键。
   - 结构测试：vendor 的校验和，改写只出现在声明过的地方；import 只用相对路径并且合乎分层；每个帧文件都被某个测试回放；皮肤 token 递归检查（跳过 `vendor/`）。
+  - 首页的帧：`home-state.jsonl` 是一天的运行加前六天、三台机器（一台离线）、五条 inbox，现在是 2026-09-30T14:32Z（测试用 UTC）；`home-commands.jsonl` 接在它后面，是完成和撤销、按数字作答、重试、停止，各带 command id；`output-page.jsonl` 是展开一条时取的输出；`command-unknown.jsonl` 是没收到应答的写用同一个 command id 重发。Go 把 store 折叠 `home-state` 的结果和 `task.State` 对照，并把帧里的写请求参数、应答和 `machines` / `inbox` 的每一项严格按 coordinator 的类型解码（`task.TaskStatus`、`coord.Dispatch`、`task.RunRef`、`coord.Answer`、`coord.OutputPageParams`、`coord.Continue`；`task.Task`、`task.Run`、`coord.OutputPage`；`coord.Machine`、`coord.InboxItem`）。
+  - `select_test.js`：数字写法；首页每个数对帧文件算出的值；空的一天；HTTP 请求的形状；操作表和 §6.6 的键表一致、每个操作有键和两种语言的名字、两种名字都搜得到；写操作的 pending、隐藏、未知和重发；偏好的读写。
+  - `pages_test.js`：首页（在应用里）和登录、邀请、登录被拒、终端确认各页按两种形态、两种语言画一遍，检查 class 有规则、没有漏译；按 `home-commands` 用键盘走完完成 → 撤销 → 作答 → 重试（确认）→ 停止（确认，`Esc` 不发）；展开一条看它刚做的三步；`doing` → `note` → `last` 的先后；命令面板按中文名找操作、按标题找任务，快捷键页；token 登录（错的、对的）和终端的允许、已过期。
+- **预览**：`go run ./tools/webpreview` 在 127.0.0.1:18765 用工作区里的文件起一个只给看的页面：`web/` 的文件、`webtest/preview/` 的预览页、帧文件和皮肤，响应头和 server 一样（`server.SecureHeaders`，CSP 不变）。预览页用假 socket 按方法回放上面的帧文件、用假 fetch 回答登录和终端确认，时钟固定在帧文件的时刻；`?as=signedout` 看登录页，`#device-<码>`、`#invite-<码>` 看另两页。它不连任何 coordinator。

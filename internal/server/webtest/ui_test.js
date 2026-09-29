@@ -108,7 +108,7 @@ test('the phone form has the tab bar, sheets, cards and no key caps', () => {
 test('the words every table-built label needs are there in both languages', () => {
   const need = [...navPages.map(p => 'nav.' + p), ...phoneTabs.map(x => x.label), ...Object.keys(statuses).map(s => 'status.' + s)];
   eq(need.filter(k => !words.has(k)), [], 'missing');
-  const src = ['base', 'controls', 'expand', 'overlay', 'panel', 'shell', 'status', 'table', 'toast'].map(f => readFileSync(new URL(`../web/ui/${f}.js`, import.meta.url), 'utf8')).join('\n');
+  const src = ['base', 'charts', 'controls', 'expand', 'input', 'menu', 'overlay', 'palette', 'panel', 'shell', 'status', 'table', 'toast'].map(f => readFileSync(new URL(`../web/ui/${f}.js`, import.meta.url), 'utf8')).join('\n');
   const used = [...src.matchAll(/\b(?:t|f)\('([a-z]+\.[\w.]+)'|label: '([a-z]+\.[\w.]+)'/g)].map(m => m[1] || m[2]);
   ok(used.length > 15, `${used.length} words used`);
   eq([...new Set(used)].filter(k => !words.has(k)), [], 'unregistered');
@@ -158,7 +158,7 @@ test('a table moves its selection by key and keeps it by id through a sort', asy
   await key(keys, 'j');
   eq(log.sel, 'r2', 'j moves in the sorted order');
   const bar = barGroups(keys.active());
-  eq(bar.map(g => [g.label, g.keys.join(' '), g.to || '']), [['keys.move', 'j k', ''], ['keys.open', 'Enter', ''], ['keys.toggle', 'Space', ''], ['keys.pick', '1', '9']], 'key bar groups');
+  eq(bar.map(g => [g.label, g.keys.join(' '), g.to || '']), [['act.move', 'j k', ''], ['act.open', 'Enter', ''], ['act.toggle', 'Space', ''], ['act.pick', '1', '9']], 'key bar groups');
 });
 
 test(`a table over ${VIRTUAL_ABOVE} rows draws only its window and scrolls to the selection`, async () => {

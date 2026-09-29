@@ -10,9 +10,11 @@ import (
 	"reflect"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
+	"github.com/oxsean/fav/internal/coord"
 	"github.com/oxsean/fav/internal/journal"
 	"github.com/oxsean/fav/internal/task"
 )
@@ -56,6 +58,12 @@ func TestTheCoreWireSpeaksTheFrames(t *testing.T) { runModule(t, "webtest/wire_t
 func TestTheCoreKeysRouterAndWords(t *testing.T) { runModule(t, "webtest/core_test.js") }
 
 func TestTheSharedComponentsInBothForms(t *testing.T) { runModule(t, "webtest/ui_test.js") }
+
+func TestTheFiguresActionsAndWritesUnderThePages(t *testing.T) {
+	runModule(t, "webtest/select_test.js")
+}
+
+func TestThePagesInBothFormsAndLanguages(t *testing.T) { runModule(t, "webtest/pages_test.js") }
 
 // The store folds a state.watch as the coordinator folds the same snapshot and envelopes.
 func TestTheStoreFoldsAStateWatchAsTheCoordinatorDoes(t *testing.T) {
@@ -189,7 +197,7 @@ func strictInto(t *testing.T, name string, items json.RawMessage, table any) {
 // Every frame file is played by a core test, every line is one the player knows, and the frames are wire frames.
 func TestEveryFrameFileIsPlayed(t *testing.T) {
 	files, _ := filepath.Glob(filepath.Join("webtest", "frames", "*.jsonl"))
-	tests, _ := filepath.Glob(filepath.Join("webtest", "*_test.js"))
+	tests, _ := filepath.Glob(filepath.Join("webtest", "*.js"))
 	var src strings.Builder
 	for _, f := range tests {
 		b, _ := os.ReadFile(f)
@@ -251,6 +259,66 @@ func TestFrameSnapshotsAreTheCoordinatorsShapes(t *testing.T) {
 			if table != nil {
 				strictInto(t, name, p.Items, table)
 			}
+		}
+	}
+}
+
+// strictDecode decodes raw into v, failing on a field v's type does not have.
+func strictDecode(t *testing.T, where string, raw json.RawMessage, v any) {
+	t.Helper()
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(v); err != nil {
+		t.Errorf("%s: %v", where, err)
+	}
+}
+
+// The writes, their answers and the machines and inbox lists in the frame files are the coordinator's shapes.
+func TestFrameWritesAndListsAreTheCoordinatorsShapes(t *testing.T) {
+	params := map[string]func() any{
+		coord.MTaskStatus: func() any { return new(task.TaskStatus) }, coord.MRunDispatch: func() any { return new(coord.Dispatch) },
+		coord.MRunStop: func() any { return new(task.RunRef) }, coord.MRunAnswer: func() any { return new(coord.Answer) },
+		coord.MRunContinue: func() any { return new(coord.Continue) }, coord.MRunOutputPage: func() any { return new(coord.OutputPageParams) },
+	}
+	results := map[string]func() any{
+		coord.MTaskStatus: func() any { return new(task.Task) }, coord.MRunDispatch: func() any { return new(task.Run) },
+		coord.MRunStop: func() any { return new(task.Run) }, coord.MRunAnswer: func() any { return new(task.Run) },
+		coord.MRunContinue: func() any { return new(task.Run) }, coord.MRunOutputPage: func() any { return new(coord.OutputPage) },
+	}
+	files, _ := filepath.Glob(filepath.Join("webtest", "frames", "*.jsonl"))
+	seen := map[string]int{}
+	for _, f := range files {
+		name := strings.TrimSuffix(filepath.Base(f), ".jsonl")
+		asked := map[int64]string{}
+		for i, l := range frameLines(t, name) {
+			at := name + ".jsonl:" + strconv.Itoa(i+1)
+			switch {
+			case l.C != nil && l.C.Type == "req":
+				asked[l.C.ID] = l.C.Method
+				if mk := params[l.C.Method]; mk != nil {
+					strictDecode(t, at, l.C.Params, mk())
+					seen[l.C.Method]++
+				}
+			case l.S != nil && l.S.Type == "res" && l.S.Result != nil:
+				if mk := results[asked[l.S.ID]]; mk != nil {
+					strictDecode(t, at, l.S.Result, mk())
+				}
+			case l.S != nil && l.S.Type == "push" && l.S.Method == "machines":
+				strictDecode(t, at, l.S.Params, new(struct {
+					Items []coord.Machine `json:"items"`
+				}))
+				seen["machines"]++
+			case l.S != nil && l.S.Type == "push" && l.S.Method == "inbox":
+				strictDecode(t, at, l.S.Params, new(struct {
+					Items []coord.InboxItem `json:"items"`
+				}))
+				seen["inbox"]++
+			}
+		}
+	}
+	for _, m := range []string{coord.MTaskStatus, coord.MRunDispatch, coord.MRunStop, coord.MRunAnswer, coord.MRunOutputPage, "machines", "inbox"} {
+		if seen[m] == 0 {
+			t.Errorf("no frame file has %s", m)
 		}
 	}
 }

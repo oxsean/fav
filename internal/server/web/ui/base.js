@@ -5,6 +5,7 @@ import {useState, useEffect, useContext, useRef} from '../vendor/hooks.mjs';
 import htm from '../vendor/htm.mjs';
 import {form, mac} from '../core/layout.js';
 import {words} from '../core/i18n.js';
+import {bindingsFor} from '../core/actions.js';
 import './words.js';
 
 export const html = htm.bind(h);
@@ -42,16 +43,22 @@ export function useKeys(level, bindings, {blocks = false, active = true} = {}) {
   const keys = useContext(KeysContext);
   const current = useRef(bindings);
   current.current = bindings;
-  const shape = bindings.map(b => b.key + '\t' + (b.label || '')).join('\n');
+  // shape holds whether each binding is in force, so the key bar follows a when() that changes with the page.
+  const shape = bindings.map(b => [b.key, b.id, b.label, b.bar, b.palette, b.alias, !b.when || b.when()].join('\t')).join('\n');
   useEffect(() => {
     if (!keys || !active) return;
     const proxied = current.current.map((b, i) => ({
-      key: b.key, label: b.label,
+      ...b,
       run: e => current.current[i]?.run(e),
       when: () => { const x = current.current[i]; return !!x && (!x.when || x.when()); },
     }));
     return keys.push(level, proxied, {blocks});
   }, [keys, active, level, blocks, shape]);
+}
+
+// useActions binds what the component can do, {id: {run(key, e), when?, label?}}, under the keys the action table gives.
+export function useActions(level, impls, options) {
+  useKeys(level, bindingsFor(impls), options);
 }
 
 // keyParts spells a key as its caps show it: "Mod+K" is ⌘K on a Mac and Ctrl+K elsewhere; "g h" is two caps.

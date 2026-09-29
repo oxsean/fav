@@ -30,6 +30,7 @@ var (
 	// external: package qualifiers and builtins that are not this module's
 	external = regexp.MustCompile(`^(t|tea|syscall|lipgloss|os|filepath|strings|exec|time|json|testing)\.|^len\(`)
 	goFile   = regexp.MustCompile(`[\w-]+\.go\b`)
+	goRun    = regexp.MustCompile(`go run \./([\w./-]+)`)
 	keyName  = regexp.MustCompile(`^([A-Z]|F\d+)$`)
 	ident    = regexp.MustCompile(`^(?:[a-z][a-z0-9]*\.)?([A-Za-z_][A-Za-z0-9_]*)(?:\.([A-Za-z_][A-Za-z0-9_]*))?(?:\(\))?$`)
 	envVar   = regexp.MustCompile(`^[A-Z][A-Z0-9]*_[A-Z0-9_]+$`)
@@ -184,6 +185,11 @@ func TestDocsNameWhatExists(t *testing.T) {
 				for _, f := range goFile.FindAllString(line, -1) {
 					if !paths[f] {
 						t.Errorf("%s names %q: no such file", doc, f)
+					}
+				}
+				for _, m := range goRun.FindAllStringSubmatch(line, -1) {
+					if !paths[m[1]] {
+						t.Errorf("%s runs %q: no such package", doc, m[1])
 					}
 				}
 			}

@@ -1,11 +1,13 @@
 // Shell is the frame of every page. On a desktop: the top bar, the sidebar (collapsed with [, kept in the browser)
 // and the key bar; on a phone: a slimmer top bar and four tabs at the bottom. Both show a banner while the connection
 // is down or the server has moved on, and the toasts.
-import {html, cx, usePhone, useKeys, useWords, useSignalValue, KeysContext} from './base.js';
+import {html, cx, usePhone, useActions, useWords, useSignalValue, KeysContext} from './base.js';
 import {Button, Kbd} from './controls.js';
 import {Status} from './status.js';
 import {Icon} from './icons.js';
 import {Toasts} from './toast.js';
+import {Menu} from './menu.js';
+import {tokens, money} from '../core/format.js';
 import {format} from '../core/router.js';
 
 export const navPages = ['home', 'tasks', 'runs', 'machines', 'agents', 'team', 'me'];
@@ -44,11 +46,11 @@ export function Banner({wire, onReload}) {
   return null;
 }
 
-// barGroups joins the keys in force that share a label: "j k" for one move, "1–9" for a run of digits.
+// barGroups joins the key-bar keys in force that share a label: "j k" for one move, "1–9" for a run of digits.
 export function barGroups(bindings) {
   const groups = [];
   for (const b of bindings) {
-    if (!b.label) continue;
+    if (!b.bar) continue;
     const g = groups.find(x => x.label === b.label);
     if (g) g.keys.push(b.key); else groups.push({label: b.label, keys: [b.key]});
   }
@@ -61,16 +63,20 @@ export function barGroups(bindings) {
 export function KeyBar({keys}) {
   const {t} = useWords();
   useSignalValue(keys.changed);
-  const groups = barGroups(keys.active());
+  const active = keys.active();
+  const groups = barGroups(active);
+  const has = id => active.some(b => b.id === id);
   return html`<footer class="keybar" aria-label=${t('shell.keys')}>
     ${groups.map(g => html`<span class="kb">${g.keys.map(k => html`<${Kbd} k=${k} />`)}${g.to && html`–<${Kbd} k=${g.to} />`} ${t(g.label)}</span>`)}
+    ${(has('palette') || has('help')) && html`<span class="kb kb-end">${has('palette') && html`<${Kbd} k="Mod+K" /> ${t('act.palette')}`}${has('palette') && has('help') && ' · '}${has('help') && html`<${Kbd} k="?" /> ${t('act.help')}`}</span>`}
   </footer>`;
 }
 
-function Counts({counts}) {
+function Counts({counts, spent}) {
   const {t, f} = useWords();
   const off = counts.offline || [];
   return html`<span class="top-counts">
+    ${spent && html`<span class="t-muted">${f('shell.spent', tokens(spent.tokens), spent.usd ? ' · ' + money(spent.usd) : '')}</span>`}
     <span><${Status} state="running" /> ${t('shell.running')} <b class="mono">${counts.running || 0}</b></span>
     <span><${Status} state="queued" /> ${t('shell.queued')} <b class="mono">${counts.queued || 0}</b></span>
     ${off.length > 0 && html`<span class="t-failed"><${Status} state="offline" /> ${off.length === 1 ? f('shell.offlineOne', off[0]) : f('shell.offlineMany', off.length)}</span>`}
@@ -109,16 +115,16 @@ function TabBar({page, onNavigate, waiting}) {
 
 // Shell: keys and wire are core's; nav is core/layout's createNav; counts {running, queued, offline: [machine],
 // waiting}; navCounts by page; onServers opens the server list (the app only), onSearch the palette.
-export function Shell({keys, wire, nav, toasts, page, onNavigate, counts = {}, navCounts, user, server, onServers, onSearch, onNew, onReload, children}) {
-  return html`<${KeysContext.Provider} value=${keys}><${Frame} keys=${keys} wire=${wire} nav=${nav} toasts=${toasts} page=${page} onNavigate=${onNavigate}
-    counts=${counts} navCounts=${navCounts} user=${user} server=${server} onServers=${onServers} onSearch=${onSearch} onNew=${onNew} onReload=${onReload}>${children}<//><//>`;
+// spent {tokens, usd} is today's; userMenu [{label, onClick}] opens from the user's name.
+export function Shell(props) {
+  return html`<${KeysContext.Provider} value=${props.keys}><${Frame} ...${props} /><//>`;
 }
 
-function Frame({keys, wire, nav, toasts, page, onNavigate, counts, navCounts, user, server, onServers, onSearch, onNew, onReload, children}) {
+function Frame({keys, wire, nav, toasts, page, onNavigate, counts = {}, spent, navCounts, user, userMenu = [], server, onServers, onSearch, onNew, onReload, children}) {
   const phone = usePhone();
   const {t, f} = useWords();
   const open = useSignalValue(nav.open);
-  useKeys('global', [{key: '[', label: open ? 'nav.collapse' : 'nav.expand', run: nav.toggle}], {active: !phone});
+  useActions('global', {nav: {run: nav.toggle, label: open ? 'nav.collapse' : 'nav.expand'}}, {active: !phone});
   const waiting = counts.waiting || 0;
   if (phone) {
     const off = (counts.offline || []).length;
@@ -143,9 +149,9 @@ function Frame({keys, wire, nav, toasts, page, onNavigate, counts, navCounts, us
       <a class="brand mono" ...${link('home', onNavigate)}><span class="mark" aria-hidden="true">>_</span>tend</a>
       <button type="button" class="btn search" onClick=${onSearch}><${Icon} name="search" /><span class="search-text">${t('shell.search')}</span><${Kbd} k="Mod+K" /></button>
       <div class="top-right">
-        <${Counts} counts=${counts} />
+        <${Counts} counts=${counts} spent=${spent} />
         <span class="divider" aria-hidden="true"></span>
-        ${user && html`<${Button} kind="quiet" icon="person" onClick=${() => onNavigate('me')}>${user.name}<//>`}
+        ${user && html`<${Menu} label=${user.name} icon="person" items=${userMenu} />`}
       </div>
     </header>
     <div class="frame">

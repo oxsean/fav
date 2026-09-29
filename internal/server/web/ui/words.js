@@ -9,6 +9,7 @@ register('ui', {
   'shell.new': ['新建任务', 'New task'], 'shell.running': ['在跑', 'Running'], 'shell.queued': ['排队', 'Queued'],
   'shell.offlineOne': ['%s 离线', '%s offline'], 'shell.offlineMany': ['%d 台机器离线', '%d machines offline'],
   'shell.servers': ['切换 server', 'Switch server'], 'shell.keys': ['按键', 'Keys'], 'shell.counts': ['在跑 %d · 排队 %d', '%d running · %d queued'],
+  'shell.spent': ['今天 %s tok%s', 'Today %s tok%s'],
   'banner.offline': ['连接断开，正在重连…', 'Connection lost, reconnecting…'], 'banner.retry': ['立即重连', 'Reconnect now'],
   'banner.outdated': ['服务器已经更新，刷新页面后继续。', 'The server was updated: reload the page to go on.'], 'banner.reload': ['刷新', 'Reload'],
   'ui.close': ['关闭', 'Close'], 'ui.back': ['返回', 'Back'], 'ui.undo': ['撤销', 'Undo'], 'ui.dismiss': ['知道了', 'Dismiss'],
@@ -18,6 +19,8 @@ register('ui', {
   'status.failed': ['失败', 'Failed'], 'status.canceled': ['已取消', 'Canceled'], 'status.abandoned': ['已放弃', 'Abandoned'],
   'status.asked': ['在问你', 'Asking you'], 'status.permission': ['要你批准', 'Needs approval'], 'status.stalled': ['卡住了', 'Stalled'],
   'status.backlog': ['待办', 'Backlog'], 'status.todo': ['未开始', 'To do'], 'status.done': ['完成', 'Done'], 'status.waiting': ['等你', 'Waiting'],
-  'keys.move': ['上下一条', 'Next / previous'], 'keys.open': ['打开', 'Open'], 'keys.toggle': ['展开', 'Expand'], 'keys.pick': ['选择', 'Pick'],
+  'chart.running': ['在跑', 'Running'], 'chart.exited': ['正常结束', 'Ended well'], 'chart.failed': ['出错', 'Failed'], 'chart.stopped': ['停止', 'Stopped'],
+  'palette.hint': ['输入操作、任务、运行或机器…', 'Type an action, a task, a run or a machine…'], 'palette.none': ['没有匹配的', 'Nothing matches'],
+  'palette.task': ['任务', 'Task'], 'palette.run': ['运行', 'Run'], 'palette.machine': ['机器', 'Machine'],
   'status.online': ['在线', 'Online'], 'status.offline': ['离线', 'Offline'],
 });

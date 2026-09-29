@@ -23,7 +23,7 @@
 {"s":{"type":"push","id":2,"method":"journal","params":{"v":2,"seq":12,"at":"2026-09-29T10:00:12Z","events":[{"type":"run_observed","data":{"id":"r1","state":"exited","node_rev":3,"exit_code":0}}]}}}
 {"s":{"type":"push","id":2,"method":"journal","params":{"v":2,"seq":13,"at":"2026-09-29T10:00:13Z","events":[{"type":"task_created","data":{"id":"t3","title":"Refunds","project":"p1","owner":"u_b","status":"todo"}}]}}}
 {"s":{"type":"push","id":3,"method":"open","params":{"mode":"snapshot"}}}
-{"s":{"type":"push","id":3,"method":"machines","params":{"items":[{"name":"mba","online":true}]}}}
+{"s":{"type":"push","id":3,"method":"machines","params":{"items":[{"name":"mba","state":"connected","slots":2,"active":1,"queued":0}]}}}
 {"s":{"type":"push","id":4,"method":"open","params":{"mode":"snapshot"}}}
 {"s":{"type":"push","id":4,"method":"inbox","params":{"items":[{"task":"t1","reason":"dispatch"}]}}}
 {"step":"live"}

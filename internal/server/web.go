@@ -43,13 +43,14 @@ func page() http.Handler {
 	sub, _ := fs.Sub(webFiles, "web")
 	files := http.FileServerFS(sub)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		secureHeaders(w)
+		SecureHeaders(w)
 		w.Header().Set("Cache-Control", "no-cache")
 		files.ServeHTTP(w, r)
 	})
 }
 
-func secureHeaders(w http.ResponseWriter) {
+// SecureHeaders are the headers every page and file of the Web UI goes out with; tools/webpreview serves under them too.
+func SecureHeaders(w http.ResponseWriter) {
 	h := w.Header()
 	h.Set("Content-Security-Policy", "default-src 'self'; connect-src 'self'; img-src 'self' data:; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
 	h.Set("X-Content-Type-Options", "nosniff")
@@ -73,7 +74,7 @@ func (s *Server) webRoutes(mux *http.ServeMux) {
 // settings page, /theme/presets.json.
 func theme(w http.ResponseWriter, r *http.Request) {
 	if r.PathValue("file") == "presets.json" {
-		secureHeaders(w)
+		SecureHeaders(w)
 		writeJSON(w, http.StatusOK, skin.Presets)
 		return
 	}
@@ -83,7 +84,7 @@ func theme(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	secureHeaders(w)
+	SecureHeaders(w)
 	w.Header().Set("Content-Type", "text/css; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-cache")
 	fmt.Fprint(w, sk.CSS())
@@ -367,7 +368,7 @@ func (s *Server) signinPage(w http.ResponseWriter, status int, problem string) {
 	if problem != "" {
 		to = "/#signin-" + problem
 	}
-	secureHeaders(w)
+	SecureHeaders(w)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(status)
 	fmt.Fprintf(w, `<!doctype html><meta charset="utf-8"><meta http-equiv="refresh" content="0;url=%s"><a href="%s">tend</a>`, to, to)

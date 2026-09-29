@@ -1,0 +1,12 @@
+{"note":"a write whose answer never came is unknown; its retry goes out under the same command id"}
+{"connect":true}
+{"c":{"type":"req","id":1,"method":"hello","params":{"proto":2,"role":"client"}}}
+{"s":{"type":"res","id":1,"result":{"proto":2,"version":"test","role":"coordinator","methods":["hello","task.get","state.watch","run.output.watch","machines.watch","inbox.watch","run.output.page","task.set_status","run.dispatch","run.stop","run.answer","run.continue"]}}}
+{"step":"send"}
+{"c":{"type":"req","id":2,"method":"task.set_status","command_id":"c1","params":{"id":"t4","status":"done"}}}
+{"wait_ms":30000}
+{"c":{"type":"cancel","id":2}}
+{"step":"unknown"}
+{"c":{"type":"req","id":3,"method":"task.set_status","command_id":"c1","params":{"id":"t4","status":"done"}}}
+{"s":{"type":"res","id":3,"result":{"id":"t4","title":"Cart price rounding","dir":"/w/t4","project":"p1","owner":"u_b","status":"done","rev":2,"created_at":"2026-09-23T09:00:00Z","updated_at":"2026-09-30T08:00:00Z","approver":"u_b"}}}
+{"step":"answered"}
