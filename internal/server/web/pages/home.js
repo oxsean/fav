@@ -196,7 +196,7 @@ export function Home({store, commands, toasts, clock = () => Date.now(), fetchOu
         <span class="stat-parts">${sel.waitGroups.filter(g => sum.by[g]).map(g => html`<${Status} state=${stateOf(g, g === 'answer' ? 'asked' : g)} label=${f('home.g.n', t('home.g.' + g), sum.by[g])} />`)}</span>
       <//>
       <${Stat} label=${t('home.going')} value=${`${c.running} / ${c.queued}`} tone="running" note=${f('home.peak', day.peak)} onClick=${() => onNavigate('runs')}>
-        <span class="stat-row"><span class="kn">${f('home.room', room.slots, room.active)}</span><${Spark} values=${day.hourly} step label=${f('home.peak', day.peak)} tone="running" /></span>
+        <span class="stat-row"><span class="kn">${f('home.room', room.active, room.slots)}</span><${Spark} values=${day.hourly} step label=${f('home.peak', day.peak)} tone="running" /></span>
       <//>
       <${Stat} label=${t('home.ended')} value=${String(day.ended)} note=${day.ended ? f('home.mean', duration(day.mean)) : ''}>
         <span class="stat-parts">${endParts(day.ends)}</span>

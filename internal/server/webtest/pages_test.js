@@ -75,7 +75,7 @@ test('the home draws in both forms and both languages, styled and worded', async
   const d = drawn(a.vnode(), 'desktop', 'zh');
   for (const want of ['class="home-stats"', 'class="timeline"', 'class="bars"', 'class="meter"', 'Which PDF library should the export use?',
     '要执行 Bash：rm -rf ./testdata/webhooks-old', '运行失败：the check failed', '运行结束，待确认完成：Prices round half-even; the cart tests pass.', '等派发',
-    'go vet ./internal/pay/...', '等机器接手（2/2 在用）', '4 个位置里用了 3 个', '今天最多同时 3 个', '286k tok · 7 天 $12.47', '2 / 2 满', '离线',
+    'go vet ./internal/pay/...', '等机器接手（2/2 在用）', '用了 3 个位置，共 4 个', '今天最多同时 3 个', '286k tok · 7 天 $12.47', '2 / 2 满', '离线',
     '869k tok · claude 估算 $12.47', '10 次', '最久一条等了 4h 32m']) ok(d.includes(want), `desktop: no ${want}`);
   const p = drawn(a.vnode(), 'phone', 'en');
   for (const not of ['home-stats', 'timeline', 'class="bars"', 'class="meter"', 'Ended lately']) ok(!p.includes(not), `phone: has ${not}`);

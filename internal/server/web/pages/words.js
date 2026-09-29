@@ -39,7 +39,7 @@ register('pages', {
   'home.none': ['没有等你处理的事', 'Nothing waits on you'],
   'home.g.answer': ['要回答', 'To answer'], 'home.g.accept': ['待验收', 'To accept'], 'home.g.error': ['出错', 'Failed'], 'home.g.other': ['其他', 'Other'],
   'home.going': ['在跑 / 排队', 'Running / queued'], 'home.peak': ['今天最多同时 %d 个', 'At most %d at once today'],
-  'home.room': ['%d 个位置里用了 %d 个', '%d of %d slots in use'],
+  'home.room': ['用了 %d 个位置，共 %d 个', '%d of %d slots in use'],
   'home.ended': ['今天结束', 'Ended today'], 'home.mean': ['平均 %s', 'Mean %s'],
   'home.spent': ['今天花费', 'Spent today'], 'home.spentNote': ['%s tok · 7 天 %s', '%s tok · 7 days %s'],
   'home.all': ['全部', 'All'], 'home.asOwner': ['我负责', 'Mine'], 'home.asApprover': ['我验收', 'To accept'],
