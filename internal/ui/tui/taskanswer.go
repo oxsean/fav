@@ -264,6 +264,13 @@ func (m *Model) renderAnswer() string {
 	return ovRender(body, w)
 }
 
+// asked: r's question is among the requests requestLines draws.
+func asked(r *task.Run) bool {
+	return slices.ContainsFunc(r.Requests, func(q agent.Request) bool {
+		return q.Kind == agent.RequestQuestion && len(q.Questions) > 0 && q.Questions[0].Question == r.Ask
+	})
+}
+
 // requestLines: what r waits on, one line each.
 func requestLines(r *task.Run, inner int) []string {
 	var out []string

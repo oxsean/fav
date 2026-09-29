@@ -95,6 +95,8 @@ func WaitKind(r *task.Run) string {
 		return i18n.T("sit.failed")
 	case r.State == task.Unknown:
 		return i18n.T("sit.unknown")
+	case r.State == task.Exited && r.ExitCode != nil && *r.ExitCode == 0:
+		return i18n.T("sit.ended")
 	case r.State == task.Exited:
 		return i18n.T("sit.exited")
 	}

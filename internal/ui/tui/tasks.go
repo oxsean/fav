@@ -43,6 +43,7 @@ type tasksState struct {
 	depth      map[string]int // the tree: how deep each task sits
 	cols       [][]*task.Task // the board: the tasks of each column; list holds them column after column
 	split      int            // the home: list[:split] wait for you, the rest run
+	matched    int            // the tasks the query matches, whichever of them the layout shows
 	cursor     int
 	scroll     int
 	out        map[string]runOutput // by run id
@@ -890,7 +891,7 @@ func runFacts(r *task.Run, inner, room int) []string {
 		}
 		out = append(out, dimmed.Render(render.Truncate(i18n.F("tasks.reason", why), inner)))
 	}
-	if r.Ask != "" {
+	if r.Ask != "" && !asked(r) {
 		lines := render.Wrap(i18n.F("tasks.ask", render.Sanitize(r.Ask)), inner)
 		if len(lines) > room {
 			lines = append(lines[:room-1], dimmed.Render(i18n.F("tasks.more_lines", len(lines)-room+1)))
@@ -1014,10 +1015,10 @@ func (m *Model) tasksBody(y0, h int) []string {
 
 func (m *Model) taskList(y0, x0, w, h int) []string {
 	t := &m.tasks
-	title := i18n.F("tasks.title", m.openTaskCount(), len(t.list))
+	title := i18n.F("tasks.title", m.openTaskCount(), t.matched)
 	if t.st != nil {
 		if n := len(t.st.NeedsYou()); n > 0 {
-			title = i18n.F("tasks.title_needs_you", m.openTaskCount(), len(t.list), n)
+			title = i18n.F("tasks.title_needs_you", m.openTaskCount(), t.matched, n)
 		}
 	}
 	title += " · " + i18n.T(layoutKeys[t.layout])

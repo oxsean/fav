@@ -45,6 +45,7 @@ func (m *Model) cycleLayout() {
 func (m *Model) arrange(needs, open, closed []*task.Task) {
 	t := &m.tasks
 	t.depth, t.cols, t.split = nil, nil, 0
+	t.matched = len(needs) + len(open) + len(closed)
 	switch t.layout {
 	case layoutList:
 		t.list = append(append(needs, open...), closed...)
@@ -55,7 +56,7 @@ func (m *Model) arrange(needs, open, closed []*task.Task) {
 			switch {
 			case sit.Kind == task.SitWaiting:
 				waits = append(waits, x)
-			case t.st.Running(x.ID):
+			case sit.Kind == task.SitRunning:
 				runs = append(runs, x)
 			}
 		}
@@ -154,7 +155,7 @@ func (m *Model) rowCell(x *task.Task, r *task.Run, w int) string {
 		}
 		fields = append(fields, i18n.F("tasks.waited", render.Elapsed(waitedSince(x, r), m.now)))
 		return render.Fields(fields, 1, w)
-	case r != nil && task.Open(r.State):
+	case sit.Kind == task.SitRunning && r != nil:
 		fields := []string{render.ShortID(x.ID)}
 		if x.Stage != "" {
 			fields = append(fields, x.Stage)

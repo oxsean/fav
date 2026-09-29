@@ -14,6 +14,7 @@ import (
 	"github.com/oxsean/fav/internal/agent"
 	"github.com/oxsean/fav/internal/coord"
 	"github.com/oxsean/fav/internal/filelock"
+	"github.com/oxsean/fav/internal/i18n"
 	"github.com/oxsean/fav/internal/node"
 	"github.com/oxsean/fav/internal/remote"
 	"github.com/oxsean/fav/internal/task"
@@ -728,5 +729,46 @@ func TestTasksAreArrangedAsHomeListTreeOrBoard(t *testing.T) {
 	key(m, "o")
 	if m.tasks.layout != layoutHome {
 		t.Fatalf("o comes back to the home: %v", m.tasks.layout)
+	}
+}
+
+func TestTheHomeShowsRunsAsTheyStand(t *testing.T) {
+	m, _ := tasksModel(t)
+	key(m, "5")
+	waitFor(t, m, func() bool { return m.tasks.loaded })
+	zero := 0
+	st := task.New()
+	add := func(id string, r task.Run) {
+		st.Tasks[id] = &task.Task{ID: id, Title: id, Status: task.StatusTodo}
+		r.ID, r.Task = "r"+id, id
+		st.Runs[r.ID] = &r
+	}
+	add("t_ok", task.Run{State: task.Exited, ExitCode: &zero})
+	add("t_run", task.Run{State: task.Running})
+	add("t_q", task.Run{State: task.Queued})
+	m.tasks.st = st
+	m.filterTasks()
+	if got := ids(m); got != "t_ok t_run" {
+		t.Fatalf("the home holds what waits, then what runs, not what queues: %q", got)
+	}
+	s := screenText(m)
+	if !strings.Contains(s, i18n.T("sit.ended")) || strings.Contains(s, i18n.T("sit.exited")) {
+		t.Fatalf("a run that exited 0 ended well:\n%s", s)
+	}
+	if want := i18n.F("tasks.title", m.openTaskCount(), 3); !strings.Contains(s, want) {
+		t.Fatalf("the title counts every matching task, not the rows the home shows: want %q\n%s", want, s)
+	}
+	key(m, "o")
+	if !strings.Contains(screenText(m), i18n.T("sit.slot")) {
+		t.Fatalf("a queued task in the list says what it waits for:\n%s", screenText(m))
+	}
+}
+
+func TestAQuestionShowsOnce(t *testing.T) {
+	q := "Which database for the cache?"
+	r := &task.Run{State: task.Running, Attention: task.AttentionAsked, Ask: q,
+		Requests: []agent.Request{{ID: "q1", Kind: agent.RequestQuestion, Questions: []agent.Question{{Question: q}}}}}
+	if n := strings.Count(ansi.Strip(strings.Join(runFacts(r, 100, 4), "\n")), q); n != 1 {
+		t.Fatalf("the question shows %d times", n)
 	}
 }
