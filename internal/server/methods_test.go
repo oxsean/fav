@@ -19,7 +19,6 @@ var comingMethods = map[string]string{
 	"run.changes":      "T4.3",
 	"run.diff":         "T4.3",
 	"run.output.watch": "T4.1",
-	"run.interrupt":    "T3.4",
 }
 
 var methodCall = regexp.MustCompile(`\b(?:call|watch|has|send)\(\s*'([a-z_]+(?:\.[a-z_]+)+)'`)

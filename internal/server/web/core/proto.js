@@ -27,6 +27,9 @@ export const code = Object.freeze({
   lagged: 'lagged',
   gone: 'gone',
   unsupported: 'unsupported',
+  requestGone: 'request_gone',
+  cannotSend: 'cannot_send',
+  routeChanged: 'route_changed',
   offline: 'offline',
   auth: 'auth',
   hostKey: 'hostkey',
@@ -38,6 +41,7 @@ export const code = Object.freeze({
 // wire.PushOpen and coord.Push*: what a stream pushes; open comes first.
 export const push = Object.freeze({
   open: 'open',
+  affordances: 'affordances',
   snapshot: 'snapshot',
   live: 'live',
   journal: 'journal',
@@ -124,6 +128,8 @@ export const methods = Object.freeze([
   'task.plan_save',
   'task.plan_apply',
   'task.message',
+  'task.message.preview',
+  'run.interrupt',
 ]);
 
 // output.Families: a tool's family by the name claude or codex calls it; another name is other, claude's
