@@ -1,6 +1,6 @@
 // protogen writes the Web UI's view of tend's protocol from the Go sources: internal/server/web/core/proto.js (the
-// Proto, frame types, error codes, push names, the coordinator's methods, event kinds, the family table and the
-// density table) and proto.schema.json (the frames, hello, state.watch and output events as JSON Schema). A test fails
+// Proto, frame types, error codes, push names, the coordinator's methods, the built-in workflows, event kinds, the family table
+// and the density table) and proto.schema.json (the frames, hello, state.watch and output events as JSON Schema). A test fails
 // while either file differs from what this writes.
 //
 //	go run ./tools/protogen
@@ -27,6 +27,7 @@ import (
 	"github.com/oxsean/fav/internal/output"
 	"github.com/oxsean/fav/internal/remote"
 	"github.com/oxsean/fav/internal/wire"
+	"github.com/oxsean/fav/internal/workflow"
 )
 
 const (
@@ -219,6 +220,14 @@ func protoJS(root string) ([]byte, error) {
 	b.WriteString("\n// coord.Methods: what the coordinator answers a client, as hello lists them.\nexport const methods = Object.freeze([\n")
 	for _, m := range coord.Methods {
 		fmt.Fprintf(&b, "  %s,\n", quote(m))
+	}
+	b.WriteString("]);\n")
+	b.WriteString("\n// workflow.Builtins: the workflows a task or project may name besides its project's own.\nexport const workflows = Object.freeze([")
+	for i, n := range workflow.Names(nil) {
+		if i > 0 {
+			b.WriteString(", ")
+		}
+		b.WriteString(quote(n))
 	}
 	b.WriteString("]);\n")
 	tools := slices.Sorted(func(yield func(string) bool) {

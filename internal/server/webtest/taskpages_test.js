@@ -132,6 +132,19 @@ test('each form draws in both forms and both languages, styled and worded', asyn
   }
 });
 
+test('the workflow picker offers the built-in workflows beside the project default and none', async () => {
+  const r = await tasks();
+  const none = () => {};
+  const keys = createKeys();
+  const root = await mount(html`<${KeysContext.Provider} value=${keys}><${TaskForm} store=${r.store} agents=${[]} machines=${r.store.machines.value}
+    storage=${memory()} onSubmit=${none} onClose=${none} /><//>`);
+  const label = root.find('label').find(l => l.textContent === words.t('form.workflow'));
+  const flow = root.find('.picker-btn').find(b => b.getAttribute('id') === label.getAttribute('for'));
+  await click(flow);
+  const offered = root.find('[role=option]').map(o => o.textContent.trim());
+  for (const name of ['docs', 'feature', 'fix']) ok(offered.includes(name), `no ${name} in ${offered}`);
+});
+
 test('n creates a task from the form: its directory picked, its draft kept on this device until it is sent, then started', async () => {
   const r = await tasks();
   const storage = memory();

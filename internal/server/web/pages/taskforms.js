@@ -11,6 +11,7 @@ import {Picker} from '../ui/picker.js';
 import {Markdown} from '../ui/markdown.js';
 import {Status} from '../ui/status.js';
 import * as tk from '../core/tasks.js';
+import {workflows as builtinFlows} from '../core/proto.js';
 import {sitState} from './task.js';
 import './taskwords.js';
 
@@ -147,7 +148,7 @@ export function TaskForm({store, wire, agents = [], machines = [], mode = 'new',
     : [{label: t('form.createBacklog'), disabled: busy, onClick: () => submit('backlog')}, {label: t('form.createPlan'), disabled: busy, onClick: () => submit('plan')},
       {label: t('form.createStart'), kind: 'primary', keyName: 'Mod+Enter', disabled: busy, onClick: () => submit('start')}];
   const workflows = [{value: '', label: d.workflow ? f('form.default', d.workflow) : t('form.unset')}, {value: 'none', label: t('form.workflowNone')},
-    ...Object.keys(project?.workflows || {}).map(n => ({value: n, label: n}))];
+    ...[...new Set([...builtinFlows, ...Object.keys(project?.workflows || {})])].sort().map(n => ({value: n, label: n}))];
   if (v.workflow && !workflows.some(o => o.value === v.workflow)) workflows.push({value: v.workflow, label: v.workflow});
   const others = taskOptions(st, mode === 'edit' ? task : null);
   return html`<${Modal} title=${title} onClose=${onClose} full actions=${actions}>

@@ -144,6 +144,9 @@ export const methods = Object.freeze([
   'inbox.watch',
 ]);
 
+// workflow.Builtins: the workflows a task or project may name besides its project's own.
+export const workflows = Object.freeze(['docs', 'feature', 'fix']);
+
 // output.Families: a tool's family by the name claude or codex calls it; another name is other, claude's
 // mcp__server__tool is mcp.
 export const tools = Object.freeze({

@@ -73,7 +73,7 @@ tend journal verify [--json] | repair [-y]
     - `watch`：发 `req` 之前先登记接收者。推送按 `id` 交给这个流，第一条是 `open{cursor, mode}`；同一个 `id` 的 `res` 是最后一帧：`result` 表示正常结束，`lagged` 按游标立即重开，其它错误码就是流的终点。`cancel` 只发一次，之后到达的帧一律丢掉。
     - 断线后 1 s 起翻倍、最长 30 s、带抖动地重连（成功 hello 后回到 1 s），然后每个流用它的主人给的参数（带游标）重开。
     - `setVisible(false)` 结束可暂停的流（输出），`state.watch` 保留；`setVisible(true)` 按游标重开它们，离线时立即重连。连接状态放在一个 signal 里：`idle` / `connecting` / `open` / `offline` / `outdated` / `closed`。
-  - `proto.js`：由 `tools/protogen` 生成，不手改：`PROTO`、`frame`、`code`、`push`、`mode`、`methods`、`kind`、`family`、`tools`（工具名 → family）、`density`（[output.md](output.md)「密度」）。`core`、`ui`、`pages` 比较错误码、帧类型和密度都用它。结构测试检查页面 `call` / `watch` / `has` / `send` 的每个方法名都在 `coord.Methods` 里，协调器还没有的几个列在 `comingMethods`，各自标着补它的卡。
+  - `proto.js`：由 `tools/protogen` 生成，不手改：`PROTO`、`frame`、`code`、`push`、`mode`、`methods`、`kind`、`family`、`tools`（工具名 → family）、`density`（[output.md](output.md)「密度」）、`workflows`（内置工作流的名字，新建任务的工作流选择器把它们和项目自己的放在一起）。`core`、`ui`、`pages` 比较错误码、帧类型和密度都用它。结构测试检查页面 `call` / `watch` / `has` / `send` 的每个方法名都在 `coord.Methods` 里，协调器还没有的几个列在 `comingMethods`，各自标着补它的卡。
   - `fold.js`：把推送的信封折进状态，逐条照搬 `task.State.Apply`；`fold_test.go` 用 Go 生成的信封、`foldfuzz_test.go` 用随机日志和它对照。`parts` 表列出每种事件改动状态里的哪几张表。
   - `store.js`：页面的状态。
     - `state.watch` 的推送：
