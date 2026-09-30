@@ -241,7 +241,13 @@ func (rw) Close() error { return nil }
 func TestNoiseLinesAndNULsAreSkipped(t *testing.T) {
 	res := `{"type":"res","id":1,"result":{"text":"x"}}`
 	in := "WARNING: post-quantum\n\x00" + strings.Join(strings.Split(res, ""), "\x00") + "\n"
-	c := New(rw{strings.NewReader(in), io.Discard}, Options{})
+	reqR, reqW := io.Pipe()
+	resR, resW := io.Pipe()
+	go func() { // answers once asked: an answer that comes before its request is nobody's
+		reqR.Read(make([]byte, 4096))
+		io.WriteString(resW, in)
+	}()
+	c := New(lastWords{resR, reqW}, Options{})
 	defer c.Close()
 	var got text
 	if err := c.Call(bounded(t), "echo", nil, &got); err != nil || got.Text != "x" {
