@@ -24,7 +24,7 @@ register('changes', {
   'chg.view': ['版式', 'Layout'], 'chg.v.unified': ['上下对照', 'Unified'], 'chg.v.split': ['左右对照', 'Side by side'],
   'chg.pickHint': ['点行号选中一行，再点另一行选到那里；拖选几行也行，或者用 j / k、Space 和 Shift+↑ / ↓', 'Tap a line number to pick it, then another to reach it; or select the lines, or use j / k, Space and Shift+↑ / ↓'],
   'chg.pickHintPhone': ['点行号选中一行，再点另一行选到那里；也可以长按拖选几行', 'Tap a line number to pick it, then another to reach it; or press and drag to select the lines'],
-  'chg.picked': ['选了 %d 行', 'Lines picked: %d'], 'chg.pickMore': ['再点一行可以选到那里', 'Tap another line to reach it'],
+  'chg.pickLine': ['选行', 'Pick the line'], 'chg.picked': ['选了 %d 行', 'Lines picked: %d'], 'chg.pickMore': ['再点一行可以选到那里', 'Tap another line to reach it'],
   'chg.toAgent': ['发给 agent', 'Send to the agent'], 'chg.toNotes': ['写进退回意见', 'Add to the send-back notes'], 'chg.unpick': ['取消', 'Cancel'],
   'chg.q.before': ['%s（改之前）', '%s (before the change)'], 'chg.q.more': ['……另有 %d 行没有引用', '… %d more lines not quoted'],
   'chg.at': ['截至 %s', 'As of %s'], 'chg.refresh': ['刷新', 'Refresh'],
@@ -198,7 +198,7 @@ export function Changes({data = null, error = '', unsupported = false, running =
   useActions('list', {
     next: {run: () => move(ch.stepTo(ss, cur, 1))},
     prev: {run: () => move(ch.stepTo(ss, cur, -1))},
-    toggle: {run: () => tap(cur), when: () => !!cur},
+    toggle: {run: () => tap(cur), when: () => !!cur, label: cur?.lo >= 0 ? 'chg.pickLine' : undefined},
     open: {run: () => (sel && cur?.lo >= 0 ? onQuote(sel.path, rowsBy[sel.path] || [], 'agent') : tap(cur)), when: () => !!cur},
     reachDown: {run: () => reach(1), when: () => cur?.lo >= 0},
     reachUp: {run: () => reach(-1), when: () => cur?.lo >= 0},

@@ -314,11 +314,14 @@ test('on a desktop the keys walk the files and the open lines, pick, reach, send
   await act(() => root.one('.chg-list').dispatch('focusin'));
   await press('j');
   eq(cur(), ['chg-row cur'], 'the first file');
+  const spaceSays = () => keys.active().find(x => x.key === 'Space' && x.bar)?.label;
+  eq(spaceSays(), 'act.toggle', 'on a file Space says it opens');
   await press('Space');
   eq(log.toggled, ['a.go'], 'Space opens or closes a file');
   await press('j');
   await press('j');
   eq(cur(), ['2:2'], 'the lines, the hunk head skipped');
+  eq(spaceSays(), 'chg.pickLine', 'on a line Space says it picks');
   await press('Space');
   eq([log.sel.a, log.sel.b], [2, 2], 'Space picks the line');
   await press('ArrowDown', {shiftKey: true});
