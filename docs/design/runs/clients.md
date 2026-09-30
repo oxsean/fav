@@ -86,7 +86,7 @@ tend journal verify [--json] | repair [-y]
   - `store.js`：页面的状态。
     - `state.watch` 的推送：
       - `open{mode: snapshot}` 或 `reset` 开始一份新快照；
-      - `snapshot{part, items}` 的 `part` 是 `task.State` 那几张表的 JSON 名（`tasks`、`runs`、`projects`、`shares`、`agent_defs`），`items` 是 id → 对象，同一张表可以分几批，累加起来；
+      - `snapshot{part, items}` 的 `part` 是 `task.State` 那几张表的 JSON 名（`tasks`、`runs`、`projects`、`shares`、`drains`、`agent_defs`），`items` 是 id → 对象，同一张表可以分几批，累加起来；
       - `live{seq}` 结束快照，整份换上；
       - 之后是 `journal{信封}`，seq 不大于已应用的就跳过。
       - `open{mode: resume}` 表示接着已应用的 seq 继续。`affordances` 这个 part 和之后的 `affordances` 推送按人计算，不折叠，放进 `affordances` 这个 signal：`{runs: {运行: [操作]}, tasks: {任务: {actions, route}}}`。推送按键合并，值为 `null` 的删掉；新快照开始时先暂存，`live` 时换上。`route` 是这个任务的消息此刻会去哪：`{to: run | reply | workpad, run?, stage?, version?, why?}`；运行的操作里有 `steer`、`interrupt`、`allow_run`。
@@ -196,7 +196,7 @@ tend journal verify [--json] | repair [-y]
 - **机器页**（`g m`）：
   - 页头一行摘要：几台（退役的不算）、几台在线、在线机器的运行位在用 / 总数、排队数；「全部检查」（有在线的机器时：`machine.check{}`，检查中按钮不可点，回来后提示检查了几台，探不了的每台一条提示）和「添加机器」。
   - 机器按「我的机器 / 分享给我的（点名分享，或分享给我在的项目）/ 其他人的」分组，没有主人的算我的。每台一张卡片：状态、怎么连上的（`via`：本机、ssh、连入服务器）、运行位条和排队数、系统、tend 版本、装了的 agent CLI，和最要紧的一条提示：退役（主人已停用）、连不上的原因、哪个 CLI 没登录（`agents.<名>.auth` 是 `missing`）、它的 tend 缺哪些节点 feature（`missing`，附 `tend hosts install` 更新）。
-  - 选中的机器（`j` / `k` / 方向键，或点卡片）：下面是它今天的泳道（每个运行位一行，同首页的 `Timeline`）；右栏写主人、连接（离线时带原因和下次重试的时间；连入服务器的节点离线时写明它自己重连，最多隔 60 秒，页面没有「立即重连」：协调器连不到它）、主机名、系统、tend、运行位、排队的运行（任务和为什么在等）、提示、每个 agent CLI（已装已登录 / 已装没登录 / 已装 / 没装和版本；标题后写多久前检查的（`checked_at`，每次重画时算），在线的机器旁边有「检查」：`machine.check{machine}`，探不了时提示原因）、分享给谁（人和项目，能否批准权限请求），主人或管理员看到「改分享」；它的节点 token（`GET /api/machines`：绑定的主机、创建和最近使用的时间），「换机」和「吊销」都先确认，退役机器的 token 只能吊销；名字对不上任何机器的 token 列在「还没接入的机器」里。`Enter` 或「看这台的运行」把运行页的机器筛选（`tend-runs-filter`）设成它，转到运行页。
+  - 选中的机器（`j` / `k` / 方向键，或点卡片）：下面是它今天的泳道（每个运行位一行，同首页的 `Timeline`）；右栏写主人、连接（离线时带原因和下次重试的时间；连入服务器的节点离线时写明它自己重连，最多隔 60 秒，页面没有「立即重连」：协调器连不到它）、主机名、系统、tend、运行位、排队的运行（任务和为什么在等）、提示、每个 agent CLI（已装已登录 / 已装没登录 / 已装 / 没装和版本；标题后写多久前检查的（`checked_at`，每次重画时算），在线的机器旁边有「检查」：`machine.check{machine}`，探不了时提示原因）、分享给谁（人和项目，能否批准权限请求），主人或管理员看到「改分享」和「停止接新运行」（`machine.drain`，不用确认；停着时换成「恢复接新运行」，卡片和右栏都提示「停止接新运行 · 谁 几点起」，排队的运行写「等机器恢复接新运行」，手机也看得到这条提示）；它的节点 token（`GET /api/machines`：绑定的主机、创建和最近使用的时间），「换机」和「吊销」都先确认，退役机器的 token 只能吊销；名字对不上任何机器的 token 列在「还没接入的机器」里。`Enter` 或「看这台的运行」把运行页的机器筛选（`tend-runs-filter`）设成它，转到运行页。
   - 改分享：先写信任声明（agent 以主人的账号跑，读主人 home 下的文件、用主人的 CLI 额度，提交的 committer 是主人），再选人、项目和权限请求（只能派发 / 也能批准，附说明），保存发 `machine.share`（整份替换）。
   - 添加机器：填机器名（`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`），`POST /api/machines {name}` 回 `{id, token, command}`；对话框用 `Secret` 显示 token 和命令，说明把 token 存进 `~/.config/tend/node-token` 再在那台机器上运行命令；关掉后 token 不再显示。新机器的主人是添加的人。服务器的错误码经 `apiText` 变成一句话（`api.<code>`，没有的写码本身）。
   - 手机上只看：分组的卡片列表，点一台占满整屏看它的事实（不含 token，不能检查）；添加、分享和 token 写明在电脑上管理。

@@ -12,6 +12,7 @@
 {"s":{"type":"push","id":2,"method":"snapshot","params":{"part":"tasks","items":{"t2":{"id":"t2","title":"Receipts","project":"p1","owner":"u_b","status":"backlog","rev":1,"created_at":"2026-09-29T09:00:00Z","updated_at":"2026-09-29T09:00:00Z"}}}}}
 {"s":{"type":"push","id":2,"method":"snapshot","params":{"part":"runs","items":{"r1":{"id":"r1","task":"t1","machine":"mba","agent":"fake","profile":{"name":"fake","provider":"fake"},"dir":"/w","project":"p1","dispatcher":"u_b","want":"run","seq":9,"state":"running","node_rev":1,"queued_at":"2026-09-29T09:00:00Z"}}}}}
 {"s":{"type":"push","id":2,"method":"snapshot","params":{"part":"shares","items":{"mba":{"machine":"mba","projects":["p1"],"approve":true}}}}}
+{"s":{"type":"push","id":2,"method":"snapshot","params":{"part":"drains","items":{}}}}
 {"s":{"type":"push","id":2,"method":"snapshot","params":{"part":"agent_defs","items":{"coder":{"name":"coder","provider":"claude","owner":"u_a","rev":1,"updated_at":"2026-09-29T09:00:00Z"}}}}}
 {"note":"affordances are the viewer's own; the store takes them without folding"}
 {"s":{"type":"push","id":2,"method":"snapshot","params":{"part":"affordances","items":{"runs":{"r1":["steer","answer","stop"]},"tasks":{"t1":{"actions":["stop","edit","message"],"route":{"to":"run","run":"r1","version":3}}}}}}}

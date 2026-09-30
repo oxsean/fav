@@ -37,6 +37,9 @@ func foldScenario() []journal.Envelope {
 	add(ev(task.EMachineShared, task.Share{Machine: "mba", Projects: []string{"p1"}, Approve: true}))
 	add(ev(task.EMachineShared, task.Share{Machine: "old", Users: []string{"u_b"}}))
 	add(ev(task.EMachineShared, task.Share{Machine: "old"}))
+	add(ev(task.EMachineDrained, task.DrainSet{Machine: "old", On: true, By: "u_a"}))
+	add(ev(task.EMachineDrained, task.DrainSet{Machine: "mba", On: true, By: "u_a"}))
+	add(ev(task.EMachineDrained, task.DrainSet{Machine: "old"}))
 	add(ev(task.ETaskCreated, task.Task{ID: "t1", Title: "x", Dir: "/w", Project: "p1", Owner: "u_b", Status: task.StatusTodo}))
 	add(ev(task.ETaskEdited, task.TaskEdit{ID: "t1", Title: ptr("y"), Brief: ptr("b")}))
 	add(ev(task.ERunQueued, task.Run{ID: "r1", Task: "t1", Machine: "mba", Agent: "fake", Profile: tend.AgentProfile{Name: "fake", Provider: "fake"},

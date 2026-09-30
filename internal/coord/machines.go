@@ -492,7 +492,7 @@ func (c *Coord) converge(ctx context.Context, m *machine) {
 			starting = append(starting, journal.NewEvent(task.ERunCanceled, task.RunRef{ID: r.ID, Reason: ReasonAccessRevoked}))
 			continue
 		}
-		if used >= c.slots(m.name) {
+		if used >= c.slots(m.name) || c.st.Drains[m.name] != nil {
 			break
 		}
 		if lack := missingFeatures(m.hello, runFeatures(r)); len(lack) > 0 {

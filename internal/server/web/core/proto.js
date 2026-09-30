@@ -122,6 +122,7 @@ export const methods = Object.freeze([
   'project.edit',
   'project.member',
   'machine.share',
+  'machine.drain',
   'task.start',
   'task.move',
   'agentdef.list',

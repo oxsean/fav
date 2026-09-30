@@ -245,6 +245,40 @@ test('machines: one is checked again and says when; every connected one is, and 
   eq(r.errors, [], 'errors');
 });
 
+test('machines: its owner stops it taking new runs and lets it take them again; the others only see it stopped', async () => {
+  const r = await team();
+  const root = await mount(app(r).vnode());
+  const t = words.t;
+  const aside = () => root.one('.mach-aside');
+  await click(root.find('.mach-card').find(c => c.one('b').textContent === 'mba'));
+  await r.srv.play('team-drain', {
+    async stop() { await click(buttonOf(aside(), t('mach.drain'))); },
+    async stopped() {
+      await settled();
+      await act(() => r.flush());
+      ok(root.find('.toast-text').some(x => x.textContent === words.f('mach.drained', 'mba')), 'said');
+      const note = words.f('mach.note.drain', 'Ann Lee', '14:33');
+      ok(aside().textContent.includes(note), 'the machine says since when and who: ' + aside().textContent);
+      ok(root.find('.mach-card').find(c => c.one('b').textContent === 'mba').textContent.includes(note), 'so does its card');
+      ok(aside().one('.mach-queue').textContent.includes(t('why.drain')), 'what waits there says why');
+      await click(buttonOf(aside(), t('mach.undrain')));
+    },
+    async resumed() {
+      await settled();
+      await act(() => r.flush());
+      ok(root.find('.toast-text').some(x => x.textContent === words.f('mach.undrained', 'mba')), 'said');
+      ok(!aside().textContent.includes(t('mach.undrain')) && buttonOf(aside(), t('mach.drain')), 'it can be stopped again');
+      ok(!aside().one('.mach-queue').textContent.includes(t('why.drain')), 'the queue waits for a slot again');
+    },
+  });
+  const other = await mount(app(r, {session: bo}).vnode());
+  await click(other.find('.mach-card').find(c => c.one('b').textContent === 'mba'));
+  eq(other.one('.mach-aside').find('button').filter(b => [t('mach.drain'), t('mach.undrain')].includes(labelOf(b))).length, 0, 'nobody else stops it');
+  await click(root.find('.mach-card').find(c => c.one('b').textContent === 'old-box'));
+  eq(aside().find('button').filter(b => labelOf(b) === t('mach.drain')).length, 0, 'a retired machine runs nothing anyway');
+  eq(r.errors, [], 'errors');
+});
+
 test('machines: a machine added shows its token once; a node token is moved and revoked after a confirm', async () => {
   const r = await team();
   const http = fakeHTTP();

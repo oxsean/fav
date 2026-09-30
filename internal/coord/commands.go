@@ -132,7 +132,7 @@ var readMethods = []string{remote.MHello, remote.MList, remote.MMessages, remote
 // Methods are the client methods.
 var Methods = []string{MStateGet, MTaskGet, MTaskCreate, MTaskEdit, MTaskStatus, MTaskUndo, MRunDispatch, MRunStop, MRunAbandon, MRunTail, MRunOutputPage, MRunOutputWatch,
 	MAgentList, MMachineList, MMachineCheck, MStateWatch, MNodeCall, MRunPreview, MRunContinue, MRunAnswer, MRunSend, MRunMessages,
-	MProjectCreate, MProjectEdit, MProjectMember, MMachineShare, MTaskStart, MTaskMove,
+	MProjectCreate, MProjectEdit, MProjectMember, MMachineShare, MMachineDrain, MTaskStart, MTaskMove,
 	MAgentDefList, MAgentDefGet, MAgentDefSave, MAgentDefRemove, MAgentDefShare, MInboxList, MUserOffboard, MTaskSync, MTaskLink, MTaskSourceAck, MTaskGate, MTaskMerge, MTaskPlan, MTaskPlanSave, MTaskPlanApply, MTaskMessage, MTaskMessagePreview, MRunInterrupt, MMachinesWatch, MInboxWatch,
 	MRunOutputItem, MRunOutputFind, MRunChanges, MRunDiff, MRunBlob, MProjectDirs}
 
@@ -326,6 +326,8 @@ func (c *Coord) HandlerFor(p Principal) wire.Handler {
 			return c.command(p, r, c.projectMember, projectView)
 		case MMachineShare:
 			return c.command(p, r, c.machineShare, shareView)
+		case MMachineDrain:
+			return c.command(p, r, c.machineDrain, drainView)
 		}
 		return nil, &wire.Error{Code: wire.CodeUnknownMethod, Detail: r.Method}
 	}

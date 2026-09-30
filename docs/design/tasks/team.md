@@ -84,7 +84,7 @@
 
 **不在项目里的人看不到这个项目的任何东西**：任务、run、输出、会话、用量、工单关联，也不会知道这些对象是否存在（问起来一律 `not_found`）。
 
-项目、成员和机器分享是事件（`project_created`、`project_edited`、`member_set`、`machine_shared`），由 `task.State` 折叠，两种模式相同。任务记下创建人 `Task.Owner`；不属于任何项目的任务只有它的创建人和管理员看得到。机器页列出每台机器的主人和分享对象，主人和管理员在那里分享。
+项目、成员、机器分享和停止接新运行是事件（`project_created`、`project_edited`、`member_set`、`machine_shared`、`machine_drained`），由 `task.State` 折叠，两种模式相同。任务记下创建人 `Task.Owner`；不属于任何项目的任务只有它的创建人和管理员看得到。机器页列出每台机器的主人和分享对象，主人和管理员在那里分享，也在那里让它停止接新运行（`machine.drain`）。
 
 **怎么做到不能绕过**：
 

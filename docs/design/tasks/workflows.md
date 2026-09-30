@@ -62,7 +62,7 @@ max_loops: 2
 - `Situation{kind, reason, run}` 由 `task.State.Situation` 推导，网页的 `core/fold.js` 逐条照搬：
   - `backlog`：还没开始，不算在不变式里，也不派发。
   - `running`：有未结束的 run。
-  - `queued`：会自己往下走：`after`（前置任务没完成）、`children`（子任务没完成）、`slot`（run 在等机器接手：离线、连接中或并发槽满）、`dir`（同一台机器上另一个不在自己分支或副本上的 run 正在这个目录里跑；判断用的是 run 记下的目录，映射后不同就算作 `slot`）、`ready`（协调器马上派发）、`completing`（run 成功，协调器马上标完成）；workflow 的 `advance`、`rework`、`stale` 见下文「实现」。
+  - `queued`：会自己往下走：`after`（前置任务没完成）、`children`（子任务没完成）、`drain`（run 的机器停止接新运行，见 [../runs/coordinator.md](../runs/coordinator.md)「调度与对账」；先于 `dir` 判断）、`slot`（run 在等机器接手：离线、连接中或并发槽满）、`dir`（同一台机器上另一个不在自己分支或副本上的 run 正在这个目录里跑；判断用的是 run 记下的目录，映射后不同就算作 `slot`）、`ready`（协调器马上派发）、`completing`（run 成功，协调器马上标完成）；workflow 的 `advance`、`rework`、`stale` 见下文「实现」。
   - `waiting`：要有人动手：`accept`（子任务全部完成等验收，或在人工闸门）、`dispatch`（没开始、也没人派发）、`after_canceled`、`held`（协调器派不出去，`held` 字段写原因）、`ended`（手动派发的 run 正常结束，等人标完成），以及 run 的 `asked`、`permission`、`unknown`、`failed` 等结束原因；workflow 的 `max_loops`、`blocked`、`budget`，拆解的 `draft`、`no_plan`（[planning.md](planning.md)「实现」），合并的 `merge_conflict`（[execution.md](execution.md)「实现」），需求的 `source_changed`、`source_closed`（[trackers.md](trackers.md)「导入与需求快照」）。
 - **开始**：`task.start` 把任务和它整棵子树里未完成的任务标为自动（`auto`，记下 `start_seq`），backlog 的变成 todo。之后由协调器的 `flow()` 在每次提交后推进：`ready` 的以任务主人的身份派发（照常走权限和可见性检查），失败就写 `task_held`；`completing` 的写成 done。没开始的任务照旧手动派发，`waiting: dispatch` 是它们的常态，不进收件箱也不发通知。
 - **依赖**：上游 `done` 才算满足；有分支的任务合进父任务的集成分支之后才写 done（见 [execution.md](execution.md)「实现」）。上游被取消，下游进 `waiting: after_canceled`，由人决定改依赖还是取消。

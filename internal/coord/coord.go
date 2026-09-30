@@ -62,6 +62,7 @@ const (
 	MProjectEdit        = "project.edit"
 	MProjectMember      = "project.member"
 	MMachineShare       = "machine.share"
+	MMachineDrain       = "machine.drain" // a machine takes no new runs, or takes them again (task.DrainSet)
 	MTaskStart          = "task.start"
 	MTaskSync           = "task.sync"
 	MTaskLink           = "task.link"

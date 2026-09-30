@@ -1,0 +1,10 @@
+{"note":"mba's owner stops it taking new runs (r4 stays queued), then lets it take them again"}
+{"step":"stop"}
+{"c":{"type":"req","id":5,"method":"machine.drain","command_id":"c1","params":{"machine":"mba","on":true}}}
+{"s":{"type":"res","id":5,"result":{"machine":"mba","by":"u_a","at":"2026-09-30T14:33:00Z"}}}
+{"s":{"type":"push","id":2,"method":"journal","params":{"v":2,"seq":41,"at":"2026-09-30T14:33:00Z","actor":{"kind":"user","id":"u_a"},"command":{"id":"c1","method":"machine.drain"},"events":[{"type":"machine_drained","data":{"machine":"mba","on":true,"by":"u_a"}}]}}}
+{"step":"stopped"}
+{"c":{"type":"req","id":6,"method":"machine.drain","command_id":"c2","params":{"machine":"mba","on":false}}}
+{"s":{"type":"res","id":6,"result":{"machine":"mba"}}}
+{"s":{"type":"push","id":2,"method":"journal","params":{"v":2,"seq":42,"at":"2026-09-30T14:34:00Z","actor":{"kind":"user","id":"u_a"},"command":{"id":"c2","method":"machine.drain"},"events":[{"type":"machine_drained","data":{"machine":"mba"}}]}}}
+{"step":"resumed"}

@@ -193,6 +193,37 @@ func (c *Coord) machineShare(who Principal, r *wire.Request) (string, []journal.
 	return p.Machine, []journal.Event{journal.NewEvent(task.EMachineShared, p)}, nil
 }
 
+// machineDrain is machine.drain: its owner or an admin stops the machine taking new runs, or lets it take them again.
+func (c *Coord) machineDrain(who Principal, r *wire.Request) (string, []journal.Event, error) {
+	var p task.DrainSet
+	if err := r.Decode(&p); err != nil {
+		return "", nil, err
+	}
+	if c.ms[p.Machine] == nil || !c.canSee(who, p.Machine) {
+		return "", nil, notFound("machine " + p.Machine)
+	}
+	if !who.Admin && c.ownerOf(p.Machine) != who.User {
+		return "", nil, forbidden("machine " + p.Machine)
+	}
+	if (c.st.Drains[p.Machine] != nil) == p.On {
+		return p.Machine, nil, nil
+	}
+	p.By = ""
+	if p.On {
+		p.By = who.User
+	}
+	return p.Machine, []journal.Event{journal.NewEvent(task.EMachineDrained, p)}, nil
+}
+
+// drainView answers machine.drain: the drain, or only the machine when it takes runs.
+func drainView(st *task.State, machine string) any {
+	if d := st.Drains[machine]; d != nil {
+		cp := *d
+		return &cp
+	}
+	return &task.Drain{Machine: machine}
+}
+
 // runMessages is a page of run's conversation, for whoever may read the run: its session, not any of the machine's.
 func (c *Coord) runMessages(ctx context.Context, who Principal, r *wire.Request) (any, error) {
 	var p RunMessages

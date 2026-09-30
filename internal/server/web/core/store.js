@@ -6,7 +6,7 @@ import * as fold from './fold.js';
 import {code} from './proto.js';
 
 // tables are task.State's maps by their JSON names: what state.watch's snapshot parts carry.
-export const tables = ['tasks', 'runs', 'projects', 'shares', 'agent_defs'];
+export const tables = ['tasks', 'runs', 'projects', 'shares', 'drains', 'agent_defs'];
 
 // ⚠️ What the viewer may do, computed per viewer by the coordinator (T3.3): a snapshot part and a push of the same
 // shape, {runs: {id: [action]}, tasks: {id: {actions, route}}}, never folded from the journal.
@@ -23,7 +23,7 @@ export const FIND_ROUNDS = 8;
 // fileOf is the log an event id is in: the id is file:off:n and the file (dev:ino) has colons of its own.
 export const fileOf = id => String(id).split(':').slice(0, -2).join(':');
 
-const empty = () => ({seq: 0, tasks: {}, runs: {}, projects: {}, shares: {}, agent_defs: {}});
+const empty = () => ({seq: 0, tasks: {}, runs: {}, projects: {}, shares: {}, drains: {}, agent_defs: {}});
 
 // mergeAff puts what a push or a part says of each run and task into into; null takes one out.
 function mergeAff(into, p) {

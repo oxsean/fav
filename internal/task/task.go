@@ -285,12 +285,13 @@ type State struct {
 	Runs      map[string]*Run      `json:"runs"`
 	Projects  map[string]*Project  `json:"projects"`
 	Shares    map[string]*Share    `json:"shares"`               // by machine
+	Drains    map[string]*Drain    `json:"drains"`               // by machine
 	AgentDefs map[string]*AgentDef `json:"agent_defs,omitempty"` // mode 2; mode 1 keeps them in files
 }
 
 func New() *State {
 	return &State{Tasks: map[string]*Task{}, Runs: map[string]*Run{}, Projects: map[string]*Project{}, Shares: map[string]*Share{},
-		AgentDefs: map[string]*AgentDef{}}
+		Drains: map[string]*Drain{}, AgentDefs: map[string]*AgentDef{}}
 }
 
 // The tables of a snapshot of the state, by their JSON names; PartAffordances is the viewer's own and not folded.
@@ -299,6 +300,7 @@ const (
 	PartTasks       = "tasks"
 	PartRuns        = "runs"
 	PartShares      = "shares"
+	PartDrains      = "drains"
 	PartAgentDefs   = "agent_defs"
 	PartAffordances = "affordances"
 )
@@ -314,6 +316,8 @@ func (s *State) Take(part string, items map[string]json.RawMessage) error {
 		return take(s.Runs, items)
 	case PartShares:
 		return take(s.Shares, items)
+	case PartDrains:
+		return take(s.Drains, items)
 	case PartAgentDefs:
 		return take(s.AgentDefs, items)
 	case PartAffordances:
@@ -340,6 +344,9 @@ func (s *State) Apply(env journal.Envelope) error {
 	}
 	if s.Shares == nil {
 		s.Shares = map[string]*Share{}
+	}
+	if s.Drains == nil {
+		s.Drains = map[string]*Drain{}
 	}
 	if s.AgentDefs == nil {
 		s.AgentDefs = map[string]*AgentDef{}

@@ -110,6 +110,7 @@ var methodAccess = map[string]access{
 	MProjectEdit:        writer,
 	MProjectMember:      writer,
 	MMachineShare:       writer,
+	MMachineDrain:       writer, // its owner or an admin (machineDrain)
 }
 
 func forbidden(what string) error { return &wire.Error{Code: wire.CodeUnauthorized, Detail: what} }
@@ -281,6 +282,11 @@ func (c *Coord) visibleState(p Principal, st *task.State) *task.State {
 			delete(st.Shares, m)
 		}
 	}
+	for m := range st.Drains {
+		if !c.canSee(p, m) {
+			delete(st.Drains, m)
+		}
+	}
 	for name, d := range st.AgentDefs {
 		if !c.readsDef(p, d) {
 			delete(st.AgentDefs, name)
@@ -317,7 +323,7 @@ func (c *Coord) sees(p Principal, e journal.Event) bool {
 		return p.Admin || c.st.Projects[s.ID].Role(p.User) != ""
 	case task.EMemberSet:
 		return p.Admin || c.st.Projects[s.Project].Role(p.User) != ""
-	case task.EMachineShared:
+	case task.EMachineShared, task.EMachineDrained:
 		return c.canSee(p, s.Machine)
 	case task.ETaskMoved, task.ETaskHeld, task.ETaskSourced, task.ETaskSourceAcked, task.ETaskStaged, task.ETaskNoted,
 		task.ETaskLinked, task.EPlanDrafted, task.EPlanApplied:

@@ -111,12 +111,27 @@ func (s *Share) Opens(user, project string) bool {
 	return s != nil && (slices.Contains(s.Users, user) || project != "" && slices.Contains(s.Projects, project))
 }
 
+// Drain is a machine that takes no new runs while those it has finish.
+type Drain struct {
+	Machine string    `json:"machine"`
+	By      string    `json:"by,omitempty"`
+	At      time.Time `json:"at,omitzero"`
+}
+
+// DrainSet is machine.drain, and its event: On drains Machine, off takes it back.
+type DrainSet struct {
+	Machine string `json:"machine"`
+	On      bool   `json:"on,omitempty"`
+	By      string `json:"by,omitempty"`
+}
+
 // Team events.
 const (
 	EProjectCreated = "project_created"
 	EProjectEdited  = "project_edited"
 	EMemberSet      = "member_set"
 	EMachineShared  = "machine_shared"
+	EMachineDrained = "machine_drained"
 )
 
 type ProjectEdit struct {
@@ -218,6 +233,16 @@ func (s *State) applyTeam(e journal.Event, at time.Time) (bool, error) {
 			delete(s.Shares, d.Machine)
 		} else {
 			s.Shares[d.Machine] = &d
+		}
+	case EMachineDrained:
+		var d DrainSet
+		if err := json.Unmarshal(e.Data, &d); err != nil {
+			return true, err
+		}
+		if d.On {
+			s.Drains[d.Machine] = &Drain{Machine: d.Machine, By: d.By, At: at}
+		} else {
+			delete(s.Drains, d.Machine)
 		}
 	default:
 		return false, nil

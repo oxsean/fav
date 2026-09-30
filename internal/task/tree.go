@@ -186,6 +186,7 @@ const (
 	WhyAfter         = "after"          // queued: tasks it comes after are not done
 	WhyChildren      = "children"       // queued: its subtasks are not done
 	WhySlot          = "slot"           // queued: its run waits for its machine or a slot
+	WhyDrain         = "drain"          // queued: its run's machine takes no new runs
 	WhyDir           = "dir"            // queued: another run of the same machine works in its directory
 	WhyReady         = "ready"          // queued: the coordinator dispatches it next
 	WhyCompleting    = "completing"     // queued: its run succeeded; the coordinator marks it done next
@@ -224,6 +225,8 @@ func (s *State) Situation(t *Task) Situation {
 	}
 	if r := s.OpenRun(t.ID); r != nil {
 		switch {
+		case r.State == Queued && s.Drains[r.Machine] != nil:
+			return Situation{Kind: SitQueued, Reason: WhyDrain, Run: r.ID}
 		case r.State == Queued && s.dirHeld(r):
 			return Situation{Kind: SitQueued, Reason: WhyDir, Run: r.ID}
 		case r.State == Queued:

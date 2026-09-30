@@ -43,12 +43,14 @@ export const agentChecks = m => Object.entries(m.agents || {}).sort(([a], [b]) =
   state: !c.installed ? 'missing' : c.auth === authOK ? 'ok' : c.auth === authMissing ? 'auth' : 'unknown',
 }));
 
-// machineNotes are what is wrong with a machine, worst first: retired, why it cannot be reached, the agent CLIs not
-// signed in, the node features its tend lacks. Each is {kind, …} for the page to word.
-export function machineNotes(m) {
+// machineNotes are what is wrong with a machine, worst first: retired, why it cannot be reached, that it takes no new
+// runs (drain: its entry in the state's drains), the agent CLIs not signed in, the node features its tend lacks. Each
+// is {kind, …} for the page to word.
+export function machineNotes(m, drain) {
   const out = [];
   if (m.retired) return [{kind: 'retired'}];
   if (m.error && m.state !== 'connected') out.push({kind: 'error', error: m.error, detail: m.detail || ''});
+  if (drain) out.push({kind: 'drain', by: drain.by || '', at: drain.at || ''});
   const unsigned = agentChecks(m).filter(c => c.state === 'auth').map(c => c.name);
   if (unsigned.length) out.push({kind: 'auth', agents: unsigned});
   if (m.missing?.length) out.push({kind: 'missing', features: m.missing});

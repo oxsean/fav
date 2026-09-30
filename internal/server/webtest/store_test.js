@@ -31,11 +31,11 @@ test('state.watch: snapshot parts, live, envelopes, reset', async () => {
     },
   });
   flush();
-  eq(before, {phase: 'snapshot', tasks: [], revs: {tasks: 0, runs: 0, projects: 0, shares: 0, agent_defs: 0}}, 'while the parts arrive');
+  eq(before, {phase: 'snapshot', tasks: [], revs: {tasks: 0, runs: 0, projects: 0, shares: 0, drains: 0, agent_defs: 0}}, 'while the parts arrive');
   eq(live, {phase: 'live', seq: 13, tasks: ['t1', 't2', 't3'], title: 'Pay timeout on retry', r1: 'go test ./...',
-    revs: {tasks: 1, runs: 1, projects: 1, shares: 1, agent_defs: 1},
+    revs: {tasks: 1, runs: 1, projects: 1, shares: 1, drains: 1, agent_defs: 1},
     machines: [{name: 'mba', state: 'connected', slots: 2, active: 1, queued: 0}], inbox: [{task: 't1', reason: 'dispatch'}]}, 'live');
-  eq(revs(), {tasks: 2, runs: 2, projects: 2, shares: 2, agent_defs: 2}, 'versions after the reset');
+  eq(revs(), {tasks: 2, runs: 2, projects: 2, shares: 2, drains: 2, agent_defs: 2}, 'versions after the reset');
   eq(errors, [], 'errors');
   return {live: atLive, final: store.state};
 });
@@ -48,7 +48,7 @@ test('versions go up once a frame, for the tables an envelope touched', async ()
     parts() {},
     live() { seen.push(revs()); flush(); seen.push(revs()); },
   });
-  eq(seen, [{tasks: 0, runs: 0, projects: 0, shares: 0, agent_defs: 0}, {tasks: 1, runs: 1, projects: 1, shares: 1, agent_defs: 1}], 'one bump for the snapshot and all envelopes of the frame');
+  eq(seen, [{tasks: 0, runs: 0, projects: 0, shares: 0, drains: 0, agent_defs: 0}, {tasks: 1, runs: 1, projects: 1, shares: 1, drains: 1, agent_defs: 1}], 'one bump for the snapshot and all envelopes of the frame');
 });
 
 test('no_briefs: a brief is fetched when asked for; the watch resumes after the applied seq', async () => {

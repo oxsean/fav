@@ -322,13 +322,19 @@ func (c *Coord) defAnswer(p Principal) func(*task.State, string) any {
 	}
 }
 
-// preferred is the first machine d prefers that is connected, else the first it prefers. The caller holds mu.
+// preferred is the first machine d prefers that is connected and takes new runs, else the first that takes them,
+// else the first it prefers. The caller holds mu.
 func (c *Coord) preferred(d *task.AgentDef) string {
 	if d == nil {
 		return ""
 	}
 	for _, m := range d.Machines.Prefer {
-		if x := c.ms[m]; x != nil && x.conn != nil {
+		if x := c.ms[m]; x != nil && x.conn != nil && c.st.Drains[m] == nil {
+			return m
+		}
+	}
+	for _, m := range d.Machines.Prefer {
+		if c.st.Drains[m] == nil {
 			return m
 		}
 	}

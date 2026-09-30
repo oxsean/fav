@@ -61,7 +61,7 @@ run `state` 转移表（终态单调，重复事件无副作用）：
 
 ## 事件
 
-`task_created` `task_edited` `task_status_set` `task_restored{id, status, auto, start_seq, merged, stage, loops, stage_seq, stages, parent, after, held}`（撤销：逐项放回） `run_queued` `run_starting` `run_observed{state, exit_code, reason, detail, attention, ask, note, last, usage, stream, requests, sends, caps, doing, turn, session, node_rev}` `run_stop_requested` `run_canceled` `run_abandoned` `run_answered{id, answer}` `run_sent{id, send}` `run_interrupt_requested{id, turn, ask, by}`。
+`task_created` `task_edited` `task_status_set` `task_restored{id, status, auto, start_seq, merged, stage, loops, stage_seq, stages, parent, after, held}`（撤销：逐项放回） `machine_drained{machine, on, by}` `run_queued` `run_starting` `run_observed{state, exit_code, reason, detail, attention, ask, note, last, usage, stream, requests, sends, caps, doing, turn, session, node_rev}` `run_stop_requested` `run_canceled` `run_abandoned` `run_answered{id, answer}` `run_sent{id, send}` `run_interrupt_requested{id, turn, ask, by}`。
 
 - `run_observed` 带节点的 `requests` 整体覆盖；`sends` 按 id 合并（节点说的为准，协调器排着的保留）；`answers` 里请求已不在 `requests` 的删掉（节点取走了，或不再等）。run 结束时 `requests`、`answers` 清空，还是 queued 的消息改 failed，但有会话时 `after`、`interrupt` 方式的留着（见下面「续接」）。
 - `run_queued` 带 `takes` 时，父运行里这些消息改 sent。`run_answered` 替换同一请求之前的回答。`run_sent` 的 id 已有时只改它的 `state`（协调器宣布留着的消息失败）。`run_interrupt_requested` 只在 run 未结束时记进 `Run.interrupt`（最新的一次）。
@@ -77,7 +77,8 @@ run `state` 转移表（终态单调，重复事件无副作用）：
 ## 调度与对账
 
 - 协调器循环：启动时、节点 `node.changed`、每 5 s。
-- 派发：机器已连上且没超过并发上限（`machines.<名>.slots`，默认 2）、目录不冲突 → `run_starting` → `run.start{spec}`（`command_id` = run id）。
+- 派发：机器已连上、没停止接新运行、没超过并发上限（`machines.<名>.slots`，默认 2）、目录不冲突 → `run_starting` → `run.start{spec}`（`command_id` = run id）。
+- 停止接新运行：`machine.drain{machine, on}`，机器主人或管理员（看不见这台的回 `not_found`，看得见不是主人的回 `unauthorized`），写 `machine_drained{machine, on, by}`，状态里 `drains{机器: {machine, by, at}}`，关掉时删掉这一项；和现状一样时不写事件。停着的机器不派发排队的运行（续接、下一阶段也是新运行，一样等），已经 starting / running 的照常跑完，starting 的照常重发；往它派发照样排队，`run.preview` 多一条 note `drain`（`detail` 是停的人），任务的处境是 `queued{drain}`；定义按 `machines.prefer` 挑机器时跳过停着的。只在协调器上生效，节点不知道，旧节点不受影响。看得见机器（`canSee`）的人看得见它停着。
 - 对账：连上节点或每 5 s，对「有未结束 run、有待 ack 的 run、或有还在节点上跑的 abandoned run」的机器调 `run.list{coordinator, ack, runs}`，按 `node_rev` 差分，生成 `run_observed`。`runs` 只列协调器还关心的 run（这台机器上没 ack 的：未结束、abandoned、没有结束时间、或结束不到 7 天）；一个都没有时发 `["-"]`（不匹配任何 run），旧节点忽略它、照旧全列。每个节点调用各自 20 s 超时；超时只记错误，不断连接。
 - 节点拒绝启动（`conflict`，detail 以 `dir_busy <run>` 或 `slots n/m` 开头，见 [node.md](node.md)「run 目录」）不算失败：run 留在 starting，10 s 后重发。
 - 回答和消息：
@@ -97,11 +98,11 @@ run `state` 转移表（终态单调，重复事件无副作用）：
 
 ## 订阅
 
-- `state.get` 返回整份状态 `{seq, tasks, runs, projects, shares, agent_defs}`，给一次性读取（CLI）；`no_briefs` 去掉任务书，任务书按需 `task.get`；编辑一律先 `task.get`。
+- `state.get` 返回整份状态 `{seq, tasks, runs, projects, shares, drains, agent_defs}`，给一次性读取（CLI）；`no_briefs` 去掉任务书，任务书按需 `task.get`；编辑一律先 `task.get`。
 - `state.watch{after_seq?, no_briefs?}` 是一个流（[wire.md](wire.md)「流」），跟随状态的客户端（TUI、Web UI、CLI 的 `--wait`）都用它，流在 `ClassState` 一级：
   - 锁内登记实时通道并记下日志的尾 seq H；锁外决定怎么开始，再接上实时通道，丢掉 seq ≤ 已发出部分的。
   - 能续传就续传：带 `after_seq`、它不超过 H、`(after_seq, H]` 不多于 `maxReplay`（10000）条、其中没有 `reshapes` 的事件。推 `open{mode: resume}`，回放这一段，再接实时信封。
-  - 否则推 `open{mode: snapshot}`，然后按表推 `snapshot{part, items}`（`part` 是 `task.State` 的 JSON 名：`projects`、`tasks`、`runs`、`shares`、`agent_defs`，`items` 按 id；每批不超过 `snapshotBatch`（1 MiB），每张表至少推一次，空表也推），接着是 `affordances` 这个 part（这个人能做的事，见下面「能做什么、等谁」），最后 `live{seq}`，之后是实时信封。
+  - 否则推 `open{mode: snapshot}`，然后按表推 `snapshot{part, items}`（`part` 是 `task.State` 的 JSON 名：`projects`、`tasks`、`runs`、`shares`、`drains`、`agent_defs`，`items` 按 id；每批不超过 `snapshotBatch`（1 MiB），每张表至少推一次，空表也推），接着是 `affordances` 这个 part（这个人能做的事，见下面「能做什么、等谁」），最后 `live{seq}`，之后是实时信封。
   - 实时信封是 `journal`，按人过滤（`visibleEnv`），每个 seq 都到，没有可见事件时是空的。`reshapes` 的信封不单独推：推 `reset{}`，接着推新的快照和 `live`，这个信封只体现在新快照里。所以客户端的副本停在它的 seq 上时一定是它之后做的快照，断线续传不会跳过撤权。
   - 推送用 `PushWait`：客户端读得慢时协调器等，不丢；实时通道积压超过 `stateQueue`（256）条，流以 `lagged` 结束，客户端按自己的 seq 重开。协调器关闭时流以 `gone` 结束。常数在 `internal/coord/limits.go`。
   - 每推一个实时信封之后，协调器为它碰到的任务（`touched`：提交时、事件折叠之前算好，随信封交给每个流；包括事件点名的任务和它的父任务，新建、移动、撤销移动的还有事件里的新父任务，移动和撤销移动的还有它下面的整棵子树，因为深度变了）和这些任务的运行，按这个人重算 `affordances`，只推变了的：`affordances{runs: {id: [动作] | null}, tasks: {id: {actions, route} | null}}`，`null` 是这一项没了（没有可做的也算没了）。每个流记着自己发过什么。续传的流在回放之后推一次全量（看得见的每一项，空的推 `null`），因为不知道客户端手里的那份。`affordances` 不经 journal 折叠，也不带 seq。

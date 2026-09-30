@@ -33,7 +33,7 @@ func TestTheWebFramesOfferWhatTheCoordinatorOffers(t *testing.T) {
 			parts, want := framedState(t, name)
 			e.c.mu.Lock()
 			for part, items := range parts {
-				table := map[string]any{"tasks": &e.c.st.Tasks, "runs": &e.c.st.Runs, "projects": &e.c.st.Projects, "shares": &e.c.st.Shares,
+				table := map[string]any{"tasks": &e.c.st.Tasks, "runs": &e.c.st.Runs, "projects": &e.c.st.Projects, "shares": &e.c.st.Shares, "drains": &e.c.st.Drains,
 					"agent_defs": &e.c.st.AgentDefs}[part]
 				if err := json.Unmarshal(items, table); err != nil {
 					t.Fatal(part, err)
@@ -276,7 +276,7 @@ func replayAgentFrames(t *testing.T, c *Coord, name string) {
 			}
 			json.Unmarshal(l.S.Params, &p)
 			st := c.visibleState(bo, c.state(true))
-			table := map[string]any{"projects": st.Projects, "tasks": st.Tasks, "runs": st.Runs, "shares": st.Shares, "agent_defs": st.AgentDefs}[p.Part]
+			table := map[string]any{"projects": st.Projects, "tasks": st.Tasks, "runs": st.Runs, "shares": st.Shares, "drains": st.Drains, "agent_defs": st.AgentDefs}[p.Part]
 			same(at+" "+p.Part, table, p.Items)
 		case l.S != nil && l.S.ID == 2 && l.S.Method == "live":
 			same(at, map[string]int64{"seq": c.st.Seq}, l.S.Params)

@@ -224,6 +224,10 @@ function applyEvent(s, e, at, seq) {
       if (!(d.users || []).length && !(d.projects || []).length) delete s.shares[d.machine];
       else s.shares[d.machine] = d;
       break;
+    case 'machine_drained':
+      if (d.on) s.drains[d.machine] = {machine: d.machine, ...(d.by ? {by: d.by} : {}), at};
+      else delete s.drains[d.machine];
+      break;
     default: // an event this page does not know yet: only the seq moves on
   }
 }
@@ -238,12 +242,12 @@ const parts = {
   run_canceled: ['runs'], run_abandoned: ['runs'], run_answered: ['runs'], run_sent: ['runs'], run_interrupt_requested: ['runs'],
   project_created: ['projects'], project_edited: ['projects'], member_set: ['projects'],
   agentdef_saved: ['agent_defs'], agentdef_removed: ['agent_defs'], agentdef_shared: ['agent_defs'],
-  machine_shared: ['shares'],
+  machine_shared: ['shares'], machine_drained: ['drains', 'tasks'],
 };
 
 // apply folds env into s (which it changes) and returns s.
 function apply(s, env) {
-  s.tasks ||= {}; s.runs ||= {}; s.projects ||= {}; s.shares ||= {}; s.agent_defs ||= {};
+  s.tasks ||= {}; s.runs ||= {}; s.projects ||= {}; s.shares ||= {}; s.drains ||= {}; s.agent_defs ||= {};
   for (const e of env.events || []) applyEvent(s, e, env.at, env.seq);
   s.seq = env.seq;
   return s;
@@ -362,7 +366,7 @@ function situation(s, t) {
   const runs = Object.values(s.runs).filter(r => r.task === t.id);
   const open = runs.find(r => openStates.has(r.state));
   if (open) {
-    if (open.state === 'queued') return {kind: 'queued', reason: dirHeld(s, open) ? 'dir' : 'slot', run: open.id};
+    if (open.state === 'queued') return {kind: 'queued', reason: s.drains?.[open.machine] ? 'drain' : dirHeld(s, open) ? 'dir' : 'slot', run: open.id};
     if (open.attention === 'asked' || open.attention === 'permission') return {kind: 'waiting', reason: open.attention, run: open.id};
     if (open.state === 'unknown') return {kind: 'waiting', reason: 'unknown', run: open.id};
     return {kind: 'running', reason: open.state, run: open.id};

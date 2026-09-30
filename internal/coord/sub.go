@@ -172,7 +172,7 @@ func (c *Coord) snapshot(ctx context.Context, s *wire.Stream, sb *sub, noBriefs 
 		items map[string]any
 	}{
 		{task.PartProjects, anyMap(st.Projects)}, {task.PartTasks, anyMap(st.Tasks)}, {task.PartRuns, anyMap(st.Runs)},
-		{task.PartShares, anyMap(st.Shares)}, {task.PartAgentDefs, anyMap(st.AgentDefs)},
+		{task.PartShares, anyMap(st.Shares)}, {task.PartDrains, anyMap(st.Drains)}, {task.PartAgentDefs, anyMap(st.AgentDefs)},
 	}
 	for _, part := range parts {
 		batch, size := map[string]json.RawMessage{}, 0

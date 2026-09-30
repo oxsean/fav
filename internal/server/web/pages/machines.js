@@ -42,6 +42,9 @@ register('machines', {
   'mach.checkFailed': ['%s 检查不了：%s', '%s cannot be checked: %s'],
   'mach.checkWhy.unsupported': ['它的 tend 太旧，没有这个检查', 'its tend is too old for this check'],
   'mach.checkWhy.offline': ['它不在线', 'it is offline'], 'mach.checkWhy.timeout': ['节点没有及时回答', 'its node did not answer in time'],
+  'mach.drain': ['停止接新运行', 'Stop new runs'], 'mach.undrain': ['恢复接新运行', 'Take new runs again'],
+  'mach.drained': ['%s 停止接新运行：在跑的会跑完', '%s takes no new runs: those running finish'], 'mach.undrained': ['%s 恢复接新运行', '%s takes new runs again'],
+  'mach.note.drain': ['停止接新运行 · %s %s 起', 'Takes no new runs · %s since %s'],
   'mach.redials': ['节点断线后自己重连，最多隔 60 秒', 'its node dials in again by itself, within a minute'],
   'mach.cli.ok': ['已装 · 已登录', 'installed · signed in'], 'mach.cli.auth': ['已装 · 没登录', 'installed · not signed in'],
   'mach.cli.unknown': ['已装', 'installed'], 'mach.cli.missing': ['没装', 'not installed'],
@@ -80,8 +83,9 @@ register('machines', {
 const stateWord = (w, m) => (m.retired ? w.t('mach.retired') : w.has('mach.state.' + m.state) ? w.t('mach.state.' + m.state) : m.state);
 const viaWord = (w, m) => (m.via ? (w.has('mach.via.' + m.via) ? w.t('mach.via.' + m.via) : m.via) : '');
 
-function noteText(w, n) {
+function noteText(w, n, name) {
   if (n.kind === 'retired') return w.t('mach.note.retired');
+  if (n.kind === 'drain') return w.f('mach.note.drain', n.by ? name(n.by) : '—', n.at ? clock(n.at) : '');
   if (n.kind === 'error') return w.f('mach.note.error', n.detail || n.error);
   if (n.kind === 'auth') return w.f('mach.note.auth', n.agents.join(', '));
   return w.f('mach.note.missing', n.features.join(', '));
@@ -97,23 +101,24 @@ function SlotBar({m}) {
   return html`<span class="mach-bar" aria-hidden="true">${Array.from({length: n}, (_, i) => html`<span class=${cx(i < (m.active || 0) && 'used')}></span>`)}</span>`;
 }
 
-function Card({m, picked, onPick}) {
+function Card({m, drain, picked, onPick}) {
   const w = useWords();
   const {t, f} = w;
+  const name = useName();
   const clis = tm.agentChecks(m).filter(c => c.state !== 'missing').map(c => c.name);
-  const notes = tm.machineNotes(m);
+  const notes = tm.machineNotes(m, drain);
   return html`<button type="button" class=${cx('mach-card', picked && 'sel', m.retired && 'retired')} aria-pressed=${picked ? 'true' : 'false'} onClick=${onPick}>
     <span class="mach-card-head"><${Status} state=${tm.machineState(m)} /><b class="mono ell">${m.name}</b><span class="t-muted">${stateWord(w, m)}</span>
       ${m.via && html`<span class="chip">${viaWord(w, m)}</span>`}</span>
     <span class="mach-card-slots"><span class="t-muted">${t('mach.slots')}</span><span class="mono">${f('mach.slotsOf', m.active || 0, m.slots || 0)}${m.queued ? ' · ' + f('mach.queuedN', m.queued) : ''}</span><${SlotBar} m=${m} /></span>
     <span class="mach-card-meta mono t-muted">${[m.os, m.version && 'tend ' + m.version, clis.join(' ')].filter(Boolean).join(' · ')}</span>
-    ${notes.slice(0, 1).map(n => html`<span class=${cx('mach-card-note', 't-' + noteTone(n))}>${noteText(w, n)}</span>`)}
+    ${notes.slice(0, 1).map(n => html`<span class=${cx('mach-card-note', 't-' + noteTone(n))}>${noteText(w, n, name)}</span>`)}
   </button>`;
 }
 
 // Facts is one machine: how it is reached, its room and queue, its agent CLIs and when they were checked, who else may
 // use it and its token. The buttons are there only where their handlers are given.
-function Facts({m, st, creds, now, checking, onCheck, onShare, onRebind, onRevoke, onRuns}) {
+function Facts({m, st, creds, now, checking, onCheck, draining, onDrain, onShare, onRebind, onRevoke, onRuns}) {
   const w = useWords();
   const {t, f} = w;
   const name = useName();
@@ -135,7 +140,7 @@ function Facts({m, st, creds, now, checking, onCheck, onShare, onRebind, onRevok
       <dt>${t('mach.queue')}</dt><dd>${queue.length ? html`<ul class="mach-queue">${queue.map(x => html`<li key=${x.run.id}><span class="ell">${x.task?.title || x.run.task}</span>
         <span class="t-muted">${x.why ? why(w, x.why) : duration(now - Date.parse(x.run.queued_at))}</span></li>`)}</ul>` : t('mach.noQueue')}</dd>
     </dl>
-    ${tm.machineNotes(m).map(n => html`<p class=${cx('mach-note', 't-' + noteTone(n))}>${noteText(w, n)}</p>`)}
+    ${tm.machineNotes(m, st.drains?.[m.name]).map(n => html`<p class=${cx('mach-note', 't-' + noteTone(n))}>${noteText(w, n, name)}</p>`)}
     <section class="det-sec"><h3 class="det-h mach-h"><span>${t('mach.clis')}${m.checked_at && html`<span class="t-muted mach-when"> · ${f('mach.checkedAgo', duration(now - Date.parse(m.checked_at)))}</span>`}</span>
       ${onCheck && html`<${Button} kind="quiet" disabled=${checking} onClick=${onCheck}>${t('mach.check')}<//>`}</h3>
       ${tm.agentChecks(m).length ? html`<ul class="mach-clis">${tm.agentChecks(m).map(c => html`<li key=${c.name}>
@@ -150,7 +155,9 @@ function Facts({m, st, creds, now, checking, onCheck, onShare, onRebind, onRevok
     ${creds.length > 0 && html`<section class="det-sec"><h3 class="det-h">${t('mach.cred')}</h3>
       ${creds.map(c => html`<${Cred} key=${c.id} c=${c} onRebind=${onRebind} onRevoke=${onRevoke} />`)}
     </section>`}
-    ${onRuns && html`<div class="det-acts"><${Button} keyName="Enter" onClick=${onRuns}>${t('mach.runs')}<//></div>`}
+    ${(onRuns || onDrain) && html`<div class="det-acts">
+      ${onDrain && html`<${Button} disabled=${draining} onClick=${onDrain}>${st.drains?.[m.name] ? t('mach.undrain') : t('mach.drain')}<//>`}
+      ${onRuns && html`<${Button} keyName="Enter" onClick=${onRuns}>${t('mach.runs')}<//>`}</div>`}
   </div>`;
 }
 
@@ -215,8 +222,10 @@ export function Machines({store, commands, toasts, session, http, wire, router, 
   const {t, f} = w;
   const phone = usePhone();
   const names = useNames();
+  const name = useName();
   const machines = useSignalValue(store.machines);
   useSignalValue(store.rev.shares);
+  useSignalValue(store.rev.drains);
   useSignalValue(store.rev.projects);
   useSignalValue(store.rev.runs);
   useSignalValue(commands.pending);
@@ -240,6 +249,11 @@ export function Machines({store, commands, toasts, session, http, wire, router, 
   const failed = e => toasts.show({text: apiText(w, e), tone: 'danger'});
   useListKeys({ids, selected: cur?.name, onSelect: setPicked, onOpen: phone ? null : toRuns, active: !modal && !(phone && picked)});
 
+  const drain = m => {
+    const on = !st.drains?.[m.name];
+    commands.send('machine.drain', {machine: m.name, on}, {key: 'drain:' + m.name})
+      .then(() => toasts.show({text: f(on ? 'mach.drained' : 'mach.undrained', m.name)}), failed);
+  };
   const share = p => commands.send('machine.share', p, {key: 'machine:' + p.machine})
     .then(() => { close(); toasts.show({text: f('mach.sharedDone', p.machine)}); }, failed);
   const add = name => {
@@ -286,7 +300,7 @@ export function Machines({store, commands, toasts, session, http, wire, router, 
           <span class="card-lead"><${Status} state=${tm.machineState(m)} /></span>
           <span class="card-main"><span class="card-primary mono">${m.name}</span>
             <span class="card-secondary">${[stateWord(w, m), viaWord(w, m), f('m.inUse', m.active || 0, m.slots || 0)].filter(Boolean).join(' · ')}</span>
-            ${tm.machineNotes(m).slice(0, 1).map(n => html`<span class=${cx('card-secondary', 't-' + noteTone(n))}>${noteText(w, n)}</span>`)}</span>
+            ${tm.machineNotes(m, st.drains?.[m.name]).slice(0, 1).map(n => html`<span class=${cx('card-secondary', 't-' + noteTone(n))}>${noteText(w, n, name)}</span>`)}</span>
         </button></li>`)}</ul>
       <//>`)}
       <p class="empty t-muted">${t('mach.desktop')}</p>
@@ -311,7 +325,7 @@ export function Machines({store, commands, toasts, session, http, wire, router, 
         ${!machines.length && html`<${Panel} title=${t('mach.title')} count=${0}><p class="empty">${t('mach.none')}</p><//>`}
         ${groups.map(([g, xs]) => html`<section class="mach-group" key=${g}>
           <h2 class="sect-h">${t('mach.' + g)} <span class="mono count">${xs.length}</span></h2>
-          <div class="mach-cards">${xs.map(m => html`<${Card} key=${m.name} m=${m} picked=${m.name === cur?.name} onPick=${() => setPicked(m.name)} />`)}</div>
+          <div class="mach-cards">${xs.map(m => html`<${Card} key=${m.name} m=${m} drain=${st.drains?.[m.name]} picked=${m.name === cur?.name} onPick=${() => setPicked(m.name)} />`)}</div>
         </section>`)}
         ${lane && html`<${Panel} title=${f('mach.today', cur.name)} actions=${html`<span class="t-muted">${t('mach.todayNote')}</span>`}>
           <div class="panel-body"><${Timeline} from=${lane.from} to=${lane.to} label=${f('mach.today', cur.name)} lanes=${[{
@@ -325,6 +339,7 @@ export function Machines({store, commands, toasts, session, http, wire, router, 
       ${cur && html`<aside class="mach-aside panel" aria-label=${cur.name}>
         <header class="mach-aside-head"><${Status} state=${tm.machineState(cur)} /><b class="mono">${cur.name}</b><span class="t-muted">${stateWord(w, cur)}</span></header>
         <${Facts} m=${cur} st=${st} creds=${credsOf(cur)} now=${at} onRuns=${() => toRuns(cur.name)}
+          draining=${commands.state('drain:' + cur.name) === 'pending'} onDrain=${mine(cur) ? () => drain(cur) : null}
           checking=${!!checking} onCheck=${checks && cur.state === 'connected' && !cur.retired ? () => check(cur.name) : null}
           onShare=${mine(cur) ? () => setModal({kind: 'share', machine: cur.name}) : null}
           onRebind=${cur.retired ? null : c => setModal({kind: 'rebind', cred: c})} onRevoke=${c => setModal({kind: 'revoke', cred: c})} />

@@ -247,6 +247,9 @@ func (g *journalGen) event() journal.Event {
 	case 26:
 		return ev(task.ERunInterrupt, task.RunInterrupt{ID: g.pick(g.runs, "r"), Turn: 1 + g.n(2), Ask: g.of("int_1", "int_2"), By: g.user()})
 	case 25:
+		if g.chance(50) {
+			return ev(task.EMachineDrained, task.DrainSet{Machine: g.of("m1", "m2"), On: g.chance(60), By: g.user()})
+		}
 		return ev(task.EMachineShared, task.Share{Machine: g.of("m1", "m2"), Users: g.some([]string{"u_a", "u_b"}, "u"), Projects: g.some(g.projects, "p")})
 	default:
 		switch g.n(3) {
@@ -394,7 +397,7 @@ func TestThePageFoldsRandomJournalsAsTheCoordinatorDoes(t *testing.T) {
 	b, _ := json.Marshal(journals)
 	os.WriteFile(filepath.Join(dir, "journals.json"), b, 0o600)
 	body := `const out=[];for(const envs of JSON.parse(fs.readFileSync(process.argv[2],'utf8'))){
-let s={seq:0,tasks:{},runs:{},projects:{},shares:{},agent_defs:{}},fail_at=-1;
+let s={seq:0,tasks:{},runs:{},projects:{},shares:{},drains:{},agent_defs:{}},fail_at=-1;
 for(let i=0;i<envs.length;i++){const c=structuredClone(s);try{Fold.apply(c,envs[i]);s=c}catch(e){fail_at=i;break}}
 const sits={},convs={};for(const t of Object.values(s.tasks))sits[t.id]=Fold.situation(s,t);
 for(const id of Object.keys(s.runs))convs[id]=Fold.conversation(s,id).map(r=>r.id);
