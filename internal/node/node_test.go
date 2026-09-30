@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -86,7 +87,45 @@ func start(t *testing.T, n *Node, p StartParams) Snapshot {
 	if err != nil {
 		t.Fatal(err)
 	}
+	reap(t, n, s.Run, p.Coordinator)
 	return s
+}
+
+// reap waits, before the test's directories go, until run has no live supervisor, stopping the run when it has one: a
+// supervisor still writing a run directory makes its removal fail. Call it after the directories are made, so that
+// its cleanup runs before theirs.
+func reap(t *testing.T, n *Node, run, coordinator string) {
+	t.Helper()
+	launched := reflect.ValueOf(n.Launch).Pointer() == reflect.ValueOf(n.launch).Pointer()
+	t.Cleanup(func() {
+		dir := n.runDir(run)
+		stopped := false
+		for deadline := time.Now().Add(20 * time.Second); supervised(dir, launched); time.Sleep(20 * time.Millisecond) {
+			if time.Now().After(deadline) {
+				t.Errorf("run %s: its supervisor still runs", run)
+				return
+			}
+			if !stopped && paths.Exists(filepath.Join(dir, "claim")) {
+				n.Stop(RunRef{Run: run, Coordinator: coordinator})
+				stopped = true
+			}
+		}
+	})
+}
+
+// supervised: a supervisor may still write run directory dir: the one launched for it has not claimed it yet, or the
+// one that did still runs. ⚠️ A supervisor records its pid only after its claim, and Supervise called by a test runs
+// as the test's own pid.
+func supervised(dir string, launched bool) bool {
+	if !paths.Exists(dir) {
+		return false
+	}
+	if launched && !paths.Exists(filepath.Join(dir, "claim")) {
+		return true
+	}
+	var st State
+	readState(dir, &st)
+	return filelock.Held(filepath.Join(dir, "lock")) || st.Sup > 0 && st.Sup != os.Getpid() && proc.Alive(st.Sup)
 }
 
 func wait(t *testing.T, n *Node, id string, done func(Snapshot) bool) Snapshot {
@@ -133,6 +172,7 @@ func TestStartingARunAgainStartsNothing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	reap(t, n, first.Run, p.Coordinator)
 	running := wait(t, n, first.Run, func(s Snapshot) bool { return s.State.State == StateRunning })
 	again, err := n.Start(p)
 	if err != nil || again.Pid != running.Pid || again.Sup != running.Sup {
