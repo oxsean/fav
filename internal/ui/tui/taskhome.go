@@ -54,11 +54,14 @@ func (m *Model) homeAskLines(w int) []string {
 				opts = append(opts, dimmed.Render(text))
 			}
 		}
-		return []string{
+		lines := []string{
 			accent.Render(render.Truncate(indent+label, w)),
 			render.Truncate(indent+strings.Join(opts, "   "), w),
-			dimmed.Render(render.Truncate(indent+i18n.T("tasks.home_ask_hint"), w)),
 		}
+		if says := optionSays(x, m.tasks.askPick); says != "" {
+			lines = append(lines, dimmed.Render(render.Truncate(indent+says, w)))
+		}
+		return append(lines, dimmed.Render(render.Truncate(indent+i18n.T("tasks.home_ask_hint"), w)))
 	}
 	lines := []string{
 		accent.Render(render.Truncate(indent+i18n.F("tasks.answer_tool", q.Tool), w)),

@@ -178,7 +178,8 @@ func (c *codexProto) request(m rpcMessage) {
 			Header   string `json:"header"`
 			Question string `json:"question"`
 			Options  []struct {
-				Label string `json:"label"`
+				Label       string `json:"label"`
+				Description string `json:"description"`
 			} `json:"options"`
 		} `json:"questions"`
 	}
@@ -201,7 +202,7 @@ func (c *codexProto) request(m rpcMessage) {
 		for _, q := range p.Questions {
 			aq := agent.Question{Question: q.Question, Header: q.Header}
 			for _, o := range q.Options {
-				aq.Options = append(aq.Options, o.Label)
+				aq.AddOption(o.Label, o.Description)
 			}
 			req.Questions = append(req.Questions, aq)
 			pd.qids[q.Question] = q.ID

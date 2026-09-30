@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"os"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -126,9 +127,9 @@ func TestCodexApprovalsQuestionsAndSteering(t *testing.T) {
 		t.Fatalf("%v", m)
 	}
 	g.gone(t, req.ID)
-	g.feed(`{"id":8,"method":"item/tool/requestUserInput","params":{"questions":[{"id":"q1","question":"Which DB?","options":[{"label":"pg"}]}]}}`)
+	g.feed(`{"id":8,"method":"item/tool/requestUserInput","params":{"questions":[{"id":"q1","question":"Which DB?","options":[{"label":"pg","description":"Postgres"}]}]}}`)
 	q := g.s.st.Requests[0]
-	if q.Kind != agent.RequestQuestion || g.s.st.Ask != "Which DB?" {
+	if q.Kind != agent.RequestQuestion || g.s.st.Ask != "Which DB?" || !reflect.DeepEqual(q.Questions[0].Descriptions, []string{"Postgres"}) {
 		t.Fatalf("%+v", g.s.st)
 	}
 	appendLine(g.s.dir+"/"+answersFile, agent.Answer{Request: q.ID, Allow: true, Answers: map[string]string{"Which DB?": "pg"}})

@@ -334,6 +334,9 @@ button.tl-seg:hover { filter: brightness(1.15); }
 .answer-hint { margin: 0; font-size: 12px; color: var(--muted); }
 .choice-hinted { display: grid; justify-items: start; gap: 2px; padding: 8px 12px; text-align: left; }
 .choice-hint { font-size: 12px; font-weight: 400; color: var(--muted); }
+.choice-body { display: grid; gap: 2px; text-align: left; }
+.choice-label { overflow-wrap: anywhere; }
+.choice-said { padding-top: 6px; padding-bottom: 6px; max-width: 100%; }
 .answer-gone .answer-note { margin: 0; font-size: 13px; color: var(--muted); }
 .answer-acts, .answer-opts { display: flex; flex-wrap: wrap; gap: 6px; }
 .answer-acts-phone { display: grid; grid-template-columns: 1fr; }

@@ -200,6 +200,14 @@ func (m *Model) answerStop(d int) {
 	}
 }
 
+// optionSays is what a question's option i says beside its label, "" when nothing.
+func optionSays(x agent.Question, i int) string {
+	if i < 0 || i >= len(x.Descriptions) {
+		return ""
+	}
+	return render.Sanitize(x.Descriptions[i])
+}
+
 func (m *Model) renderAnswer() string {
 	w := m.ovWidth()
 	inner := w - 4
@@ -237,6 +245,11 @@ func (m *Model) renderAnswer() string {
 				body = append(body, accent.Render(l))
 			}
 			m.selector(&body, "", i, i, inner, m.ov.field == i)
+			if says := optionSays(x, m.ov.pick[i]); says != "" {
+				for _, l := range render.Wrap(says, inner) {
+					body = append(body, dimmed.Render(l))
+				}
+			}
 		}
 		if otherAt >= 0 {
 			field(i18n.T("tasks.answer_other"), m.ov.edit, otherAt, true)

@@ -288,7 +288,8 @@ func questionsOf(input json.RawMessage) []agent.Question {
 			Header   string `json:"header"`
 			Multi    bool   `json:"multiSelect"`
 			Options  []struct {
-				Label string `json:"label"`
+				Label       string `json:"label"`
+				Description string `json:"description"`
 			} `json:"options"`
 		} `json:"questions"`
 	}
@@ -297,7 +298,7 @@ func questionsOf(input json.RawMessage) []agent.Question {
 	for _, q := range in.Questions {
 		aq := agent.Question{Question: q.Question, Header: q.Header, Multi: q.Multi}
 		for _, o := range q.Options {
-			aq.Options = append(aq.Options, o.Label)
+			aq.AddOption(o.Label, o.Description)
 		}
 		out = append(out, aq)
 	}

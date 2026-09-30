@@ -781,3 +781,23 @@ func TestAQuestionShowsOnce(t *testing.T) {
 		t.Fatalf("the question shows %d times", n)
 	}
 }
+
+func TestTheHomeAskSaysWhatThePickedOptionMeans(t *testing.T) {
+	m, _ := tasksModel(t)
+	key(m, "5")
+	waitFor(t, m, func() bool { return m.tasks.loaded })
+	st := task.New()
+	st.Tasks["t_ask"] = &task.Task{ID: "t_ask", Title: "t_ask", Status: task.StatusTodo}
+	q := agent.Question{Question: "Which DB?", Options: []string{"pg", "sqlite"}, Descriptions: []string{"Postgres, as production runs", "One file, for tests"}}
+	st.Runs["r1"] = &task.Run{ID: "r1", Task: "t_ask", State: task.Running, Attention: task.AttentionAsked, Ask: q.Question,
+		Requests: []agent.Request{{ID: "q1", Kind: agent.RequestQuestion, Questions: []agent.Question{q}}}}
+	m.tasks.st = st
+	m.filterTasks()
+	if s := screenText(m); !strings.Contains(s, "Postgres, as production runs") || strings.Contains(s, "One file, for tests") {
+		t.Fatalf("the first option is picked and says what it means:\n%s", s)
+	}
+	key(m, "2")
+	if s := screenText(m); !strings.Contains(s, "One file, for tests") || strings.Contains(s, "Postgres, as production runs") {
+		t.Fatalf("picking the second says what it means:\n%s", s)
+	}
+}

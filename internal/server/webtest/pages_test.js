@@ -299,7 +299,9 @@ test('an open item shows what its run just did, and its choices', async () => {
   await act(() => settle());
   eq(pages, ['r2'], 'asked once');
   eq(root.find('.step').map(s => s.textContent), ['+internal/receipt/pdf.go', '~internal/receipt/pdf.go', '+pdf library'], 'the last three tools');
-  eq(root.find('.choice').map(c => c.textContent), ['1gofpdf', '2wkhtmltopdf', '3chromedp'], 'its options');
+  eq(root.find('.choice').map(c => c.find('.choice-n')[0].textContent + c.find('.choice-label')[0].textContent), ['1gofpdf', '2wkhtmltopdf', '3chromedp'], 'its options');
+  eq(root.find('.choice').map(c => c.find('.choice-hint').map(h => h.textContent)), [['Pure Go, no binary to install'], ['Renders HTML; needs its binary on every machine'], []],
+    'what each says, under its label');
 });
 
 test('what a run is doing: its node first, then its note, then what it said; queued runs say why', async () => {

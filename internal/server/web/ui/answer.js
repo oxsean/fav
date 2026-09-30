@@ -103,8 +103,9 @@ export function AnswerForm({req, scope = false, busy = false, onAnswer, detail =
       ${(q.options || []).length > 0 && html`<div class=${cx('answer-opts', phone && 'answer-acts-phone')} role=${q.multi ? 'group' : 'radiogroup'} aria-label=${q.question}>
         ${q.options.map((o, i) => {
           const on = (picks[q.question] || []).includes(o);
-          return html`<button type="button" role=${q.multi ? 'checkbox' : 'radio'} aria-checked=${on ? 'true' : 'false'} class=${cx('choice', on && 'on')}
-            disabled=${busy} onClick=${() => pick(q, o)}>${!phone && qs.length === 1 && html`<span class="mono choice-n">${i + 1}</span>`}${o}</button>`;
+          const said = q.descriptions?.[i];
+          return html`<button type="button" role=${q.multi ? 'checkbox' : 'radio'} aria-checked=${on ? 'true' : 'false'} class=${cx('choice', on && 'on', said && 'choice-said')}
+            disabled=${busy} onClick=${() => pick(q, o)}>${!phone && qs.length === 1 && html`<span class="mono choice-n">${i + 1}</span>`}<span class="choice-body"><span class="choice-label">${o}</span>${said && html`<span class="choice-hint">${said}</span>`}</span></button>`;
         })}
       </div>`}
       <input class="in" value=${own[q.question] || ''} placeholder=${t('ans.own')} aria-label=${t('ans.own')} onKeyDown=${submitKey}

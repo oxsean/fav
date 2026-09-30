@@ -1,8 +1,10 @@
 package node
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -167,5 +169,16 @@ func TestAnAgentFloodingItsOutputWhileAnswersPileUpDoesNotDeadlock(t *testing.T)
 	end := wait(t, n, s.Run, func(s Snapshot) bool { return Terminal(s.State.State) })
 	if end.State.State != StateExited || !strings.Contains(logOf(t, n, s.Run), `"type":"result"`) {
 		t.Fatalf("%+v", end)
+	}
+}
+
+func TestAQuestionsOptionsCarryWhatTheySay(t *testing.T) {
+	got := questionsOf(json.RawMessage(`{"questions":[{"question":"Which DB?","header":"DB","options":[{"label":"pg","description":"Postgres, as prod runs"},{"label":"sqlite"}]}]}`))
+	want := []agent.Question{{Question: "Which DB?", Header: "DB", Options: []string{"pg", "sqlite"}, Descriptions: []string{"Postgres, as prod runs", ""}}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("%+v", got)
+	}
+	if got := questionsOf(json.RawMessage(`{"questions":[{"question":"Go?","options":[{"label":"yes"},{"label":"no"}]}]}`)); got[0].Descriptions != nil {
+		t.Fatalf("options that say nothing more carry no descriptions: %+v", got)
 	}
 }

@@ -44,10 +44,22 @@ type Request struct {
 }
 
 type Question struct {
-	Question string   `json:"question"`
-	Header   string   `json:"header,omitempty"`
-	Options  []string `json:"options,omitempty"`
-	Multi    bool     `json:"multi,omitempty"`
+	Question     string   `json:"question"`
+	Header       string   `json:"header,omitempty"`
+	Options      []string `json:"options,omitempty"`
+	Descriptions []string `json:"descriptions,omitempty"` // what each option says beside its label, in Options' order; nil when none says anything
+	Multi        bool     `json:"multi,omitempty"`
+}
+
+// AddOption appends an option and what it says, keeping Descriptions nil until one says something.
+func (q *Question) AddOption(label, description string) {
+	if description != "" && q.Descriptions == nil {
+		q.Descriptions = make([]string, len(q.Options), len(q.Options)+1)
+	}
+	q.Options = append(q.Options, label)
+	if q.Descriptions != nil {
+		q.Descriptions = append(q.Descriptions, description)
+	}
 }
 
 // Decisions on a permission. Allow says the same for an end that knows no Decision: allow_run is an allow there.
