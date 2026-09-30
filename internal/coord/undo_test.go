@@ -295,3 +295,19 @@ func TestAMoveReachesTheWatchersOfBothPlaces(t *testing.T) {
 	as(root, "late", TaskCreate{Parent: dst.ID})
 	check("a subtask made under dst", b)
 }
+
+// An undone move puts the task back only where it may still go: a parent finished since takes no subtask.
+func TestAMoveIsUndoneOnlyToAPlaceThatStillTakesIt(t *testing.T) {
+	e := newEnv(t, tend.Config{})
+	e.start()
+	src, dst := e.create(TaskCreate{Title: "src", Status: task.StatusBacklog}), e.create(TaskCreate{Title: "dst", Status: task.StatusBacklog})
+	x := e.create(TaskCreate{Title: "x", Parent: src.ID, Status: task.StatusBacklog})
+	e.write(MTaskMove, "move", task.TaskMove{ID: x.ID, Parent: &dst.ID})
+	e.must(MTaskStatus, task.TaskStatus{ID: src.ID, Status: task.StatusDone}, nil)
+	if _, err := e.undo(x.ID, "move"); wire.Code(err) != wire.CodeConflict {
+		t.Fatalf("its old parent is done: %v", err)
+	}
+	if p := e.c.State().Tasks[x.ID].Parent; p != dst.ID {
+		t.Fatalf("it stays where it went: %s", p)
+	}
+}

@@ -2,6 +2,7 @@ package coord
 
 import (
 	"encoding/json"
+	"slices"
 
 	"github.com/oxsean/fav/internal/journal"
 	"github.com/oxsean/fav/internal/task"
@@ -71,7 +72,7 @@ func (c *Coord) keepUndo(env journal.Envelope, u *undoable) {
 }
 
 // taskUndo is task.undo: the task goes back to how it stood before the command, field for field, when nothing changed
-// it since; what the coordinator did because of the command stays done. A done that queued a merge is taken back by
+// it since and its old place still takes it; what the coordinator did because of the command stays done. A done that queued a merge is taken back by
 // canceling the merge while it waits.
 func (c *Coord) taskUndo(who Principal, r *wire.Request) (string, []journal.Event, error) {
 	var p TaskUndo
@@ -94,6 +95,11 @@ func (c *Coord) taskUndo(who Principal, r *wire.Request) (string, []journal.Even
 			return "", nil, conflict("merge started")
 		}
 		return t.ID, []journal.Event{journal.NewEvent(task.ERunCanceled, task.RunRef{ID: u.run, Reason: task.WhyUndone})}, nil
+	}
+	if u.was.Parent != t.Parent || !slices.Equal(u.was.After, t.After) {
+		if err := c.checkPlace(who, t, u.was.Parent, u.was.After); err != nil {
+			return "", nil, err
+		}
 	}
 	return t.ID, []journal.Event{journal.NewEvent(task.ETaskRestored, u.was)}, nil
 }

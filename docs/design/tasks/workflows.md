@@ -68,7 +68,7 @@ max_loops: 2
 - **依赖**：上游 `done` 才算满足；有分支的任务合进父任务的集成分支之后才写 done（见 [execution.md](execution.md)「实现」）。上游被取消，下游进 `waiting: after_canceled`，由人决定改依赖还是取消。
 - **重试** = 再次 `task.start`：`start_seq` 之前的 run 算作更早的尝试，不再决定现状；编辑任务或再次开始都会清掉 `held`。
 - **重开**：已结束（done 或 canceled）的任务改回 todo 或 backlog（`task.set_status`：重新打开、已结束的先不开始）是一条尝试的分界线：任务不再是自动的（`auto` 清掉），`start_seq` 记成这次改状态的 seq，`merged` 清掉。之前的 run（包括合并 run）都算更早的尝试，不再决定现状，所以协调器不会把它再标完成；改回 todo 而没有新 run 时它是 `waiting: dispatch`。走 workflow 的任务在同一条命令里回到当前阶段的 `Flow.Back`（和打回一样，`loops` 不加）。要再跑就再开始或派发。
-- **撤销**不是重开：`task.undo{id, command}` 把任务的状态、`auto`、`start_seq`、`merged`、阶段（`stage`、`loops`、`stage_seq`、`stages`）和位置（`parent`、`after`、`held`）逐项放回被撤销的那条 `task.set_status` 或 `task.move` 之前的样子（`task_restored`），所以撤销完成后任务又落在原来的处境、回到收件箱，撤销重新打开后它原样是 done（workflow 任务也一样）。只还原那条命令改过的；协调器因它已经做了的事（派发了下游、父任务往下走）不撤回。完成排的是合并 run 时，撤销在合并还在排队时取消它（`run_canceled`，`reason: undone`，这样的 run 不算任何一次尝试），开跑了就拒绝。
+- **撤销**不是重开：`task.undo{id, command}` 把任务的状态、`auto`、`start_seq`、`merged`、阶段（`stage`、`loops`、`stage_seq`、`stages`）和位置（`parent`、`after`、`held`）逐项放回被撤销的那条 `task.set_status` 或 `task.move` 之前的样子（`task_restored`），所以撤销完成后任务又落在原来的处境、回到收件箱，撤销重新打开后它原样是 done（workflow 任务也一样）。原位置已经放不下（原父任务结束了、有打开的 run、太深）时拒绝撤销移动。只还原那条命令改过的；协调器因它已经做了的事（派发了下游、父任务往下走）不撤回。完成排的是合并 run 时，撤销在合并还在排队时取消它（`run_canceled`，`reason: undone`，这样的 run 不算任何一次尝试），开跑了就拒绝。
 - **父任务**在子任务完成前从不派 run。子任务全部完成后，没有 workflow 的父任务进 `waiting: accept`，由人标完成；有 workflow 的走自己的阶段。
 - 树最多三层；`task.move` 改 parent 和 after，拒绝成环、跨项目和超过深度。
 - 随机事件序列测试（`internal/task/tree_test.go`）在每一步检查不变式：每个未完成、非 backlog 的任务恰好落在 running / queued / waiting 之一，并带原因。
