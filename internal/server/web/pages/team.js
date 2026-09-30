@@ -37,6 +37,7 @@ register('team', {
   'team.offProjects': ['他负责的 %d 个项目交给 %s', 'The %d projects they own go to %s'],
   'team.offLeft': ['他离开参与的 %d 个项目', 'They leave the %d projects they take part in'],
   'team.offTasks': ['%d 个没结束的任务（他负责或验收的）交给各自项目的负责人，不在项目里的交给 %s', 'The %d unfinished tasks they own or accept go to their project\'s owner, or to %s outside a project'],
+  'team.offDefs': ['他的 agent 定义 %s 交给 %s', 'Their agent definitions %s go to %s'],
   'team.offMachines': ['机器 %s 不再对别人开放', 'Machines %s close to everyone else'],
   'team.offCanceled': ['机器 %s 不再对别人开放，别人排在那里的 %d 个运行取消', 'Machines %s close to everyone else, and the %d runs others queued there are canceled'],
   'team.offEnd': ['最后停用他，吊销他的全部凭据（包括他机器的 token）', 'Last, they are disabled and every credential of theirs ends, their machines\' tokens too'],
@@ -145,6 +146,7 @@ function Offboard({user, people, me, plan, busy, onGo, onClose}) {
       ${p.projects.length > 0 && html`<li>${f('team.offProjects', p.projects.length, heir)}</li>`}
       ${p.left.length > 0 && html`<li>${f('team.offLeft', p.left.length)}</li>`}
       ${p.tasks.length > 0 && html`<li>${f('team.offTasks', p.tasks.length, heir)}</li>`}
+      ${p.defs.length > 0 && html`<li>${f('team.offDefs', p.defs.join(', '), heir)}</li>`}
       ${p.machines.length > 0 && html`<li>${p.canceled ? f('team.offCanceled', p.machines.join(', '), p.canceled) : f('team.offMachines', p.machines.join(', '))}</li>`}
       <li>${t('team.offEnd')}</li>
     </ol>

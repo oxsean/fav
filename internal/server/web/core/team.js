@@ -104,8 +104,8 @@ export const mayManage = (session, p) => !!p && (isAdmin(session) || p.owner ===
 
 // offboardPlan is what handing user's work to to does, as the coordinator does it (coord.userOffboard): the projects
 // they own go to to, they leave the projects they are in, their unfinished tasks (as owner or approver) go to each
-// project's owner once this is done (to without a project), their machines close to everyone else and the runs others
-// queued there are canceled.
+// project's owner once this is done (to without a project), their agent definitions go to to, their machines close to
+// everyone else and the runs others queued there are canceled.
 export function offboardPlan(state, machines, user, to) {
   const owned = Object.values(state.projects || {}).filter(p => p.owner === user).map(p => p.id);
   const heir = p => (owned.includes(p) || !state.projects?.[p] ? to : state.projects[p].owner);
@@ -116,6 +116,7 @@ export function offboardPlan(state, machines, user, to) {
     projects: owned,
     left: Object.values(state.projects || {}).filter(p => (p.members || {})[user] !== undefined).map(p => p.id),
     tasks: tasks.map(t => ({id: t.id, to: heir(t.project)})),
+    defs: Object.values(state.agent_defs || {}).filter(d => d.owner === user).map(d => d.name).sort(),
     machines: mine, canceled: canceled.length,
   };
 }

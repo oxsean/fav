@@ -333,6 +333,7 @@ test('team: an admin changes a role, disables and enables, and hands someone\'s 
   await menuOf(root, 'Bo Lin', words.t('team.offboard'));
   const steps = root.one('.team-steps').textContent;
   ok(steps.includes(words.f('team.offProjects', 1, 'Ann Lee')) && steps.includes(words.f('team.offLeft', 1)) && steps.includes(words.t('team.offEnd')), 'the steps: ' + steps);
+  ok(steps.includes(words.f('team.offDefs', 'bo-dev', 'Ann Lee')), 'his agent definitions go to the heir: ' + steps);
   await click(buttonOf(root.one('.modal-foot'), words.t('team.offGo')));
   await settled();
   eq(writes(a.http), [['POST /api/users', {id: 'u_b', role: 'admin'}], ['POST /api/users', {id: 'u_c', disabled: true}],
