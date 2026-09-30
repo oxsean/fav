@@ -29,6 +29,7 @@ func TestUpgradingTheDeliveriesKeepsWhatWentAndSendsNothingAgain(t *testing.T) {
 		t.Fatal(err)
 	}
 	tm.Close()
+	before0010(t, path)
 	before0009(t, path)
 	exec(t, path, `INSERT INTO deliveries VALUES (3, 'local', 'task.needs_you', '200', 1), (4, 'local', 'task.done', '500', 2),
 			(5, 'local', 'task.needs_you', '', 3), (6, 'u_a', 'task.needs_you', 'error', 4), (7, 'u_a', 'task.done', '204', 5)`)

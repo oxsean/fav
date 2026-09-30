@@ -1,5 +1,6 @@
 // Package tracker speaks to issue trackers (Gitea, GitHub, GitLab): it reads a repository's issues and their comments,
-// writes one comment, a close or a label back, and opens sub-issues and pull requests. Only tend-server carries it.
+// writes one comment, a close or a label back (and takes them back), and opens sub-issues and pull requests. Only
+// tend-server carries it.
 package tracker
 
 import (
@@ -70,7 +71,10 @@ type Tracker interface {
 	CreateComment(ctx context.Context, number int64, body string) (Comment, error)
 	EditComment(ctx context.Context, number, id int64, body string) error // ErrNotFound when it was deleted
 	Close(ctx context.Context, number int64) error
+	Reopen(ctx context.Context, number int64) error
 	Label(ctx context.Context, number int64, label string) error
+	// Unlabel takes label off issue number; nothing when the issue does not carry it.
+	Unlabel(ctx context.Context, number int64, label string) error
 	CreateIssue(ctx context.Context, title, body string) (Issue, error)
 	// LinkSubIssue makes child a sub-issue of parent on GitHub; elsewhere child's body names its parent and this does nothing.
 	LinkSubIssue(ctx context.Context, parent int64, child Issue) error

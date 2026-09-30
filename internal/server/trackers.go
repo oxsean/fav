@@ -330,8 +330,8 @@ func (s *Server) trackerPreview(w http.ResponseWriter, r *http.Request, c caller
 		apiError(w, http.StatusNotFound, "not_found")
 		return
 	}
-	body, _, ok := s.syncer.progress(x, settingsOf(x), row.Task)
-	if !ok {
+	body, status := s.syncer.progress(x, settingsOf(x), row.Task)
+	if status == "" {
 		apiError(w, http.StatusNotFound, "not_found")
 		return
 	}

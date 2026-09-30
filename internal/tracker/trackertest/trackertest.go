@@ -61,13 +61,15 @@ type Server struct {
 	clock    time.Time
 	// Faults: RateLimit answers the next n requests 429 with Retry-After 30; Refuse answers every request 401; Down every
 	// request 503; LoseCreate makes the next comment it creates answer 502 although the comment is made, LoseIssue the
-	// next issue; DropLabel answers the next label added to an issue 200 without adding it.
+	// next issue; DropLabel answers the next label added to an issue 200 without adding it; Break answers the next n
+	// requests to "METHOD path" (without the query) 500.
 	RateLimit  int
 	Refuse     bool
 	Down       bool
 	LoseCreate bool
 	LoseIssue  bool
 	DropLabel  bool
+	Break      map[string]int
 	// Requests counts requests by "METHOD path" without the query.
 	Requests map[string]int
 }
@@ -75,7 +77,7 @@ type Server struct {
 func New(kind, repo, bot, token string) *Server {
 	s := &Server{Kind: kind, Repo: repo, Bot: bot, Token: token, RepoID: 42, issues: map[int64]*Issue{}, pulls: map[int64]*Pull{},
 		branches: map[string]bool{"main": true}, subs: map[int64][]int64{}, labels: map[string]int64{}, next: 100,
-		clock: time.Date(2026, 9, 27, 8, 0, 0, 0, time.UTC), Requests: map[string]int{}}
+		clock: time.Date(2026, 9, 27, 8, 0, 0, 0, time.UTC), Requests: map[string]int{}, Break: map[string]int{}}
 	s.Server = httptest.NewServer(http.HandlerFunc(s.serve))
 	return s
 }
@@ -250,6 +252,10 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Retry-After", "30")
 		http.Error(w, `{"message":"rate limit"}`, http.StatusTooManyRequests)
 		return
+	case s.Break[r.Method+" "+r.URL.Path] > 0:
+		s.Break[r.Method+" "+r.URL.Path]--
+		http.Error(w, `{"message":"broken"}`, http.StatusInternalServerError)
+		return
 	}
 	if s.Kind == "gitlab" {
 		s.gitlab(w, r)
@@ -391,6 +397,28 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 				s.label(i, s.named(p.Labels)...)
 			}
 			writeJSON(w, s.labelsOf(i))
+		case parts[1] == "labels" && r.Method == http.MethodGet:
+			writeJSON(w, s.labelsOf(i))
+		case parts[1] == "labels" && len(parts) == 3 && r.Method == http.MethodDelete:
+			name := parts[2]
+			if s.Kind == "gitea" { // by id
+				name = ""
+				for n, id := range s.labels {
+					if strconv.FormatInt(id, 10) == parts[2] {
+						name = n
+					}
+				}
+			}
+			if !slices.Contains(i.Labels, name) {
+				http.Error(w, `{"message":"Label does not exist"}`, http.StatusNotFound)
+				return
+			}
+			i.Labels, i.Updated = slices.DeleteFunc(i.Labels, func(l string) bool { return l == name }), s.tick()
+			if s.Kind == "gitea" {
+				w.WriteHeader(http.StatusNoContent)
+				return
+			}
+			writeJSON(w, s.labelsOf(i))
 		default:
 			http.NotFound(w, r)
 		}
@@ -478,17 +506,27 @@ func (s *Server) gitlab(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, issue(i))
 		case len(parts) == 1 && r.Method == http.MethodPut:
 			var p struct {
-				StateEvent string `json:"state_event"`
-				AddLabels  string `json:"add_labels"`
+				StateEvent   string `json:"state_event"`
+				AddLabels    string `json:"add_labels"`
+				RemoveLabels string `json:"remove_labels"`
 			}
 			json.NewDecoder(r.Body).Decode(&p)
-			if p.StateEvent == "close" {
+			switch p.StateEvent {
+			case "close":
 				i.Closed, i.Updated = true, s.tick()
 				s.system(n, "closed")
+			case "reopen":
+				i.Closed, i.Updated = false, s.tick()
+				s.system(n, "reopened")
 			}
 			if p.AddLabels != "" {
 				s.label(i, strings.Split(p.AddLabels, ",")...)
 				s.system(n, "added ~"+p.AddLabels+" label")
+			}
+			if p.RemoveLabels != "" {
+				gone := strings.Split(p.RemoveLabels, ",")
+				i.Labels, i.Updated = slices.DeleteFunc(i.Labels, func(l string) bool { return slices.Contains(gone, l) }), s.tick()
+				s.system(n, "removed ~"+p.RemoveLabels+" label")
 			}
 			writeJSON(w, issue(i))
 		case len(parts) == 2 && parts[1] == "notes" && r.Method == http.MethodGet:

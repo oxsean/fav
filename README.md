@@ -556,7 +556,8 @@ the admins' **Needs you**.
 (`https://github.com` for GitHub), the repository (`owner/name`, with subgroups on GitLab) and a bot account's token (kept encrypted on the server, with the key in `server.key` or
 `TEND_SERVER_KEY`). Issues with the label (`tend` by default), or optionally assigned to a member, become requirements of
 the project, owned by the assignee when they signed in with that tracker. tend keeps one progress comment on each issue and
-closes it once the requirement is done. When an issue changes, its requirement waits until someone takes the new revision
+closes it once the requirement is done; when the requirement is reopened or its completion undone, tend reopens an issue
+it closed itself (never one closed outside tend). When an issue changes, its requirement waits until someone takes the new revision
 or keeps the current scope; when it is closed outside tend, someone decides whether to go on. The server polls (60 s by
 default); a webhook to `<public_url>/hooks/<id>` with the secret shown at binding time (GitHub: content type
 `application/json`; GitLab: as the secret token) makes it quicker. A refused token

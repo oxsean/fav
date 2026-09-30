@@ -293,8 +293,14 @@ func (s *Syncer) assignee(x store.Tracker, i tracker.Issue) string {
 	return ""
 }
 
-// writeBacks are the issues of x whose task the journal moved past what was written back: a comment to rewrite, or a
-// done requirement whose issue is still to be closed.
+// What of a completion's write-back tend did itself (store.TrackerIssue.Applied), which it takes back.
+const (
+	appliedClose = "close"
+	appliedLabel = "label:" // + the label
+)
+
+// writeBacks are the issues of x whose task the journal moved past what was written back: a comment to rewrite, a
+// done task whose issue is still to be closed or labelled, or an unfinished one whose completion was written back.
 func (s *Syncer) writeBacks(x store.Tracker, set TrackerSettings) []int64 {
 	rows, err := s.team.TrackerIssues(x.ID, false)
 	if err != nil {
@@ -305,10 +311,11 @@ func (s *Syncer) writeBacks(x store.Tracker, set TrackerSettings) []int64 {
 		if row.Task == "" || row.Dirty {
 			continue
 		}
-		body, done, ok := s.progress(x, set, row.Task)
+		body, status := s.progress(x, set, row.Task)
 		switch {
-		case !ok:
-		case done && !row.Closed, set.Comment && hash(body) != row.BodyHash && s.now().Sub(row.Written) >= editRest:
+		case status == "":
+		case status == task.StatusDone && !row.Closed, !task.Finished(status) && row.Closed,
+			set.Comment && hash(body) != row.BodyHash && s.now().Sub(row.Written) >= editRest:
 			out = append(out, row.Number)
 		}
 	}
@@ -350,12 +357,15 @@ func (s *Syncer) issue(ctx context.Context, x store.Tracker, tr tracker.Tracker,
 			theirs = append(theirs, c)
 		}
 	}
+	if label, ok := strings.CutPrefix(row.Applied, appliedLabel); row.Applied == appliedClose && !i.Closed || ok && !slices.Contains(i.Labels, label) {
+		row.Applied = ""
+	}
 	if row.Parent == 0 {
 		if row.Task == "" && !s.wanted(x, set, i) {
 			row.Dirty = false
 			return s.team.PutTrackerIssue(row)
 		}
-		id, err := s.requirement(ctx, x, i, theirs)
+		id, err := s.requirement(ctx, x, i, theirs, i.Closed && row.Applied != appliedClose)
 		if err != nil {
 			return err
 		}
@@ -373,25 +383,61 @@ func (s *Syncer) issue(ctx context.Context, x store.Tracker, tr tracker.Tracker,
 	if mine != nil && row.CommentID == 0 {
 		row.CommentID = mine.ID
 	}
-	body, done, ok := s.progress(x, set, row.Task)
-	if ok && set.Comment && hash(body) != row.BodyHash && s.now().Sub(row.Written) >= editRest {
+	body, status := s.progress(x, set, row.Task)
+	if status != "" && set.Comment && hash(body) != row.BodyHash && s.now().Sub(row.Written) >= editRest {
 		if err := s.writeComment(ctx, tr, &row, body); err != nil {
 			return err
 		}
 	}
-	if ok && done && !row.Closed {
-		if set.OnAccept == "label" {
-			err = tr.Label(ctx, i.Number, set.AcceptLabel)
-		} else if !i.Closed {
-			err = tr.Close(ctx, i.Number)
-		}
-		if err != nil {
-			return err
-		}
-		row.Closed = true
+	switch {
+	case status == task.StatusDone && !row.Closed:
+		err = s.accept(ctx, tr, set, i, &row)
+	case status != "" && !task.Finished(status) && row.Closed:
+		err = s.takeBack(ctx, tr, i, &row)
+	}
+	if err != nil {
+		return err
 	}
 	row.Dirty, row.LastError, row.Synced = false, "", s.now()
 	return s.team.PutTrackerIssue(row)
+}
+
+// accept writes a completion back on issue i: it closes it or labels it, and records in row what of that it did itself.
+func (s *Syncer) accept(ctx context.Context, tr tracker.Tracker, set TrackerSettings, i tracker.Issue, row *store.TrackerIssue) error {
+	applied := ""
+	switch {
+	case set.OnAccept == "label":
+		if err := tr.Label(ctx, i.Number, set.AcceptLabel); err != nil {
+			return err
+		}
+		if !slices.Contains(i.Labels, set.AcceptLabel) {
+			applied = appliedLabel + set.AcceptLabel
+		}
+	case !i.Closed:
+		if err := tr.Close(ctx, i.Number); err != nil {
+			return err
+		}
+		applied = appliedClose
+	}
+	row.Closed, row.Applied = true, applied
+	return nil
+}
+
+// takeBack undoes what tend itself wrote back on issue i for a completion its task no longer has; what someone else
+// did stays.
+func (s *Syncer) takeBack(ctx context.Context, tr tracker.Tracker, i tracker.Issue, row *store.TrackerIssue) error {
+	var err error
+	switch label, ok := strings.CutPrefix(row.Applied, appliedLabel); {
+	case row.Applied == appliedClose:
+		err = tr.Reopen(ctx, i.Number)
+	case ok:
+		err = tr.Unlabel(ctx, i.Number, label)
+	}
+	if err != nil {
+		return err
+	}
+	row.Closed, row.Applied = false, ""
+	return nil
 }
 
 // How a task's issue syncs, in TaskSyncState.State.
@@ -461,12 +507,13 @@ func (s *Syncer) TaskStates(project string) ([]TaskSyncState, error) {
 	return out, nil
 }
 
-// requirement records issue i, with the comments of people, as its task in the journal; "" when it makes none.
-func (s *Syncer) requirement(ctx context.Context, x store.Tracker, i tracker.Issue, theirs []tracker.Comment) (string, error) {
+// requirement records issue i, with the comments of people, as its task in the journal; "" when it makes none. closed:
+// the issue is closed, and not by tend's own write-back.
+func (s *Syncer) requirement(ctx context.Context, x store.Tracker, i tracker.Issue, theirs []tracker.Comment, closed bool) (string, error) {
 	title, text, digest := snapshot(i, theirs)
 	owner := s.assignee(x, i)
 	p := coord.TaskSync{Project: x.Project, Kind: x.Kind, Tracker: x.ID, Base: x.Base, Repo: x.Repo, RepoID: x.RepoID, Number: i.Number,
-		URL: i.URL, Title: title, Text: text, Digest: digest, Closed: i.Closed, Owner: owner, Unmapped: owner == "" && len(i.Assignees) > 0}
+		URL: i.URL, Title: title, Text: text, Digest: digest, Closed: closed, Owner: owner, Unmapped: owner == "" && len(i.Assignees) > 0}
 	b, _ := json.Marshal(p)
 	res, err := s.do(ctx, &wire.Request{Method: coord.MTaskSync, CommandID: "sync-" + journal.Digest(b), Params: b})
 	if err != nil {
@@ -521,10 +568,9 @@ func snapshot(i tracker.Issue, comments []tracker.Comment) (title, text, digest 
 	return i.Title, text, hash(i.Title + "\x00" + text)[:32]
 }
 
-// progress is the comment x's issue carries for taskID, and whether the task is done; ok is false when the journal no
-// longer holds it.
-func (s *Syncer) progress(x store.Tracker, set TrackerSettings, taskID string) (body string, done, ok bool) {
-	var owner, approver, status, stages, pr string
+// progress is the comment x's issue carries for taskID, and the task's status; "" when the journal no longer holds it.
+func (s *Syncer) progress(x store.Tracker, set TrackerSettings, taskID string) (body, status string) {
+	var owner, approver, line, stages, pr string
 	var kids []string
 	var total, finished int
 	s.coord.Read(func(st *task.State) {
@@ -532,9 +578,9 @@ func (s *Syncer) progress(x store.Tracker, set TrackerSettings, taskID string) (
 		if t == nil {
 			return
 		}
-		ok, done = true, t.Status == task.StatusDone
+		status = t.Status
 		owner, approver, pr = t.Owner, t.Approver, t.PR
-		status = statusLine(st.Situation(t))
+		line = statusLine(st.Situation(t))
 		stages = stageLine(t)
 		for _, k := range st.Subtree(t.ID)[1:] {
 			if len(st.Children(k.ID)) > 0 {
@@ -553,12 +599,12 @@ func (s *Syncer) progress(x store.Tracker, set TrackerSettings, taskID string) (
 			}
 		}
 	})
-	if !ok {
-		return "", false, false
+	if status == "" {
+		return "", ""
 	}
 	var b strings.Builder
 	b.WriteString(marker(s.coord.ID(), taskID) + "\n")
-	fmt.Fprintf(&b, "**tend** · %s\n", status)
+	fmt.Fprintf(&b, "**tend** · %s\n", line)
 	if stages != "" {
 		b.WriteString("\n" + stages + "\n")
 	}
@@ -574,7 +620,7 @@ func (s *Syncer) progress(x store.Tracker, set TrackerSettings, taskID string) (
 	if len(kids) > 0 {
 		b.WriteString("\n" + strings.Join(kids, "\n") + "\n")
 	}
-	return b.String(), done, true
+	return b.String(), status
 }
 
 // mentions names the owner and approver as the tracker knows them.

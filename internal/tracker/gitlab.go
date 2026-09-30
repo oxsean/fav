@@ -153,6 +153,16 @@ func (g *gitlab) Close(ctx context.Context, number int64) error {
 	return err
 }
 
+func (g *gitlab) Reopen(ctx context.Context, number int64) error {
+	_, err := g.do(ctx, http.MethodPut, g.issuePath(number, ""), nil, map[string]string{"state_event": "reopen"}, nil)
+	return err
+}
+
+func (g *gitlab) Unlabel(ctx context.Context, number int64, label string) error {
+	_, err := g.do(ctx, http.MethodPut, g.issuePath(number, ""), nil, map[string]string{"remove_labels": label}, nil)
+	return err
+}
+
 func (g *gitlab) Label(ctx context.Context, number int64, label string) error {
 	_, err := g.do(ctx, http.MethodPut, g.issuePath(number, ""), nil, map[string]string{"add_labels": label}, nil)
 	return err

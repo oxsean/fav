@@ -2,6 +2,7 @@ package store
 
 import (
 	"errors"
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -31,11 +32,12 @@ func TestATrackerBindingKeepsItsIssuesUntilItGoes(t *testing.T) {
 	if err != nil || len(is) != 1 || is[0].Number != 3 || !is[0].Dirty {
 		t.Fatalf("%+v %v", is, err)
 	}
-	must(t, tm.PutTrackerIssue(TrackerIssue{Tracker: x.ID, Number: 3, Task: "t_1", CommentID: 99, BodyHash: "h", Written: now}))
+	must(t, tm.PutTrackerIssue(TrackerIssue{Tracker: x.ID, Number: 3, Task: "t_1", CommentID: 99, BodyHash: "h", Written: now, Closed: true,
+		Applied: "label:tend:accepted"}))
 	if is, _ = tm.TrackerIssues(x.ID, true); len(is) != 0 {
 		t.Fatalf("read: %+v", is)
 	}
-	if i, _ := tm.TrackerIssue(x.ID, 3); i.CommentID != 99 || i.Task != "t_1" || !i.Written.Equal(now) {
+	if i, _ := tm.TrackerIssue(x.ID, 3); i.CommentID != 99 || i.Task != "t_1" || !i.Written.Equal(now) || !i.Closed || i.Applied != "label:tend:accepted" {
 		t.Fatalf("%+v", i)
 	}
 	if first, _ := tm.TakeDelivery("d1"); !first {
@@ -65,5 +67,38 @@ func TestAnAssigneeMapsToTheMemberWhoSignedInThere(t *testing.T) {
 	}
 	if l, _ := tm.LoginOf(ann.ID, id.Issuer); l != "Ann" {
 		t.Fatalf("and back: %q", l)
+	}
+}
+
+// before0010 puts tracker_issues back as it was before 0010.
+func before0010(t *testing.T, path string) {
+	exec(t, path, `ALTER TABLE tracker_issues DROP COLUMN applied`)
+}
+
+// A write-back done before 0010 stays done, and tend claims none of it as its own: it cannot tell a close it made from
+// one it found.
+func TestUpgradingTheWriteBacksClaimsNoneOfThemAsTends(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, File)
+	tm, err := OpenTeam(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	x, err := tm.AddTracker(Tracker{Project: "p1", Kind: "gitea", Base: "http://git", Repo: "o/r", RepoID: 9, Bot: "bot",
+		Token: []byte("sealed"), HookSecret: []byte("sealed2"), Settings: "{}", CreatedBy: LocalUser})
+	must(t, err)
+	tm.Close()
+	before0010(t, path)
+	exec(t, path, `INSERT INTO tracker_issues (tracker, number, task, closed, dirty) VALUES ('`+x.ID+`', 3, 't_1', 1, 0)`)
+	setVersion(t, path, 9)
+	if tm, err = OpenTeam(path); err != nil {
+		t.Fatal(err)
+	}
+	defer tm.Close()
+	if i, err := tm.TrackerIssue(x.ID, 3); err != nil || !i.Closed || i.Applied != "" || i.Task != "t_1" {
+		t.Fatalf("%+v %v", i, err)
+	}
+	if baks, _ := filepath.Glob(filepath.Join(dir, File+".v9-*.bak")); len(baks) != 1 {
+		t.Fatalf("no copy of the v9 database: %v", baks)
 	}
 }

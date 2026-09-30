@@ -215,6 +215,7 @@ func TestUpgradingToTheSecretsTableKeepsTheTeam(t *testing.T) {
 		t.Fatal(err)
 	}
 	tm.Close()
+	before0010(t, path)
 	before0009(t, path)
 	exec(t, path, "DROP TABLE secrets")
 	setVersion(t, path, 7)

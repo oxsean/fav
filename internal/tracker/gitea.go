@@ -2,6 +2,7 @@ package tracker
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -60,6 +61,11 @@ type giteaIssue struct {
 	HTMLURL     string                  `json:"html_url"`
 	UpdatedAt   time.Time               `json:"updated_at"`
 	PullRequest *struct{}               `json:"pull_request"`
+}
+
+type giteaLabel struct {
+	ID   int64  `json:"id"`
+	Name string `json:"name"`
 }
 
 type giteaComment struct {
@@ -169,8 +175,12 @@ func (g *gitea) EditComment(ctx context.Context, _, id int64, body string) error
 	return err
 }
 
-func (g *gitea) Close(ctx context.Context, number int64) error {
-	_, err := g.do(ctx, http.MethodPatch, g.repoPath("/issues/"+strconv.FormatInt(number, 10)), nil, map[string]string{"state": "closed"}, nil)
+func (g *gitea) Close(ctx context.Context, number int64) error { return g.state(ctx, number, "closed") }
+
+func (g *gitea) Reopen(ctx context.Context, number int64) error { return g.state(ctx, number, "open") }
+
+func (g *gitea) state(ctx context.Context, number int64, state string) error {
+	_, err := g.do(ctx, http.MethodPatch, g.repoPath("/issues/"+strconv.FormatInt(number, 10)), nil, map[string]string{"state": state}, nil)
 	return err
 }
 
@@ -194,13 +204,32 @@ func (g *gitea) Label(ctx context.Context, number int64, label string) error {
 	return nil
 }
 
+// Unlabel takes label off issue number: GitHub by name, Gitea by the id the issue's labels give it.
+func (g *gitea) Unlabel(ctx context.Context, number int64, label string) error {
+	issue := g.repoPath("/issues/" + strconv.FormatInt(number, 10) + "/labels/")
+	which := url.PathEscape(label)
+	if g.makeLabels {
+		var on []giteaLabel
+		if _, err := g.do(ctx, http.MethodGet, strings.TrimSuffix(issue, "/"), nil, nil, &on); err != nil {
+			return err
+		}
+		k := slices.IndexFunc(on, func(l giteaLabel) bool { return l.Name == label })
+		if k < 0 {
+			return nil
+		}
+		which = strconv.FormatInt(on[k].ID, 10)
+	}
+	_, err := g.do(ctx, http.MethodDelete, issue+which, nil, nil, nil)
+	if errors.Is(err, ErrNotFound) {
+		return nil
+	}
+	return err
+}
+
 // labelID is the id of the repository's label name, made when the repository lacks it.
 func (g *gitea) labelID(ctx context.Context, name string) (int64, error) {
 	for page := 1; ; page++ {
-		var batch []struct {
-			ID   int64
-			Name string
-		}
+		var batch []giteaLabel
 		q := url.Values{g.pageParam: {strconv.Itoa(g.page)}, "page": {strconv.Itoa(page)}}
 		if _, err := g.do(ctx, http.MethodGet, g.repoPath("/labels?"+q.Encode()), nil, nil, &batch); err != nil {
 			return 0, err

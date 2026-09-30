@@ -231,3 +231,37 @@ func TestALabelTheRepositoryLacksIsMadeAndCheckedOnTheIssue(t *testing.T) {
 		})
 	}
 }
+
+func TestEachTrackerTakesBackAClosedIssueAndAnAddedLabel(t *testing.T) {
+	for _, kind := range []string{tracker.KindGitea, tracker.KindGitHub, tracker.KindGitLab} {
+		t.Run(kind, func(t *testing.T) {
+			g := trackertest.New(kind, "acme/app", "tend-bot", "tok")
+			defer g.Close()
+			tr, err := tracker.New(tracker.Config{Kind: kind, Base: g.URL, Repo: "acme/app", Token: "tok"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			ctx := context.Background()
+			g.Open(1, "one", "body", "tend")
+			g.Open(2, "two", "body", "tend", "keep")
+			if err := tr.Close(ctx, 1); err != nil {
+				t.Fatal(err)
+			}
+			if err := tr.Reopen(ctx, 1); err != nil || g.Get(1).Closed {
+				t.Fatalf("reopened: %+v %v", g.Get(1), err)
+			}
+			if err := tr.Label(ctx, 2, "tend:accepted"); err != nil {
+				t.Fatal(err)
+			}
+			if err := tr.Unlabel(ctx, 2, "tend:accepted"); err != nil || !slices.Equal(g.Get(2).Labels, []string{"tend", "keep"}) {
+				t.Fatalf("only that label comes off: %v %v", g.Get(2).Labels, err)
+			}
+			if err := tr.Unlabel(ctx, 2, "tend:accepted"); err != nil {
+				t.Fatalf("a label the issue no longer carries is off already: %v", err)
+			}
+			if err := tr.Unlabel(ctx, 2, "never-made"); err != nil || !slices.Equal(g.Get(2).Labels, []string{"tend", "keep"}) {
+				t.Fatalf("so is one the repository never had: %v %v", g.Get(2).Labels, err)
+			}
+		})
+	}
+}

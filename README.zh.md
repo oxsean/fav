@@ -511,7 +511,7 @@ tend task list   # 命令行和 TUI 的任务页都改为和 server 说话
 **工单。** 项目可以跟一个 Gitea、GitHub 或 GitLab 仓库同步（项目页的**工单同步**）：填地址（GitHub 填 `https://github.com`）、
 仓库（`owner/name`，GitLab 可带子组）和机器人账号的 token
 （加密保存在 server 上，密钥在 `server.key` 或 `TEND_SERVER_KEY`）。打了标签（默认 `tend`）的 issue，或可选地指派给项目成员的 issue，
-会成为项目的需求；指派人用这个工单系统登录过 tend 的，就归他负责。tend 在每个 issue 上只维护一条进度评论，需求完成后关单。
+会成为项目的需求；指派人用这个工单系统登录过 tend 的，就归他负责。tend 在每个 issue 上只维护一条进度评论，需求完成后关单；需求重开或撤销完成时，tend 重新打开自己关的单（在外面关的不动）。
 issue 改了，需求会停下来等人选「采用新版本」或「维持本轮范围」；issue 在外面被关掉，由人决定是否继续。server 默认每 60 秒轮询一次；
 在仓库里加一个指向 `<public_url>/hooks/<id>` 的 webhook（密钥在绑定时只显示一次；GitHub 的 Content type 选
 `application/json`，GitLab 把密钥填作 Secret token）会更快。token 被拒时绑定停下并通知项目负责人和管理员，限流时暂停。项目负责人和管理员在每个需求上能看到它的 issue 同步得怎样：上次同步的时间，是否待同步或同步失败，以及错误和下次重试的时间。

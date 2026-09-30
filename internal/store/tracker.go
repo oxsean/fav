@@ -39,7 +39,8 @@ type TrackerIssue struct {
 	CommentID int64
 	BodyHash  string
 	Written   time.Time // when the progress comment was last written
-	Closed    bool      // tend closed (or labelled) it after acceptance
+	Closed    bool      // the write-back of its task's completion is done: closed or labelled, or found so already
+	Applied   string    // what of that tend did itself, and takes back once the task is unfinished again: close, label:<name>, or ""
 	Dirty     bool      // to be read again
 	LastError string
 	Parent    int64     // a sub-issue tend made for a subtask of that issue's task; never a requirement
@@ -129,12 +130,13 @@ func (t *Team) Rescan(id string) error {
 	return affected(t.w.Exec(`UPDATE trackers SET cursor = 0, etag = '', polled = 0 WHERE id = ?`, id))
 }
 
-const issueCols = `tracker, number, task, comment_id, body_hash, written, closed, dirty, last_error, parent, pr, synced`
+const issueCols = `tracker, number, task, comment_id, body_hash, written, closed, dirty, last_error, parent, pr, synced, applied`
 
 func scanIssue(row interface{ Scan(...any) error }) (TrackerIssue, error) {
 	var x TrackerIssue
 	var written, synced int64
-	err := row.Scan(&x.Tracker, &x.Number, &x.Task, &x.CommentID, &x.BodyHash, &written, &x.Closed, &x.Dirty, &x.LastError, &x.Parent, &x.PR, &synced)
+	err := row.Scan(&x.Tracker, &x.Number, &x.Task, &x.CommentID, &x.BodyHash, &written, &x.Closed, &x.Dirty, &x.LastError, &x.Parent, &x.PR, &synced,
+		&x.Applied)
 	x.Written, x.Synced = fromNanos(written), fromNanos(synced)
 	return x, err
 }
@@ -150,11 +152,12 @@ func (t *Team) TrackerIssue(tracker string, number int64) (TrackerIssue, error) 
 
 // PutTrackerIssue records x.
 func (t *Team) PutTrackerIssue(x TrackerIssue) error {
-	_, err := t.w.Exec(`INSERT INTO tracker_issues (`+issueCols+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	_, err := t.w.Exec(`INSERT INTO tracker_issues (`+issueCols+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT (tracker, number) DO UPDATE SET task = excluded.task, comment_id = excluded.comment_id, body_hash = excluded.body_hash,
 		written = excluded.written, closed = excluded.closed, dirty = excluded.dirty, last_error = excluded.last_error,
-		parent = excluded.parent, pr = excluded.pr, synced = excluded.synced`,
-		x.Tracker, x.Number, x.Task, x.CommentID, x.BodyHash, nanos(x.Written), x.Closed, x.Dirty, x.LastError, x.Parent, x.PR, nanos(x.Synced))
+		parent = excluded.parent, pr = excluded.pr, synced = excluded.synced, applied = excluded.applied`,
+		x.Tracker, x.Number, x.Task, x.CommentID, x.BodyHash, nanos(x.Written), x.Closed, x.Dirty, x.LastError, x.Parent, x.PR, nanos(x.Synced),
+		x.Applied)
 	return err
 }
 

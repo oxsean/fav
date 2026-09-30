@@ -41,18 +41,26 @@
 - 快照 = 标题 + 正文 + 人的评论（排除 tend 自己的进度评论），摘要是它们的 sha256。每次取到的内容有一个不可变的版本；导入时任务书就是快照。
 - 拆解、任务树确认、验收都记录自己依据的版本（草稿的 `source_rev`，见 [planning.md](planning.md)「实现」）。
 - issue 的正文或评论变了，就记一个新版本（`pending`），任务进 `waiting: source_changed`（「需求有变化」），由人「采用新版本」（标题和任务书换成新版本）或「维持本轮范围」（这个版本不再提起）；有未决变化时不能标完成。
-- issue 在外面被关掉了，需求不自动取消，而是进 `waiting: source_closed`，原因「issue 已关闭」，由人「继续做」或取消任务；tend 自己关的（任务已完成）不算。
+- issue 在外面被关掉了，需求不自动取消，而是进 `waiting: source_closed`，原因「issue 已关闭」，由人「继续做」或取消任务。tend 自己关的不算：同步 worker 报给协调器的 `closed` 不含 tend 自己那次还在的关单（见下文「回写」），所以 `Source.closed` 只表示在外面关的。
 - 事件：`task_created`（带 source）、`task_sourced`、`task_source_acked`。
 - **指派人对应**：issue 的指派人按「在这个 tracker 的地址上登录过的账号」对应到成员（`identities.issuer` 与绑定的地址一致、用户名相同、只有一个；GitHub 登录的 issuer 是 `https://github.com`，GitLab、Gitea 走 OIDC，issuer 就是它们的地址）；对应不上时归项目负责人并打 `unmapped_assignee`，之后对应上了再改回（见 [team.md](team.md)「人在任务里」）。`tracker_accounts` 显式对应表未实现。
 
 ## 回写
 
 - 在 issue 上只维护**一条**进度评论。
-- **回写用期望状态对账，不用事务内的 outbox**：worker 每 5 秒按当前状态算出每条需求期望的评论正文和是否该关单，和 `tracker_issues` 表里已应用的（`comment_id`、`body_hash`、`written`、`closed`）比对，不同就把这个 issue 标脏去处理。状态本身就在 journal 里，崩溃重启后重算即可，效果和 outbox 一样，少一套意图表。
+- **回写用期望状态对账，不用事务内的 outbox**：worker 每 5 秒按当前状态算出每条需求期望的评论正文和是否该关单，和 `tracker_issues` 表里已应用的（`comment_id`、`body_hash`、`written`、`closed`、`applied`）比对，不同就把这个 issue 标脏去处理。状态本身就在 journal 里，崩溃重启后重算即可，效果和 outbox 一样，少一套意图表。
 - 评论编辑做去抖，至少间隔 30 秒；编辑返回 404 就重建。
 - 评论里带隐藏标记 `<!-- tend:progress <协调器 id> <任务 id> -->`。创建之前先按「机器人作者 + 隐藏标记前缀」认领已有评论，所以「创建成功、响应丢失」不会留下两条。
 - **评论内容**：英文，一行状态、叶子子任务进度、@ 负责人和验收人（按上面的指派人对应）；项目打开「列子任务」才列明细；走 workflow 的任务多一行 `Stages: …`。
 - 验收通过后关单或打标签。这次关单由 tend 发出，回来时只确认同步成功，不会被当成「在外面被关掉」。
+  - `closed` 记这次完成的回写已做完（关了、打了标签，或者 issue 本来就是那样）；`applied` 记其中 tend 自己做的：`close`，或 `label:<标签名>`（issue 原来没有这个标签）。issue 本来就关着、标签是别人打的，`applied` 为空。
+  - 之后读到 tend 做的已经不在了（有人在外面重开了 issue、摘了标签），`applied` 清空：这次关单归别人了，之后再在外面关就算「在外面被关掉」。
+- **撤回自己的回写**：任务又变回未结束（重开，或 `task.undo` 撤销了完成，见 [workflows.md](workflows.md)「重开」「撤销」），而这次完成已经回写过，worker 撤回 tend 自己做的：`applied` 是 `close` 就重开 issue，是 `label:…` 就摘掉那个标签（issue 上已经没有它就算摘了），然后清掉 `closed` 和 `applied`，下次完成再照 `on_accept` 回写。
+  - 别人关的、别人打的标签不动（`applied` 为空）：在外面关掉的 issue 仍按 `source_closed` 处理。
+  - 完成后改成取消仍是结束，回写留着；从取消再重开才撤回。
+  - 撤回和别的回写一样：失败记在这条 issue 上，一分钟后重试，`applied` 留着直到撤回成功；进度评论照常按新状态重写（比如「not started」）。
+  - 只撤回这个绑定自己记下的：解绑时 `tracker_issues` 跟着删，之后任务重开不碰 issue；重新绑定是新的记录，也不认之前做过的。
+  - 迁移 0010 之前完成的回写 `applied` 为空，分不清是不是 tend 关的，一律不撤回。
 - 打标签和 GitHub、GitLab 按名字加标签一致：仓库没有这个标签就先建。Gitea 不会自己建，对不存在的标签照样回 200 却不加，所以在 Gitea 上先按名字找仓库的标签，没有就建（颜色固定），再按 id 加。加完核对应答里 issue 确实带着它（Gitea、GitHub），不带就算这条 issue 失败，一分钟后重试，不记成已完成回写。
 - **自己的写不算需求变化**：识别依据是评论 id、写入版本和机器人账号，不能只靠可伪造的隐藏标记。
 
@@ -72,7 +80,7 @@
 
 ## 三家的差别
 
-都在 `internal/tracker` 里消化，worker 不分种类。`rest.go` 是共用的 REST 层；`gitea.go` 同时服务 Gitea 和 GitHub，两家只差 API 位置、token 写法、页大小和打标签；`gitlab.go`；`hook.go` 按种类验签、取 delivery id、取仓库和 issue 号；`trackertest` 是测试用的假服务器，能说三家的方言（包括 Gitea 对不存在的标签回 200 不加），能注入限流、拒绝凭据、响应丢失、加标签被悄悄丢掉。
+都在 `internal/tracker` 里消化，worker 不分种类。`rest.go` 是共用的 REST 层；`gitea.go` 同时服务 Gitea 和 GitHub，两家只差 API 位置、token 写法、页大小和打、摘标签；`gitlab.go`；`hook.go` 按种类验签、取 delivery id、取仓库和 issue 号；`trackertest` 是测试用的假服务器，能说三家的方言（包括 Gitea 对不存在的标签回 200 不加），能注入限流、拒绝凭据、响应丢失、加标签被悄悄丢掉、某个请求回 500（`Break`）。
 
 | | Gitea | GitHub | GitLab |
 |---|---|---|---|
@@ -81,6 +89,7 @@
 | 列表 | `since`、`limit=50`、`type=issues` | `since`、`per_page=100`，去掉 `pull_request` | `updated_after`、`per_page=100`、`scope=all`，MR 本来就分开 |
 | 评论 | issue comments；编辑按评论 id | 同 Gitea | notes，跳过 `system` 的；编辑要带 issue 号 |
 | 关单 / 标签 | `PATCH state=closed` / 找或建仓库标签（`GET`、`POST labels`）后按 id `POST issues/{n}/labels` | `PATCH state=closed` / 按名字 `POST labels`（自动建） | `PUT state_event=close` / `PUT add_labels` |
+| 重开 / 摘标签 | `PATCH state=open` / 从 `GET issues/{n}/labels` 取 id 后 `DELETE issues/{n}/labels/{id}` | `PATCH state=open` / 按名字 `DELETE issues/{n}/labels/{name}`（404 算已摘） | `PUT state_event=reopen` / `PUT remove_labels` |
 | webhook | `X-Gitea-Signature`（HMAC）、`X-Gitea-Delivery` | `X-Hub-Signature-256: sha256=…`、`X-GitHub-Delivery`；Content type 要选 `application/json` | `X-Gitlab-Token`（原样比对）、`X-Gitlab-Event-UUID`；`object_kind` 为 `issue` 或 `note` 时才指向 issue |
 | 限流 | `Retry-After` | `X-RateLimit-Reset` / `X-RateLimit-Remaining` | `RateLimit-Reset` / `RateLimit-Remaining` |
 
