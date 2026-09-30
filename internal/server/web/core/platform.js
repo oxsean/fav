@@ -8,9 +8,10 @@
 // createPlatform: nav is the browser's navigator, media answers a media query (matchMedia), secure is
 // isSecureContext, reload loads the page again, build is the page's own (index.html's tend-build; empty in the preview
 // and the tests, which start no service worker), notices the browser's Notification, pushes whether it has a
-// PushManager.
+// PushManager, origin the page's.
 export function createPlatform({nav = globalThis.navigator || {}, media = q => globalThis.matchMedia?.(q), secure = !!globalThis.isSecureContext,
-  reload = () => globalThis.location.reload(), build = '', notices = globalThis.Notification, pushes = 'PushManager' in globalThis} = {}) {
+  reload = () => globalThis.location.reload(), build = '', notices = globalThis.Notification, pushes = 'PushManager' in globalThis,
+  origin = globalThis.location?.origin || ''} = {}) {
   const ua = nav.userAgent || '';
   const iPad = /iPad/.test(ua) || nav.platform === 'MacIntel' && nav.maxTouchPoints > 1;
   const os = iPad || /iPhone|iPod/.test(ua) ? 'ios' : /Android/.test(ua) ? 'android' : 'other';
@@ -46,6 +47,22 @@ export function createPlatform({nav = globalThis.navigator || {}, media = q => g
     onOpen(fn) {
       sw?.addEventListener?.('message', e => { if (typeof e.data?.open === 'string') fn(e.data.open); });
     },
+    // link is the page's address at path, to open elsewhere.
+    link: path => origin + path,
+    // share hands url on, to be opened on another device: the system's share sheet where there is one, else the
+    // clipboard. It answers shared, copied or canceled (the sheet closed); it fails with neither.
+    async share(url) {
+      if (nav.share) {
+        try {
+          await nav.share({url});
+          return 'shared';
+        } catch (e) {
+          if (e?.name === 'AbortError') return 'canceled';
+        }
+      }
+      await nav.clipboard.writeText(url);
+      return 'copied';
+    },
     // start registers the service worker; a browser that refuses it runs the page as it is.
     start() {
       sw?.register('/sw.js', {scope: '/'}).catch(() => {});
@@ -70,4 +87,4 @@ export function createPlatform({nav = globalThis.navigator || {}, media = q => g
 }
 
 // nowhere is the platform of the preview and the tests: a browser tab on an address that is not secure.
-export const nowhere = createPlatform({nav: {}, media: () => undefined, secure: false, reload: () => {}, notices: null, pushes: false});
+export const nowhere = createPlatform({nav: {}, media: () => undefined, secure: false, reload: () => {}, notices: null, pushes: false, origin: ''});

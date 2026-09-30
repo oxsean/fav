@@ -1,9 +1,9 @@
 // me is the viewer's own page: who they are, how the page looks in this browser, how they hear that something needs
-// them (browser notices while the page is open, pushes to this device, a personal webhook), the sign-in accounts
-// linked to them, their personal tokens and their browser sessions. On a phone it keeps only the account, the ways
-// into the team and agent pages (which only show there), pushes to this device, putting tend on the home screen and
-// signing out. Where the address is not HTTPS it
-// says so, on either form.
+// them (browser notices while the page is open, pushes to this device and what it takes of them, their other devices,
+// a personal webhook), the sign-in accounts linked to them, their personal tokens and their browser sessions. On a
+// phone it keeps only the account, the ways into the team and agent pages (which only show there), pushes to this
+// device, the devices, putting tend on the home screen, the pages to open on a computer and signing out. Where the
+// address is not HTTPS it says so, on either form.
 import {useState, useEffect} from '../vendor/hooks.mjs';
 import {html, cx, usePhone, useWords, useSignalValue} from '../ui/base.js';
 import {Panel} from '../ui/panel.js';
@@ -11,6 +11,7 @@ import {Modal} from '../ui/overlay.js';
 import {Button, Segmented} from '../ui/controls.js';
 import {TextInput} from '../ui/input.js';
 import {Secret} from '../ui/secret.js';
+import {DeskLinks} from '../ui/desk.js';
 import {register, t as say, f as fill} from '../core/i18n.js';
 import {linkURL} from '../core/http.js';
 import {themes, densities} from '../core/prefs.js';
@@ -40,6 +41,21 @@ register('me', {
   'me.push.none': ['这个浏览器收不到推送', 'This browser receives no pushes'],
   'me.push.install': ['装到主屏幕、从主屏幕打开 tend 以后才能打开推送', 'Pushes can be turned on once tend is on the home screen and opened from there'],
   'me.push.insecure': ['这个地址不是 HTTPS，收不到推送', 'This address is not HTTPS, so no pushes come'],
+  'me.devNotices': ['这台设备的通知 · %s', 'Notices on this device · %s'],
+  'me.dev.waiting': ['等你的事', 'What waits on you'], 'me.dev.waitingNote': ['权限、提问、待验收、失败', 'Permissions, questions, runs to accept, failures'],
+  'me.dev.done': ['任务完成', 'Tasks done'], 'me.dev.doneNote': ['你负责、派发或验收的', 'Yours, dispatched by you or accepted by you'],
+  'me.dev.hide': ['锁屏上隐藏内容', 'Hide the content'], 'me.dev.hideNote': ['只显示「tend：N 项等你」，不带按钮', 'Only "N waiting on you" shows, without buttons'],
+  'me.dev.wait': ['升级前的等待', 'Before a push'], 'me.dev.waitNote': ['网页上一直没人处理多久才推到这里', 'How long something waits unhandled on the page before it is pushed here'],
+  'me.dev.wait.0': ['默认', 'Default'], 'me.dev.wait.-1': ['立即', 'At once'], 'me.dev.wait.300': ['5 分钟', '5 min'], 'me.dev.wait.900': ['15 分钟', '15 min'],
+  'me.dev.waitDefault': ['默认：权限请求 30 秒，其余 1 分钟', 'Default: 30 s for a permission, a minute for the rest'],
+  'me.devices': ['收推送的设备', 'Devices that receive pushes'], 'me.devicesNote': ['去掉的设备下次打开 tend 时会重新登记', 'A device taken away registers again the next time it opens tend'],
+  'me.dev.this': ['这台设备', 'This device'], 'me.dev.unnamed': ['没有名字的设备', 'A device without a name'],
+  'me.dev.renewed': ['%s 续期', 'renewed %s'], 'me.dev.lastOK': ['%s 送达过', 'reached %s'], 'me.dev.failures': ['失败 %d 次', '%d failures'],
+  'me.dev.remove': ['去掉', 'Remove'], 'me.dev.removed': ['%s 已去掉', '%s is removed'],
+  'me.desk': ['设置和管理 · 在电脑上打开', 'Settings and management · on a computer'],
+  'me.desk.agents': ['Agent 定义与 workflow', 'Agent definitions and workflows'], 'me.desk.team': ['项目、成员与邀请', 'Projects, people and invitations'],
+  'me.desk.trackers': ['工单绑定与同步', 'Issue trackers and their sync'], 'me.desk.machines': ['机器分享与交接', 'Sharing and handing machines over'],
+  'me.desk.tokens': ['token、浏览器会话与 webhook', 'Tokens, browser sessions and the webhook'], 'me.desk.look': ['外观与语言', 'Look and language'],
   'me.webhook': ['个人 webhook', 'Personal webhook'], 'me.webhookSave': ['保存', 'Save'],
   'me.webhookNote': ['有事等你或任务结束时 POST 一段带 text 的 JSON；ntfy、Slack、企业微信都能收。留空就不发。', 'When something needs you or a task ends, it receives a JSON POST with a text field, which ntfy, Slack and the like take. Empty sends nothing.'],
   'me.webhookSaved': ['webhook 已保存', 'The webhook is saved'], 'me.webhookGone': ['webhook 已去掉', 'The webhook is removed'],
@@ -138,10 +154,11 @@ function Look({prefs, presets}) {
 
 // PushSet turns pushes to this device on and off, or says why they cannot be had here: an address that is not HTTPS,
 // an iPhone's Safari before tend is on the home screen, a browser without them, notices refused.
-function PushSet({push, platform, toasts}) {
+function PushSet({push, platform, toasts, onState = () => {}}) {
   const w = useWords();
   const {t} = w;
-  const [state, setState] = useState(null);
+  const [state, setStateNow] = useState(null);
+  const setState = v => { setStateNow(v); onState(v); };
   useEffect(() => { push.state().then(setState, () => setState('none')); }, []);
   const shown = !platform.secure ? 'insecure' : state === 'none' && platform.os === 'ios' && platform.kind !== 'pwa' ? 'install' : state;
   if (!shown) return null;
@@ -153,7 +170,79 @@ function PushSet({push, platform, toasts}) {
       <span class=${cx(usable ? 't-muted' : 't-warning')}>${t(usable ? 'me.push.note' : 'me.push.' + shown)}</span></span></div>`;
 }
 
-function Notices({prefs, notices, webhook, onWebhook, toasts, push, platform}) {
+// ⚠️ The events a device takes (store.EventWaiting, store.EventDone) and the waits offered, in seconds (0 the
+// server's default, -1 at once).
+const waitingEvent = 'task.needs_you', doneEvent = 'task.done';
+const waits = [0, -1, 300, 900];
+const eventsOf = p => p?.events ?? [waitingEvent];
+
+// Switch is one on/off setting.
+function Switch({label, on, onChange}) {
+  return html`<button type="button" role="switch" class=${cx('switch', on && 'on')} aria-checked=${on ? 'true' : 'false'} aria-label=${label}
+    onClick=${() => onChange(!on)}></button>`;
+}
+
+// useDevices is the viewer's push devices and this browser's among them: read once, and again when push is turned
+// on or off here (state); a change of settings is shown at once and put back if the server refuses it.
+function useDevices({http, push, toasts, state}) {
+  const w = useWords();
+  const [list, setList] = useState(null);
+  const [mine, setMine] = useState('');
+  useEffect(() => {
+    if (!http?.devices || state === null) return;
+    let live = true;
+    Promise.all([http.devices(), push.device()]).then(([ds, id]) => { if (live) { setList(ds || []); setMine(id); } }, () => live && setList([]));
+    return () => { live = false; };
+  }, [state]);
+  const failed = e => toasts.show({text: apiText(w, e), tone: 'danger'});
+  const setPrefs = (d, prefs) => {
+    const before = list;
+    setList(list.map(x => (x.id === d.id ? {...x, prefs} : x)));
+    http.setPrefs(d.id, prefs).catch(e => { setList(before); failed(e); });
+  };
+  const remove = d => http.removeDevice(d.id).then(() => {
+    setList(l => l.filter(x => x.id !== d.id));
+    toasts.show({text: w.f('me.dev.removed', d.name || w.t('me.dev.unnamed'))});
+  }, failed);
+  return {list, mine: list?.find(d => d.id === mine) || null, setPrefs, remove};
+}
+
+// DeviceSets is what this device takes of the pushes: what waits, tasks done, the content hidden, how long before.
+function DeviceSets({device, onPrefs}) {
+  const {t} = useWords();
+  const p = device.prefs || {};
+  const events = eventsOf(p);
+  const turn = (event, on) => onPrefs({...p, events: [waitingEvent, doneEvent].filter(e => (e === event ? on : events.includes(e)))});
+  const row = (key, on, onChange) => html`<div class="me-set"><span class="me-k">${t('me.dev.' + key)}</span>
+    <span class="me-inline"><${Switch} label=${t('me.dev.' + key)} on=${on} onChange=${onChange} /><span class="t-muted">${t('me.dev.' + key + 'Note')}</span></span></div>`;
+  return html`
+    ${row('waiting', events.includes(waitingEvent), v => turn(waitingEvent, v))}
+    ${row('done', events.includes(doneEvent), v => turn(doneEvent, v))}
+    ${row('hide', !!p.hide, v => onPrefs({...p, events, hide: v}))}
+    <div class="me-set me-set-stack"><span class="me-k">${t('me.dev.wait')}</span>
+      <span class="me-inline"><${Segmented} label=${t('me.dev.wait')} value=${p.wait || 0} onChange=${v => onPrefs({...p, events, wait: v})}
+        options=${waits.map(v => ({value: v, label: t('me.dev.wait.' + v)}))} />
+        <span class="t-muted">${(p.wait || 0) === 0 ? t('me.dev.waitDefault') : t('me.dev.waitNote')}</span></span></div>`;
+}
+
+// Devices lists the viewer's push devices, this one marked; another is taken away here (it registers again when it
+// next opens tend), this one by turning pushes off.
+function Devices({devices, mine, onRemove}) {
+  const w = useWords();
+  const {t, f} = w;
+  const facts = d => [d.renewed && f('me.dev.renewed', when(d.renewed)), d.last_ok && f('me.dev.lastOK', when(d.last_ok)),
+    d.failures > 0 && f('me.dev.failures', d.failures)].filter(Boolean).join(' · ');
+  return html`<${Panel} title=${t('me.devices')} count=${devices.length}>
+    <p class="t-muted me-note">${t('me.devicesNote')}</p>
+    <ul class="me-rows">${devices.map(d => html`<li class="me-row" key=${d.id}>
+      <span class=${cx('st', d.id === mine?.id ? 's-success' : 's-muted')} aria-hidden="true">${d.id === mine?.id ? '●' : '○'}</span>
+      <span class="me-main"><span>${d.name || t('me.dev.unnamed')}</span><span class="t-muted">${facts(d)}</span></span>
+      ${d.id === mine?.id ? html`<span class="me-side me-current">${t('me.dev.this')}</span>`
+        : html`<${Button} kind="quiet danger" onClick=${() => onRemove(d)}>${t('me.dev.remove')}<//>`}</li>`)}</ul>
+  <//>`;
+}
+
+function Notices({prefs, notices, webhook, onWebhook, toasts, push, platform, http}) {
   const {t} = useWords();
   const on = useSignalValue(prefs.notify);
   const [permission, setPermission] = useState(() => permissionOf(notices));
@@ -170,19 +259,35 @@ function Notices({prefs, notices, webhook, onWebhook, toasts, push, platform}) {
     }, () => {});
   };
   const usable = permission === 'granted' || permission === 'default';
+  const [pushed, setPushed] = useState(null);
+  const devs = useDevices({http, push, toasts, state: pushed});
   return html`<${Panel} title=${t('me.notices')} actions=${html`<span class="t-muted">${t('me.noticesNote')}</span>`}>
     <div class="me-sets">
       <div class="me-set"><span class="me-k">${t('me.browser')}</span>
         <span class="me-inline">${usable && html`<${Segmented} label=${t('me.browser')} value=${shown} onChange=${turn}
           options=${[{value: 'on', label: t('me.on')}, {value: 'off', label: t('me.off')}]} />`}
           <span class=${cx(usable ? 't-muted' : 't-warning')}>${t('me.browser.' + permission)}</span></span></div>
-      <${PushSet} push=${push} platform=${platform} toasts=${toasts} />
+      <${PushSet} push=${push} platform=${platform} toasts=${toasts} onState=${setPushed} />
+      ${pushed === 'on' && devs.mine && html`<${DeviceSets} device=${devs.mine} onPrefs=${p => devs.setPrefs(devs.mine, p)} />`}
       <div class="me-set me-set-top"><span class="me-k">${t('me.webhook')}</span>
         <span class="me-hook"><span class="me-hook-row"><${TextInput} label=${t('me.webhook')} value=${url} onInput=${setUrl} mono placeholder="https://ntfy.sh/…" />
           <${Button} disabled=${webhook === null || url.trim() === (webhook || '')} onClick=${() => onWebhook(url.trim())}>${t('me.webhookSave')}<//></span>
           <span class="field-note">${t('me.webhookNote')}</span></span></div>
     </div>
-  <//>`;
+  <//>
+  ${devs.list?.length > 0 && html`<${Devices} devices=${devs.list} mine=${devs.mine} onRemove=${devs.remove} />`}`;
+}
+
+// PhoneNotices is the phone's: pushes to this device and what it takes of them, and the devices.
+function PhoneNotices({http, push, platform, toasts}) {
+  const {f} = useWords();
+  const [pushed, setPushed] = useState(null);
+  const devs = useDevices({http, push, toasts, state: pushed});
+  return html`<${Panel} title=${f('me.devNotices', platform.name)}><div class="me-sets">
+      <${PushSet} push=${push} platform=${platform} toasts=${toasts} onState=${setPushed} />
+      ${pushed === 'on' && devs.mine && html`<${DeviceSets} device=${devs.mine} onPrefs=${p => devs.setPrefs(devs.mine, p)} />`}
+    </div><//>
+    ${devs.list?.length > 0 && html`<${Devices} devices=${devs.list} mine=${devs.mine} onRemove=${devs.remove} />`}`;
 }
 
 function Logins({logins, identities, onLink}) {
@@ -325,8 +430,10 @@ export function Me({session, http, prefs, toasts, router, notices, tab, platform
         <li><button type="button" class="card-row" onClick=${() => router.go({page: 'agents'})}>
           <span class="card-main"><span class="card-primary">${t('me.agents')}</span><span class="card-secondary">${t('me.agentsNote')}</span></span></button></li>
       </ul>
-      <${Panel} title=${t('me.notices')}><div class="me-sets"><${PushSet} push=${push} platform=${platform} toasts=${toasts} /></div><//>
+      <${PhoneNotices} http=${http} push=${push} platform=${platform} toasts=${toasts} />
       <${Install} platform=${platform} phone />
+      <${Panel} title=${t('me.desk')}><${DeskLinks} platform=${platform} toasts=${toasts} items=${[['agents', 'agents'], ['team', 'team'], ['trackers', 'team'],
+        ['machines', 'machines'], ['tokens', 'me'], ['look', 'me']].map(([k, page]) => ({label: t('me.desk.' + k), page}))} /><//>
       <${Button} kind="danger" wide onClick=${onLogout}>${t('app.logout')}<//>
     </div>`;
   }
@@ -366,7 +473,7 @@ export function Me({session, http, prefs, toasts, router, notices, tab, platform
     <div class="me-body">
       <div class="me-col">
         <${Look} prefs=${prefs} presets=${presets} />
-        <${Notices} prefs=${prefs} notices=${notices} webhook=${webhook} onWebhook=${saveHook} toasts=${toasts} push=${push} platform=${platform} />
+        <${Notices} prefs=${prefs} notices=${notices} webhook=${webhook} onWebhook=${saveHook} toasts=${toasts} push=${push} platform=${platform} http=${http} />
       </div>
       <div class="me-col">
         <${Logins} logins=${logins} identities=${identities} onLink=${() => linking(tab, now())} />

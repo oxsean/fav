@@ -18,6 +18,8 @@ import * as tm from '../core/team.js';
 import {apiText} from './words.js';
 import {ProjectDrawer, AddMember} from './project.js';
 import './taskwords.js';
+import {OnDesktop} from '../ui/desk.js';
+import {nowhere} from '../core/platform.js';
 
 register('team', {
   'team.title': ['团队', 'Team'], 'team.summary': ['%d 人在用，%d 人已停用', '%d people active, %d disabled'],
@@ -154,8 +156,9 @@ function Offboard({user, people, me, plan, busy, onGo, onClose}) {
 }
 
 // Team: http reads and changes people, invitations, rules and the log (/api); session is who signed in (an admin sees
-// and does the rest); copy is the clipboard's (a test passes its own).
-export function Team({store, commands, toasts, session, http, wire, clock: now = () => Date.now(), copy}) {
+// and does the rest); copy is the clipboard's (a test passes its own); platform hands the page's address on to a
+// computer from a phone.
+export function Team({store, commands, toasts, session, http, wire, clock: now = () => Date.now(), copy, platform = nowhere}) {
   const w = useWords();
   const {t, f} = w;
   const phone = usePhone();
@@ -276,7 +279,7 @@ export function Team({store, commands, toasts, session, http, wire, clock: now =
       <${Panel} title=${t('team.projects')} count=${projects.length}>
         ${projects.length ? projectRows : html`<p class="empty">${t('team.noProjects')}</p>`}
       <//>
-      <p class="empty t-muted">${t('team.desktop')}</p>
+      <${OnDesktop} platform=${platform} toasts=${toasts} page="team" note=${t('team.desktop')} />
       ${drawer}
     </div>`;
   }

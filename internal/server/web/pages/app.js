@@ -102,15 +102,15 @@ export function App({store, commands, toasts, wire, http, router, keys, nav, pre
       : route.page === 'runs'
         ? html`<${Runs} store=${store} commands=${commands} toasts=${toasts} router=${router} prefs=${prefs} copy=${copy} changes=${changes} drafts=${drafts} storage=${storage} clock=${clock} />`
         : route.page === 'team'
-          ? html`<${Team} store=${store} commands=${commands} toasts=${toasts} session=${session} http=${http} wire=${wire} clock=${clock} copy=${copy} />`
+          ? html`<${Team} store=${store} commands=${commands} toasts=${toasts} platform=${platform} session=${session} http=${http} wire=${wire} clock=${clock} copy=${copy} />`
           : route.page === 'machines'
-            ? html`<${Machines} store=${store} commands=${commands} toasts=${toasts} session=${session} http=${http} wire=${wire} router=${router} storage=${storage}
+            ? html`<${Machines} store=${store} commands=${commands} toasts=${toasts} platform=${platform} session=${session} http=${http} wire=${wire} router=${router} storage=${storage}
               clock=${clock} copy=${copy} />`
             : route.page === 'me'
               ? html`<${Me} session=${session} http=${http} prefs=${prefs} toasts=${toasts} router=${router} notices=${notices} tab=${tab} platform=${platform} push=${push} clock=${clock}
                 copy=${copy} onLogout=${onLogout} />`
               : route.page === 'agents'
-                ? html`<${Agents} store=${store} commands=${commands} toasts=${toasts} session=${session} wire=${wire} agentDefs=${agentDefs} download=${download} />`
+                ? html`<${Agents} store=${store} commands=${commands} toasts=${toasts} platform=${platform} session=${session} wire=${wire} agentDefs=${agentDefs} download=${download} />`
                 : null;
 
   return html`<${NamesContext.Provider} value=${names}><${Shell} keys=${keys} wire=${wire} nav=${nav} toasts=${toasts} page=${route.page} onNavigate=${onNavigate}

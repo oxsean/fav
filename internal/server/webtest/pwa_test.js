@@ -338,7 +338,7 @@ function pushPlatform({permission = 'default', answer = 'granted', sub = null, n
 function pushHTTP(key = 'BAEC') {
   const calls = [];
   return {calls, pushKey: async () => { if (!key) throw Object.assign(new Error('503'), {status: 503, code: 'push_key'}); return key; },
-    putDevice: async (sub, name) => { calls.push(['put', sub.endpoint, name]); }, dropDevice: async e => { calls.push(['drop', e]); }};
+    putDevice: async (sub, name) => { calls.push(['put', sub.endpoint, name]); return {id: 'd_' + calls.length}; }, dropDevice: async e => { calls.push(['drop', e]); }};
 }
 
 test('the platform has push only where the browser has a worker, a PushManager and notices', () => {
@@ -370,6 +370,39 @@ test('turning push on asks first, then subscribes with the server key and regist
   await createPush({http: pushHTTP(''), platform: nokey.p}).on().catch(e => { err = e; });
   eq([err?.code, nokey.did], ['push_key', [['ask']]], 'a server without a key');
   eq(await createPush({http: pushHTTP(), platform: {push: null}}).state(), 'none', 'no push in this browser');
+});
+
+test('the page knows the id of this browser\'s device from its last registration', async () => {
+  const {p} = pushPlatform();
+  const push = createPush({http: pushHTTP(), platform: p});
+  eq(await push.device(), '', 'none yet');
+  await push.on();
+  eq(await push.device(), 'd_1', 'turned on');
+  const renewing = push.renew();
+  eq(await push.device(), 'd_2', 'asked while it renews: the renewed one');
+  await renewing;
+  await push.off();
+  eq(await push.device(), '', 'turned off');
+  const held = pushPlatform({permission: 'granted'});
+  held.set(held.subOf('https://push.example/a', new Uint8Array([4, 1, 2])));
+  const failing = createPush({http: {...pushHTTP(), putDevice: async () => { throw new Error('500'); }}, platform: held.p});
+  await failing.renew().catch(() => {});
+  eq(await failing.device(), '', 'a registration that failed');
+});
+
+test('a link is handed on through the share sheet, else the clipboard', async () => {
+  const copied = [];
+  const clipboard = {writeText: async u => { copied.push(u); }};
+  const of = share => createPlatform({nav: {share, clipboard}, origin: 'https://tend.test'});
+  eq(of(undefined).link('/?page=me'), 'https://tend.test/?page=me', 'the link');
+  eq(await of(async () => {}).share('u1'), 'shared', 'shared');
+  eq(await of(async () => { throw Object.assign(new Error('closed'), {name: 'AbortError'}); }).share('u2'), 'canceled', 'the sheet closed');
+  eq(await of(async () => { throw Object.assign(new Error('no'), {name: 'NotAllowedError'}); }).share('u3'), 'copied', 'a sheet that refused');
+  eq(await of(undefined).share('u4'), 'copied', 'no sheet');
+  eq(copied, ['u3', 'u4'], 'copied');
+  let err = null;
+  await createPlatform({nav: {}}).share('u5').catch(e => { err = e; });
+  ok(err, 'neither');
 });
 
 test('the page renews its subscription, made again when the server key changed', async () => {

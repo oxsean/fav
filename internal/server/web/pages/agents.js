@@ -16,6 +16,8 @@ import {clock, day} from '../core/format.js';
 import * as ag from '../core/agents.js';
 import {apiText} from './words.js';
 import './taskwords.js';
+import {OnDesktop} from '../ui/desk.js';
+import {nowhere} from '../core/platform.js';
 
 register('agents', {
   'ag.title': ['Agent', 'Agents'],
@@ -338,8 +340,9 @@ function Remove({r, st, onGo, onClose}) {
   <//>`;
 }
 
-// Agents: agentDefs reads the two lists (core/agents.js); download gives the viewer a file (a test passes its own).
-export function Agents({store, commands, toasts, session, wire, agentDefs, download = saveFile}) {
+// Agents: agentDefs reads the two lists (core/agents.js); download gives the viewer a file (a test passes its own);
+// platform hands the page's address on to a computer from a phone.
+export function Agents({store, commands, toasts, session, wire, agentDefs, download = saveFile, platform = nowhere}) {
   const w = useWords();
   const {t, f} = w;
   const phone = usePhone();
@@ -425,7 +428,7 @@ export function Agents({store, commands, toasts, session, wire, agentDefs, downl
       <p class="t-muted ag-p">${t('ag.lead')}</p>
       ${chips}
       ${table}
-      <p class="empty t-muted">${t('ag.desktop')}</p>
+      <${OnDesktop} platform=${platform} toasts=${toasts} page="agents" note=${t('ag.desktop')} />
       ${open && html`<${Drawer} title=${open.name} onClose=${() => setOpened('')}>
         <div class="ag-phone-head"><span>${sourceText(open, st)}</span><${CheckMark} r=${open} /></div>
         ${open.view?.description && html`<p class="ag-p">${open.view.description}</p>`}

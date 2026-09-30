@@ -66,5 +66,10 @@
     {"name": "forest", "input": {"base": "#5b6b63", "accent": "#2d7a5b"}},
     {"name": "ember", "input": {"base": "#76685e", "accent": "#b0502a"}},
     {"name": "graphite", "input": {"base": "#6b6b6b", "accent": "#5a55c8"}}
+  ],
+  "GET /api/push/devices": [
+    {"id": "d_mac", "user": "u_b", "kind": "webpush", "name": "Mac", "created": "2026-09-20T09:00:00Z", "renewed": "2026-09-30T13:00:00Z", "last_ok": "2026-09-30T13:40:00Z", "prefs": {"events": null}},
+    {"id": "d_phone", "user": "u_b", "kind": "webpush", "name": "Android", "created": "2026-09-21T09:00:00Z", "renewed": "2026-09-29T08:00:00Z", "prefs": {"events": ["task.needs_you", "task.done"], "hide": true, "wait": 300}},
+    {"id": "d_old", "user": "u_b", "kind": "webpush", "created": "2026-07-01T09:00:00Z", "renewed": "2026-07-01T09:00:00Z", "failures": 2, "prefs": {"events": null}}
   ]
 }

@@ -387,6 +387,7 @@ func TestPageAPIAnswersAreTheServersShapes(t *testing.T) {
 			})
 		},
 		"GET /auth/logins": func() any { return new([]loginInfo) }, "GET /theme/presets.json": func() any { return new([]skin.Preset) },
+		"GET /api/push/devices": func() any { return new([]store.PushDevice) },
 		"GET /api/trackers/preview": func() any {
 			return new(struct {
 				Body string `json:"body"`

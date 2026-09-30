@@ -20,6 +20,8 @@ import * as tm from '../core/team.js';
 import {apiText, why} from './words.js';
 import {showMachine} from './runs.js';
 import './taskwords.js';
+import {OnDesktop} from '../ui/desk.js';
+import {nowhere} from '../core/platform.js';
 
 register('machines', {
   'mach.title': ['机器', 'Machines'], 'mach.none': ['还没有机器接入', 'No machine has connected yet'],
@@ -216,8 +218,8 @@ function Confirm({title, note, label, onGo, onClose}) {
 }
 
 // Machines: http reads and ends node tokens (/api/machines); router and storage open the runs page on a machine's runs;
-// copy is the clipboard's (a test passes its own).
-export function Machines({store, commands, toasts, session, http, wire, router, storage, clock: now = () => Date.now(), copy}) {
+// copy is the clipboard's (a test passes its own); platform hands the page's address on to a computer from a phone.
+export function Machines({store, commands, toasts, session, http, wire, router, storage, clock: now = () => Date.now(), copy, platform = nowhere}) {
   const w = useWords();
   const {t, f} = w;
   const phone = usePhone();
@@ -303,7 +305,7 @@ export function Machines({store, commands, toasts, session, http, wire, router, 
             ${tm.machineNotes(m, st.drains?.[m.name]).slice(0, 1).map(n => html`<span class=${cx('card-secondary', 't-' + noteTone(n))}>${noteText(w, n, name)}</span>`)}</span>
         </button></li>`)}</ul>
       <//>`)}
-      <p class="empty t-muted">${t('mach.desktop')}</p>
+      <${OnDesktop} platform=${platform} toasts=${toasts} page="machines" note=${t('mach.desktop')} />
       ${open && html`<${Drawer} title=${open.name} onClose=${() => setPicked('')}>
         <div class="mach-phone-head"><${Status} state=${tm.machineState(open)} word label=${stateWord(w, open)} /></div>
         <${Facts} m=${open} st=${st} creds=${[]} now=${at} />

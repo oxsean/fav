@@ -13,7 +13,12 @@ const sameKey = (buf, b64) => {
 // createPush: http is the page's (core/http.js), platform where it runs (core/platform.js).
 export function createPush({http, platform}) {
   const p = platform.push;
+  // mine is this browser's device id as the server last registered it ('' for none), set as a registration starts.
+  let mine = Promise.resolve('');
+  const register = sub => { mine = http.putDevice(sub.toJSON(), platform.name).then(r => r?.id || ''); return mine; };
   return {
+    // device is the id of this browser's push device, '' while it has none.
+    device: () => mine.catch(() => ''),
     // state is none (no push in this browser), denied (the browser refuses notices), on or off.
     async state() {
       if (!p) return 'none';
@@ -27,26 +32,31 @@ export function createPush({http, platform}) {
       key.catch(() => {});
       if ((await asked) !== 'granted') return p.permission() === 'denied' ? 'denied' : 'off';
       const sub = await p.subscribe(bytes(await key));
-      await http.putDevice(sub.toJSON(), platform.name);
+      await register(sub);
       return 'on';
     },
     async off() {
+      mine = Promise.resolve('');
       const endpoint = await p?.unsubscribe();
       if (endpoint) await http.dropDevice(endpoint);
       return p ? 'off' : 'none';
     },
     // renew tells the server this device is still here; a subscription made with another key than the server's now is
     // made again.
-    async renew() {
-      let sub = await p?.current();
-      if (!sub) return;
-      const key = await http.pushKey();
-      if (!sameKey(sub.options?.applicationServerKey, key)) {
-        await sub.unsubscribe();
-        if (p.permission() !== 'granted') return;
-        sub = await p.subscribe(bytes(key));
-      }
-      await http.putDevice(sub.toJSON(), platform.name);
+    renew() {
+      mine = (async () => {
+        let sub = await p?.current();
+        if (!sub) return '';
+        const key = await http.pushKey();
+        if (!sameKey(sub.options?.applicationServerKey, key)) {
+          await sub.unsubscribe();
+          if (p.permission() !== 'granted') return '';
+          sub = await p.subscribe(bytes(key));
+        }
+        const r = await http.putDevice(sub.toJSON(), platform.name);
+        return r?.id || '';
+      })();
+      return mine.then(() => {});
     },
     // clear closes the notices about things that no longer wait on the viewer, by the inbox's pending items: one
     // about an item, and the count of a hidden push once nothing waits. Others (a task done, how a deny went) stay.

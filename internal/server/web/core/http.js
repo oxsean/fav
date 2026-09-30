@@ -46,6 +46,11 @@ export function createHTTP({fetch = (...a) => globalThis.fetch(...a)} = {}) {
     pushKey: async () => (await ask('GET', '/api/push/key')).key,
     putDevice: (subscription, name) => ask('PUT', '/api/push/device', {subscription, name}),
     dropDevice: endpoint => ask('DELETE', '/api/push/device', {endpoint}),
+    // devices are the viewer's push devices ({id, name, created, renewed, last_ok, failures, prefs: {events, hide, wait}});
+    // setPrefs changes what one of them wants, removeDevice takes one away.
+    devices: () => ask('GET', '/api/push/devices'),
+    setPrefs: (id, prefs) => ask('POST', '/api/push/prefs', {id, prefs}),
+    removeDevice: id => ask('DELETE', '/api/push/devices', {id}),
     logout: () => ask('POST', '/logout', {}, true),
     // logins are the sign-in methods this server offers: [{name, display}].
     logins: async () => (await ask('GET', '/auth/logins')) || [],

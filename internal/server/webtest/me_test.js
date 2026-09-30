@@ -32,12 +32,20 @@ function memory(init = {}) {
   return {getItem: k => (m.has(k) ? m.get(k) : null), setItem: (k, v) => m.set(k, String(v)), removeItem: k => m.delete(k), map: m};
 }
 
-// fakeHTTP answers from api.json and keeps what the page asked, as [method path, body].
-function fakeHTTP() {
+// fakeHTTP answers from api.json and keeps what the page asked, as [method path, body]; refuse fails the calls it
+// names with 500 internal.
+function fakeHTTP({refuse = []} = {}) {
   const calls = [];
-  const ans = (key, body) => { calls.push(body === undefined ? [key] : [key, body]); return Promise.resolve(structuredClone(api[key] ?? null)); };
+  const ans = (key, body) => {
+    calls.push(body === undefined ? [key] : [key, body]);
+    if (refuse.includes(key)) return Promise.reject(Object.assign(new Error('500'), {status: 500, code: 'internal'}));
+    return Promise.resolve(structuredClone(api[key] ?? null));
+  };
   return {
     calls,
+    devices: () => ans('GET /api/push/devices'),
+    setPrefs: (id, prefs) => ans('POST /api/push/prefs', {id, prefs}),
+    removeDevice: id => ans('DELETE /api/push/devices', {id}),
     users: () => ans('GET /api/users'),
     logins: () => ans('GET /auth/logins'),
     tokens: () => ans('GET /api/tokens'),
@@ -111,9 +119,9 @@ function browser(permission = 'default', answer = 'granted') {
 
 // fakePush is this browser's push (core/push.js) standing as state, turned on to on (the browser's answer), and
 // fail the error turning it on meets; did is what the page asked of it.
-function fakePush(state = 'none', {on = 'on', fail = null} = {}) {
+function fakePush(state = 'none', {on = 'on', fail = null, device = 'd_mac'} = {}) {
   const did = [];
-  return {did, state: async () => state,
+  return {did, state: async () => state, device: async () => (state === 'on' ? device : ''),
     on: () => { did.push('on'); return fail ? Promise.reject(fail) : Promise.resolve(state = on); },
     off: () => { did.push('off'); return Promise.resolve(state = 'off'); },
     clear: inbox => { did.push(['clear', inbox === noInbox ? 'none' : inbox.map(x => x.task)]); }};
@@ -157,8 +165,8 @@ test('the page draws in both forms and both languages, styled and worded', async
     if (f === 'phone') {
       ok(text.includes('Bo Lin') && text.includes(words.t('me.team')) && text.includes(words.t('me.agentsNote')) && text.includes(words.t('app.logout')),
         `${lang}: the account, the team, the agents and signing out`);
-      ok(!text.includes(words.t('me.tokens')) && !text.includes(words.t('me.look')), `${lang}: nothing managed on a computer`);
-      eq(a.http.calls, [], `${lang}: a phone reads nothing of its own`);
+      eq([a.el.find('.me-skin').length, text.includes(words.t('me.newToken')), text.includes(words.t('me.webhookSave'))], [0, false, false], `${lang}: nothing managed on a computer`);
+      eq(a.http.calls, [['GET /api/push/devices']], `${lang}: a phone reads only the devices`);
     } else {
       for (const k of ['me.look', 'me.notices', 'me.logins', 'me.tokens', 'me.sessions']) ok(text.includes(words.t(k)), `${lang}: ${k}`);
       ok(text.includes('bo@example.com · ' + words.t('role.member')), `${lang}: who`);
@@ -313,6 +321,82 @@ test('linking an account goes to the server and remembers it in this tab', async
   await click(a.el.one('.me-link'));
   eq(a.tab.getItem('tend-linking'), String(NOW), 'remembered');
   await a.done();
+});
+
+// switchOf is the on/off setting of this device labelled key.
+const switchOf = (el, key) => el.find('[role=switch]').find(b => b.getAttribute('aria-label') === words.t(key));
+const on = b => b.getAttribute('aria-checked') === 'true';
+
+test("this device's settings go to the server as they change, one refused is put back; the devices, this one marked, another removed", async () => {
+  for (const f of ['desktop', 'phone']) {
+    const http = fakeHTTP();
+    const a = await app({f, http, push: fakePush('on'), platform: {kind: 'pwa', os: 'android', name: 'Android', secure: true}});
+    await until(() => switchOf(a.el, 'me.dev.waiting'), `${f}: the settings`);
+    eq(['me.dev.waiting', 'me.dev.done', 'me.dev.hide'].map(k => on(switchOf(a.el, k))), [true, false, false], `${f}: the defaults`);
+    const wait = a.el.find('[role=radiogroup]').find(g => g.getAttribute('aria-label') === words.t('me.dev.wait'));
+    eq(wait.find('[aria-checked=true]')[0].textContent, words.t('me.dev.wait.0'), `${f}: the default wait`);
+    await click(switchOf(a.el, 'me.dev.done'));
+    await click(switchOf(a.el, 'me.dev.waiting'));
+    await click(switchOf(a.el, 'me.dev.hide'));
+    await click(wait.find('button').find(b => b.textContent === words.t('me.dev.wait.-1')));
+    await settled();
+    eq(http.calls.filter(c => c[0] === 'POST /api/push/prefs').map(c => c[1]), [
+      {id: 'd_mac', prefs: {events: ['task.needs_you', 'task.done']}},
+      {id: 'd_mac', prefs: {events: ['task.done']}},
+      {id: 'd_mac', prefs: {events: ['task.done'], hide: true}},
+      {id: 'd_mac', prefs: {events: ['task.done'], hide: true, wait: -1}},
+    ], `${f}: each change sent`);
+    eq(['me.dev.waiting', 'me.dev.done', 'me.dev.hide'].map(k => on(switchOf(a.el, k))), [false, true, true], `${f}: as changed`);
+
+    const devices = a.el.find('.panel').find(p => p.textContent.includes(words.t('me.devices')));
+    eq(devices.find('.me-row').map(r => [r.one('.me-main').find('span')[0].textContent, r.textContent.includes(words.t('me.dev.this'))]),
+      [['Mac', true], ['Android', false], [words.t('me.dev.unnamed'), false]], `${f}: the devices, this one marked`);
+    const devRow = name => devices.find('.me-row').find(r => r.one('.me-main').find('span')[0].textContent === name);
+    ok(devRow(words.t('me.dev.unnamed')).textContent.includes(words.f('me.dev.failures', 2)), `${f}: its failures`);
+    eq(devRow('Mac').find('button').length, 0, `${f}: this one is turned off with the switch`);
+    await click(devRow('Android').one('button'));
+    await settled();
+    eq([http.calls.at(-1), devices.find('.me-row').length], [['DELETE /api/push/devices', {id: 'd_phone'}], 2], `${f}: another removed`);
+    await a.done();
+  }
+  const refusing = fakeHTTP({refuse: ['POST /api/push/prefs']});
+  const r = await app({http: refusing, push: fakePush('on')});
+  await until(() => switchOf(r.el, 'me.dev.done'), 'the settings');
+  await click(switchOf(r.el, 'me.dev.done'));
+  await settled();
+  eq([on(switchOf(r.el, 'me.dev.done')), r.el.textContent.includes(words.t('api.internal'))], [false, true], 'refused: put back and said');
+  await r.done();
+  const off = await app({push: fakePush('off')});
+  await settled();
+  eq([switchOf(off.el, 'me.dev.waiting'), off.el.textContent.includes(words.t('me.devices'))], [undefined, true], 'pushes off here: no settings, the devices still listed');
+  await off.done();
+});
+
+test('a phone hands on the pages only a computer has: to the share sheet, else the clipboard', async () => {
+  const shared = [];
+  const platform = (share) => ({kind: 'pwa', os: 'android', name: 'Android', secure: true, link: path => 'https://tend.test' + path, share});
+  const a = await app({f: 'phone', platform: platform(async url => { shared.push(url); return 'shared'; })});
+  const panel = a.el.find('.panel').find(p => p.textContent.includes(words.t('me.desk')));
+  eq(panel.find('.desk-row').map(b => b.one('.card-primary').textContent), ['me.desk.agents', 'me.desk.team', 'me.desk.trackers', 'me.desk.machines',
+    'me.desk.tokens', 'me.desk.look'].map(k => words.t(k)), 'what a computer does');
+  for (const b of panel.find('.desk-row')) await click(b);
+  await settled();
+  eq(shared, ['agents', 'team', 'team', 'machines', 'me', 'me'].map(p => 'https://tend.test/?page=' + p), 'shared');
+  await a.done();
+  for (const [page, key] of [['agents', 'ag.desktop'], ['machines', 'mach.desktop'], ['team', 'team.desktop']]) {
+    const c = await app({f: 'phone', url: '/?page=' + page, platform: platform(async () => 'copied')});
+    const desk = c.el.one('.desk');
+    ok(desk.textContent.includes(words.t(key)), `${page}: what a computer does`);
+    await click(desk.one('button'));
+    await settled();
+    ok(c.el.textContent.includes(words.t('desk.copied')), `${page}: copied`);
+    await c.done();
+  }
+  const none = await app({f: 'phone', platform: platform(async () => { throw new Error('no clipboard'); })});
+  await click(none.el.find('.desk-row')[0]);
+  await settled();
+  ok(none.el.textContent.includes(words.f('desk.failed', 'https://tend.test/?page=agents')), 'neither: the address to type');
+  await none.done();
 });
 
 test('a phone: the account, the team and agent pages and signing out', async () => {
