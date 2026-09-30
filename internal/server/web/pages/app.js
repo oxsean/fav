@@ -11,6 +11,7 @@ import * as sel from '../core/select.js';
 import {Home} from './home.js';
 import {Tasks} from './tasks.js';
 import {Runs} from './runs.js';
+import {Machines} from './machines.js';
 import {createChanges} from '../core/changes.js';
 import './words.js';
 
@@ -39,9 +40,10 @@ function finder(store, machines, go) {
 }
 
 // App: router, keys, nav and toasts are core's; prefs core/prefs.js's; session is who signed in; fetchOutput(run) the
-// last events of a run; storage is the browser's (the task page keeps its filter and draft there); onLogout signs out;
-// changes reads what runs changed (core/changes.js; one over wire when not given); names is a signal of user id → name.
-export function App({store, commands, toasts, wire, router, keys, nav, prefs, session, clock, fetchOutput, storage, onLogout, copy, changes: given, names = null}) {
+// last events of a run; http is core/http.js's (the pages read /api there); storage is the browser's (the task page
+// keeps its filter and draft there); onLogout signs out; changes reads what runs changed (core/changes.js; one over
+// wire when not given); names is a signal of user id → name.
+export function App({store, commands, toasts, wire, http, router, keys, nav, prefs, session, clock, fetchOutput, storage, onLogout, copy, changes: given, names = null}) {
   const {t, f} = useWords();
   const route = useSignalValue(router.route);
   const machines = useSignalValue(store.machines);
@@ -85,7 +87,10 @@ export function App({store, commands, toasts, wire, router, keys, nav, prefs, se
         intent=${intent} prefs=${prefs} copy=${copy} changes=${changes} />`
       : route.page === 'runs'
         ? html`<${Runs} store=${store} commands=${commands} toasts=${toasts} router=${router} prefs=${prefs} copy=${copy} changes=${changes} storage=${storage} clock=${clock} />`
-        : html`<${Soon} page=${route.page} />`;
+        : route.page === 'machines'
+          ? html`<${Machines} store=${store} commands=${commands} toasts=${toasts} session=${session} http=${http} router=${router} storage=${storage}
+            clock=${clock} copy=${copy} />`
+          : html`<${Soon} page=${route.page} />`;
 
   return html`<${NamesContext.Provider} value=${names}><${Shell} keys=${keys} wire=${wire} nav=${nav} toasts=${toasts} page=${route.page} onNavigate=${onNavigate}
     counts=${counts} spent=${{tokens: day.tokens, usd: day.usd}} user=${session} userMenu=${userMenu}

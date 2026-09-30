@@ -1,5 +1,6 @@
 // http is the page's plain HTTP: the browser session (/session, /login, /logout), the sign-in methods and invitation
-// (/auth/*), a terminal's sign-in to allow (/api/device) and who is who (/api/users). Writes carry X-Tend, which the server asks of a browser.
+// (/auth/*), a terminal's sign-in to allow (/api/device), who is who (/api/users) and the machines' node tokens
+// (/api/machines). Writes carry X-Tend, which the server asks of a browser.
 
 export class HTTPError extends Error {
   constructor(status, code) {
@@ -48,6 +49,12 @@ export function createHTTP({fetch = (...a) => globalThis.fetch(...a)} = {}) {
     decideDevice: (code, allow) => ask('POST', '/api/device', {code, allow}),
     // users are the people on this server: [{id, name, username, role, disabled}].
     users: async () => (await ask('GET', '/api/users')) || [],
+    // machineCreds are the node tokens of the caller's machines (an admin's: everyone's).
+    machineCreds: async () => (await ask('GET', '/api/machines')) || [],
+    // addMachine makes a node token for a new machine of the caller's → {id, token, command}.
+    addMachine: name => ask('POST', '/api/machines', {name}),
+    revokeMachine: id => ask('DELETE', '/api/machines', {id}),
+    rebindMachine: id => ask('POST', '/api/machines/rebind', {id}),
   };
 }
 

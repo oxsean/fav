@@ -18,6 +18,7 @@ import (
 	"github.com/oxsean/fav/internal/journal"
 	"github.com/oxsean/fav/internal/node"
 	"github.com/oxsean/fav/internal/output"
+	"github.com/oxsean/fav/internal/store"
 	"github.com/oxsean/fav/internal/task"
 )
 
@@ -70,6 +71,8 @@ func TestThePagesInBothFormsAndLanguages(t *testing.T) { runModule(t, "webtest/p
 func TestTheChangesOfARunInPagesAndOnTheTab(t *testing.T) { runModule(t, "webtest/changes_test.js") }
 
 func TestTheRunsPageAndARunsOwn(t *testing.T) { runModule(t, "webtest/runs_test.js") }
+
+func TestTheMachinesPage(t *testing.T) { runModule(t, "webtest/team_test.js") }
 
 func TestTheTaskPagesBoardsTreesAndDrafts(t *testing.T) { runModule(t, "webtest/tasks_test.js") }
 
@@ -344,6 +347,36 @@ func strictDecode(t *testing.T, where string, raw json.RawMessage, v any) {
 	}
 }
 
+// The /api answers the page tests read (webtest/api.json) are the server's shapes.
+func TestPageAPIAnswersAreTheServersShapes(t *testing.T) {
+	shapes := map[string]func() any{
+		"GET /api/users": func() any { return new([]PublicUser) }, "GET /api/machines": func() any { return new([]store.Credential) },
+		"POST /api/machines": func() any {
+			return new(struct {
+				ID      string `json:"id"`
+				Token   string `json:"token"`
+				Command string `json:"command"`
+			})
+		},
+	}
+	b, err := os.ReadFile(filepath.Join("webtest", "api.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var answers map[string]json.RawMessage
+	if err := json.Unmarshal(b, &answers); err != nil {
+		t.Fatal(err)
+	}
+	for k, raw := range answers {
+		mk := shapes[k]
+		if mk == nil {
+			t.Errorf("api.json: %s has no shape here", k)
+			continue
+		}
+		strictDecode(t, "api.json "+k, raw, mk())
+	}
+}
+
 // The writes, their answers, the machines and inbox lists and the affordances in the frame files are the coordinator's
 // shapes.
 func TestFrameWritesAndListsAreTheCoordinatorsShapes(t *testing.T) {
@@ -359,6 +392,7 @@ func TestFrameWritesAndListsAreTheCoordinatorsShapes(t *testing.T) {
 		coord.MTaskMessage: func() any { return new(coord.TaskMessage) }, coord.MTaskMessagePreview: func() any { return new(coord.MessagePreview) },
 		coord.MRunSend: func() any { return new(coord.SendMessage) }, coord.MRunInterrupt: func() any { return new(coord.Interrupt) },
 		coord.MRunChanges: func() any { return new(node.ChangesParams) }, coord.MRunDiff: func() any { return new(node.DiffParams) },
+		coord.MMachineShare: func() any { return new(task.Share) },
 	}
 	results := map[string]func() any{
 		coord.MTaskStatus: func() any { return new(task.Task) }, coord.MRunDispatch: func() any { return new(task.Run) },
@@ -372,6 +406,7 @@ func TestFrameWritesAndListsAreTheCoordinatorsShapes(t *testing.T) {
 		coord.MTaskMessage: func() any { return new(coord.MessageResult) }, coord.MTaskMessagePreview: func() any { return new(coord.MessageRoute) },
 		coord.MRunSend: func() any { return new(task.Run) }, coord.MRunInterrupt: func() any { return new(task.Run) },
 		coord.MRunChanges: func() any { return new(node.Changes) }, coord.MRunDiff: func() any { return new(node.Diff) },
+		coord.MMachineShare: func() any { return new(task.Share) },
 	}
 	files, _ := filepath.Glob(filepath.Join("webtest", "frames", "*.jsonl"))
 	seen := map[string]int{}
@@ -415,7 +450,7 @@ func TestFrameWritesAndListsAreTheCoordinatorsShapes(t *testing.T) {
 	}
 	for _, m := range []string{coord.MTaskStatus, coord.MRunDispatch, coord.MRunStop, coord.MRunAnswer, coord.MRunOutputPage, coord.MTaskCreate,
 		coord.MTaskStart, coord.MTaskMerge, coord.MTaskMove, coord.MTaskPlanSave, coord.MTaskPlanApply, coord.MTaskGate, coord.MTaskSourceAck,
-		coord.MRunPreview, coord.MAgentList, coord.MTaskMessage, coord.MRunInterrupt, coord.MRunChanges, coord.MRunDiff, "machines", "inbox", coord.PushAffordances, "affordances part"} {
+		coord.MRunPreview, coord.MAgentList, coord.MTaskMessage, coord.MRunInterrupt, coord.MRunChanges, coord.MRunDiff, coord.MMachineShare, "machines", "inbox", coord.PushAffordances, "affordances part"} {
 		if seen[m] == 0 {
 			t.Errorf("no frame file has %s", m)
 		}

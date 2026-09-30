@@ -35,6 +35,10 @@ register('pages', {
   'app.soonNote': ['在那之前：用户和凭据用 tend-server admin / token，agent 定义用 tend agent，项目设置用 TUI。', 'Until then: people and credentials through tend-server admin / token, agent definitions through tend agent, project settings in the TUI.'],
   'app.failed': ['没有办成：%s', 'That did not work: %s'], 'app.unsure': ['不知道成没成（%s）', 'Not known whether it went through (%s)'],
   'app.retry': ['重试', 'Retry'],
+  'api.exists': ['这个名字已经有了', 'That name is taken'], 'api.name': ['名字不合法', 'That name is not valid'],
+  'api.csrf': ['请求被拒绝，请刷新页面', 'The request was refused: reload the page'], 'api.unauthorized': ['你没有这个权限', 'You may not do that'],
+  'api.not_found': ['没有这一项，或者你看不到它', 'No such thing, or it is out of your sight'],
+  'api.offline': ['连不上服务器', 'The server cannot be reached'], 'api.internal': ['服务器出错了', 'The server failed'],
   'home.title': ['首页', 'Home'], 'home.waiting': ['等你', 'Waiting on you'], 'home.longest': ['最久一条等了 %s', 'The oldest has waited %s'],
   'home.none': ['没有等你处理的事', 'Nothing waits on you'],
   'home.g.answer': ['要回答', 'To answer'], 'home.g.accept': ['待验收', 'To accept'], 'home.g.error': ['出错', 'Failed'], 'home.g.other': ['其他', 'Other'],
@@ -82,6 +86,9 @@ register('pages', {
   'why.work': ['建不了工作区', 'Its worktree could not be made'], 'why.draft': ['拆解草稿等你确认', 'A plan waits for you'],
   'why.no_plan': ['拆解没有给出计划', 'Its planner handed in no plan'], 'why.other': ['需要你处理（%s）', 'Needs you (%s)'],
 });
+
+// apiText is what an /api failure says: the server's code in words, or the code as it is.
+export const apiText = (w, e) => (w.has('api.' + e?.code) ? w.t('api.' + e.code) : w.f('app.failed', e?.code || String(e?.message || e)));
 
 // why is what a reason code says; a code the table lacks is shown as it is.
 export const why = (w, reason) => (w.has('why.' + reason) ? w.t('why.' + reason) : w.f('why.other', reason));

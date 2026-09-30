@@ -125,7 +125,7 @@
   - 节点侧的 `allow_dirs`、`allow_profiles`、`allow_bypass` 仍然是最后一道边界；
   - 节点可以按项目设置目录白名单：`projects.<id>.dirs`；
   - 能**看见**机器的是管理员、主人、分享名单里的人和被分享项目的成员（`canSee`）。其他人在 `machine.list` 和状态里看不到它，对它 `machine.share` 回 `not_found`，不暴露它存在。看得见不等于能用：派发要主人或分享（`canUse`），否则回 `unauthorized`，`run.preview` 写明原因，管理员也一样。
-- 机器页按「我的机器 / 分享给我的 / 其他人的」分组（模式一只有一组）；每台标出怎么连上的（`machine.list` 的 `via`：本机、ssh、连入）和它的 tend 缺哪些节点 feature（`missing`，缺的那些运行不会派到这里）。
+- 机器页按「我的机器 / 分享给我的 / 其他人的」分组（模式一只有一组）；每台标出怎么连上的（`machine.list` 的 `via`：本机、ssh、连入）、agent CLI 装没装和登没登录、它的 tend 缺哪些节点 feature（`missing`，缺的那些运行不会派到这里）。模式二里每个成员在机器页添加自己的机器、拿到一次性的节点 token，主人和管理员在那里换机或吊销它的 token；页面细节见 [runs/clients.md](../runs/clients.md)「机器页」。
 - **信任声明**：分享对话框写明「他们的 agent 以你的账号运行，能读你 home 下的文件、用你的 CLI 额度」。推荐做法是：要共享的机器用专用 OS 用户或容器跑 `tend node`，登录团队自己的 claude / codex 账号；个人机器不共享。计划：节点在 `hello` 里报告自己是不是主人的交互账号，共享派发时 `run.preview` 给出 `shared_home` 提示（未实现）。
 - **派发检查**：下面四条都满足才派发。任何一条不满足，`run.preview` 都会写明原因。
   1. 发起人在这个项目里是「参与」；

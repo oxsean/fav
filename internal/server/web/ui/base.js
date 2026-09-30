@@ -43,11 +43,15 @@ const LOCAL_USER = 'local';
 // NamesContext carries a signal of user id → name; the signed-in app provides it.
 export const NamesContext = createContext(null);
 
+// useNames is every user the server gave, id → name.
+export function useNames() {
+  return useSignalValue(useContext(NamesContext) || noNames);
+}
+
 // useName is how a user id reads: the person's name when the server gave it, the server admin for local, else the id.
 export function useName() {
   const {t} = useWords();
-  const names = useContext(NamesContext);
-  const known = useSignalValue(names || noNames);
+  const known = useNames();
   return id => (id === LOCAL_USER ? t('ui.serverAdmin') : known[id] || id);
 }
 const noNames = {peek: () => ({}), subscribe: () => () => {}};

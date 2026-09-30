@@ -50,6 +50,11 @@ function readFilter(storage) {
   } catch { return {state: 'all', machine: ''}; }
 }
 
+// showMachine keeps the runs page's filter on machine, so the page opens on its runs.
+export function showMachine(storage, machine) {
+  try { storage?.setItem(RUNS_FILTER_KEY, JSON.stringify({...readFilter(storage), machine})); } catch {}
+}
+
 // listed is the runs of a filter, the latest queued first.
 export function listed(state, filter) {
   return Object.values(state.runs).filter(r => tests[filter.state || 'all'](r) && (!filter.machine || r.machine === filter.machine))
@@ -206,7 +211,7 @@ export function Runs({store, commands, toasts, router, prefs, copy, changes, sto
   const machineNames = [...new Set([...machines.filter(m => !m.retired).map(m => m.name), ...all.map(r => r.machine)])].filter(Boolean);
   const head = html`<div class=${cx('runs-head', phone && 'runs-head-phone')}>
     ${!phone && html`<h1 class="tasks-title">${t('runs.title')}</h1>`}
-    ${phone && html`<p class="runs-machines t-muted">${f('runs.machines', machineCount(machines).up, machineCount(machines).down)}</p>`}
+    ${phone && html`<button type="button" class="runs-machines" onClick=${() => router.go({page: 'machines'})}>${f('runs.machines', machineCount(machines).up, machineCount(machines).down)} ›</button>`}
     <${Chips} label=${t('runs.filter')}>${runFilters.map(x => html`<${Chip} label=${t('runs.f.' + x)} count=${all.filter(tests[x]).length}
       on=${filter.state === x} onClick=${() => filterBy({state: x})} />`)}<//>
     ${machineNames.length > 1 && html`<${Chips} label=${t('runs.machine')}>

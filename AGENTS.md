@@ -38,7 +38,7 @@ go test ./internal/ui/tui -run TestName -v          # single test
 TEND_DUMP=120x34 go test ./internal/ui/tui -run TestDumpFrame -v   # print a frame; TEND_DUMP_OV=<overlay> opens one
 scripts/tui-drive.py down enter dump                # drive tend tui on a fixture dataset in a pty and print screens
 go run ./tools/vendorweb                             # rewrite the Web UI's vendored files from their manifests (npm)
-go run ./tools/webpreview                            # the new Web UI from the working tree on the home frames, at 127.0.0.1:18765 (?frames=tasks, ?as=signedout, #device-<code>)
+go run ./tools/webpreview                            # the new Web UI from the working tree on the home frames, at 127.0.0.1:18765 (?frames=tasks or team, ?as=signedout or admin, #device-<code>)
 go run ./tools/protogen                              # rewrite the Web UI's core/proto.js and proto.schema.json from the Go sources (a test fails while they are stale)
 TEND_TRACE=1 tend tui                                # event trace in the data directory's trace.log (or TEND_TRACE=<path>)
 HERDR_LIVE=1 go test ./internal/herdr -run TestLiveCreateTabAndRun   # inside Herdr only; opens a real tab

@@ -209,7 +209,7 @@
 .runs-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
 .runs-head-phone { display: grid; gap: 8px; }
 .runs-head-phone .chips { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
-.runs-machines { margin: 0; font-size: 13px; }
+.runs-machines { margin: 0; padding: 0; border: 0; background: none; color: var(--muted); font: inherit; font-size: 13px; text-align: left; cursor: pointer; }
 .runs-body { flex: 1; min-height: 0; display: flex; }
 .runs-split { display: grid; grid-template-columns: minmax(0, 1fr) minmax(360px, 440px); grid-template-rows: minmax(0, 1fr); gap: var(--gap); }
 .runs-list { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
@@ -230,3 +230,44 @@
 .run-acts { flex: none; display: flex; flex-wrap: wrap; gap: 6px; }
 [data-form="phone"] .run-acts .btn { flex: 1; }
 .runs-phone { padding-bottom: 16px; }
+
+/* Machines */
+.mach { display: grid; gap: 12px; align-content: start; min-width: 0; }
+.mach-head { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; font-size: 12px; }
+.mach-head-acts { margin-left: auto; }
+.mach-body { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 16px; align-items: start; }
+.mach-main { display: grid; gap: 16px; min-width: 0; }
+.mach-group { display: grid; gap: 8px; }
+.mach-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 10px; }
+.mach-card { display: grid; gap: 6px; padding: 10px 12px; min-width: 0; text-align: left; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; color: inherit; font: inherit; font-size: 12px; cursor: pointer; }
+.mach-card:hover { background: var(--surface-hover); }
+.mach-card.sel { border-color: var(--accent); background: var(--accent-soft); }
+.mach-card.retired { opacity: .7; }
+.mach-card-head { display: flex; align-items: center; gap: 6px; min-width: 0; font-size: 13px; }
+.mach-card-head .chip { margin-left: auto; }
+.mach-card-slots { display: flex; align-items: center; gap: 8px; }
+.mach-card-meta { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
+.mach-card-note { font-size: 11px; }
+.mach-bar { display: inline-flex; gap: 2px; margin-left: auto; }
+.mach-bar span { width: 10px; height: 8px; border-radius: 2px; background: var(--border); }
+.mach-bar span.used { background: var(--running); }
+.mach-aside { position: sticky; top: 0; display: grid; gap: 12px; padding: 12px var(--pad); align-content: start; max-height: calc(100vh - 120px); overflow-y: auto; }
+.mach-aside-head { display: flex; align-items: center; gap: 6px; font-size: 14px; }
+.mach-facts { display: grid; gap: 14px; min-width: 0; }
+.mach-h { display: flex; align-items: center; justify-content: space-between; }
+.mach-p, .mach-note { margin: 0; font-size: 12px; }
+.mach-queue, .mach-clis, .mach-who { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; font-size: 12px; }
+.mach-queue li, .mach-who li { display: grid; gap: 1px; min-width: 0; }
+.mach-clis li { display: grid; grid-template-columns: auto auto 1fr auto; align-items: center; gap: 6px; }
+.mach-cred { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; padding: 6px 0; border-top: 1px solid var(--border); font-size: 12px; }
+.mach-cred-main { flex: 1 1 100%; min-width: 0; display: grid; gap: 2px; }
+.mach-trust { font-family: inherit; max-height: none; }
+.mach-sum { margin: 0; font-size: 12px; }
+.mach-phone { gap: 10px; }
+.mach-phone-head { margin-bottom: 8px; }
+.secret { display: grid; gap: 4px; min-width: 0; }
+.secret-row { display: flex; align-items: flex-start; gap: 6px; min-width: 0; }
+.secret-value { flex: 1; min-width: 0; padding: 6px 8px; background: var(--surface-alt); border: 1px solid var(--border); border-radius: 6px; font-size: 12px; overflow-wrap: anywhere; user-select: all; }
+@media (max-width: 1100px) { .mach-body { grid-template-columns: minmax(0, 1fr); } .mach-aside { position: static; max-height: none; } }
+.mach-phone .card-secondary.t-failed { color: var(--failed); }
+.mach-phone .card-secondary.t-warning { color: var(--warning); }

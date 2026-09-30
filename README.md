@@ -569,7 +569,8 @@ with a token; the browser session lasts 30 days, and signing out or revoking it 
 runs; creates, edits and dispatches tasks; previews a dispatch; follows a run's output and conversation; shows why a run
 ended or what it asks and takes a reply; stops or abandons runs; marks tasks done, reopens or cancels them; shows task
 trees and starts them; lists what needs you; edits and shares agent definitions and project settings; shows the
-machines, who owns them and whom they are shared with; manages projects and members; makes personal tokens for the CLI
+machines (state, slots, agent CLIs, queue and the day's runs), who owns them and whom they are shared with; adds a
+machine and shows its node token once, and moves or revokes a node token; manages projects and members; makes personal tokens for the CLI
 and TUI on the Account page, or confirms one from `tend login` on a terminal-authorization page (the code, the client's
 name, source address and time, Allow or Deny); and, for admins, users, admission rules, invitations and the audit log. It
 follows the

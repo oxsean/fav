@@ -5,7 +5,7 @@
 //
 //	go run ./tools/webpreview [-addr 127.0.0.1:18765]
 //
-// The page is at /; ?as=signedout shows the sign-in page, #device-<code> a terminal's sign-in, #invite-<code> an
+// The page is at /; ?as=signedout shows the sign-in page, ?as=admin signs in as the admin, #device-<code> a terminal's sign-in, #invite-<code> an
 // invitation.
 package main
 

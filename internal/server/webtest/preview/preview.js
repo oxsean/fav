@@ -2,7 +2,8 @@
 // files by method, a fetch that answers the sign-in and device calls, and the clock of the home frames. ?frames=tasks
 // plays the task pages' frames instead of the home's, ?frames=output a conversation's and its changes (open
 // ?page=tasks&task=t1), ?frames=carry that conversation carried on into a third run, ?frames=gone with its question
-// answered by someone else first.
+// answered by someone else first, ?frames=team the machines and team pages' data (?as=admin signs in as its admin).
+// /api/* answers come from webtest/api.json by method and path; a write it has no answer for succeeds empty.
 import {boot} from '../../web/pages/boot.js';
 
 // ⚠️ The moment the home frames are written for.
@@ -17,7 +18,8 @@ const sets = {home: ['home-state', 'output-page', 'home-commands', 'changes-gone
   tasks: ['tasks-state', 'tasks-create', 'tasks-dispatch', 'tasks-plan', 'tasks-acts', 'tasks-board'],
   output: ['output-state', 'output-conv', 'output-send', 'output-answer', 'changes-list'],
   carry: ['output-state', 'output-conv', 'output-send', 'output-carry', 'changes-list'],
-  gone: ['output-state', 'output-conv', 'output-answer-gone', 'changes-list']};
+  gone: ['output-state', 'output-conv', 'output-answer-gone', 'changes-list'],
+  team: ['team-state', 'team-share']};
 // joins are the files whose pushes on a stream an earlier file opened go on that stream, after what it pushed there.
 const joins = new Set(['output-send', 'output-carry']);
 const keyOf = (f, run = true) => [f.method, run && f.params?.run, f.params?.after, f.params?.path].filter(Boolean).join(' ');
@@ -67,24 +69,28 @@ function socket(table) {
   return s;
 }
 
-const me = {id: 'u_b', name: 'Bo Lin', email: 'bo@example.com', username: 'bo', role: 'member', session: 'web-1'};
+const people = {member: {id: 'u_b', name: 'Bo Lin', email: 'bo@example.com', username: 'bo', role: 'member', session: 'web-1'},
+  admin: {id: 'u_a', name: 'Ann Lee', email: 'ann@example.com', username: 'ann', role: 'admin', session: 'web-2'}};
 const json = (status, body) => new Response(body === undefined ? '' : JSON.stringify(body), {status, headers: {'Content-Type': 'application/json'}});
 
-function fakeFetch(signedIn) {
+function fakeFetch(me, api) {
   return async (path, init = {}) => {
     const [p] = String(path).split('?');
     const post = init.method === 'POST';
-    if (p === '/session') return signedIn ? json(200, me) : json(401, {error: 'unauthorized'});
+    if (p === '/session') return me ? json(200, me) : json(401, {error: 'unauthorized'});
     if (p === '/login' && post) return new URLSearchParams(init.body).get('token') === 'tend_ok' ? json(200, {}) : json(401, {error: 'unauthorized'});
     if (p === '/logout') return json(200, {});
     if (p === '/auth/logins') return json(200, [{name: 'github', display: 'GitHub'}, {name: 'oidc', display: 'Company SSO'}]);
     if (p === '/auth/invite') return json(200, {inviter: 'Al', role: 'member', project: 'Shop', access: 'participant', expires: '2026-10-07T00:00:00Z'});
     if (p === '/api/device') return post ? json(200, {}) : json(200, {code: 'K7QX-M2PD', name: 'tend on mba', ip: '100.64.0.2', created: '2026-09-30T14:30:00Z'});
+    const method = init.method || 'GET';
+    if (p.startsWith('/api/')) return method + ' ' + p in api ? json(200, api[method + ' ' + p]) : method === 'GET' ? json(404, {error: 'not_found'}) : json(200, {});
     return fetch(path, init);
   };
 }
 
 const query = new URLSearchParams(location.search);
 const table = await answers(sets[query.get('frames')] || sets.home);
-const signedOut = query.get('as') === 'signedout';
-boot({open: () => socket(table), fetch: fakeFetch(!signedOut), clock: () => NOW});
+const api = await (await fetch('webtest/api.json')).json();
+const as = query.get('as');
+boot({open: () => socket(table), fetch: fakeFetch(as === 'signedout' ? null : people[as] || people.member, api), clock: () => NOW});

@@ -56,7 +56,7 @@ tend journal verify [--json] | repair [-y]
 - 认证：登录页列出 `/auth/logins` 给的登录方式（GitHub、OIDC），另有 token 表单。`POST /login`（表单 `token`）建一条网页会话，写 cookie `tend_session`（HttpOnly、SameSite=Strict、TLS 下 Secure、30 天）；`GET /session` 回 `{id, name, email, username, role, session}` 或 401；`POST /logout` 吊销这条会话。地址里的 `#invite-<secret>` 让登录按钮带上邀请，`#signin-<结果>` 显示登录失败的原因。`/client` 接受 header 里的 token 或这个 cookie；WebSocket 握手校验 Origin（同源）。会话被吊销或用户被停用，连接立即断开，页面回到登录页。
 - 响应头：CSP `default-src 'self'`（不允许内联脚本和 `style` 属性，宽度等动态样式经 CSSOM 设置）、`frame-ancestors 'none'`、`nosniff`、`no-referrer`、`Cache-Control: no-cache`。
 - 没有轮询：页面上的一切随 `state.watch`、`machines.watch`、`inbox.watch` 和 `run.output.watch` 的推送变化，首页的数每次重画时取当前时间。页面不调用 `setInterval`（`TestThePageRunsNoInterval`）；剩下的计时器都只响一次：防抖、重连的退避、调用超时、提示的停留、`g` 开头的两键序列。
-- 页面：首页、任务（列表、看板、树、详情、对话、改动）、运行，以及登录、终端授权、邀请。机器、Agent、团队、我四页在侧栏和标签栏里有位置，打开时写「这一页还在做」；在那之前，用户和准入、凭据、登记一台机器、agent 定义、项目设置分别用 `tend-server admin`、`tend-server token`、`tend-server token add --node <机器> --owner <用户>`、`tend agent`、TUI 的项目设置完成，主题、语言、密度用快捷键和用户菜单。
+- 页面：首页、任务（列表、看板、树、详情、对话、改动）、运行、机器，以及登录、终端授权、邀请。Agent、团队、我三页在侧栏和标签栏里有位置，打开时写「这一页还在做」；在那之前，用户和准入、凭据、替别人登记一台机器、agent 定义、项目设置分别用 `tend-server admin`、`tend-server token`、`tend-server token add --node <机器> --owner <用户>`、`tend agent`、TUI 的项目设置完成，主题、语言、密度用快捷键和用户菜单。
 
 ### 结构
 
@@ -133,6 +133,7 @@ tend journal verify [--json] | repair [-y]
   - `home.js`：首页，见下。
   - `conversation.js`：一个任务的对话，见下面「对话与输出」。
   - `runs.js`：运行页和一次运行自己的页，见下面「运行页」。`changes.js`：改动页签，见下面「改动」。
+  - `machines.js`：机器页，见下面「机器页」；分组、摘要、提示、排队和泳道这些推导在 `core/team.js`（纯函数）。`ui/secret.js` 的 `Secret` 显示服务器只给一次的值（节点 token、命令），带复制；剪贴板被拒时选中文字让人手动复制。
   - `tasks.js`（列表、看板、树和每个写操作）、`task.js`（一个任务的详情）、`taskforms.js`（新建 / 子任务 / 复制 / 编辑、派发、调整位置、审拆解、验收）、`taskwords.js`（它们的词表）：任务页，见下。
 - **首页**：
   - 上面四个数：
@@ -175,8 +176,15 @@ tend journal verify [--json] | repair [-y]
 - **运行页**：
   - 列表是全部运行，排得晚的在前；筛选按状态（全部、未结束、失败、已结束，各带数目）和机器，记在浏览器里（`tend-runs-filter`）。列：状态、运行、任务、阶段、agent @ 机器、开始、耗时、用量。
   - 电脑上选中的一条在右边预览：状态、概况，和它的输出（简洁密度、`Output` 的 `bare`）；「打开运行」「在任务里打开」。`Enter` 打开运行自己的页（`?page=runs&run=<id>`），`x` 停止（先确认，发 `run.stop{id}`）。
-  - 手机上是卡片，上面一行「N 台在线 · M 台离线」（退役的不算）；打开一条占满整屏，页头有上一个 / 下一个（按列表的顺序）。
+  - 手机上是卡片，上面一行「N 台在线 · M 台离线」（退役的不算，点它进机器页）；打开一条占满整屏，页头有上一个 / 下一个（按列表的顺序）。
   - 运行自己的页：输出（这次运行所在的对话）、改动、概况三个页签；电脑上头部一行放状态、标题、页签、停止（还没结束时）、放弃（失联时，同任务页）、在任务里打开和关闭，手机上页签在上、按钮在下。概况写任务、状态、在哪跑、阶段、目录、分支、时间、用量、节点报的 `doing`、结论、退出码、会话，和运行的 `caps` 里它能做的事（插话、打断、整次运行都允许、运行中作答、接着会话再跑、在终端接管）。
+- **机器页**（`g m`）：
+  - 页头一行摘要：几台（退役的不算）、几台在线、在线机器的运行位在用 / 总数、排队数；「添加机器」。
+  - 机器按「我的机器 / 分享给我的（点名分享，或分享给我在的项目）/ 其他人的」分组，没有主人的算我的。每台一张卡片：状态、怎么连上的（`via`：本机、ssh、连入服务器）、运行位条和排队数、系统、tend 版本、装了的 agent CLI，和最要紧的一条提示：退役（主人已停用）、连不上的原因、哪个 CLI 没登录（`agents.<名>.auth` 是 `missing`）、它的 tend 缺哪些节点 feature（`missing`，附 `tend hosts install` 更新）。
+  - 选中的机器（`j` / `k` / 方向键，或点卡片）：下面是它今天的泳道（每个运行位一行，同首页的 `Timeline`）；右栏写主人、连接（离线时带原因和下次重试的时间）、主机名、系统、tend、运行位、排队的运行（任务和为什么在等）、提示、每个 agent CLI（已装已登录 / 已装没登录 / 已装 / 没装和版本）、分享给谁（人和项目，能否批准权限请求），主人或管理员看到「改分享」；它的节点 token（`GET /api/machines`：绑定的主机、创建和最近使用的时间），「换机」和「吊销」都先确认，退役机器的 token 只能吊销；名字对不上任何机器的 token 列在「还没接入的机器」里。`Enter` 或「看这台的运行」把运行页的机器筛选（`tend-runs-filter`）设成它，转到运行页。
+  - 改分享：先写信任声明（agent 以主人的账号跑，读主人 home 下的文件、用主人的 CLI 额度，提交的 committer 是主人），再选人、项目和权限请求（只能派发 / 也能批准，附说明），保存发 `machine.share`（整份替换）。
+  - 添加机器：填机器名（`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`），`POST /api/machines {name}` 回 `{id, token, command}`；对话框用 `Secret` 显示 token 和命令，说明把 token 存进 `~/.config/tend/node-token` 再在那台机器上运行命令；关掉后 token 不再显示。新机器的主人是添加的人。服务器的错误码经 `apiText` 变成一句话（`api.<code>`，没有的写码本身）。
+  - 手机上只看：分组的卡片列表，点一台占满整屏看它的事实（不含 token）；添加、分享和 token 写明在电脑上管理。
 - **改动**（`pages/changes.js`，任务详情和运行页共用）：
   - 一个任务有几次运行时先选看哪一次，默认最新的。头部写文件数和 `+a −d`、筛选（全部、只看 agent 用工具改的、生成的文件，各带数目）；还在跑的运行写「截至 hh:mm」和刷新，状态变了也重读。
   - 文件按目录分组，根目录在前；每个文件一行：`+ ~ − →`（新增、修改、删除、改名，改名写 `旧 → 新`）、路径、生成的标记、`+a −d`。二进制写大小（有 `old_bytes` 时写 `旧 → 新`），不能展开；改动很大的和生成的先折起。

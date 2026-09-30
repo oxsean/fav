@@ -60,7 +60,7 @@ function Root({http, router, keys, nav, prefs, first, open, location, history, c
     return html`<${AuthFrame} onLang=${lang}><${Device} http=${http} code=${auth.value} onBack=${dropAuth} /><//>`;
   }
   if (!live) return null;
-  return html`<${App} ...${live} router=${router} keys=${keys} nav=${nav} prefs=${prefs} session=${session} storage=${storage}
+  return html`<${App} ...${live} http=${http} router=${router} keys=${keys} nav=${nav} prefs=${prefs} session=${session} storage=${storage}
     onLogout=${async () => { try { await http.logout(); } finally { location.assign('/'); } }} />`;
 }
 

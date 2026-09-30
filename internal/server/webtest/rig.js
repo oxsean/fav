@@ -22,6 +22,9 @@ export const home = steps => played((r, s) => r.srv.play('home-state', s), steps
 // tasks is a rig that has played tasks-state, the task pages' data.
 export const tasks = steps => played((r, s) => r.srv.play('tasks-state', s), steps);
 
+// team is a rig that has played team-state, the machines and team pages' data as an admin sees it.
+export const team = steps => played((r, s) => r.srv.play('team-state', s), steps);
+
 async function played(play, steps = {}) {
   const r = rig();
   await play(r, {start() { r.store.start(); }, live() { r.flush(); steps.live?.(r); }, journal() { r.flush(); steps.journal?.(r); }});
