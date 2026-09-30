@@ -83,6 +83,7 @@ var methodAccess = map[string]access{
 	MAgentDefList:       reader,
 	MAgentDefGet:        reader,
 	MAgentDefSave:       writer,
+	MAgentDefCheck:      reader, // agentdef.save's rules, saving nothing (agentDefCheck)
 	MAgentDefRemove:     writer,
 	MAgentDefShare:      writer,
 	MInboxList:          reader,

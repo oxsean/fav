@@ -128,6 +128,7 @@ export const methods = Object.freeze([
   'agentdef.list',
   'agentdef.get',
   'agentdef.save',
+  'agentdef.check',
   'agentdef.remove',
   'agentdef.share',
   'inbox.list',

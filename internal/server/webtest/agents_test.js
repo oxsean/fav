@@ -343,6 +343,36 @@ test('the editor says what saving a changed name does', async () => {
   ok(box().textContent.includes(t('ag.nameless')) && buttonOf(box().one('.modal-foot'), t('form.save')).disabled, 'no name');
 });
 
+test('the editor checks the text without saving it: every problem, then its warnings; a change clears what it said', async () => {
+  const {r, root} = await opened();
+  const box = () => root.one('.modal');
+  const check = () => buttonOf(box().one('.modal-foot'), t('ag.check'));
+  const said = () => box().find('.ag-checks').flatMap(u => u.find('li')).map(x => x.textContent.trim());
+  await pick(root, 'bo-dev');
+  await click(buttonOf(aside(root), t('ag.edit')));
+  await r.srv.play('agents-check', {
+    async bad() {
+      await type(box().one('textarea'), textOf('bo-dev').replace('role: implement', 'role: boss').replace('effort: high', 'effort: huge'));
+      await click(check());
+    },
+    async badSaid() {
+      await settled();
+      eq(said(), ['✗' + t('ag.checkBad'), '·role "boss": one of planner, implement, review, test, any', '·effort "huge": one of low, medium, high, xhigh, max'], 'every problem');
+      await type(box().one('textarea'), textOf('bo-dev').replace('effort: high', 'effort: xhigh').replace('permission: acceptEdits\n', 'permission: acceptEdits\nshade: blue\n'));
+      eq(said(), [], 'a change clears it');
+      await click(check());
+    },
+    async goodSaid() {
+      await settled();
+      eq(said(), ['✓' + t('ag.checkOK'), '!' + f('ag.warn.unknown', 'shade')], 'it passes, with its warning');
+      ok(root.find('.modal').length === 1 && toasts(root).length === 0, 'nothing saved, the editor stays');
+    },
+  });
+  await type(box().one('textarea'), '  ');
+  ok(check().disabled, 'nothing to check');
+  eq(r.errors, [], 'errors');
+});
+
 test('sharing changed and a definition removed after a confirm, each read again from a new snapshot', async () => {
   const {r, root} = await opened();
   const modal = () => root.one('.modal');

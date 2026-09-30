@@ -1,7 +1,7 @@
 {"note":"the agent page's data as Bo (u_b, a member) sees it: two definitions of his own, one of Docs (his project), one of Shop (he takes part) that he may read, one Cy shares for reading, one Ann shares only for use (not in the state), the configured profiles; three machines he may use; now is 2026-09-30T14:32Z"}
 {"connect":true}
 {"c":{"type":"req","id":1,"method":"hello","params":{"proto":2,"role":"client"}}}
-{"s":{"type":"res","id":1,"result":{"proto":2,"version":"test","role":"coordinator","methods":["hello","state.watch","machines.watch","inbox.watch","run.output.watch","run.output.page","agent.list","agentdef.list","agentdef.get","agentdef.save","agentdef.remove","agentdef.share","task.create","task.edit"]}}}
+{"s":{"type":"res","id":1,"result":{"proto":2,"version":"test","role":"coordinator","methods":["hello","state.watch","machines.watch","inbox.watch","run.output.watch","run.output.page","agent.list","agentdef.list","agentdef.get","agentdef.save","agentdef.check","agentdef.remove","agentdef.share","task.create","task.edit"]}}}
 {"step":"start"}
 {"c":{"type":"req","id":2,"method":"state.watch","params":{}}}
 {"c":{"type":"req","id":3,"method":"machines.watch","params":{}}}

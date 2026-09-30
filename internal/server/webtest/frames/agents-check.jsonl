@@ -1,0 +1,8 @@
+{"note":"Bo checks his edit of bo-dev before saving it: a role and an effort the coordinator does not know, then the fixed text with a field it keeps but does not know; nothing is saved"}
+{"step":"bad"}
+{"c":{"type":"req","id":7,"method":"agentdef.check","params":{"text":"---\nname: bo-dev\ndescription: Fixes bugs in Docs\nrole: boss\nprovider: claude\nmodel: sonnet\neffort: huge\npermission: acceptEdits\ntools:\n  deny:\n    - WebFetch\nmachines:\n  prefer:\n    - bo-laptop\n---\nRun the tests before you stop.\n\nKeep each commit to one change.\n"}}}
+{"s":{"type":"res","id":7,"result":{"name":"bo-dev","errors":["role \"boss\": one of planner, implement, review, test, any","effort \"huge\": one of low, medium, high, xhigh, max"]}}}
+{"step":"badSaid"}
+{"c":{"type":"req","id":8,"method":"agentdef.check","params":{"text":"---\nname: bo-dev\ndescription: Fixes bugs in Docs\nrole: implement\nprovider: claude\nmodel: sonnet\neffort: xhigh\npermission: acceptEdits\nshade: blue\ntools:\n  deny:\n    - WebFetch\nmachines:\n  prefer:\n    - bo-laptop\n---\nRun the tests before you stop.\n\nKeep each commit to one change.\n"}}}
+{"s":{"type":"res","id":8,"result":{"name":"bo-dev","warnings":["unknown field shade is kept"],"launch":["claude","-p","--input-format","stream-json","--output-format","stream-json","--verbose","--include-partial-messages","--permission-prompt-tool","stdio","--replay-user-messages","--model","sonnet","--permission-mode","acceptEdits","--effort","xhigh","--disallowedTools","WebFetch"]}}}
+{"step":"goodSaid"}

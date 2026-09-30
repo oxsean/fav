@@ -78,6 +78,7 @@ const (
 	MAgentDefList       = "agentdef.list"
 	MAgentDefGet        = "agentdef.get"
 	MAgentDefSave       = "agentdef.save"
+	MAgentDefCheck      = "agentdef.check" // what agentdef.save would say, without saving (AgentDefSave)
 	MAgentDefRemove     = "agentdef.remove"
 	MAgentDefShare      = "agentdef.share"
 	MInboxList          = "inbox.list"

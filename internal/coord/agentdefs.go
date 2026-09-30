@@ -170,32 +170,14 @@ func (c *Coord) agentDefSave(who Principal, r *wire.Request) (string, []journal.
 	if err := r.Decode(&p); err != nil {
 		return "", nil, err
 	}
-	d, err := defs.Parse([]byte(p.Text))
-	if err != nil {
-		return "", nil, bad(err.Error())
-	}
-	if errs, _ := defs.Check(d); len(errs) > 0 {
+	rec, errs, err := c.vetDef(who, p)
+	switch {
+	case err != nil:
+		return "", nil, err
+	case len(errs) > 0:
 		return "", nil, bad(strings.Join(errs, "; "))
 	}
-	if _, err := defs.Compile(d, c.profile); err != nil {
-		return "", nil, bad(err.Error())
-	}
-	rec := task.AgentDef{AgentDef: d, Owner: who.User}
-	if old := c.agentDefs()[d.Name]; old != nil {
-		if _, err := c.managedDef(who, d.Name); err != nil {
-			return "", nil, err
-		}
-		rec.Owner, rec.Share = old.Owner, old.Share
-	} else if p.Owner != "" && p.Owner != who.User {
-		pr := c.st.Projects[strings.TrimPrefix(p.Owner, task.ProjectOwner)]
-		switch {
-		case !strings.HasPrefix(p.Owner, task.ProjectOwner) || pr == nil || !who.Admin && pr.Role(who.User) == "":
-			return "", nil, notFound(p.Owner)
-		case !who.Admin && pr.Owner != who.User:
-			return "", nil, forbidden(p.Owner)
-		}
-		rec.Owner = p.Owner
-	}
+	d := rec.AgentDef
 	if !c.team() {
 		if err := fileio.WriteFile(filepath.Join(c.defsDir(), d.Name+".md"), defs.Format(d), 0o600); err != nil {
 			return "", nil, &wire.Error{Code: wire.CodeInternal, Detail: err.Error()}
@@ -203,6 +185,68 @@ func (c *Coord) agentDefSave(who Principal, r *wire.Request) (string, []journal.
 		return d.Name, nil, nil
 	}
 	return d.Name, []journal.Event{journal.NewEvent(task.EAgentDefSaved, rec)}, nil
+}
+
+// vetDef is what agentdef.save makes of p for who: the definition it would keep, or the text's problems, or why who may
+// not save it there. The caller holds mu.
+func (c *Coord) vetDef(who Principal, p AgentDefSave) (rec task.AgentDef, errs []string, err error) {
+	d, err := defs.Parse([]byte(p.Text))
+	if err != nil {
+		return rec, []string{err.Error()}, nil
+	}
+	rec = task.AgentDef{AgentDef: d, Owner: who.User}
+	if errs, _ := defs.Check(d); len(errs) > 0 {
+		return rec, errs, nil
+	}
+	if _, err := defs.Compile(d, c.profile); err != nil {
+		return rec, []string{err.Error()}, nil
+	}
+	if old := c.agentDefs()[d.Name]; old != nil {
+		if _, err := c.managedDef(who, d.Name); err != nil {
+			return rec, nil, err
+		}
+		rec.Owner, rec.Share = old.Owner, old.Share
+	} else if p.Owner != "" && p.Owner != who.User {
+		pr := c.st.Projects[strings.TrimPrefix(p.Owner, task.ProjectOwner)]
+		switch {
+		case !strings.HasPrefix(p.Owner, task.ProjectOwner) || pr == nil || !who.Admin && pr.Role(who.User) == "":
+			return rec, nil, notFound(p.Owner)
+		case !who.Admin && pr.Owner != who.User:
+			return rec, nil, forbidden(p.Owner)
+		}
+		rec.Owner = p.Owner
+	}
+	return rec, nil, nil
+}
+
+// AgentDefCheck answers agentdef.check: what agentdef.save would make of a text, which it does not save.
+type AgentDefCheck struct {
+	Name     string   `json:"name,omitempty"`
+	Errors   []string `json:"errors,omitempty"` // why the save would be refused
+	Warnings []string `json:"warnings,omitempty"`
+	Launch   []string `json:"launch,omitempty"`
+}
+
+// agentDefCheck is agentdef.check: agentdef.save's rules for who, without saving.
+func (c *Coord) agentDefCheck(who Principal, r *wire.Request) (AgentDefCheck, error) {
+	var p AgentDefSave
+	if err := r.Decode(&p); err != nil {
+		return AgentDefCheck{}, err
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	rec, errs, err := c.vetDef(who, p)
+	if err != nil {
+		return AgentDefCheck{}, err
+	}
+	out := AgentDefCheck{Name: rec.Name, Errors: errs}
+	if rec.Name != "" {
+		_, out.Warnings = defs.Check(rec.AgentDef)
+	}
+	if len(errs) == 0 {
+		out.Launch = c.launchOf(&rec)
+	}
+	return out, nil
 }
 
 func (c *Coord) agentDefRemove(who Principal, r *wire.Request) (string, []journal.Event, error) {

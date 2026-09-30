@@ -44,7 +44,8 @@ budget: {usd: 3, minutes: 40}
   - 管理员能看见和管理所有定义，但不能用没分享给自己的定义。
   - 别人看不见也用不了的定义，报 `not_found`；看得见但这个任务不能用的，报 `unauthorized` 并说明原因。
   - 分享的完整规则见 [team.md](team.md)「共享：agent 和机器默认私有」。
-- 方法：`agentdef.list` / `get` / `save` / `remove` / `share`；CLI 是 `tend agent defs|import|export|check|rm|share`。
+- 方法：`agentdef.list` / `get` / `save` / `check` / `remove` / `share`；CLI 是 `tend agent defs|import|export|check|rm|share`。
+- `agentdef.check{text, owner?}` 走 `save` 的同一段判断（解析、`defs.Check`、按档案编译、覆盖已有定义要能管它、归到项目要是负责人），不保存、不写日志，回 `{name, errors, warnings, launch}`：文本的问题都列进 `errors`（`save` 会带着它们、用 `; ` 连起来回 `bad_request`），权限的问题照 `save` 回错误（`not_found`、`unauthorized`）；没有 `errors` 时 `warnings`、`launch` 就是保存后定义上的。能读状态的人都能调。CLI 的 `tend agent check <file>` 仍只在本地解析和检查。
 
 ## 编译
 

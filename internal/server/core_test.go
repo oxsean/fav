@@ -432,7 +432,7 @@ func TestFrameWritesAndListsAreTheCoordinatorsShapes(t *testing.T) {
 		coord.MProjectDirs: func() any { return new(coord.ProjectDirsParams) }, coord.MAgentDefList: func() any { return new(struct{}) },
 		coord.MAgentDefSave: func() any { return new(coord.AgentDefSave) }, coord.MAgentDefShare: func() any { return new(task.AgentDefShare) },
 		coord.MAgentDefRemove: func() any { return new(task.AgentDefRef) }, coord.MMachineCheck: func() any { return new(coord.MachineCheck) },
-		coord.MMachineDrain: func() any { return new(task.DrainSet) },
+		coord.MMachineDrain: func() any { return new(task.DrainSet) }, coord.MAgentDefCheck: func() any { return new(coord.AgentDefSave) },
 	}
 	results := map[string]func() any{
 		coord.MTaskStatus: func() any { return new(task.Task) }, coord.MTaskUndo: func() any { return new(task.Task) },
@@ -452,6 +452,7 @@ func TestFrameWritesAndListsAreTheCoordinatorsShapes(t *testing.T) {
 		coord.MProjectDirs: func() any { return new(coord.ProjectDirs) }, coord.MAgentDefList: func() any { return new(coord.AgentDefList) },
 		coord.MAgentDefSave: func() any { return new(coord.AgentDefView) }, coord.MAgentDefShare: func() any { return new(coord.AgentDefView) },
 		coord.MMachineCheck: func() any { return new(coord.MachineChecks) }, coord.MMachineDrain: func() any { return new(task.Drain) },
+		coord.MAgentDefCheck: func() any { return new(coord.AgentDefCheck) },
 	}
 	files, _ := filepath.Glob(filepath.Join("webtest", "frames", "*.jsonl"))
 	seen := map[string]int{}
@@ -496,7 +497,7 @@ func TestFrameWritesAndListsAreTheCoordinatorsShapes(t *testing.T) {
 	for _, m := range []string{coord.MTaskStatus, coord.MRunDispatch, coord.MRunStop, coord.MRunAnswer, coord.MRunOutputPage, coord.MTaskCreate,
 		coord.MTaskStart, coord.MTaskMerge, coord.MTaskMove, coord.MTaskPlanSave, coord.MTaskPlanApply, coord.MTaskGate, coord.MTaskSourceAck,
 		coord.MRunPreview, coord.MAgentList, coord.MTaskMessage, coord.MRunInterrupt, coord.MRunChanges, coord.MRunDiff, coord.MMachineShare, coord.MProjectCreate, coord.MProjectMember, coord.MProjectEdit, coord.MProjectDirs,
-		coord.MAgentDefList, coord.MAgentDefSave, coord.MAgentDefShare, coord.MAgentDefRemove, coord.MMachineCheck, coord.MMachineDrain, "machines", "inbox", coord.PushAffordances, "affordances part"} {
+		coord.MAgentDefList, coord.MAgentDefSave, coord.MAgentDefShare, coord.MAgentDefRemove, coord.MMachineCheck, coord.MMachineDrain, coord.MAgentDefCheck, "machines", "inbox", coord.PushAffordances, "affordances part"} {
 		if seen[m] == 0 {
 			t.Errorf("no frame file has %s", m)
 		}

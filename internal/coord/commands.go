@@ -133,7 +133,7 @@ var readMethods = []string{remote.MHello, remote.MList, remote.MMessages, remote
 var Methods = []string{MStateGet, MTaskGet, MTaskCreate, MTaskEdit, MTaskStatus, MTaskUndo, MRunDispatch, MRunStop, MRunAbandon, MRunTail, MRunOutputPage, MRunOutputWatch,
 	MAgentList, MMachineList, MMachineCheck, MStateWatch, MNodeCall, MRunPreview, MRunContinue, MRunAnswer, MRunSend, MRunMessages,
 	MProjectCreate, MProjectEdit, MProjectMember, MMachineShare, MMachineDrain, MTaskStart, MTaskMove,
-	MAgentDefList, MAgentDefGet, MAgentDefSave, MAgentDefRemove, MAgentDefShare, MInboxList, MUserOffboard, MTaskSync, MTaskLink, MTaskSourceAck, MTaskGate, MTaskMerge, MTaskPlan, MTaskPlanSave, MTaskPlanApply, MTaskMessage, MTaskMessagePreview, MRunInterrupt, MMachinesWatch, MInboxWatch,
+	MAgentDefList, MAgentDefGet, MAgentDefSave, MAgentDefCheck, MAgentDefRemove, MAgentDefShare, MInboxList, MUserOffboard, MTaskSync, MTaskLink, MTaskSourceAck, MTaskGate, MTaskMerge, MTaskPlan, MTaskPlanSave, MTaskPlanApply, MTaskMessage, MTaskMessagePreview, MRunInterrupt, MMachinesWatch, MInboxWatch,
 	MRunOutputItem, MRunOutputFind, MRunChanges, MRunDiff, MRunBlob, MProjectDirs}
 
 // Bulk marks the methods whose answers are large pieces fetched on demand: a connection writes them after everything
@@ -193,6 +193,8 @@ func (c *Coord) HandlerFor(p Principal) wire.Handler {
 			return c.agentDefGet(p, ref.Name)
 		case MAgentDefSave:
 			return c.command(p, r, c.agentDefSave, c.defAnswer(p))
+		case MAgentDefCheck:
+			return c.agentDefCheck(p, r)
 		case MAgentDefRemove:
 			return c.command(p, r, c.agentDefRemove, func(*task.State, string) any { return nil })
 		case MAgentDefShare:

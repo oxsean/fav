@@ -72,7 +72,8 @@ register('agents', {
   'ag.renamed': ['名字改成了 %s：保存为一个新定义，%s 还在', 'The name is now %s: it is saved as a new definition and %s stays'],
   'ag.overwrites': ['%s 已经有了：保存会覆盖它', '%s exists: saving replaces it'], 'ag.taken': ['%s 已经有了，你不能改它', '%s exists and is not yours to change'],
   'ag.shadows': ['档案里也有 %s：保存后定义优先', 'A profile is named %s too: once saved, the definition comes first'],
-  'ag.refused': ['没有保存：%s', 'Not saved: %s'], 'ag.saved': ['%s 已保存', '%s is saved'], 'ag.savedWarning': ['%s 已保存，有 1 条警告', '%s is saved with a warning'], 'ag.savedWarn': ['%s 已保存，有 %d 条警告', '%s is saved with %d warnings'],
+  'ag.refused': ['没有保存：%s', 'Not saved: %s'], 'ag.check': ['检查', 'Check'], 'ag.checkBad': ['保存会被拒绝', 'Saving it would be refused'],
+  'ag.checkRefused': ['检查不了：%s', 'Cannot be checked: %s'], 'ag.saved': ['%s 已保存', '%s is saved'], 'ag.savedWarning': ['%s 已保存，有 1 条警告', '%s is saved with a warning'], 'ag.savedWarn': ['%s 已保存，有 %d 条警告', '%s is saved with %d warnings'],
   'ag.name': ['名字', 'Name'], 'ag.nameNote': ['小写字母、数字和 . _ -，最多 64 个；派活时选这个名字', 'Lowercase letters, digits and . _ -, up to 64; dispatching picks this name'],
   'ag.nameBad': ['名字不合规矩', 'That name does not fit the rule'], 'ag.nameTaken': ['%s 已经有了', '%s exists'],
   'ag.kind': ['类型', 'Kind'], 'ag.installedOn': ['装在 %s', 'Installed on %s'], 'ag.installedNone': ['你能用的机器还没有装它', 'None of the machines you may use has it'],
@@ -224,11 +225,13 @@ function Body({r, st, tab, onTab}) {
 
 // Editor writes a definition's Markdown: mode is edit, new, subagent (an import) or copy; owners are where a new one may go. The
 // notes say what the save will do by the name the text gives.
-function Editor({mode, name: was, text: first, list, owners, projects, busyOf, error, onSave, onClose}) {
+function Editor({mode, name: was, text: first, list, owners, projects, busyOf, error, onSave, onCheck, onClose}) {
   const w = useWords();
   const {t, f} = w;
   const [text, setText] = useState(first);
   const [owner, setOwner] = useState(owners[0] || '');
+  const [checked, setChecked] = useState(null);
+  const edit = set => v => { set(v); setChecked(null); };
   const file = useRef(null);
   const readFile = e => {
     const x = e.currentTarget.files?.[0];
@@ -244,18 +247,42 @@ function Editor({mode, name: was, text: first, list, owners, projects, busyOf, e
   if (!bad && other?.kind === 'def' && !itself) notes.push(f('ag.overwrites', n));
   if (!bad && other?.kind === 'profile') notes.push(f('ag.shadows', n));
   const title = mode === 'edit' ? f('ag.editTitle', was) : mode === 'copy' ? f('ag.copyTitle', was) : t(mode === 'subagent' ? 'ag.subagent' : 'ag.new');
-  const save = () => onSave({text: mode === 'subagent' ? ag.imported(text) : text, owner: mode === 'edit' || other ? '' : owner, name: n});
-  return html`<${Modal} full title=${title} onClose=${onClose}
-    actions=${[{label: t('home.cancel'), onClick: onClose}, {label: t('form.save'), kind: 'primary', keyName: 'Mod+Enter', disabled: busyOf(n) || empty || !!bad, onClick: save}]}>
+  const sent = () => ({text: mode === 'subagent' ? ag.imported(text) : text, owner: mode === 'edit' || other ? '' : owner, name: n});
+  const save = () => onSave(sent());
+  const check = () => {
+    setChecked({busy: true});
+    onCheck(sent()).then(v => setChecked({v}), e => setChecked({refused: apiText(w, e)}));
+  };
+  const acts = [{label: t('home.cancel'), onClick: onClose},
+    ...(onCheck ? [{label: t('ag.check'), disabled: empty || !!checked?.busy, onClick: check}] : []),
+    {label: t('form.save'), kind: 'primary', keyName: 'Mod+Enter', disabled: busyOf(n) || empty || !!bad, onClick: save}];
+  return html`<${Modal} full title=${title} onClose=${onClose} actions=${acts}>
     ${mode !== 'edit' && owners.length > 1 && html`<div class="field"><span class="brief-label">${t('ag.owner')}</span>
-      <${Segmented} label=${t('ag.owner')} value=${owner} onChange=${setOwner}
+      <${Segmented} label=${t('ag.owner')} value=${owner} onChange=${edit(setOwner)}
         options=${owners.map(o => ({value: o, label: o ? f('ag.from.project', projects[ag.projectOf(o)]?.name || o) : t('ag.ownerMe')}))} /></div>`}
     ${mode === 'subagent' && html`<div class="ag-file-row"><${Button} onClick=${() => file.current?.click()}>${t('ag.fromFile')}<//>
       <input ref=${file} type="file" class="ag-file" accept=".md,text/markdown,text/plain" tabindex="-1" aria-hidden="true" onChange=${readFile} /></div>`}
-    <${TextArea} label=${t('ag.text')} value=${text} onInput=${setText} rows=${14} mono note=${t(mode === 'subagent' ? 'ag.importNote' : 'ag.textNote')}
+    <${TextArea} label=${t('ag.text')} value=${text} onInput=${edit(setText)} rows=${14} mono note=${t(mode === 'subagent' ? 'ag.importNote' : 'ag.textNote')}
       error=${error || bad} />
     ${notes.map(x => html`<p class="ag-p t-warning">${x}</p>`)}
+    <${Checked} c=${checked} />
   <//>`;
+}
+
+// Checked is what agentdef.check said of the editor's text: it would be refused, and why; or it passes, with its
+// warnings.
+function Checked({c}) {
+  const w = useWords();
+  const {t, f} = w;
+  if (!c || c.busy) return null;
+  if (c.refused) return html`<p class="ag-p t-failed" role="status">${f('ag.checkRefused', c.refused)}</p>`;
+  const errs = c.v?.errors || [], warns = c.v?.warnings || [];
+  const item = (g, tone, x) => html`<li><span class=${cx('st', tone)} aria-hidden="true">${g}</span><span>${x}</span></li>`;
+  return html`<ul class="ag-checks" role="status">
+    ${errs.length ? item('✗', 's-failed', t('ag.checkBad')) : item('✓', 's-success', t('ag.checkOK'))}
+    ${errs.map(x => item('·', 's-failed', x))}
+    ${warns.map(x => item('!', 's-unknown', warningText(w, x)))}
+  </ul>`;
 }
 
 // New is a new definition's first step: its name, kind, model and role, which make the Markdown the editor opens with.
@@ -363,7 +390,8 @@ export function Agents({store, commands, toasts, session, wire, agentDefs, downl
   const owners = ag.ownersFor(st, session);
   const dialog = modal && ({
     editor: () => html`<${Editor} key=${modal.mode + modal.name} mode=${modal.mode} name=${modal.name} text=${modal.text} list=${list} owners=${owners}
-      projects=${st.projects} busyOf=${n => !online || busy(n)} error=${modal.error} onSave=${save} onClose=${close} />`,
+      projects=${st.projects} busyOf=${n => !online || busy(n)} error=${modal.error} onSave=${save} onClose=${close}
+      onCheck=${wire?.has?.('agentdef.check') ? ({text, owner}) => wire.call('agentdef.check', owner ? {text, owner} : {text}) : null} />`,
     new: () => html`<${New} list=${list} machines=${usable} onClose=${close} onNext=${text => setModal({kind: 'editor', mode: 'new', name: '', text})} />`,
     share: () => cur && html`<${Share} r=${list.find(r => r.name === modal.name) || cur} people=${people} projects=${projectOptions}
       busy=${!online || busy(modal.name)} onSave=${share} onClose=${close} />`,

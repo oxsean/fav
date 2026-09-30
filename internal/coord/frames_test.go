@@ -102,7 +102,7 @@ func framedState(t *testing.T, name string) (map[string]json.RawMessage, Afforda
 // the definitions his state shows, and what each of his writes answers and pushes. The definitions he may not read
 // are the coordinator's alone: ann-plan is shared with him for use only, ann-secret with nobody.
 func TestTheWebAgentFramesAreTheCoordinators(t *testing.T) {
-	for _, name := range []string{"agents-state", "agents-edit", "agents-share"} {
+	for _, name := range []string{"agents-state", "agents-edit", "agents-share", "agents-check"} {
 		t.Run(name, func(t *testing.T) {
 			c := framedAgents(t)
 			if name != "agents-state" {
