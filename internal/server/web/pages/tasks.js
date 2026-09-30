@@ -34,9 +34,17 @@ const keepFilter = (storage, {mine, project, column}) => { try { storage?.setIte
 
 const when = (at, now) => { const t = Date.parse(at); return Number.isNaN(t) ? '' : t >= dayStart(now) ? hhmm(t) : day(t); };
 
+// DraftedGate is the send-back dialog on the task's notes in drafts, so they stay when it is closed and take a quote.
+function DraftedGate({drafts, task, ...p}) {
+  useSignalValue(drafts.all);
+  const wants = useSignalValue(drafts.wants);
+  return html`<${Gate} task=${task} ...${p} draft=${drafts.of(task.id, 'notes')} onDraft=${v => drafts.set(task.id, 'notes', v)}
+    focus=${wants?.task === task.id && wants.kind === 'notes'} onFocused=${() => drafts.focused(task.id, 'notes')} />`;
+}
+
 // Tasks: intent is a signal the app sets to {kind: new | search} for the page to act on; storage keeps the filter and
-// a new task's draft in this browser.
-export function Tasks({store, commands, toasts, wire, router, session, clock = () => Date.now(), storage, intent, prefs, copy, changes}) {
+// a new task's draft in this browser; drafts the unsent message and send-back notes of each task (core/drafts.js).
+export function Tasks({store, commands, toasts, wire, router, session, clock = () => Date.now(), storage, intent, prefs, copy, changes, drafts}) {
   const w = useWords();
   const {t, f} = w;
   const phone = usePhone();
@@ -221,10 +229,20 @@ export function Tasks({store, commands, toasts, wire, router, session, clock = (
   </div>`;
 
   const runOf = route.run || '';
-  const conv = () => task && prefs && html`<${Conversation} store=${store} commands=${commands} toasts=${toasts} prefs=${prefs} task=${task}
+  const conv = () => task && prefs && html`<${Conversation} store=${store} commands=${commands} toasts=${toasts} prefs=${prefs} drafts=${drafts} task=${task}
     run=${runOf} target=${route.event || ''} copy=${copy} />`;
   const showRun = id => router.go({page: 'tasks', view: route.view || 'list', task: picked, run: id}, {replace: !phone});
-  const taskChanges = changes && task && (() => html`<${RunChanges} changes=${changes} runs=${tk.runsOf(st, task.id)} prefs=${prefs} />`);
+  // sendingBack is how the task is sent back with notes, when the viewer can: rework at a workflow's gate, sendBack
+  // to its last run's session.
+  const sendingBack = x => { const a = tk.actionsOf(st, aff, x); return ['rework', 'sendBack'].find(id => a.primary === id || a.more.includes(id)) || ''; };
+  // quoted takes a quote of changed lines to the agent's box (then shown) or into the send-back notes (then opened).
+  const quoted = (x, show) => (text, to) => {
+    if (to === 'notes' && sendingBack(x)) { drafts.quote(x.id, 'notes', text); act(sendingBack(x), x); return; }
+    drafts.quote(x.id, 'message', text);
+    show();
+  };
+  const taskChanges = changes && task && (() => html`<${RunChanges} changes=${changes} runs=${tk.runsOf(st, task.id)} prefs=${prefs}
+    notes=${!!sendingBack(task)} onQuote=${prefs ? quoted(task, () => setPane('output')) : null} />`);
   const detail = picked && html`<${Task} store=${store} task=${task} now=${now} busy=${busy(task)} offline=${!online} onAct=${act} onGo=${id => go(id, {push: phone})}
     output=${prefs ? conv : null} changes=${taskChanges} onRun=${prefs ? showRun : null} run=${runOf} pane=${runOf && pane === 'overview' ? 'output' : pane} onPane=${setPane} onClose=${phone || view === 'board' ? undefined : () => go('')} />`;
   const nav = phone && picked && html`<span class="det-nav">
@@ -256,9 +274,9 @@ export function Tasks({store, commands, toasts, wire, router, session, clock = (
     },
     gate: () => {
       const x = st.tasks[modal.task.id] || modal.task;
-      return html`<${Gate} task=${x} reply=${modal.reply || null} busy=${busy(x) || !online} onClose=${close}
+      return html`<${DraftedGate} drafts=${drafts} task=${x} reply=${modal.reply || null} busy=${busy(x) || !online} onClose=${close}
         onBack=${notes => quiet((modal.reply ? send('run.continue', {run: modal.reply, text: notes}, 'run:' + modal.reply)
-          : send('task.gate', {id: x.id, pass: false, notes, expected_rev: x.rev}, 'task:' + x.id)).then(() => { close(); toasts.show({text: f('toast.sentBack', x.title)}); }))} />`;
+          : send('task.gate', {id: x.id, pass: false, notes, expected_rev: x.rev}, 'task:' + x.id)).then(() => { drafts.set(x.id, 'notes', ''); close(); toasts.show({text: f('toast.sentBack', x.title)}); }))} />`;
     },
   })[modal.kind]();
 
@@ -268,8 +286,8 @@ export function Tasks({store, commands, toasts, wire, router, session, clock = (
       <button type="button" class="fab" aria-label=${t('tasks.new')} onClick=${() => open({kind: 'form', mode: 'new'})}><${Icon} name="plus" size=${22} /></button>
       ${picked && html`<${Drawer} title=${task?.title || picked} onClose=${() => router.go({page: 'tasks', view: route.view || 'list'})} extra=${nav}>${detail}<//>`}
       ${picked && task && runOf && st.runs[runOf] && prefs && html`<${Drawer} title=${f('runs.of', runOf, task.title)} onClose=${() => router.go({page: 'tasks', view: route.view || 'list', task: picked})}>
-        <${RunPage} store=${store} commands=${commands} toasts=${toasts} prefs=${prefs} copy=${copy} changes=${changes} run=${st.runs[runOf]} now=${now}
-          tab=${runTab} onTab=${setRunTab} target=${route.event || ''} onTask=${() => router.go({page: 'tasks', view: route.view || 'list', task: picked})} /><//>`}
+        <${RunPage} store=${store} commands=${commands} toasts=${toasts} prefs=${prefs} copy=${copy} changes=${changes} drafts=${drafts} run=${st.runs[runOf]} now=${now}
+          notes=${!!sendingBack(task)} onQuote=${quoted(task, () => setRunTab('output'))} tab=${runTab} onTab=${setRunTab} target=${route.event || ''} onTask=${() => router.go({page: 'tasks', view: route.view || 'list', task: picked})} /><//>`}
       ${dialogs}
     </div>`;
   }

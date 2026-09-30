@@ -2,7 +2,7 @@
 // will go, as the coordinator routes it (task.message's route): into the running turn, after it, in place of it, on in
 // a new run of the session, or to the workflow's next stage. It shows how the last messages got on, and sends with
 // Mod+Enter.
-import {useState, useEffect} from '../vendor/hooks.mjs';
+import {useState, useEffect, useRef} from '../vendor/hooks.mjs';
 import {html, cx, usePhone, useWords} from './base.js';
 import {Button, Segmented} from './controls.js';
 import {register} from '../core/i18n.js';
@@ -39,16 +39,29 @@ export function whereTo(w, route, mode, machine) {
   return w.f('cmp.to.none', route.why || route.to || '');
 }
 
+// ⚠️ The box grows with what is written up to this many rows, then scrolls.
+const ROWS = 8;
+
 const sendWords = {queued: 'cmp.queued', sent: 'cmp.sent', seen: 'cmp.seen', failed: 'cmp.failed'};
 
 // Composer: route is the task's (null when the coordinator gives none); acts what the run offers; machine where the
 // run is; sends the run's last messages; onSend({text, mode}) resolves once sent, onResend(send) sends one again.
-// draft and onDraft keep what is written across draws; tools sit beside the send button.
-export function Composer({route, acts = [], machine = '', sends = [], busy = false, disabled = false, onSend, onResend, draft = '', onDraft, tools = null}) {
+// draft and onDraft keep what is written across draws; focus asks for the focus, at the end of what is written, and
+// onFocused says it was taken; tools sit beside the send button.
+export function Composer({route, acts = [], machine = '', sends = [], busy = false, disabled = false, onSend, onResend, draft = '', onDraft, focus = false, onFocused,
+  tools = null}) {
   const w = useWords();
   const {t} = w;
   const phone = usePhone();
   const [own, setOwn] = useState(draft);
+  const box = useRef(null);
+  useEffect(() => {
+    const el = box.current;
+    if (!focus || !el) return;
+    el.focus?.();
+    el.setSelectionRange?.(el.value.length, el.value.length);
+    onFocused?.();
+  }, [focus]);
   const text = onDraft ? draft : own;
   const setText = v => (onDraft ? onDraft(v) : setOwn(v));
   const modes = modesOf(route, acts);
@@ -75,7 +88,7 @@ export function Composer({route, acts = [], machine = '', sends = [], busy = fal
     <div class="cmp-row">
       ${modes.length > 1 && !phone && html`<div class="cmp-modes"><${Segmented} label=${t('cmp.mode')} value=${mode} onChange=${setMode}
         options=${modes.map(m => ({value: m, label: t('cmp.' + m)}))} /></div>`}
-      <textarea class="in cmp-in" rows="1" value=${text} placeholder=${t('cmp.hint')} aria-label=${t('cmp.label')} disabled=${disabled}
+      <textarea ref=${box} class="in cmp-in" rows=${Math.min(ROWS, text.split('\n').length)} value=${text} placeholder=${t('cmp.hint')} aria-label=${t('cmp.label')} disabled=${disabled}
         onInput=${e => setText(e.currentTarget.value)} onKeyDown=${onKeyDown}></textarea>
       ${!phone && tools}
       <${Button} kind=${mode === 'interrupt' ? 'danger' : 'primary'} keyName="Mod+Enter" disabled=${!canSend} onClick=${send}>${t('cmp.send')}<//>

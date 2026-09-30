@@ -138,8 +138,10 @@ function Facts({store, run, now, onTask}) {
 
 // RunPage is one run: its output (the conversation it is in, at this run), its changes and its facts. tab and onTab
 // pick the pane; onStop asks to stop it, onAbandon to abandon it once its machine lost it; onClose leaves it (a desktop;
-// a phone's drawer has its own).
-export function RunPage({store, commands, toasts, prefs, copy, changes, run, now, tab = 'output', onTab, onTask, onStop, onAbandon, onClose, target = ''}) {
+// a phone's drawer has its own). Lines picked in its changes go into its task's box in drafts, shown on the output
+// pane, unless onQuote(text, to) takes them (with notes, into the send-back notes too).
+export function RunPage({store, commands, toasts, prefs, copy, changes, drafts, run, now, tab = 'output', onTab, onTask, onStop, onAbandon, onClose, target = '',
+  notes = false, onQuote}) {
   const w = useWords();
   const {t, f} = w;
   const phone = usePhone();
@@ -147,9 +149,10 @@ export function RunPage({store, commands, toasts, prefs, copy, changes, run, now
   const task = store.state.tasks[run.task];
   const tabs = ['output', ...(changes ? ['changes'] : []), 'facts'].map(id => ({id, label: t('runs.tab.' + id)}));
   const open = sel.openStates.includes(run.state);
-  const pane = tab === 'changes' ? html`<div class="run-scroll"><${RunChanges} changes=${changes} runs=${[run]} prefs=${prefs} /></div>`
+  const quote = !task || !prefs ? null : onQuote || (text => { drafts.quote(task.id, 'message', text); onTab('output'); });
+  const pane = tab === 'changes' ? html`<div class="run-scroll"><${RunChanges} changes=${changes} runs=${[run]} prefs=${prefs} notes=${notes} onQuote=${quote} /></div>`
     : tab === 'facts' ? html`<div class="run-scroll"><${Facts} store=${store} run=${run} now=${now} onTask=${onTask} /></div>`
-    : task && prefs ? html`<${Conversation} store=${store} commands=${commands} toasts=${toasts} prefs=${prefs} task=${task} run=${run.id} target=${target} copy=${copy} />`
+    : task && prefs ? html`<${Conversation} store=${store} commands=${commands} toasts=${toasts} prefs=${prefs} drafts=${drafts} task=${task} run=${run.id} target=${target} copy=${copy} />`
     : html`<p class="empty">${t('runs.noTask')}</p>`;
   const busy = commands.state('run:' + run.id) === 'pending';
   const abandon = run.state === 'unknown' && onAbandon && (aff.runs?.[run.id] || []).includes('abandon')
@@ -175,7 +178,7 @@ export function RunPage({store, commands, toasts, prefs, copy, changes, run, now
 }
 
 // Runs: storage keeps the filter; changes reads run changes (core/changes.js).
-export function Runs({store, commands, toasts, router, prefs, copy, changes, storage, clock: now = () => Date.now()}) {
+export function Runs({store, commands, toasts, router, prefs, copy, changes, drafts, storage, clock: now = () => Date.now()}) {
   const w = useWords();
   const {t, f} = w;
   const phone = usePhone();
@@ -234,7 +237,7 @@ export function Runs({store, commands, toasts, router, prefs, copy, changes, sto
     active=${!confirm && !opened} empty=${t('runs.none')} />`;
   const dialog = confirm && html`<${Modal} title=${confirm.title} onClose=${() => setConfirm(null)} actions=${[{label: t('confirm.keep'), onClick: () => setConfirm(null)},
     {label: confirm.label, kind: 'primary', keyName: 'Mod+Enter', onClick: () => { const c = confirm; setConfirm(null); c.go(); }}]}><p>${confirm.note}</p><//>`;
-  const page = r => html`<${RunPage} store=${store} commands=${commands} toasts=${toasts} prefs=${prefs} copy=${copy} changes=${changes} run=${r} now=${at}
+  const page = r => html`<${RunPage} store=${store} commands=${commands} toasts=${toasts} prefs=${prefs} copy=${copy} changes=${changes} drafts=${drafts} run=${r} now=${at}
     tab=${tab} onTab=${setTab} onTask=${toTask} onStop=${askStop} onAbandon=${askAbandon} onClose=${phone ? null : closeRun} />`;
 
   if (phone) {

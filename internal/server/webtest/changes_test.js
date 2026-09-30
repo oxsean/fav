@@ -1,7 +1,7 @@
 // changes_test checks the changes tab's core: a run's files read in pages (run.changes) and taken again from the start
 // when its workspace moves between them, an ended run's list kept, a file's diff in pages of hunks (run.diff) joined
-// with its line numbers, more context, the files in directory order, the filters, what starts folded, side by side;
-// then the changes page itself in both forms and both languages.
+// with its line numbers, more context, the files in directory order, the filters, what starts folded, side by side,
+// picking lines and the quote they make; then the changes page itself in both forms and both languages.
 process.env.TZ = 'UTC';
 import {readFileSync} from 'node:fs';
 import renderToString from './vendor/render-to-string.mjs';
@@ -64,9 +64,44 @@ test('pages join into hunks: a page that goes on inside a hunk adds to it', () =
 
 test('side by side pairs a run of removed lines with the added lines after it', () => {
   const rows = ch.rowsOf([{at: '@@ -1,4 +1,3 @@', lines: [' a', '-b', '-c', '-d', '+B', '+C', ' e', '+f', '\\ No newline at end of file']}]);
-  eq(ch.sides(rows).map(p => [p.l, p.r]), [[0, 0], [1, 1], [2, 5], [3, 6], [4, -1], [7, 7], [-1, 8], [-1, 9]]);
+  eq(ch.sides(rows).map(p => [p.l, p.r, p.lo, p.hi]), [
+    [0, 0, 0, 0], [1, 1, 1, 1], [2, 5, 2, 5], [3, 6, 3, 6], [4, -1, 4, 4], [7, 7, 7, 7], [-1, 8, 8, 8], [-1, 9, 9, 9]]);
   eq(ch.sides(ch.rowsOf([{at: '@@ -1 +1 @@', lines: ['-a', '\\ No newline at end of file', '+b']}])).map(p => [p.l, p.r]), [[0, 0], [1, 3], [2, -1]],
     'a note after a removed line stays on the left');
+});
+
+test('picking lines: one tap picks a line, a second tap in the same file reaches to it, Shift always reaches', () => {
+  let s = ch.pick(null, 4, 4, false);
+  eq(s, {a: 4, b: 4, at: [4, 4], one: true});
+  s = ch.pick(s, 9, 9, false);
+  eq(s, {a: 4, b: 9, at: [4, 4], one: false}, 'the second tap reaches');
+  eq(ch.pick(s, 2, 2, false), {a: 2, b: 2, at: [2, 2], one: true}, 'past a range a tap starts again');
+  eq(ch.pick(s, 1, 1, true), {a: 1, b: 4, at: [4, 4], one: false}, 'Shift reaches from where it started');
+  eq(ch.pick(ch.pick(null, 4, 4, false), 4, 4, false), null, 'the same line again lets go');
+  eq(ch.pick(ch.pick(null, 2, 5, false), 7, 7, false), {a: 2, b: 7, at: [2, 5], one: false}, 'a side-by-side row covers both its lines');
+  eq(ch.pick(ch.pick(null, 6, 6, false), 2, 5, false), {a: 2, b: 6, at: [6, 6], one: false});
+});
+
+test('a quote is path:lines, the lines in a diff block, cut past its limits', () => {
+  const rows = ch.rowsOf([{at: '@@ -40,3 +40,4 @@', lines: [' a', '-b', '+c', '+d', ' e']}]);
+  const words = {before: s => `${s} (before)`, more: n => `… ${n} more lines`};
+  eq(ch.quote({path: 'x/y.go', rows, a: 2, b: 4, ...words}), 'x/y.go:41-42\n```diff\n-b\n+c\n+d\n```');
+  eq(ch.quote({path: 'x/y.go', rows, a: 1, b: 1, ...words}), 'x/y.go:40\n```diff\n a\n```', 'one line');
+  eq(ch.quote({path: 'x/y.go', rows, a: 2, b: 2, ...words}), 'x/y.go:41 (before)\n```diff\n-b\n```', 'only removed lines: the old numbers');
+  eq(ch.quote({path: 'x/y.go', rows, a: 0, b: 1, ...words}), 'x/y.go:40\n```diff\n@@ -40,3 +40,4 @@\n a\n```', 'a hunk head goes in as it is');
+  const fenced = ch.rowsOf([{at: '@@ -1 +1 @@', lines: ['+```js', '+````']}]);
+  eq(ch.quote({path: 'r.md', rows: fenced, a: 1, b: 2, ...words}), 'r.md:1-2\n`````diff\n+```js\n+````\n`````', 'a longer fence than any in the lines');
+  const many = ch.rowsOf([{at: '@@ -1 +1,300 @@', lines: Array.from({length: 300}, (_, i) => '+' + i)}]);
+  const q = ch.quote({path: 'big', rows: many, a: 1, b: 300, ...words});
+  eq(q.split('\n').length, 1 + 1 + ch.QUOTE_LINES + 1 + 1, 'the head, the fence, the lines, the fence, the rest');
+  ok(q.startsWith('big:1-300\n') && q.endsWith('```\n… 100 more lines'), 'the whole range named, the rest counted');
+  const wide = ch.rowsOf([{at: '@@ -1 +1,3 @@', lines: ['+' + 'x'.repeat(10000), '+' + 'y'.repeat(10000), '+z']}]);
+  ok(ch.quote({path: 'w', rows: wide, a: 1, b: 3, ...words}).endsWith('… 2 more lines'), 'cut past its bytes');
+});
+
+test('a quote goes after what is written, on a line of its own', () => {
+  eq(ch.withQuote('', 'q'), 'q\n');
+  eq(ch.withQuote('look at this  \n', 'q'), 'look at this\n\nq\n');
 });
 
 test('an ended run\'s changes are read in pages once, then kept; a file\'s diff in pages of hunks, each fetched once', async () => {
@@ -162,8 +197,9 @@ test('the changes page draws in both forms and both languages, styled and worded
   const shown = {'internal/receipt/pdf.go': {hunks, of: 3, next: {hunk: 1}, context: 3}};
   const open = new Set(['internal/receipt/pdf.go']);
   const states = {
-    list: {data: sample, open, diffs: shown},
-    split: {data: sample, open, diffs: shown, wide: true, view: 'split'},
+    list: {data: sample, open, diffs: shown, onPick: none},
+    split: {data: sample, open, diffs: shown, wide: true, view: 'split', onPick: none},
+    picked: {data: sample, open, diffs: shown, onPick: none, notes: true, sel: {path: 'internal/receipt/pdf.go', a: 2, b: 4, at: [2, 2], one: false}},
     goesOn: {data: sample, open, diffs: {'internal/receipt/pdf.go': {hunks, of: 1, next: {hunk: 0, line: 5}, context: 23}}},
     running: {data: sample, running: true},
     outside: {data: {...sample, git: false, snapshot: ''}},
@@ -178,13 +214,17 @@ test('the changes page draws in both forms and both languages, styled and worded
     (lang === 'zh' ? zh : en)[name + (f === 'phone' ? '/phone' : '')] = s;
   }
   for (const want of ['6 个文件', '+3,327', '−1,111', '只看 agent 用工具改的', '生成的文件', 'internal/receipt', 'internal/receipt/draw.go → internal/receipt/render.go',
-    '二进制 · 12 KB → 14 KB', '改动很大：+3,200 −1,100', '@@ -40,7 +40,8 @@', '显示了 1 / 3 处', '显示后面 2 处', '多看上下文', '上下文 3 行'])
-    ok(zh.list.includes(want), `zh list: no ${want}`);
+    '二进制 · 12 KB → 14 KB', '改动很大：+3,200 −1,100', '@@ -40,7 +40,8 @@', '显示了 1 / 3 处', '显示后面 2 处', '多看上下文', '上下文 3 行',
+    '点行号选中一行，再点另一行选到那里']) ok(zh.list.includes(want), `zh list: no ${want}`);
+  ok(zh.list.includes('data-lo="3" data-hi="3"'), 'a line\'s numbers take a tap');
   ok(zh.list.includes('<span class="dv-n">41</span><span class="dv-n"></span>'), 'a removed line: its old number only');
   ok(zh.list.includes('<span class="dv-n"></span><span class="dv-n">42</span>'), 'an added line: its new number only');
   ok(!zh.list.includes('左右对照') && !zh['list/phone'].includes('左右对照'), 'side by side only where wide');
   ok(zh.split.includes('左右对照') && zh.split.includes('dv-split') && !zh['split/phone'].includes('dv-split'), 'side by side on a wide desktop, never on a phone');
+  ok(zh.picked.includes('选了 3 行') && zh.picked.includes('发给 agent') && zh.picked.includes('写进退回意见') && zh.picked.includes('dv-row dv-del on'), 'picked lines');
+  ok(!zh.list.includes('发给 agent'), 'nothing picked, nothing to send');
   ok(zh.goesOn.includes('这一处没显示完，接着显示') && zh.goesOn.includes('上下文 23 行') && !zh.goesOn.includes('显示了'), 'a hunk that goes on');
+  ok(!zh.running.includes('点行号'), 'no hint while nothing is open');
   ok(zh.running.includes('截至 14:20') && zh.running.includes('刷新'), 'a running run says when it was taken');
   ok(zh.outside.includes('只包含 agent 用工具改的，命令改的看不到'), 'outside git');
   ok(zh.hidden.includes('这段时间这个目录里还有 4 个文件变了，只有机器主人能看'), 'only the owner');
@@ -193,7 +233,7 @@ test('the changes page draws in both forms and both languages, styled and worded
   ok(zh.empty.includes('没有改动'), 'nothing changed');
   for (const want of ['Files: 6', 'Only the agent\'s tools', 'Binary · 12 KB → 14 KB', 'Large change: +3,200 −1,100', 'Showing 1 of 3 hunks', 'Show the next 2 hunks',
     'More context']) ok(en.list.includes(want), `en list: no ${want}`);
-  ok(en.split.includes('Side by side'), 'en side by side');
+  ok(en.split.includes('Side by side') && en.picked.includes('Lines picked: 3') && en.picked.includes('Add to the send-back notes'), 'en picked');
 });
 
 test('side by side keeps both sides level: one row a side for every pair', () => {

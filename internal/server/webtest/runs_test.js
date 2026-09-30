@@ -1,8 +1,8 @@
 // runs_test draws the runs page and a run's own page in both forms and both languages from the home frames, and drives
 // them in a fake document: the filters kept in this browser, the picked run's preview, Enter opening a run and x asking
 // before it stops; a phone's run with the previous and next at hand; and the changes tab of a task and of a run, their
-// files opening on their first page of hunks, the next page and more context on asking, filtered, and a running run's
-// list read again on asking.
+// files opening on their first page of hunks, the next page and more context on asking, filtered, a running run's list
+// read again on asking, and lines picked in them going into the agent's box or the send-back notes.
 process.env.TZ = 'UTC';
 import {readFileSync} from 'node:fs';
 import {render} from '../web/vendor/preact.mjs';
@@ -21,7 +21,7 @@ import {RunPage, RUNS_FILTER_KEY, listed, machineCount} from '../web/pages/runs.
 import {PANE_KEY} from '../web/pages/tasks.js';
 import {install} from './dom.js';
 import {settle} from './fake.js';
-import {NOW, home, outputs} from './rig.js';
+import {NOW, home, outputs, tasks} from './rig.js';
 import {test, eq, ok, run, until} from './check.js';
 
 const css = ['base.css', 'components.css', 'pages.css'].map(f => readFileSync(new URL(`../web/css/${f}`, import.meta.url), 'utf8')).join('\n');
@@ -210,6 +210,8 @@ test('a task\'s changes tab: its latest run\'s files, the unfolded ones open on 
 });
 
 const fileOf = (root, path) => root.find('.chg-file').find(li => li.textContent.includes(path));
+const valueOf = el => el.value ?? el.getAttribute('value');
+const gutter = (li, lo) => li.find('[data-lo]').find(g => g.getAttribute('data-lo') === String(lo));
 
 test('a file\'s next page and more context on asking', async () => {
   const r = await outputs();
@@ -226,6 +228,64 @@ test('a file\'s next page and more context on asking', async () => {
   await until(() => fileOf(root, pdf).textContent.includes('上下文 23 行'), 'more context');
   eq(ch.asked.filter(x => x[0] === 'diff' && x[2] === pdf).at(-1)[4], {hunk: 0, context: 23}, 'from the start, 20 lines more');
   ok(!fileOf(root, pdf).textContent.includes('@@ -9 +9 @@'), 'the hunks as they are now');
+  eq(r.errors, [], 'errors');
+});
+
+test('lines picked in a task\'s changes go into its agent\'s box, shown on the output tab', async () => {
+  const r = await outputs();
+  const a = app(r, {url: '/?page=tasks&task=t1', storage: memory({[PANE_KEY]: 'changes'}), changes: changesOf({r2: list('w-1')})});
+  const root = await mount(a.vnode());
+  const pdf = 'internal/receipt/pdf.go';
+  await until(() => fileOf(root, pdf)?.textContent.includes('+new ' + pdf), 'pdf.go drawn');
+  ok(!root.find('button').some(b => b.textContent.includes('写进退回意见')), 'a running task is not sent back');
+  await click(gutter(fileOf(root, pdf), 1));
+  ok(fileOf(root, pdf).textContent.includes('选了 1 行'), 'one line');
+  await click(gutter(fileOf(root, pdf), 2));
+  ok(fileOf(root, pdf).textContent.includes('选了 2 行'), 'a second tap reaches');
+  await click(buttonOf(root, '发给 agent'));
+  await until(() => root.find('.cmp-in').length === 1, 'the output tab');
+  const box = root.one('.cmp-in');
+  eq(valueOf(box), `${pdf}:1\n\`\`\`diff\n-old ${pdf}\n+new ${pdf}\n\`\`\`\n`, 'the quote in the box');
+  ok(root.ownerDocument?.activeElement === box || globalThis.document.activeElement === box, 'the box has the focus');
+  eq(a.router.route.value.task, 't1', 'the same task');
+  eq(r.errors, [], 'errors');
+});
+
+test('lines picked in the changes of a task to accept go into its send-back notes, which stay there when the dialog closes', async () => {
+  const r = await tasks();
+  const a = app(r, {url: '/?page=tasks&task=q4', storage: memory({[PANE_KEY]: 'changes'}), changes: changesOf({r25: list('t-4')})});
+  const root = await mount(a.vnode());
+  const pdf = 'internal/receipt/pdf.go';
+  await until(() => fileOf(root, pdf)?.textContent.includes('+new ' + pdf), 'pdf.go drawn');
+  const pick = async lo => {
+    await click(gutter(fileOf(root, pdf), lo));
+    await click(buttonOf(root, '写进退回意见'));
+    await until(() => root.find('.modal').length === 1, 'the send-back dialog');
+    return valueOf(root.one('.modal').find('textarea')[0]);
+  };
+  eq(await pick(1), `${pdf}:1（改之前）\n\`\`\`diff\n-old ${pdf}\n\`\`\`\n`, 'a removed line: its old number');
+  await click(buttonOf(root.one('.modal'), words.t('home.cancel')));
+  eq(root.find('.modal').length, 0, 'closed');
+  eq(await pick(2), `${pdf}:1（改之前）\n\`\`\`diff\n-old ${pdf}\n\`\`\`\n\n${pdf}:1\n\`\`\`diff\n+new ${pdf}\n\`\`\`\n`, 'kept, the next quote after it');
+  eq(r.errors, [], 'errors');
+});
+
+test('on a phone, lines picked in a run\'s changes go into its task\'s box on the run\'s output', async () => {
+  const r = await outputs();
+  const a = app(r, {url: '/?page=tasks&task=t1&run=r2', changes: changesOf({r2: list('w-1')})});
+  const root = await mount(a.vnode(), 'phone');
+  await settled();
+  await click(root.find('button').find(b => b.textContent.trim() === words.t('runs.tab.changes')));
+  const pdf = 'internal/receipt/pdf.go';
+  await until(() => root.find('.chg-row').length > 0, 'the files');
+  ok(!fileOf(root, pdf).textContent.includes('+new'), 'a phone opens none on its own');
+  await click(root.find('.chg-row').find(b => b.textContent.includes(pdf)));
+  await until(() => fileOf(root, pdf)?.textContent.includes('+new ' + pdf), 'opened on asking');
+  await click(gutter(fileOf(root, pdf), 2));
+  await click(buttonOf(root, '发给 agent'));
+  await until(() => root.find('.cmp-in').length === 1, 'the output');
+  eq(valueOf(root.one('.cmp-in')), `${pdf}:1\n\`\`\`diff\n+new ${pdf}\n\`\`\`\n`, 'the quote in the box');
+  form.value = 'desktop';
   eq(r.errors, [], 'errors');
 });
 

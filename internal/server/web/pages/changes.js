@@ -1,7 +1,7 @@
 // changes is the changes tab of a task and of a run: what a run changed, file by file in directory order with its
 // +a −d, filtered to the agent tools' own or the generated files. A file opens on its diff, in pages of hunks, with
 // both sides' line numbers, more context on asking, and side by side on a wide desktop. Big, generated and binary
-// files start folded.
+// files start folded. Lines picked by their numbers make a quote for the agent's box or the send-back notes.
 import {useState, useEffect, useRef, useMemo} from '../vendor/hooks.mjs';
 import {signal} from '../vendor/signals-core.mjs';
 import {html, cx, usePhone, useWords, useSignalValue} from '../ui/base.js';
@@ -20,6 +20,10 @@ register('changes', {
   'chg.goOn': ['这一处没显示完，接着显示', 'This hunk goes on: show the rest'],
   'chg.context': ['多看上下文', 'More context'], 'chg.contextNow': ['上下文 %d 行', 'Context: %d lines'],
   'chg.view': ['版式', 'Layout'], 'chg.v.unified': ['上下对照', 'Unified'], 'chg.v.split': ['左右对照', 'Side by side'],
+  'chg.pickHint': ['点行号选中一行，再点另一行选到那里', 'Tap a line number to pick it, then another to reach it'],
+  'chg.picked': ['选了 %d 行', 'Lines picked: %d'], 'chg.pickMore': ['再点一行可以选到那里', 'Tap another line to reach it'],
+  'chg.toAgent': ['发给 agent', 'Send to the agent'], 'chg.toNotes': ['写进退回意见', 'Add to the send-back notes'], 'chg.unpick': ['取消', 'Cancel'],
+  'chg.q.before': ['%s（改之前）', '%s (before the change)'], 'chg.q.more': ['……另有 %d 行没有引用', '… %d more lines not quoted'],
   'chg.at': ['截至 %s', 'As of %s'], 'chg.refresh': ['刷新', 'Refresh'],
   'chg.outside': ['只包含 agent 用工具改的，命令改的看不到', 'Only what the agent changed with its tools: changes made by commands are not seen'],
   'chg.hidden': ['这段时间这个目录里还有 %d 个文件变了，只有机器主人能看', '%d more files changed in this directory meanwhile: only the machine\'s owner can see them'],
@@ -68,29 +72,49 @@ const byHunk = (items, h) => {
   return out;
 };
 
-function Line({r, side = ''}) {
+function Line({r, lo, hi, on, side = ''}) {
   if (!r) return html`<div class="dv-row dv-none"><span class="dv-g"></span><span class="dv-t"> </span></div>`;
   if (r.kind === 'hunk') return html`<div class="dv-row dv-hunk"><span class="dv-g"></span><span class="dv-t">${r.text}</span></div>`;
-  return html`<div class=${cx('dv-row', r.kind !== 'ctx' && 'dv-' + r.kind)}>
-    <span class="dv-g mono">${side !== 'r' && html`<span class="dv-n">${r.old || ''}</span>`}${side !== 'l' && html`<span class="dv-n">${r.new || ''}</span>`}</span><span class="dv-t">${r.text}</span></div>`;
+  return html`<div class=${cx('dv-row', r.kind !== 'ctx' && 'dv-' + r.kind, on && 'on')}>
+    <span class="dv-g mono" data-lo=${lo} data-hi=${hi}>${side !== 'r' && html`<span class="dv-n">${r.old || ''}</span>`}${side !== 'l' && html`<span class="dv-n">${r.new || ''}</span>`}</span><span class="dv-t">${r.text}</span></div>`;
 }
 
 // DiffLines draws a file's rows, unified or side by side (split), each hunk a block the browser skips while it is out
-// of sight.
-export function DiffLines({rows, split = false}) {
+// of sight; sel is the picked rows ({a, b}); onPick(lo, hi, extend) is a tap on a line's numbers.
+export function DiffLines({rows, split = false, sel = null, onPick}) {
+  const on = (lo, hi) => !!sel && lo <= sel.b && hi >= sel.a;
+  const tap = e => {
+    for (let n = e.target; n && n !== e.currentTarget; n = n.parentNode) {
+      const lo = n.getAttribute?.('data-lo');
+      if (lo !== null && lo !== undefined) { onPick?.(Number(lo), Number(n.getAttribute('data-hi')), !!e.shiftKey); return; }
+    }
+  };
   if (!split) {
     const hunks = byHunk(rows.map((r, i) => ({r, i})), x => x.r.h);
-    return html`<div class="dv mono"><div class="dv-col">${hunks.map(g => html`<div class="dv-h" key=${g.h}>
-      ${g.items.map(({r, i}) => html`<${Line} key=${i} r=${r} />`)}</div>`)}</div></div>`;
+    return html`<div class="dv mono" onClick=${tap}><div class="dv-col">${hunks.map(g => html`<div class="dv-h" key=${g.h}>
+      ${g.items.map(({r, i}) => html`<${Line} key=${i} r=${r} lo=${i} hi=${i} on=${on(i, i)} />`)}</div>`)}</div></div>`;
   }
-  const hunks = byHunk(ch.sides(rows), p => rows[p.l >= 0 ? p.l : p.r].h);
+  const hunks = byHunk(ch.sides(rows), p => rows[p.lo].h);
   const col = side => html`<div class="dv-col">${hunks.map(g => html`<div class="dv-h" key=${g.h}>
-    ${g.items.map((p, j) => { const i = p[side]; const r = i >= 0 ? rows[i] : null;
-      return html`<${Line} key=${j} r=${r && r.kind === 'hunk' && side === 'r' ? {kind: 'hunk', text: ''} : r} side=${side} />`; })}</div>`)}</div>`;
-  return html`<div class="dv dv-split mono">${col('l')}${col('r')}</div>`;
+    ${g.items.map(p => { const i = p[side]; const r = i >= 0 ? rows[i] : null;
+      return html`<${Line} key=${p.lo + ':' + p.hi} r=${r && r.kind === 'hunk' && side === 'r' ? {kind: 'hunk', text: ''} : r} lo=${p.lo} hi=${p.hi} on=${on(p.lo, p.hi)} side=${side} />`; })}</div>`)}</div>`;
+  return html`<div class="dv dv-split mono" onClick=${tap}>${col('l')}${col('r')}</div>`;
 }
 
-function FileBody({f, diff, split, onMore, onContext}) {
+function Picked({rows, sel, notes, onQuote, onClear}) {
+  const {t, f} = useWords();
+  const n = rows.slice(sel.a, sel.b + 1).filter(r => r.kind !== 'hunk').length;
+  return html`<div class="chg-pick" role="group" aria-label=${f('chg.picked', n)}>
+    <span class="chg-pick-n">${f('chg.picked', n)}${sel.one ? html` <span class="t-muted">${t('chg.pickMore')}</span>` : ''}</span>
+    <span class="chg-pick-acts">
+      <${Button} kind="primary" onClick=${() => onQuote('agent')}>${t('chg.toAgent')}<//>
+      ${notes && html`<${Button} onClick=${() => onQuote('notes')}>${t('chg.toNotes')}<//>`}
+      <${Button} kind="quiet" onClick=${onClear}>${t('chg.unpick')}<//>
+    </span>
+  </div>`;
+}
+
+function FileBody({f, diff, split, sel, notes, onMore, onContext, onPick, onQuote, onClear}) {
   const {t, f: fmt} = useWords();
   const rows = useMemo(() => (diff?.hunks ? ch.rowsOf(diff.hunks) : []), [diff?.hunks]);
   if (!diff || (diff.loading && !diff.hunks)) return html`<p class="chg-note t-muted">${t('chg.loading')}</p>`;
@@ -100,17 +124,18 @@ function FileBody({f, diff, split, onMore, onContext}) {
   const left = Math.min(ch.HUNKS, diff.of - shown);
   const context = f.op === 'modify' || f.op === 'rename';
   return html`<div class="chg-body">
-    <${DiffLines} rows=${rows} split=${split} />
+    <${DiffLines} rows=${rows} split=${split} sel=${sel} onPick=${onPick} />
     <div class="chg-foot">
       ${diff.of > 1 && html`<span class="t-muted">${fmt('chg.shown', shown, diff.of)}</span>`}
       ${diff.next && html`<${Button} kind="quiet" disabled=${diff.loading} onClick=${onMore}>${diff.next.line ? t('chg.goOn') : fmt('chg.next', left)}<//>`}
       ${context && html`<${Button} kind="quiet" disabled=${diff.loading} onClick=${onContext}>${t('chg.context')}<//><span class="t-muted">${fmt('chg.contextNow', diff.context)}</span>`}
       ${diff.error && html`<span class="t-muted">${diff.error === code.snapshotChanged ? t('chg.moved') : fmt('chg.failed', diff.error)}</span>`}
     </div>
+    ${sel && html`<${Picked} rows=${rows} sel=${sel} notes=${notes} onQuote=${to => onQuote(to, rows)} onClear=${onClear} />`}
   </div>`;
 }
 
-function FileRow({f, open, diff, split, onToggle, onMore, onContext}) {
+function FileRow({f, open, diff, split, sel, notes, onToggle, onMore, onContext, onPick, onQuote, onClear}) {
   const {t, f: fmt} = useWords();
   const name = f.op === 'rename' && f.from ? `${f.from} → ${f.path}` : f.path;
   const binary = f.binary && fmt('chg.binary', f.old_bytes ? `${size(f.old_bytes)} → ${size(f.bytes)}` : size(f.bytes));
@@ -124,18 +149,20 @@ function FileRow({f, open, diff, split, onToggle, onMore, onContext}) {
         : f.big && !open ? html`<span class="chg-n t-muted">${fmt('chg.big', `+${num(f.add)} −${num(f.del)}`)}</span>`
         : html`<${Counts} add=${f.add} del=${f.del} />`}
     </button>
-    ${open && !f.binary && html`<${FileBody} f=${f} diff=${diff} split=${split}
-      onMore=${() => onMore(f.path)} onContext=${() => onContext(f.path)} />`}
+    ${open && !f.binary && html`<${FileBody} f=${f} diff=${diff} split=${split} sel=${sel} notes=${notes}
+      onMore=${() => onMore(f.path)} onContext=${() => onContext(f.path)} onPick=${(lo, hi, x) => onPick(f.path, lo, hi, x)}
+      onQuote=${(to, rows) => onQuote(f.path, rows, to)} onClear=${onClear} />`}
   </li>`;
 }
 
 // Changes draws a run's changes: data is its list (core/changes.js list), error why there is none, unsupported an older
 // server; open is the files shown open and diffs what they show ({hunks, of, next, context, loading?, error?}); running
 // says the list is the workspace as it was at data.at, refreshed with onRefresh; runs and run pick which run. view is
-// the layout asked for (unified or split, onView changes it; side by side only where wide); onMore(path) takes a
-// file's next page, onContext(path) more context around its changes.
+// the layout asked for (unified or split, onView changes it; side by side only where wide); sel the lines picked
+// ({path, a, b, at, one}, onPick(path, lo, hi, extend) and onClear change it); onQuote(path, rows, to) sends them on,
+// to the agent or, when notes, into the send-back notes.
 export function Changes({data = null, error = '', unsupported = false, running = false, open = new Set(), diffs = {}, onToggle, onRefresh,
-  runs = [], run = '', onRun, view = 'unified', onView, wide = false, onMore, onContext}) {
+  runs = [], run = '', onRun, view = 'unified', onView, wide = false, sel = null, notes = false, onMore, onContext, onPick, onQuote, onClear}) {
   const {t, f} = useWords();
   const phone = usePhone();
   const [filter, setFilter] = useState('all');
@@ -158,10 +185,12 @@ export function Changes({data = null, error = '', unsupported = false, running =
       </div>
       ${!data.git && html`<p class="chg-warn">${t('chg.outside')}</p>`}
       ${data.hidden > 0 && html`<p class="chg-warn">${f('chg.hidden', data.hidden)}</p>`}
+      ${onPick && groups.length > 0 && open.size > 0 && html`<p class="chg-hint t-muted">${t('chg.pickHint')}</p>`}
       ${!groups.length ? html`<p class="empty">${t('chg.none')}</p>` : html`<div class="chg-list">${groups.map(g => html`<section class="chg-group" key=${g.dir}>
         ${g.dir && html`<h4 class="chg-dir mono">${g.dir}/</h4>`}
         <ul class="chg-files">${g.files.map(x => html`<${FileRow} key=${x.path} f=${x} open=${open.has(x.path)} diff=${diffs[x.path]} split=${split}
-          onToggle=${onToggle} onMore=${onMore} onContext=${onContext} />`)}</ul>
+          sel=${sel?.path === x.path ? sel : null} notes=${notes} onToggle=${onToggle} onMore=${onMore} onContext=${onContext} onPick=${onPick}
+          onQuote=${onQuote} onClear=${onClear} />`)}</ul>
       </section>`)}</div>`}`;
   };
   return html`<section class="chg" aria-label=${t('chg.label')}>
@@ -171,14 +200,17 @@ export function Changes({data = null, error = '', unsupported = false, running =
 }
 
 // RunChanges loads the changes of one of runs (the first unless picked) through changes (core/changes.js) and draws
-// them; a running run's are read again when its state moves and on asking. prefs keeps the layout.
-export function RunChanges({changes, runs, prefs = null}) {
+// them; a running run's are read again when its state moves and on asking. prefs keeps the layout; onQuote(text, to)
+// takes a quote of picked lines to the agent's box ('agent') or, when notes, the send-back notes ('notes').
+export function RunChanges({changes, runs, prefs = null, notes = false, onQuote}) {
+  const w = useWords();
   const phone = usePhone();
   const [picked, setPicked] = useState('');
   const run = runs.find(r => r.id === picked) || runs[0];
   const [got, setGot] = useState({});
   const [open, setOpen] = useState(() => new Set());
   const [diffs, setDiffs] = useState({});
+  const [sel, setSel] = useState(null);
   const [tick, setTick] = useState(0);
   const seq = useRef(0);
   const box = useRef(null);
@@ -195,6 +227,7 @@ export function RunChanges({changes, runs, prefs = null}) {
       if (n !== seq.current) return;
       setGot({data});
       setDiffs({});
+      setSel(null);
       if (!phone) setOpen(new Set(data.files.filter(x => !ch.folded(x)).slice(0, AUTO_OPEN).map(x => x.path)));
     }, e => n === seq.current && setGot({error: e.code || String(e.message || e)}));
   }, [run?.id, run?.state, tick, can]);
@@ -226,11 +259,18 @@ export function RunChanges({changes, runs, prefs = null}) {
       fetch(path, {hunk: 0}, ch.CONTEXT, true);
     }
   }, [got.data, [...open].join('\n')]);
-  const toggle = path => setOpen(o => { const s = new Set(o); if (s.has(path)) s.delete(path); else s.add(path); return s; });
+  const toggle = path => setOpen(o => { const s = new Set(o); if (s.has(path)) { s.delete(path); if (sel?.path === path) setSel(null); } else s.add(path); return s; });
   const more = path => { const d = diffs[path]; if (d?.next && !d.loading) fetch(path, d.next, d.context, false); };
-  const context = path => { const d = diffs[path]; if (d && !d.loading) fetch(path, {hunk: 0}, d.context + ch.MORE_CONTEXT, true); };
+  const context = path => { const d = diffs[path]; if (d && !d.loading) { if (sel?.path === path) setSel(null); fetch(path, {hunk: 0}, d.context + ch.MORE_CONTEXT, true); } };
+  const pick = (path, lo, hi, extend) => setSel(s => { const x = ch.pick(s?.path === path ? s : null, lo, hi, extend); return x && {...x, path}; });
+  const quote = (path, rows, to) => {
+    if (!sel) return;
+    onQuote?.(ch.quote({path, rows, a: sel.a, b: sel.b, before: s => w.f('chg.q.before', s), more: n => w.f('chg.q.more', n)}), to);
+    setSel(null);
+  };
   if (!run) return null;
   return html`<div class="chg-box" ref=${box}><${Changes} data=${got.data || null} error=${got.error || ''} unsupported=${!can} running=${running} open=${open} diffs=${diffs}
-    onToggle=${toggle} onRefresh=${() => setTick(n => n + 1)} runs=${runs} run=${run.id} onRun=${id => { setPicked(id); setGot({}); setOpen(new Set()); }}
-    view=${view} onView=${v => prefs?.setDiff(v)} wide=${wide} onMore=${more} onContext=${context} /></div>`;
+    onToggle=${toggle} onRefresh=${() => setTick(n => n + 1)} runs=${runs} run=${run.id} onRun=${id => { setPicked(id); setGot({}); setOpen(new Set()); setSel(null); }}
+    view=${view} onView=${v => prefs?.setDiff(v)} wide=${wide} sel=${onQuote ? sel : null} notes=${notes}
+    onMore=${more} onContext=${context} onPick=${onQuote ? pick : null} onQuote=${quote} onClear=${() => setSel(null)} /></div>`;
 }

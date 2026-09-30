@@ -16,6 +16,7 @@ import {Me} from './me.js';
 import {Agents} from './agents.js';
 import {useNotices} from './notify.js';
 import {createChanges} from '../core/changes.js';
+import {createDrafts} from '../core/drafts.js';
 import {createAgentDefs} from '../core/agents.js';
 import './words.js';
 
@@ -40,9 +41,10 @@ function finder(store, machines, go) {
 // App: router, keys, nav and toasts are core's; prefs core/prefs.js's; session is who signed in; fetchOutput(run) the
 // last events of a run; http is core/http.js's (the pages read /api there); storage is the browser's (the task page
 // keeps its filter and draft there); onLogout signs out; changes reads what runs changed (core/changes.js; one over
-// wire when not given); agentDefs reads the agents (core/agents.js; likewise); names is a signal of user id → name;
-// notices are the browser's ({Notification, secure}), doc the document, tab the tab's storage (the me page's); copy and
-// download are the clipboard's and a file save's (the tests pass their own).
+// wire when not given); drafts (core/drafts.js) keep what is written to each task's agent and into its send-back
+// notes; agentDefs reads the agents (core/agents.js; likewise); names is a signal of user id → name; notices are the
+// browser's ({Notification, secure}), doc the document, tab the tab's storage (the me page's); copy and download are
+// the clipboard's and a file save's (the tests pass their own).
 export function App({store, commands, toasts, wire, http, router, keys, nav, prefs, session, clock, fetchOutput, storage, onLogout, copy, changes: given, names = null,
   notices = {}, doc = null, tab = null, agentDefs: givenDefs, download}) {
   const {t, f} = useWords();
@@ -56,6 +58,7 @@ export function App({store, commands, toasts, wire, http, router, keys, nav, pre
   // intent is what the task page is asked to do once it is up: open a new task or its search.
   const intent = useMemo(() => signal(null), []);
   const changes = useMemo(() => given || createChanges({wire}), [wire, given]);
+  const drafts = useMemo(() => createDrafts(), []);
   const agentDefs = useMemo(() => givenDefs || createAgentDefs({wire}), [wire, givenDefs]);
   const go = to => router.go(to);
   const phone = usePhone();
@@ -88,9 +91,9 @@ export function App({store, commands, toasts, wire, http, router, keys, nav, pre
     ? html`<${Home} store=${store} commands=${commands} toasts=${toasts} clock=${clock} fetchOutput=${fetchOutput} onOpen=${onOpen} onNavigate=${onNavigate} />`
     : route.page === 'tasks'
       ? html`<${Tasks} store=${store} commands=${commands} toasts=${toasts} wire=${wire} router=${router} session=${session} clock=${clock} storage=${storage}
-        intent=${intent} prefs=${prefs} copy=${copy} changes=${changes} />`
+        intent=${intent} prefs=${prefs} copy=${copy} changes=${changes} drafts=${drafts} />`
       : route.page === 'runs'
-        ? html`<${Runs} store=${store} commands=${commands} toasts=${toasts} router=${router} prefs=${prefs} copy=${copy} changes=${changes} storage=${storage} clock=${clock} />`
+        ? html`<${Runs} store=${store} commands=${commands} toasts=${toasts} router=${router} prefs=${prefs} copy=${copy} changes=${changes} drafts=${drafts} storage=${storage} clock=${clock} />`
         : route.page === 'team'
           ? html`<${Team} store=${store} commands=${commands} toasts=${toasts} session=${session} http=${http} wire=${wire} clock=${clock} copy=${copy} />`
           : route.page === 'machines'

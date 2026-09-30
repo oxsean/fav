@@ -18,8 +18,8 @@ export function TextInput({label, value, onInput, type = 'text', placeholder, no
     onInput=${e => onInput(e.currentTarget.value)} onKeyDown=${onKeyDown} aria-invalid=${error ? 'true' : undefined} />`);
 }
 
-export function TextArea({label, value, onInput, placeholder, note, error, rows = 3, onKeyDown, mono = false}) {
+export function TextArea({label, value, onInput, placeholder, note, error, rows = 3, onKeyDown, mono = false, inputRef}) {
   const id = useId();
-  return field(id, label, note, error, html`<textarea id=${id} class=${cx('in', mono && 'mono')} rows=${rows} value=${value} placeholder=${placeholder}
+  return field(id, label, note, error, html`<textarea ref=${inputRef} id=${id} class=${cx('in', mono && 'mono')} rows=${rows} value=${value} placeholder=${placeholder}
     spellcheck=${mono ? 'false' : undefined} onInput=${e => onInput(e.currentTarget.value)} onKeyDown=${onKeyDown}></textarea>`);
 }

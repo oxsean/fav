@@ -1,8 +1,8 @@
 // changes is what a run changed, for the changes tab: its files (run.changes, read in pages of the node's size), a
-// file's diff in pages of hunks (run.diff), and how the tab lays them out: line numbers and side by side. A running
-// run's list is compared against its workspace as it is (a snapshot); when that moves between two pages the list is
-// taken again from its start. An ended run's changes do not change, so they are kept; a running run's pages are kept
-// by their snapshot.
+// file's diff in pages of hunks (run.diff), and how the tab lays them out: line numbers, side by side, picked lines
+// and the quote they make for the agent. A running run's list is compared against its workspace as it is (a
+// snapshot); when that moves between two pages the list is taken again from its start. An ended run's changes do not
+// change, so they are kept; a running run's pages are kept by their snapshot.
 import {code} from './proto.js';
 
 // ⚠️ How many times a list is taken again from its start before its snapshot_changed is given up to.
@@ -12,6 +12,9 @@ export const HUNKS = 10;
 // ⚠️ The lines of context the node gives by default, and how many more each ask for context adds.
 export const CONTEXT = 3;
 export const MORE_CONTEXT = 20;
+// ⚠️ A quote holds at most this many lines and bytes of what was picked (the coordinator takes 64 KiB a message).
+export const QUOTE_LINES = 200;
+export const QUOTE_BYTES = 16 << 10;
 // ⚠️ run.diff pages kept at most, the oldest let go first.
 export const KEPT_PAGES = 200;
 
@@ -81,7 +84,8 @@ export function joined(pages) {
   return {hunks, of, next};
 }
 
-// sides pairs rows for side by side: {l, r} the row shown on the left and on the right (-1 for none). A run of removed lines goes beside the added ones after it; a hunk's head and context lines
+// sides pairs rows for side by side: {l, r} the row shown on the left and on the right (-1 for none), lo and hi the
+// rows the pair covers. A run of removed lines goes beside the added ones after it; a hunk's head and context lines
 // are on both sides; a note stays with the side of the line before it.
 export function sides(rows) {
   const out = [];
@@ -93,15 +97,52 @@ export function sides(rows) {
       while (i < rows.length && (rows[i].kind === 'del' || (rows[i].kind === 'note' && !adds.length && dels.length))) dels.push(i++);
       while (i < rows.length && (rows[i].kind === 'add' || (rows[i].kind === 'note' && adds.length))) adds.push(i++);
       for (let j = 0; j < Math.max(dels.length, adds.length); j++) {
-        out.push({l: dels[j] ?? -1, r: adds[j] ?? -1});
+        const l = dels[j] ?? -1, r = adds[j] ?? -1;
+        out.push({l, r, lo: Math.min(...[l, r].filter(x => x >= 0)), hi: Math.max(l, r)});
       }
     } else {
-      out.push({l: i, r: i});
+      out.push({l: i, r: i, lo: i, hi: i});
       i++;
     }
   }
   return out;
 }
+
+// pick is the lines picked after a tap on the rows lo..hi (one row, or a side-by-side pair): the first tap picks it,
+// a second one reaches from it to the one tapped, and past a range a tap starts again; extend (Shift) always reaches.
+// The same single row tapped again lets go (null). sel is {a, b, at, one}: the rows a..b, at the rows it started from.
+export function pick(sel, lo, hi, extend) {
+  if (sel && (extend || sel.one)) {
+    if (!extend && sel.at[0] === lo && sel.at[1] === hi) return null;
+    return {a: Math.min(sel.at[0], lo), b: Math.max(sel.at[1], hi), at: sel.at, one: false};
+  }
+  return {a: lo, b: hi, at: [lo, hi], one: true};
+}
+
+const span = ns => (ns.length ? (Math.min(...ns) === Math.max(...ns) ? String(ns[0]) : Math.min(...ns) + '-' + Math.max(...ns)) : '');
+
+// quote is what picked rows a..b of path say to the agent: path:lines (the new side's numbers, or the old side's
+// through before when only removed lines are picked), then the lines as the diff has them in a fenced block, at most
+// QUOTE_LINES and QUOTE_BYTES of them, more(n) saying how many are left out.
+export function quote({path, rows, a, b, before, more}) {
+  const picked = rows.slice(a, b + 1);
+  const news = picked.filter(r => r.new).map(r => r.new), olds = picked.filter(r => r.old).map(r => r.old);
+  const ref = news.length ? path + ':' + span(news) : olds.length ? before(path + ':' + span(olds)) : path;
+  const lines = [];
+  let bytes = 0;
+  for (const r of picked) {
+    if (lines.length >= QUOTE_LINES || (lines.length && bytes + r.text.length + 1 > QUOTE_BYTES)) break;
+    lines.push(r.text);
+    bytes += r.text.length + 1;
+  }
+  const longest = Math.max(2, ...lines.map(l => Math.max(0, ...(l.match(/`+/g) || []).map(x => x.length))));
+  const fence = '`'.repeat(longest + 1);
+  const cut = picked.length - lines.length;
+  return `${ref}\n${fence}diff\n${lines.join('\n')}\n${fence}` + (cut > 0 ? '\n' + more(cut) : '');
+}
+
+// withQuote is a draft with a quote put after what is written.
+export const withQuote = (draft, q) => (draft.trim() ? draft.trimEnd() + '\n\n' : '') + q + '\n';
 
 // createChanges reads changes over wire; now gives the time a list was taken (ms).
 export function createChanges({wire, now = () => Date.now()}) {

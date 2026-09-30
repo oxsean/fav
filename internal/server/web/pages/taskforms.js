@@ -2,7 +2,7 @@
 // moving a task in its tree, reviewing a planner's draft, and accepting work or sending it back. Each is a dialog on a
 // desktop; on a phone the long ones take the screen and the short ones rise from the bottom. They collect what the
 // write needs and hand it to the page, which sends it.
-import {useState, useEffect} from '../vendor/hooks.mjs';
+import {useState, useEffect, useRef} from '../vendor/hooks.mjs';
 import {html, cx, usePhone, useWords} from '../ui/base.js';
 import {Modal} from '../ui/overlay.js';
 import {Button, Tabs, Segmented} from '../ui/controls.js';
@@ -324,15 +324,26 @@ export function PlanReview({store, task, busy = false, onSave, onApply, onDiscar
 }
 
 // Gate sends a workflow task at its human gate back with what to change; for a task without one (reply), it sends what
-// to change to its last run's session.
-export function Gate({task, reply = null, busy = false, onBack, onClose}) {
+// to change to its last run's session. draft and onDraft keep the notes across draws; focus asks for the focus, at the
+// end of the notes, and onFocused says it was taken.
+export function Gate({task, reply = null, busy = false, onBack, onClose, draft = '', onDraft, focus = false, onFocused}) {
   const {t, f} = useWords();
   const phone = usePhone();
-  const [notes, setNotes] = useState('');
+  const [own, setOwn] = useState(draft);
+  const notes = onDraft ? draft : own;
+  const setNotes = v => (onDraft ? onDraft(v) : setOwn(v));
   const [tried, setTried] = useState(false);
+  const box = useRef(null);
+  useEffect(() => {
+    const el = box.current;
+    if (!focus || !el) return;
+    el.focus?.();
+    el.setSelectionRange?.(el.value.length, el.value.length);
+    onFocused?.();
+  }, [focus]);
   const back = () => { setTried(true); if (notes.trim()) onBack(notes.trim()); };
   const quick = [{label: t('gate.back'), kind: 'primary', keyName: 'Mod+Enter', disabled: busy, onClick: back}];
-  const field = html`<${TextArea} label=${t('gate.notes')} value=${notes} onInput=${setNotes} rows=${phone ? 4 : 5}
+  const field = html`<${TextArea} label=${t('gate.notes')} value=${notes} onInput=${setNotes} rows=${phone ? 4 : 5} inputRef=${box}
     note=${reply ? f('gate.replyNote', reply) : t('gate.notesNote')} error=${tried && !notes.trim() ? t('gate.needNotes') : undefined} />`;
   if (phone) {
     return html`<${Modal} title=${f('gate.title', task.title)} onClose=${onClose}>

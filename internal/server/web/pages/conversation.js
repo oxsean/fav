@@ -58,13 +58,16 @@ function useOutputs(store, ids, watched) {
 }
 
 // Conversation: run is the run whose conversation shows (the task's latest when empty); target a step to go to;
-// prefs holds the viewer's output density; session is where the view's place is kept (the tab's sessionStorage).
-export function Conversation({store, commands, toasts, prefs, task, run = '', target = '', session = sessionStore(), copy}) {
+// prefs holds the viewer's output density; drafts the box's unsent message (core/drafts.js), kept per task; session is
+// where the view's place is kept (the tab's sessionStorage).
+export function Conversation({store, commands, toasts, prefs, drafts, task, run = '', target = '', session = sessionStore(), copy}) {
   const w = useWords();
   const {t, f} = w;
   useSignalValue(store.rev.runs);
   const aff = useSignalValue(store.affordances);
   const density = useSignalValue(prefs.output);
+  useSignalValue(drafts.all);
+  const wants = useSignalValue(drafts.wants);
   useSignalValue(commands.pending);
   const st = store.state;
   const latest = Object.values(st.runs).filter(r => r.task === task.id).sort((a, b) => (b.seq || 0) - (a.seq || 0))[0];
@@ -75,7 +78,6 @@ export function Conversation({store, commands, toasts, prefs, task, run = '', ta
   const [confirm, setConfirm] = useState(null);
   const [gone, setGone] = useState({});
   const [raw, setRaw] = useState(null);
-  const [drafts, setDrafts] = useState({});
   useEffect(() => { setFrom(Math.max(0, conv.length - 1)); setRaw(null); }, [root, conv.length]);
   const shown = conv.slice(Math.min(from, Math.max(0, conv.length - 1)));
   const outputs = useOutputs(store, shown.map(r => r.id), last?.id || '');
@@ -152,7 +154,8 @@ export function Conversation({store, commands, toasts, prefs, task, run = '', ta
       onResend=${m => message({text: m.text, mode: ''})} linkOf=${s => address() + link(task.id, s.run, s.id)}>
       <${Composer} route=${route} acts=${acts} machine=${last.machine} busy=${busy} onSend=${onSend}
         tools=${acts.includes('interrupt') && html`<${Button} kind="danger" disabled=${busy} onClick=${interrupt}>${t('conv.interrupt')}<//>`}
-        draft=${drafts[last.id] || ''} onDraft=${v => setDrafts(d => ({...d, [last.id]: v}))} />
+        draft=${drafts.of(task.id, 'message')} onDraft=${v => drafts.set(task.id, 'message', v)}
+        focus=${wants?.task === task.id && wants.kind === 'message'} onFocused=${() => drafts.focused(task.id, 'message')} />
     <//>
     ${confirm && html`<${Modal} title=${confirm.title} onClose=${() => { confirm.cancel?.(); setConfirm(null); }}
       actions=${[{label: t('conv.keep'), onClick: () => { confirm.cancel?.(); setConfirm(null); }},

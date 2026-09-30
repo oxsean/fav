@@ -204,7 +204,14 @@
 [data-form="phone"] .chg-row { min-height: 44px; font-size: 13px; }
 [data-form="phone"] .chg-body, [data-form="phone"] .chg-note { padding-left: 8px; }
 .chg-box { min-width: 0; }
+.chg-hint { margin: 0; font-size: 11px; }
 .chg-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 10px; font-size: 11px; }
+.chg-pick { position: sticky; bottom: 0; z-index: 1; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; padding: 6px 8px;
+  border: 1px solid var(--accent); border-radius: 6px; background: var(--surface); box-shadow: var(--shadow); font-size: 12px; }
+.chg-pick-n { font-weight: 600; }
+.chg-pick-acts { margin-left: auto; display: flex; gap: 6px; }
+[data-form="phone"] .chg-pick-acts { margin-left: 0; width: 100%; flex-wrap: wrap; }
+[data-form="phone"] .chg-pick-acts .btn { flex: 1 1 auto; }
 /* a file's diff: rows of one height, so the two sides of side by side stay level while each scrolls sideways */
 .dv { min-width: 0; border: 1px solid var(--border); border-radius: 4px; background: var(--surface); font-size: 11px; line-height: 18px; tab-size: 4; }
 .dv-split { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
@@ -213,6 +220,8 @@
 .dv-h { width: max-content; min-width: 100%; content-visibility: auto; contain-intrinsic-block-size: auto 180px; }
 .dv-row { display: flex; height: 18px; white-space: pre; }
 .dv-g { position: sticky; left: 0; flex: none; display: flex; min-width: 9ch; border-right: 1px solid var(--border); background: var(--surface); color: var(--faint); user-select: none; -webkit-user-select: none; }
+.dv-g[data-lo] { cursor: pointer; }
+.dv-g[data-lo]:hover { color: var(--accent); }
 .dv-split .dv-g { min-width: 5ch; }
 .dv-n { min-width: 4.5ch; padding: 0 4px; text-align: right; }
 .dv-t { padding: 0 8px; }
@@ -221,6 +230,10 @@
 .dv-hunk, .dv-hunk .dv-g { background: var(--surface-alt); color: var(--muted); }
 .dv-note .dv-t, .dv-none .dv-t { color: var(--muted); }
 .dv-none, .dv-none .dv-g { background: var(--surface-alt); }
+.dv-row.on, .dv-row.on .dv-g { background: var(--accent-soft); }
+.dv-row.on .dv-g { color: var(--accent); }
+[data-form="phone"] .dv { font-size: 12px; line-height: 26px; }
+[data-form="phone"] .dv-row { height: 26px; }
 
 /* the runs page and a run's own */
 .runs { position: relative; display: flex; flex-direction: column; gap: var(--gap); min-height: 0; flex: 1; }
