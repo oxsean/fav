@@ -277,6 +277,9 @@ func (s *State) Pending(t *Task) []Pending {
 		if len(out) > 0 || sit.Kind != SitWaiting {
 			return out
 		}
+		if len(r.Requests) > 0 && (sit.Reason == AttentionAsked || sit.Reason == AttentionPermission) {
+			return nil
+		}
 	}
 	if sit.Kind != SitWaiting || sit.Reason == WhyDispatch {
 		return nil

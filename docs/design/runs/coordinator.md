@@ -131,7 +131,7 @@ run `state` 转移表（终态单调，重复事件无副作用）：
   `task.message{id, text, mode, expect}` 照这张表送：`run` 走 `run.send`（`mode` 缺省时能插话就 `steer`，否则 `after`），`reply` 走 `run.continue`，`workpad` 记一条 `message` 笔记，`none` 回 `cannot_send`，`detail` 是 `why`。带了 `expect`（发送方看到的 `route`）而 `to`、`run`、`stage`、`version` 有一项不同 → `route_changed`，`detail` 是现在的 `to`，什么都不写。`task.message.preview{id}` 回 `{route}`，能读任务的人都能调。
 - **待处理项**：`State.Pending(t)`，只在 Go 里算。
   - 形状：`Pending{id, kind, reason?, task, run?, request?, version}`。
-  - 开着的运行有没答的请求：每个请求一项，`kind` 为 `permission` 或 `question`，`id` 是 `<run>/<request>`。
+  - 开着的运行有没答的请求：每个请求一项，`kind` 为 `permission` 或 `question`，`id` 是 `<run>/<request>`。请求都答了、节点还报着提问或等批准（agent 正在接回答）时没有项。
   - 否则按处境给一项（`id` 是 `<task>/<kind>`）：
     - 验收（人工闸门，或子任务都完成）是 `gate`；
     - 运行中在终端里提问或等批准，是 `question` 或 `permission`，不带 `request`；

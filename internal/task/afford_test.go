@@ -59,6 +59,11 @@ func TestPendingIsWhatWaitsOnSomeoneAboutATask(t *testing.T) {
 				Requests: []agent.Request{{ID: "p", Kind: agent.RequestPermission, Failed: true}}}),
 			ev(ERunAnswered, RunAnswer{ID: "r", Answer: agent.Answer{Request: "p", Allow: true}})},
 			[]Pending{{ID: "r/p", Kind: PendPermission, Task: "t", Run: "r", Request: "p", Version: 1}}},
+		{"every request answered, the agent yet to take it", []journal.Event{
+			ev(ERunObserved, Observation{ID: "r", State: Running, NodeRev: 1, Stream: true, Attention: AttentionPermission,
+				Requests: []agent.Request{{ID: "p", Kind: agent.RequestPermission}}}),
+			ev(ERunAnswered, RunAnswer{ID: "r", Answer: agent.Answer{Request: "p", Allow: true}})},
+			nil},
 		{"asked in a terminal", []journal.Event{ev(ERunObserved, Observation{ID: "r", State: Running, NodeRev: 1, Attention: AttentionAsked})},
 			[]Pending{{ID: "t/question", Kind: PendQuestion, Task: "t", Run: "r", Version: 1}}},
 		{"ended on a question", []journal.Event{ev(ERunObserved, Observation{ID: "r", State: Exited, NodeRev: 1, ExitCode: &zero, Attention: AttentionAsked})},
