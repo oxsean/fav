@@ -36,6 +36,10 @@ type AgentDefView struct {
 	Manage      bool           `json:"manage,omitempty"`
 	Text        string         `json:"text,omitempty"`
 	Warnings    []string       `json:"warnings,omitempty"`
+	Require     []string       `json:"require,omitempty"` // the machines it runs on only
+	Prefer      []string       `json:"prefer,omitempty"`  // the machines it runs on when nothing else says
+	SavedBy     string         `json:"saved_by,omitempty"`
+	SavedAt     time.Time      `json:"saved_at,omitzero"`
 	Rev         int            `json:"rev,omitzero"`
 	UpdatedAt   time.Time      `json:"updated_at,omitzero"`
 	Launch      []string       `json:"launch,omitempty"` // what a run of it starts, to whoever may read it
@@ -103,7 +107,7 @@ func (c *Coord) readsDef(p Principal, d *task.AgentDef) bool {
 
 func (c *Coord) defView(p Principal, d *task.AgentDef) AgentDefView {
 	v := AgentDefView{Name: d.Name, Description: d.Description, Role: d.Role, Provider: d.Provider, Model: d.Model, Effort: d.Effort,
-		Owner: d.Owner, Rev: d.Rev, UpdatedAt: d.UpdatedAt}
+		Owner: d.Owner, Require: d.Machines.Require, Prefer: d.Machines.Prefer, SavedBy: d.SavedBy, SavedAt: d.SavedAt, Rev: d.Rev, UpdatedAt: d.UpdatedAt}
 	if c.manages(p, d) {
 		share := d.Share
 		v.Share, v.Manage = &share, true
@@ -194,7 +198,7 @@ func (c *Coord) vetDef(who Principal, p AgentDefSave) (rec task.AgentDef, errs [
 	if err != nil {
 		return rec, []string{err.Error()}, nil
 	}
-	rec = task.AgentDef{AgentDef: d, Owner: who.User}
+	rec = task.AgentDef{AgentDef: d, Owner: who.User, SavedBy: who.User}
 	if errs, _ := defs.Check(d); len(errs) > 0 {
 		return rec, errs, nil
 	}

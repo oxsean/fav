@@ -208,7 +208,7 @@ function applyEvent(s, e, at, seq) {
     }
     case 'agentdef_saved': {
       const old = s.agent_defs[d.name];
-      s.agent_defs[d.name] = {...d, rev: (old ? old.rev || 0 : 0) + 1, updated_at: at};
+      s.agent_defs[d.name] = {...d, rev: (old ? old.rev || 0 : 0) + 1, updated_at: at, saved_at: at};
       break;
     }
     case 'agentdef_removed':

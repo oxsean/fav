@@ -26,6 +26,8 @@ type AgentDef struct {
 	defs.AgentDef
 	Owner     string    `json:"owner"`
 	Share     DefShare  `json:"share,omitzero"`
+	SavedBy   string    `json:"saved_by,omitempty"` // who saved this text last
+	SavedAt   time.Time `json:"saved_at,omitzero"`
 	Rev       int       `json:"rev,omitzero"`
 	UpdatedAt time.Time `json:"updated_at,omitzero"`
 }
@@ -80,7 +82,7 @@ func (s *State) applyDefs(e journal.Event, at time.Time) (bool, error) {
 			d.Rev = old.Rev
 		}
 		d.Rev++
-		d.UpdatedAt = at
+		d.UpdatedAt, d.SavedAt = at, at
 		s.AgentDefs[d.Name] = &d
 	case EAgentDefRemoved:
 		var d AgentDefRef

@@ -256,7 +256,7 @@ func (g *journalGen) event() journal.Event {
 		case 0:
 			name := "d" + strconv.Itoa(g.n(3))
 			g.names = append(g.names, name)
-			return ev(task.EAgentDefSaved, task.AgentDef{AgentDef: defs.AgentDef{Name: name, Provider: "claude"}, Owner: g.user()})
+			return ev(task.EAgentDefSaved, task.AgentDef{AgentDef: defs.AgentDef{Name: name, Provider: "claude"}, Owner: g.user(), SavedBy: g.user()})
 		case 1:
 			return ev(task.EAgentDefShared, task.AgentDefShare{Name: g.pick(g.names, "d"), Share: task.DefShare{All: g.chance(50)}})
 		}

@@ -39,7 +39,7 @@ budget: {usd: 3, minutes: 40}
 
 ## 存放、归属与分享
 
-- **存放**：团队模式是 journal 事件 `agentdef_saved` / `agentdef_removed` / `agentdef_shared`（随 journal 存在 SQLite 里）；模式一是 `<home>/defs/agents/<name>.md`，归这台机器的用户。同名时定义优先于 `config.json` 的档案。
+- **存放**：团队模式是 journal 事件 `agentdef_saved` / `agentdef_removed` / `agentdef_shared`（随 journal 存在 SQLite 里）；`agentdef_saved` 带保存的人（`saved_by`），折叠时记下 `saved_at`，改分享不算保存；模式一是 `<home>/defs/agents/<name>.md`，归这台机器的用户。同名时定义优先于 `config.json` 的档案。
 - **归属与分享**：主人是用户，或 `project:<id>`（项目负责人管理，项目参与者使用）。`DefShare{users, projects, all, view}`：分享给人、给项目（该项目的参与者在该项目的任务上用），或给所有人；`view` 决定被分享的人能否看说明书。
   - 管理员能看见和管理所有定义，但不能用没分享给自己的定义。
   - 别人看不见也用不了的定义，报 `not_found`；看得见但这个任务不能用的，报 `unauthorized` 并说明原因。

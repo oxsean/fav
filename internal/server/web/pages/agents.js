@@ -32,7 +32,8 @@ register('agents', {
   'ag.nowhere': ['没有', 'none'], 'ag.checkOK': ['检查通过', 'Its check passes'], 'ag.checkWarn': ['有警告', 'It has warnings'],
   'ag.foot': ['「档案」来自 config.json，只读；同名时定义优先。✓ 检查通过，! 有警告。', 'Profiles come from config.json and are read-only; a definition of the same name comes first. ✓ passes its check, ! has warnings.'],
   'ag.none': ['还没有 agent', 'No agent yet'], 'ag.noneHere': ['这一类没有 agent', 'No agent of this kind'], 'ag.loading': ['正在读取…', 'Loading…'],
-  'ag.rev': ['第 %d 版 · %s 改过', 'Version %d · changed %s'], 'ag.config': ['config.json 里的档案', 'A profile in config.json'],
+  'ag.rev': ['第 %d 版 · %s 改过', 'Version %d · changed %s'], 'ag.revBy': ['第 %d 版 · %s 在 %s 改过', 'Version %d · changed by %s on %s'],
+  'ag.require': ['只在这些机器上跑', 'Runs only on'], 'ag.prefer': ['优先的机器', 'Prefers'], 'ag.config': ['config.json 里的档案', 'A profile in config.json'],
   'ag.role': ['角色', 'Role'], 'ag.runsAs': ['provider · 模型', 'Provider · model'], 'ag.permission': ['权限', 'Permissions'],
   'ag.deny': ['不许用的工具', 'Tools denied'], 'ag.usedBy': ['用在', 'Used by'], 'ag.default': ['默认', 'default'],
   'ag.usedRoles': ['%s：%s', '%s: %s'], 'ag.usedTask': ['1 个没完成的任务', 'One unfinished task'], 'ag.usedTasks': ['%d 个没完成的任务', '%d unfinished tasks'], 'ag.unused': ['没有项目或任务在用', 'No project or task names it'],
@@ -168,6 +169,8 @@ function Facts({r, st, on, pinned}) {
       <dt>${t('ag.runsAs')}</dt><dd class="mono">${specLine(r) || '—'}</dd>
       ${s.permission && html`<dt>${t('ag.permission')}</dt><dd class="mono">${s.permission}</dd>`}
       ${s.deny.length > 0 && html`<dt>${t('ag.deny')}</dt><dd class="mono">${s.deny.join(' ')}</dd>`}
+      ${r.view?.require?.length > 0 && html`<dt>${t('ag.require')}</dt><dd class="mono">${r.view.require.join(' ')}</dd>`}
+      ${r.view?.prefer?.length > 0 && html`<dt>${t('ag.prefer')}</dt><dd class="mono">${r.view.prefer.join(' ')}</dd>`}
       <dt>${t('ag.usedBy')}</dt><dd>${!used.projects.length && !used.tasks.length ? t('ag.unused') : html`<ul class="ag-list">
         ${used.projects.map(x => html`<li key=${x.project.id}>${f('ag.usedRoles', x.project.name, x.roles.map(role => role || t('ag.default')).join(', '))}</li>`)}
         ${used.tasks.length > 0 && html`<li title=${used.tasks.map(x => x.title).join('\n')}>${used.tasks.length === 1 ? t('ag.usedTask') : f('ag.usedTasks', used.tasks.length)}</li>`}</ul>`}</dd>
@@ -182,6 +185,17 @@ function Facts({r, st, on, pinned}) {
     ${notes.length > 0 && html`<section class="det-sec"><h3 class="det-h">${t('ag.checks')}</h3>
       <ul class="ag-checks">${notes.map(n => html`<li><span class="st s-unknown" aria-hidden="true">!</span><span>${n}</span></li>`)}</ul></section>`}
   </div>`;
+}
+
+// metaOf is the picked agent's version line: its version, and who last saved its text and when (only the version and
+// its last change for a definition saved before that was kept).
+function metaOf({t, f}, name, r) {
+  if (!r) return '';
+  if (r.kind === 'profile') return t('ag.config');
+  const v = r.view;
+  const when = at => day(at) + ' ' + clock(at);
+  if (v.saved_by && v.saved_at) return f('ag.revBy', v.rev || 1, name(v.saved_by), when(v.saved_at));
+  return v.updated_at ? f('ag.rev', v.rev || 1, when(v.updated_at)) : '';
 }
 
 // Body is the picked agent's definition, command or sharing.
@@ -347,6 +361,7 @@ export function Agents({store, commands, toasts, session, wire, agentDefs, downl
   const {t, f} = w;
   const phone = usePhone();
   const names = useNames();
+  const name = useName();
   const sourceText = useSource();
   const status = useSignalValue(wire.status);
   const rev = useSignalValue(store.rev.agent_defs);
@@ -439,7 +454,7 @@ export function Agents({store, commands, toasts, session, wire, agentDefs, downl
   }
 
   const acts = cur && ag.may(cur);
-  const meta = !cur ? '' : cur.kind === 'profile' ? t('ag.config') : cur.view.updated_at ? f('ag.rev', cur.view.rev || 1, day(cur.view.updated_at) + ' ' + clock(cur.view.updated_at)) : '';
+  const meta = metaOf(w, name, cur);
   return html`<div class="ag">
     <div class="ag-head">
       <h1 class="tasks-title">${t('ag.title')}</h1><span class="t-muted">${t('ag.lead')}</span>

@@ -107,3 +107,29 @@ func TestADefinitionIsItsOwnersUntilShared(t *testing.T) {
 		t.Fatalf("p1's participants use p1's definitions: %+v %v", pv, err)
 	}
 }
+
+func TestADefinitionSaysWhoLastSavedItAndWhereItRuns(t *testing.T) {
+	e := team(t, tend.Config{})
+	e.start()
+	e.project()
+	placed := strings.Replace(careful, "effort: high\n", "effort: high\nmachines: {require: [mba, linux], prefer: [linux]}\n", 1)
+	var v AgentDefView
+	if err := callAs(e.as(bob), MAgentDefSave, "d1", AgentDefSave{Text: placed}, &v); err != nil {
+		t.Fatal(err)
+	}
+	if v.SavedBy != bob.User || v.SavedAt.IsZero() || !slices.Equal(v.Require, []string{"linux", "mba"}) && !slices.Equal(v.Require, []string{"mba", "linux"}) || !slices.Equal(v.Prefer, []string{"linux"}) {
+		t.Fatalf("%+v", v)
+	}
+	saved := v.SavedAt
+	if err := callAs(e.as(root), MAgentDefSave, "d2", AgentDefSave{Text: strings.Replace(placed, "twice", "three times", 1)}, &v); err != nil || v.SavedBy != root.User {
+		t.Fatalf("an admin's edit is theirs: %+v %v", v, err)
+	}
+	if err := callAs(e.as(bob), MAgentDefShare, "s1", task.AgentDefShare{Name: "careful", Share: task.DefShare{All: true}}, nil); err != nil {
+		t.Fatal(err)
+	}
+	var seen AgentDefView
+	if err := callAs(e.as(ann), MAgentDefGet, "", task.AgentDefRef{Name: "careful"}, &seen); err != nil || seen.SavedBy != root.User || seen.SavedAt.Before(saved) ||
+		len(seen.Require) != 2 || seen.Text != "" {
+		t.Fatalf("sharing is no save, and whoever may use it sees who saved it and where it runs: %+v %v", seen, err)
+	}
+}

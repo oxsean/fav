@@ -205,7 +205,7 @@ test('the picked one: its facts, notes, text, command and sharing as far as the 
   await pick(root, 'shop-review');
   let text = aside(root).textContent;
   for (const s of [f('ag.note.auth', 'mba', 'codex'), f('ag.note.missing', 'bo-laptop', 'codex'), t('ag.note.codex'), f('ag.note.kept', 'output'), t('ag.warn.claudeOnly'),
-    f('ag.usedRoles', 'Shop', 'review'), t('ag.usedTask'), f('ag.rev', 3, '9-28 10:00')]) ok(text.includes(s), 'shop-review: ' + s);
+    f('ag.usedRoles', 'Shop', 'review'), t('ag.usedTask'), f('ag.revBy', 3, 'Ann Lee', '9-28 10:00')]) ok(text.includes(s), 'shop-review: ' + s);
   eq(aside(root).find('button').map(labelOf).filter(l => ![t('ag.tab.def'), t('ag.tab.launch'), t('ag.tab.share')].includes(l)), [t('ag.copy'), t('ag.export')],
     'a project\'s he may read: copied or exported');
   await tabTo(root, 'launch');
@@ -226,6 +226,8 @@ test('the picked one: its facts, notes, text, command and sharing as far as the 
   text = aside(root).textContent;
   ok(text.includes(f('ag.usedRoles', 'Docs', t('ag.default'))) && text.includes(t('ag.usedTask')), 'Docs\'s default, one task not finished');
   ok(text.includes('WebFetch') && text.includes('acceptEdits'), 'its permissions and denied tools');
+  eq(aside(root).one('.facts').find('dt').map(x => x.textContent).filter(x => [t('ag.require'), t('ag.prefer')].includes(x)), [t('ag.prefer')], 'the machines it prefers');
+  ok(text.includes(f('ag.rev', 2, '9-29 10:00')), 'saved before tend named who saved: the version alone');
   eq(aside(root).one('pre').textContent, textOf('bo-dev'), 'its text');
   await tabTo(root, 'share');
   eq(aside(root).one('.ag-pane').one('.ag-list').find('li').map(x => x.textContent), [t('ag.shareNone')], 'not shared');
@@ -278,7 +280,7 @@ test('a definition refused, then saved; a new one, an import and a copy, each re
     },
     async new() {
       await settled();
-      ok(aside(root).textContent.includes(f('ag.rev', 3, '9-30 14:33')), 'the new version, read again');
+      ok(aside(root).textContent.includes(f('ag.revBy', 3, 'Bo Lin', '9-30 14:33')), 'the new version, read again, saved by him');
       await click(buttonOf(root, t('ag.new')));
       const go = () => buttonOf(modal().one('.modal-foot'), t('ag.next'));
       await type(modal().find('input')[0], 'bo-dev');
