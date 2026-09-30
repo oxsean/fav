@@ -53,6 +53,7 @@
 - 评论里带隐藏标记 `<!-- tend:progress <协调器 id> <任务 id> -->`。创建之前先按「机器人作者 + 隐藏标记前缀」认领已有评论，所以「创建成功、响应丢失」不会留下两条。
 - **评论内容**：英文，一行状态、叶子子任务进度、@ 负责人和验收人（按上面的指派人对应）；项目打开「列子任务」才列明细；走 workflow 的任务多一行 `Stages: …`。
 - 验收通过后关单或打标签。这次关单由 tend 发出，回来时只确认同步成功，不会被当成「在外面被关掉」。
+- 打标签和 GitHub、GitLab 按名字加标签一致：仓库没有这个标签就先建。Gitea 不会自己建，对不存在的标签照样回 200 却不加，所以在 Gitea 上先按名字找仓库的标签，没有就建（颜色固定），再按 id 加。加完核对应答里 issue 确实带着它（Gitea、GitHub），不带就算这条 issue 失败，一分钟后重试，不记成已完成回写。
 - **自己的写不算需求变化**：识别依据是评论 id、写入版本和机器人账号，不能只靠可伪造的隐藏标记。
 
 ## 子 issue
@@ -71,7 +72,7 @@
 
 ## 三家的差别
 
-都在 `internal/tracker` 里消化，worker 不分种类。`rest.go` 是共用的 REST 层；`gitea.go` 同时服务 Gitea 和 GitHub，两家只差 API 位置、token 写法和页大小；`gitlab.go`；`hook.go` 按种类验签、取 delivery id、取仓库和 issue 号；`trackertest` 是测试用的假服务器，能说三家的方言，能注入限流、拒绝凭据、响应丢失。
+都在 `internal/tracker` 里消化，worker 不分种类。`rest.go` 是共用的 REST 层；`gitea.go` 同时服务 Gitea 和 GitHub，两家只差 API 位置、token 写法、页大小和打标签；`gitlab.go`；`hook.go` 按种类验签、取 delivery id、取仓库和 issue 号；`trackertest` 是测试用的假服务器，能说三家的方言（包括 Gitea 对不存在的标签回 200 不加），能注入限流、拒绝凭据、响应丢失、加标签被悄悄丢掉。
 
 | | Gitea | GitHub | GitLab |
 |---|---|---|---|
@@ -79,7 +80,7 @@
 | token | `Authorization: token …` | `Authorization: Bearer …` + `X-GitHub-Api-Version` | `PRIVATE-TOKEN` |
 | 列表 | `since`、`limit=50`、`type=issues` | `since`、`per_page=100`，去掉 `pull_request` | `updated_after`、`per_page=100`、`scope=all`，MR 本来就分开 |
 | 评论 | issue comments；编辑按评论 id | 同 Gitea | notes，跳过 `system` 的；编辑要带 issue 号 |
-| 关单 / 标签 | `PATCH state=closed` / `POST labels` | 同 Gitea | `PUT state_event=close` / `PUT add_labels` |
+| 关单 / 标签 | `PATCH state=closed` / 找或建仓库标签（`GET`、`POST labels`）后按 id `POST issues/{n}/labels` | `PATCH state=closed` / 按名字 `POST labels`（自动建） | `PUT state_event=close` / `PUT add_labels` |
 | webhook | `X-Gitea-Signature`（HMAC）、`X-Gitea-Delivery` | `X-Hub-Signature-256: sha256=…`、`X-GitHub-Delivery`；Content type 要选 `application/json` | `X-Gitlab-Token`（原样比对）、`X-Gitlab-Event-UUID`；`object_kind` 为 `issue` 或 `note` 时才指向 issue |
 | 限流 | `Retry-After` | `X-RateLimit-Reset` / `X-RateLimit-Remaining` | `RateLimit-Reset` / `RateLimit-Remaining` |
 

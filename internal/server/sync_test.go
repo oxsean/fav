@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -216,6 +217,29 @@ func TestALostAnswerLeavesOneCommentAndAClosedIssueWaits(t *testing.T) {
 	r.pass(31 * time.Second)
 	if cs = r.g.CommentsOf(3); len(cs) != 1 || cs[0].ID == row.CommentID {
 		t.Fatalf("a deleted comment is made again: %+v", cs)
+	}
+}
+
+func TestAnAcceptedIssueGetsTheAcceptLabelEvenWhereTheRepositoryLacksIt(t *testing.T) {
+	r := newSyncRig(t)
+	set := DefaultSettings()
+	set.OnAccept = "label"
+	b, _ := json.Marshal(set)
+	if err := r.team.SetTrackerSettings(r.x.ID, string(b)); err != nil {
+		t.Fatal(err)
+	}
+	r.g.Open(5, "Labelled", "body", "tend")
+	r.pass(0)
+	x := r.task(5)
+	r.g.DropLabel = true
+	r.call(coord.Owner, coord.MTaskStatus, task.TaskStatus{ID: x.ID, Status: task.StatusDone}, nil)
+	r.pass(31 * time.Second)
+	if row, _ := r.team.TrackerIssue(r.x.ID, 5); row.Closed || row.LastError == "" || slices.Contains(r.g.Get(5).Labels, set.AcceptLabel) {
+		t.Fatalf("a label the tracker left off is no write-back: %+v %v", row, r.g.Get(5).Labels)
+	}
+	r.pass(61 * time.Second)
+	if row, _ := r.team.TrackerIssue(r.x.ID, 5); !row.Closed || row.LastError != "" || !slices.Contains(r.g.Get(5).Labels, set.AcceptLabel) || r.g.Get(5).Closed {
+		t.Fatalf("tried again, the label lands and the issue stays open: %+v %+v", row, r.g.Get(5))
 	}
 }
 

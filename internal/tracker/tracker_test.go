@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"testing"
 	"time"
 
@@ -195,5 +196,38 @@ func TestOnlyKnownTrackersAndWholeRepositoryNames(t *testing.T) {
 	}
 	if _, err := tracker.New(tracker.Config{Kind: tracker.KindGitLab, Repo: "group/sub/app"}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestALabelTheRepositoryLacksIsMadeAndCheckedOnTheIssue(t *testing.T) {
+	for _, kind := range []string{tracker.KindGitea, tracker.KindGitHub} {
+		t.Run(kind, func(t *testing.T) {
+			g := trackertest.New(kind, "acme/app", "tend-bot", "tok")
+			defer g.Close()
+			tr, err := tracker.New(tracker.Config{Kind: kind, Base: g.URL, Repo: "acme/app", Token: "tok"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			ctx := context.Background()
+			many := []string{"tend"}
+			for n := range 60 {
+				many = append(many, fmt.Sprintf("l%02d", n))
+			}
+			g.Open(1, "one", "body", many...)
+			g.Open(2, "two", "body", "tend")
+			g.Open(3, "three", "body", "tend")
+			if err := tr.Label(ctx, 2, "tend:accepted"); err != nil || !slices.Contains(g.Get(2).Labels, "tend:accepted") ||
+				!slices.Contains(g.RepoLabels(), "tend:accepted") {
+				t.Fatalf("the label is made and lands on the issue: %v %v %v", err, g.Get(2).Labels, g.RepoLabels())
+			}
+			made := g.Count("POST /api/v1/repos/acme/app/labels")
+			if err := tr.Label(ctx, 3, "l59"); err != nil || !slices.Contains(g.Get(3).Labels, "l59") || g.Count("POST /api/v1/repos/acme/app/labels") != made {
+				t.Fatalf("a label the repository has, past the first page, is not made again: %v %v", err, g.Get(3).Labels)
+			}
+			g.DropLabel = true
+			if err := tr.Label(ctx, 1, "tend:accepted"); err == nil {
+				t.Fatalf("an answer that leaves the label off the issue is an error: %v", g.Get(1).Labels)
+			}
+		})
 	}
 }

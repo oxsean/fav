@@ -55,24 +55,26 @@ type Server struct {
 	pulls    map[int64]*Pull
 	branches map[string]bool
 	subs     map[int64][]int64
+	labels   map[string]int64 // the repository's labels by name, with their ids
 	comments []*Comment
 	next     int64
 	clock    time.Time
 	// Faults: RateLimit answers the next n requests 429 with Retry-After 30; Refuse answers every request 401; Down every
 	// request 503; LoseCreate makes the next comment it creates answer 502 although the comment is made, LoseIssue the
-	// next issue.
+	// next issue; DropLabel answers the next label added to an issue 200 without adding it.
 	RateLimit  int
 	Refuse     bool
 	Down       bool
 	LoseCreate bool
 	LoseIssue  bool
+	DropLabel  bool
 	// Requests counts requests by "METHOD path" without the query.
 	Requests map[string]int
 }
 
 func New(kind, repo, bot, token string) *Server {
 	s := &Server{Kind: kind, Repo: repo, Bot: bot, Token: token, RepoID: 42, issues: map[int64]*Issue{}, pulls: map[int64]*Pull{},
-		branches: map[string]bool{"main": true}, subs: map[int64][]int64{}, next: 100,
+		branches: map[string]bool{"main": true}, subs: map[int64][]int64{}, labels: map[string]int64{}, next: 100,
 		clock: time.Date(2026, 9, 27, 8, 0, 0, 0, time.UTC), Requests: map[string]int{}}
 	s.Server = httptest.NewServer(http.HandlerFunc(s.serve))
 	return s
@@ -131,11 +133,32 @@ func (s *Server) openPull(w http.ResponseWriter, head, base, title, body string)
 	return p, true
 }
 
-// Open makes issue number with title, body and labels, as a person (not the bot) would.
+// Open makes issue number with title, body and labels, as a person (not the bot) would; the labels are the repository's
+// from then on.
 func (s *Server) Open(number int64, title, body string, labels ...string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	for _, l := range labels {
+		s.repoLabel(l)
+	}
 	s.issues[number] = &Issue{Number: number, Title: title, Body: body, Labels: labels, Updated: s.tick()}
+}
+
+// RepoLabels are the names of the repository's labels.
+func (s *Server) RepoLabels() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return slices.Sorted(maps.Keys(s.labels))
+}
+
+// repoLabel is the id of the repository's label name, which it makes when there is none.
+func (s *Server) repoLabel(name string) int64 {
+	if id, ok := s.labels[name]; ok {
+		return id
+	}
+	s.next++
+	s.labels[name] = s.next
+	return s.next
 }
 
 // Change edits issue number: f changes it; its updated time moves.
@@ -234,10 +257,6 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 	}
 	user := func(login string) map[string]any { return map[string]any{"id": len(login), "login": login} }
 	issue := func(i *Issue) map[string]any {
-		labels := []map[string]string{}
-		for _, l := range i.Labels {
-			labels = append(labels, map[string]string{"name": l})
-		}
 		as := []map[string]any{}
 		for _, a := range i.Assignees {
 			as = append(as, user(a))
@@ -246,7 +265,7 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 		if i.Closed {
 			state = "closed"
 		}
-		out := map[string]any{"id": i.Number + 1000, "number": i.Number, "title": i.Title, "body": i.Body, "state": state, "labels": labels, "assignees": as,
+		out := map[string]any{"id": i.Number + 1000, "number": i.Number, "title": i.Title, "body": i.Body, "state": state, "labels": s.labelsOf(i), "assignees": as,
 			"html_url": fmt.Sprintf("%s/%s/issues/%d", s.URL, s.Repo, i.Number), "updated_at": i.Updated}
 		if i.PR {
 			out["pull_request"] = map[string]any{}
@@ -272,6 +291,26 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 	case rest == "":
 		writeJSON(w, map[string]any{"id": s.RepoID, "full_name": s.Repo, "html_url": s.URL + "/" + s.Repo, "default_branch": "main"})
+	case rest == "/labels" && r.Method == http.MethodGet && s.Kind == "gitea":
+		out := []map[string]any{}
+		names := slices.Sorted(maps.Keys(s.labels))
+		page, _ := strconv.Atoi(r.URL.Query().Get("page"))
+		size, _ := strconv.Atoi(r.URL.Query().Get(pageSize))
+		for k, n := range names {
+			if k >= (page-1)*size && k < page*size {
+				out = append(out, map[string]any{"id": s.labels[n], "name": n})
+			}
+		}
+		writeJSON(w, out)
+	case rest == "/labels" && r.Method == http.MethodPost && s.Kind == "gitea":
+		var p struct{ Name, Color string }
+		json.NewDecoder(r.Body).Decode(&p)
+		if _, ok := s.labels[p.Name]; ok || p.Name == "" || p.Color == "" {
+			http.Error(w, `{"message":"label exists or lacks a name or a colour"}`, http.StatusUnprocessableEntity)
+			return
+		}
+		w.WriteHeader(http.StatusCreated)
+		writeJSON(w, map[string]any{"id": s.repoLabel(p.Name), "name": p.Name, "color": p.Color})
 	case rest == "/issues" && r.Method == http.MethodGet:
 		since, _ := time.Parse(time.RFC3339, r.URL.Query().Get("since"))
 		writeJSON(w, s.list(r, since, pageSize, issue))
@@ -344,10 +383,14 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusCreated)
 			writeJSON(w, issue(i))
 		case parts[1] == "labels" && r.Method == http.MethodPost:
-			var p struct{ Labels []string }
+			var p struct{ Labels []any }
 			json.NewDecoder(r.Body).Decode(&p)
-			s.label(i, p.Labels...)
-			writeJSON(w, []any{})
+			if s.DropLabel {
+				s.DropLabel = false
+			} else {
+				s.label(i, s.named(p.Labels)...)
+			}
+			writeJSON(w, s.labelsOf(i))
 		default:
 			http.NotFound(w, r)
 		}
@@ -534,8 +577,39 @@ func (s *Server) edit(w http.ResponseWriter, r *http.Request, id int64) *Comment
 	return s.comments[i]
 }
 
+// named are the names of the labels a request adds to an issue, by name or (Gitea) by id. Gitea leaves out a label the
+// repository lacks and still answers 200; GitHub makes it.
+func (s *Server) named(labels []any) []string {
+	var out []string
+	for _, l := range labels {
+		switch v := l.(type) {
+		case string:
+			if _, ok := s.labels[v]; ok || s.Kind == "github" {
+				out = append(out, v)
+			}
+		case float64:
+			for n, id := range s.labels {
+				if float64(id) == v {
+					out = append(out, n)
+				}
+			}
+		}
+	}
+	return out
+}
+
+// labelsOf is issue i's labels as Gitea and GitHub answer them.
+func (s *Server) labelsOf(i *Issue) []map[string]any {
+	out := []map[string]any{}
+	for _, l := range i.Labels {
+		out = append(out, map[string]any{"id": s.labels[l], "name": l})
+	}
+	return out
+}
+
 func (s *Server) label(i *Issue, labels ...string) {
 	for _, l := range labels {
+		s.repoLabel(l)
 		if !slices.Contains(i.Labels, l) {
 			i.Labels = append(i.Labels, l)
 		}

@@ -2,8 +2,10 @@ package tracker
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -16,10 +18,15 @@ type gitea struct {
 	page      int    // Gitea's default MAX_RESPONSE_ITEMS is 50; GitHub's per_page is 100 at most
 	pageParam string // limit | per_page
 	subIssues bool   // GitHub's
+	// makeLabels: Gitea's. It leaves a label the repository lacks off an issue and still answers 200; GitHub makes it.
+	makeLabels bool
 }
 
+// ⚠️ The colour of a label tend makes on Gitea, which requires one.
+const labelColour = "#0e8a16"
+
 func newGitea(cfg Config) *gitea {
-	g := &gitea{rest: rest{cfg: cfg, api: cfg.Base + "/api/v1", accept: "application/json"}, page: 50, pageParam: "limit"}
+	g := &gitea{rest: rest{cfg: cfg, api: cfg.Base + "/api/v1", accept: "application/json"}, page: 50, pageParam: "limit", makeLabels: true}
 	g.auth = func(h http.Header) { h.Set("Authorization", "token "+cfg.Token) }
 	return g
 }
@@ -167,9 +174,49 @@ func (g *gitea) Close(ctx context.Context, number int64) error {
 	return err
 }
 
+// Label adds label to issue number and checks the answer carries it.
 func (g *gitea) Label(ctx context.Context, number int64, label string) error {
-	_, err := g.do(ctx, http.MethodPost, g.repoPath("/issues/"+strconv.FormatInt(number, 10)+"/labels"), nil, map[string][]string{"labels": {label}}, nil)
-	return err
+	var add any = label
+	if g.makeLabels {
+		id, err := g.labelID(ctx, label)
+		if err != nil {
+			return err
+		}
+		add = id
+	}
+	var on []struct{ Name string }
+	if _, err := g.do(ctx, http.MethodPost, g.repoPath("/issues/"+strconv.FormatInt(number, 10)+"/labels"), nil, map[string][]any{"labels": {add}}, &on); err != nil {
+		return err
+	}
+	if !slices.ContainsFunc(on, func(l struct{ Name string }) bool { return l.Name == label }) {
+		return fmt.Errorf("the tracker left label %q off issue #%d", label, number)
+	}
+	return nil
+}
+
+// labelID is the id of the repository's label name, made when the repository lacks it.
+func (g *gitea) labelID(ctx context.Context, name string) (int64, error) {
+	for page := 1; ; page++ {
+		var batch []struct {
+			ID   int64
+			Name string
+		}
+		q := url.Values{g.pageParam: {strconv.Itoa(g.page)}, "page": {strconv.Itoa(page)}}
+		if _, err := g.do(ctx, http.MethodGet, g.repoPath("/labels?"+q.Encode()), nil, nil, &batch); err != nil {
+			return 0, err
+		}
+		for _, l := range batch {
+			if l.Name == name {
+				return l.ID, nil
+			}
+		}
+		if len(batch) < g.page {
+			break
+		}
+	}
+	var l struct{ ID int64 }
+	_, err := g.do(ctx, http.MethodPost, g.repoPath("/labels"), nil, map[string]string{"name": name, "color": labelColour}, &l)
+	return l.ID, err
 }
 
 func (g *gitea) CreateIssue(ctx context.Context, title, body string) (Issue, error) {
