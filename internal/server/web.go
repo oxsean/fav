@@ -52,7 +52,7 @@ func page() http.Handler {
 // SecureHeaders are the headers every page and file of the Web UI goes out with; tools/webpreview serves under them too.
 func SecureHeaders(w http.ResponseWriter) {
 	h := w.Header()
-	h.Set("Content-Security-Policy", "default-src 'self'; connect-src 'self'; img-src 'self' data:; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
+	h.Set("Content-Security-Policy", "default-src 'self'; connect-src 'self'; img-src 'self' data:; manifest-src 'self'; worker-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
 	h.Set("X-Content-Type-Options", "nosniff")
 	h.Set("Referrer-Policy", "no-referrer")
 }
@@ -68,6 +68,7 @@ func (s *Server) webRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /auth/device", s.limited(s.deviceStart))
 	mux.HandleFunc("POST /auth/device/token", s.limited(s.devicePoll))
 	mux.HandleFunc("GET /theme/{file}", theme)
+	s.pwaRoutes(mux)
 }
 
 // theme serves a skin as a stylesheet, /theme/<name>.css with the name as skin.Named reads it, and the presets for the

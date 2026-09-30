@@ -54,7 +54,13 @@ tend journal verify [--json] | repair [-y]
 
 - 文件：`internal/server/web/`，`go:embed` 进二进制。Preact + htm + signals，浏览器原生的 ES 模块，没有构建步骤。`index.html` 引入 `css/` 的三份样式、皮肤样式表（`theme/<皮肤>.css`，`id="skin"`，由 `pages/boot.js` 换成这位访客的皮肤）和入口 `main.js`，并预载 `vendor/` 的四个文件。界面文字在各模块自己的 `zh` / `en` 词表里（`core/i18n.js`，不走 Go 的 i18n）。
 - 认证：登录页列出 `/auth/logins` 给的登录方式（GitHub、OIDC），另有 token 表单。`POST /login`（表单 `token`）建一条网页会话，写 cookie `tend_session`（HttpOnly、SameSite=Strict、TLS 下 Secure、30 天）；`GET /session` 回 `{id, name, email, username, role, session}` 或 401；`POST /logout` 吊销这条会话。地址里的 `#invite-<secret>` 让登录按钮带上邀请，`#signin-<结果>` 显示登录失败的原因。`/client` 接受 header 里的 token 或这个 cookie；WebSocket 握手校验 Origin（同源）。会话被吊销或用户被停用，连接立即断开，页面回到登录页。
-- 响应头：CSP `default-src 'self'`（不允许内联脚本和 `style` 属性，宽度等动态样式经 CSSOM 设置）、`frame-ancestors 'none'`、`nosniff`、`no-referrer`、`Cache-Control: no-cache`。
+- 响应头：CSP `default-src 'self'`（不允许内联脚本和 `style` 属性，宽度等动态样式经 CSSOM 设置；另写明 `manifest-src 'self'`、`worker-src 'self'`）、`frame-ancestors 'none'`、`nosniff`、`no-referrer`、`Cache-Control: no-cache`。
+- 装到主屏幕（PWA）：
+  - `/manifest.webmanifest`：`name` tend，`display: standalone`，`start_url: /?source=pwa`，`scope: /`，`theme_color` 和 `background_color` 取默认皮肤（`tend`）浅色的底色（访客自己的皮肤只在他的浏览器里，server 不知道）；图标 `icon-192.png`、`icon-512.png` 和 maskable 的 `icon-maskable-512.png`，另有 iOS 用的 `icon-180.png`（`apple-touch-icon`）。图标由 `pwa.go` 按默认皮肤的强调色画出页头的 `>_`，第一次请求时生成，仓库里没有图片文件；maskable 的记号在中心 40% 半径的安全区里。`<meta name="theme-color">` 由 `pages/boot.js` 跟着这位访客的皮肤和主题取 `--bg`。
+  - `/sw.js`（根作用域）：`web/sw.js` 加上 server 写进去的一行 `BOOT`：构建号和要留的文件（`/` 和 `web/` 里的 `.js`、`.mjs`、`.css`）。安装时把它们存进缓存 `tend-<构建号>`；访问页面（`/` 带任意查询）和这些文件先从缓存取，缓存里没有就问 server；其余（`/api`、`/client`、`/auth`、皮肤、图标、manifest）一律直接去 server，不做离线模式。接管时删掉别的 `tend-*` 缓存。新构建的 `sw.js` 字节不同，浏览器装上以后等着，页面发 `skip` 才接管。
+  - `/`：`index.html` 里的 `<meta name="tend-build">` 由 server 填上构建号，页面据此和 hello 的比（`wire.js`）。
+  - `core/platform.js`：页面跑在哪，一个接口：`kind` 是 `browser` 或 `pwa`（`display-mode: standalone` 或 iOS 的 `navigator.standalone`），`os`（`ios` / `android` / `other`，iPad 装成 Mac 的也认），`name`（给设备码登录的设备名：iPhone、iPad、Android、Mac、Windows、Linux），`secure`（`isSecureContext`）；`start()` 只在安全上下文、并且有构建号时注册 service worker；`refresh()` 载入新构建：有等着的新 service worker 就让它接管（`skip`），接管后（`controllerchange`）再重载，没有就先 `update()`，仍没有才直接重载，因为只重载的话拿到的还是旧缓存。`outdated` 横幅的「刷新」走它，不自动刷新（没发出去的字只在内存里）。
+
 - 没有轮询：页面上的一切随 `state.watch`、`machines.watch`、`inbox.watch` 和 `run.output.watch` 的推送变化，首页的数每次重画时取当前时间。页面不调用 `setInterval`（`TestThePageRunsNoInterval`）；剩下的计时器都只响一次：防抖、重连的退避、调用超时、提示的停留、`g` 开头的两键序列。
 - 页面：首页、任务（列表、看板、树、详情、对话、改动）、运行、机器、Agent、团队、我，以及登录、终端授权、邀请。替别人登记一台机器用 `tend-server token add --node <机器> --owner <用户>`。
 
@@ -68,7 +74,7 @@ tend journal verify [--json] | repair [-y]
 - **分层**：`vendor` ← `core` ← `ui` ← `pages`，每层只 import 自己和下面的层，`ui` 不直接 import `core/wire.js`；入口 `main.js` 不受限制。所有 import 都是相对路径，不用 import map。`web/package.json` 的 `{"type":"module"}` 让 node 把这些 `.js` 当 ES 模块跑。
 - **`core/`**（不碰 DOM，全部在 node 里测）：
   - `wire.js`：`/client` 上的 wire 帧，按行拆帧。
-    - 连上后先发 `hello{proto: 2, role: "client"}`，形状就是 `remote.HelloParams`。回来的 `proto` 不是 2，或者重连后的 `build` 和第一次 hello 的不一样（server 换了一套页面文件，见 [wire.md](wire.md)「握手与版本」），状态记为 `outdated`，不再重连（页面要重新加载）；回来的 `methods` 决定哪些 `.watch` 可以开，没列出的方法在本地直接结束，报 `unsupported`。
+    - 连上后先发 `hello{proto: 2, role: "client"}`，形状就是 `remote.HelloParams`。回来的 `proto` 不是 2，或者 hello 的 `build` 和页面自己的不一样（`index.html` 的 `tend-build`，没有时是第一次 hello 的；server 换了一套页面文件，见 [wire.md](wire.md)「握手与版本」），状态记为 `outdated`，不再重连（页面要重新加载）；回来的 `methods` 决定哪些 `.watch` 可以开，没列出的方法在本地直接结束，报 `unsupported`。
     - `call`：30 s 超时后发 `cancel`，报 `timeout`；连接中的调用等 hello 完成再发，离线时立即报 `offline`，断线时报 `closed`。server 发来的 `ping` 照答，别的请求回 `unknown_method`。
     - `watch`：发 `req` 之前先登记接收者。推送按 `id` 交给这个流，第一条是 `open{cursor, mode}`；同一个 `id` 的 `res` 是最后一帧：`result` 表示正常结束，`lagged` 按游标立即重开，其它错误码就是流的终点。`cancel` 只发一次，之后到达的帧一律丢掉。
     - 断线后 1 s 起翻倍、最长 30 s、带抖动地重连（成功 hello 后回到 1 s），然后每个流用它的主人给的参数（带游标）重开。

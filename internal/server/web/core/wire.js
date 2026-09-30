@@ -16,13 +16,14 @@ export class WireError extends Error {
 }
 
 // createWire returns the connection; nothing is dialled before start. open makes a WebSocket-like object (send,
-// close, onopen, onmessage, onclose); timers and random are replaced by the tests.
-export function createWire({url, open = u => new WebSocket(u), timers = globalThis, random = Math.random, lang = '', wait = callWait} = {}) {
+// close, onopen, onmessage, onclose); timers and random are replaced by the tests. build is the page's own (index.html's
+// tend-build); without it the first hello's stands for it.
+export function createWire({url, open = u => new WebSocket(u), timers = globalThis, random = Math.random, lang = '', wait = callWait, build: own = ''} = {}) {
   // status: idle before start; connecting (the socket or its hello); open; offline (waiting to reconnect); outdated
   // (the server speaks another Proto, or serves other files than the page loaded: the page must reload); closed
-  // (stopped). build is the server's Web UI as the first hello named it.
+  // (stopped). build is the page's Web UI: its own, or the first hello's.
   const status = signal('idle');
-  let ws = null, nextID = 1, buffer = '', attempt = 0, retry = null, methods = null, visible = true, build = null;
+  let ws = null, nextID = 1, buffer = '', attempt = 0, retry = null, methods = null, visible = true, build = own || null;
   const calls = new Map(), streams = new Map(), watches = new Set(), waiting = [];
 
   const send = frame => ws.send(JSON.stringify(frame) + '\n');

@@ -14,6 +14,7 @@ import {createCommands} from '../core/commands.js';
 import {createToasts} from '../core/toasts.js';
 import {createPrefs} from '../core/prefs.js';
 import {form, mac, phoneQuery, narrowQuery, NAV_OPEN_FROM, createNav} from '../core/layout.js';
+import {createPlatform, nowhere} from '../core/platform.js';
 import {words} from '../core/i18n.js';
 import {AuthFrame, Login, Device} from './auth.js';
 import {App} from './app.js';
@@ -23,10 +24,10 @@ const localStore = () => { try { return globalThis.localStorage; } catch { retur
 const tabStore = () => { try { return globalThis.sessionStorage; } catch { return null; } };
 
 // connect is what a signed-in page runs on: the wire to /client, the store fed by its watches, writes and notices, and
-// the people's names, read again when a project's members change.
-function connect({open, location, clock, doc, http}) {
+// the people's names, read again when a project's members change. build is the page's own.
+function connect({open, location, clock, doc, http, build}) {
   const url = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/client`;
-  const wire = createWire({url, ...(open ? {open} : {}), lang: words.lang.value});
+  const wire = createWire({url, ...(open ? {open} : {}), lang: words.lang.value, build});
   const store = createStore({wire});
   const commands = createCommands({wire});
   const toasts = createToasts();
@@ -41,8 +42,10 @@ function connect({open, location, clock, doc, http}) {
 }
 
 // Root is the page once boot has asked who is signed in: the sign-in page, a terminal's sign-in, or the app, on the me
-// page when the tab comes back from linking an account. tab is the tab's storage, notices the browser's notices.
-export function Root({http, router, keys, nav, prefs, first, open, location, history, clock, doc, storage, tab = null, notices = {}}) {
+// page when the tab comes back from linking an account. tab is the tab's storage, notices the browser's notices,
+// platform where the page runs, build the page's own.
+export function Root({http, router, keys, nav, prefs, first, open, location, history, clock, doc, storage, tab = null, notices = {},
+  platform = nowhere, build = ''}) {
   const [session, setSession] = useState(first);
   const [live, setLive] = useState(null);
   const route = router.route.value;
@@ -50,7 +53,7 @@ export function Root({http, router, keys, nav, prefs, first, open, location, his
   const dropAuth = () => { history.replaceState(null, '', location.pathname + location.search); router.popped(); };
   useEffect(() => {
     if (!session) return;
-    const c = connect({open, location, clock, doc, http});
+    const c = connect({open, location, clock, doc, http, build});
     setLive(c);
     const back = returnedFromLink(auth, tab, clock());
     if (auth && auth.kind !== 'device') dropAuth();
@@ -67,7 +70,7 @@ export function Root({http, router, keys, nav, prefs, first, open, location, his
   }
   if (!live) return null;
   return html`<${App} ...${live} http=${http} router=${router} keys=${keys} nav=${nav} prefs=${prefs} session=${session} storage=${storage}
-    tab=${tab} notices=${notices} doc=${doc} onLogout=${async () => { try { await http.logout(); } finally { location.assign('/'); } }} />`;
+    tab=${tab} notices=${notices} doc=${doc} platform=${platform} onLogout=${async () => { try { await http.logout(); } finally { location.assign('/'); } }} />`;
 }
 
 // boot: root is where the page draws; open makes the socket (default: a WebSocket); fetch, storage, media (matchMedia)
@@ -83,7 +86,18 @@ export async function boot({root = globalThis.document.getElementById('app'), op
     doc.documentElement.dataset.density = prefs.density.value;
   });
   const skin = doc.getElementById('skin');
-  effect(() => { skin?.setAttribute('href', `theme/${prefs.skin.value}.css`); });
+  // The browser's bar takes the skin's background: its sheet loaded, the theme or the system's changed.
+  const tint = doc.querySelector('meta[name="theme-color"]');
+  const paintTint = () => {
+    const bg = globalThis.getComputedStyle?.(doc.documentElement).getPropertyValue('--bg').trim();
+    if (tint && bg) tint.setAttribute('content', bg);
+  };
+  skin?.addEventListener('load', paintTint);
+  media('(prefers-color-scheme: dark)').addEventListener?.('change', paintTint);
+  effect(() => { void prefs.theme.value; skin?.setAttribute('href', `theme/${prefs.skin.value}.css`); paintTint(); });
+  const build = doc.querySelector('meta[name="tend-build"]')?.getAttribute('content') || '';
+  const platform = createPlatform({media, build});
+  platform.start();
   const phone = media(phoneQuery);
   const formNow = () => { form.value = phone.matches ? 'phone' : 'desktop'; };
   formNow();
@@ -99,6 +113,6 @@ export async function boot({root = globalThis.document.getElementById('app'), op
   try { first = await http.session(); } catch {}
   const draw = () => render(html`<${KeysContext.Provider} value=${keys}><${Root} http=${http} router=${router} keys=${keys} nav=${nav}
     prefs=${prefs} first=${first} open=${open} location=${location} history=${history} clock=${clock} doc=${doc} storage=${storage}
-    tab=${tabStore()} notices=${{Notification: globalThis.Notification, secure: !!globalThis.isSecureContext}} /><//>`, root);
+    tab=${tabStore()} notices=${{Notification: globalThis.Notification, secure: !!globalThis.isSecureContext}} platform=${platform} build=${build} /><//>`, root);
   effect(() => { void router.route.value; draw(); });
 }

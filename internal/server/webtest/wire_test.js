@@ -46,6 +46,22 @@ test('a server back with other Web UI files leaves the page outdated', async () 
   eq(wire.status.value, 'outdated', 'status');
 });
 
+// A page the service worker kept knows its own build from the start: a first hello naming another is outdated too.
+test('a page of another build than the server\'s first hello is outdated', async () => {
+  const at = build => {
+    const clk = clock(), srv = server(clk);
+    const wire = createWire({url: 'ws://tend.test/client', open: srv.open, timers: clk, random: () => 1, build});
+    wire.start();
+    return {srv, wire};
+  };
+  const old = at('000000000000');
+  await old.srv.play('hello-page');
+  eq(old.wire.status.value, 'outdated', 'another build');
+  const same = at('0a1b2c3d4e5f');
+  await same.srv.play('hello-page');
+  eq(same.wire.status.value, 'open', 'its own build');
+});
+
 test('calls are answered by id in any order', async () => {
   const {srv, wire} = rig();
   let a, b, c;

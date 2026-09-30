@@ -12,7 +12,7 @@
 
 ### server
 
-- `tend-server --listen <addr> [--tls-cert f --tls-key f]`：独立程序，`tend` 不含 server 代码；日志存在 SQLite 的 `coord/tend.db`（`import` / `export` / `backup` / `db check` 见 [tasks/storage.md](../tasks/storage.md)「存储」）。它是同一个协调器（常驻持锁），加 HTTP：`/node`、`/client`（WebSocket），`/healthz`；Web UI 的 `/`（静态页）、`/login`、`/logout`、`/session`、`/auth/logins`、`/auth/<provider>/start|callback`、`/api/*`（见 [clients.md](clients.md)「Web UI（模式二）」；身份与权限见 [tasks/team.md](../tasks/team.md)「团队与权限」）。
+- `tend-server --listen <addr> [--tls-cert f --tls-key f]`：独立程序，`tend` 不含 server 代码；日志存在 SQLite 的 `coord/tend.db`（`import` / `export` / `backup` / `db check` 见 [tasks/storage.md](../tasks/storage.md)「存储」）。它是同一个协调器（常驻持锁），加 HTTP：`/node`、`/client`（WebSocket），`/healthz`；Web UI 的 `/`（静态页）、`/sw.js`、`/manifest.webmanifest` 和图标（装到主屏幕，见 [clients.md](clients.md)「Web UI（模式二）」）、`/login`、`/logout`、`/session`、`/auth/logins`、`/auth/<provider>/start|callback`、`/api/*`（见 [clients.md](clients.md)「Web UI（模式二）」；身份与权限见 [tasks/team.md](../tasks/team.md)「团队与权限」）。
 - `--listen` 只允许回环或 tailnet 地址（100.64.0.0/10、fd7a:115c:a1e0::/48）；其它地址必须同时给 TLS，或显式 `--plain`（容器里、前面有转发时）。
 
 ### 凭据与身份

@@ -18,6 +18,7 @@ import {useNotices} from './notify.js';
 import {createChanges} from '../core/changes.js';
 import {createDrafts} from '../core/drafts.js';
 import {createAgentDefs} from '../core/agents.js';
+import {nowhere} from '../core/platform.js';
 import './words.js';
 
 const goes = {home: {page: 'home'}, tasks: {page: 'tasks', view: 'list'}, board: {page: 'tasks', view: 'board'}, runs: {page: 'runs'},
@@ -46,7 +47,7 @@ function finder(store, machines, go) {
 // browser's ({Notification, secure}), doc the document, tab the tab's storage (the me page's); copy and download are
 // the clipboard's and a file save's (the tests pass their own).
 export function App({store, commands, toasts, wire, http, router, keys, nav, prefs, session, clock, fetchOutput, storage, onLogout, copy, changes: given, names = null,
-  notices = {}, doc = null, tab = null, agentDefs: givenDefs, download}) {
+  notices = {}, doc = null, tab = null, agentDefs: givenDefs, download, platform = nowhere}) {
   const {t, f} = useWords();
   const route = useSignalValue(router.route);
   const machines = useSignalValue(store.machines);
@@ -110,7 +111,7 @@ export function App({store, commands, toasts, wire, http, router, keys, nav, pre
     counts=${counts} spent=${{tokens: day.tokens, usd: day.usd}} user=${session} userMenu=${userMenu}
     navCounts=${{tasks: Object.values(st.tasks).filter(x => x.status === 'todo').length, runs: sel.openRuns(st).length, machines: machines.length}}
     onSearch=${() => setModal({kind: 'palette', entries: runnable(keys.active())})} onNew=${() => toTasks('new')}
-    onReload=${() => globalThis.location?.reload()}>
+    onReload=${() => platform.refresh()}>
     ${page}
     ${modal?.kind === 'palette' && html`<${Palette} entries=${modal.entries} find=${finder(store, machines, go)} onClose=${() => setModal(null)} />`}
     ${modal?.kind === 'help' && html`<${Help} onClose=${() => setModal(null)} />`}
