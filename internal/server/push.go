@@ -113,3 +113,56 @@ func (s *Server) dropPushDevice(w http.ResponseWriter, r *http.Request, c caller
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
+
+// pushDevices lists the caller's devices, with what each wants of the notices.
+func (s *Server) pushDevices(w http.ResponseWriter, r *http.Request, c caller) {
+	ds, err := s.team().Devices(c.user.ID)
+	if err != nil {
+		apiError(w, http.StatusInternalServerError, "internal")
+		return
+	}
+	writeJSON(w, http.StatusOK, append([]store.PushDevice{}, ds...))
+}
+
+// setPushPrefs changes what one of the caller's devices wants of the notices.
+func (s *Server) setPushPrefs(w http.ResponseWriter, r *http.Request, c caller) {
+	var in struct {
+		ID    string            `json:"id"`
+		Prefs store.DevicePrefs `json:"prefs"`
+	}
+	if !decode(w, r, &in) {
+		return
+	}
+	if in.Prefs.Check() != nil {
+		apiError(w, http.StatusBadRequest, "bad_request")
+		return
+	}
+	ok, err := s.team().SetDevicePrefs(c.user.ID, in.ID, in.Prefs)
+	switch {
+	case err != nil:
+		apiError(w, http.StatusInternalServerError, "internal")
+	case !ok:
+		apiError(w, http.StatusNotFound, "not_found")
+	default:
+		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
+// removePushDevice takes one of the caller's devices away, this browser or another.
+func (s *Server) removePushDevice(w http.ResponseWriter, r *http.Request, c caller) {
+	var in struct {
+		ID string `json:"id"`
+	}
+	if !decode(w, r, &in) {
+		return
+	}
+	ok, err := s.team().RemoveUserDevice(c.user.ID, in.ID)
+	switch {
+	case err != nil:
+		apiError(w, http.StatusInternalServerError, "internal")
+	case !ok:
+		apiError(w, http.StatusNotFound, "not_found")
+	default:
+		w.WriteHeader(http.StatusNoContent)
+	}
+}

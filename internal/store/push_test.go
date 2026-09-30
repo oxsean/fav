@@ -2,6 +2,7 @@ package store
 
 import (
 	"path/filepath"
+	"reflect"
 	"testing"
 	"time"
 )
@@ -10,6 +11,11 @@ var t0 = time.Date(2026, 9, 30, 12, 0, 0, 0, time.UTC)
 
 func webhookRow(seq int64, user, event string, next time.Time) Delivery {
 	return Delivery{Seq: seq, User: user, Event: event, Next: next, Notice: []byte(`{"task":"t1"}`), At: t0}
+}
+
+// before0011 takes a database back to before the devices' settings.
+func before0011(t *testing.T, path string) {
+	exec(t, path, `ALTER TABLE push_devices DROP COLUMN prefs`)
 }
 
 // before0009 puts the tables 0009 changed back as they were before it.
@@ -29,6 +35,7 @@ func TestUpgradingTheDeliveriesKeepsWhatWentAndSendsNothingAgain(t *testing.T) {
 		t.Fatal(err)
 	}
 	tm.Close()
+	before0011(t, path)
 	before0010(t, path)
 	before0009(t, path)
 	exec(t, path, `INSERT INTO deliveries VALUES (3, 'local', 'task.needs_you', '200', 1), (4, 'local', 'task.done', '500', 2),
@@ -173,5 +180,57 @@ func TestADeviceIsFoundAgainByItsEndpoint(t *testing.T) {
 	}
 	if _, ok, _ := tm.Device(fresh.ID); !ok {
 		t.Fatal("a renewed device went")
+	}
+}
+
+// A device's notice settings start as the defaults, are its owner's alone to change or to remove the device by, and
+// stay through its renewals; a database from before them gives every device the defaults.
+func TestADevicesSettingsAreItsOwnersAndOutliveItsRenewals(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, File)
+	tm, err := OpenTeam(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	old, err := tm.KeepDevice(PushDevice{User: LocalUser, Kind: KindWebPush, Name: "Mac", Target: []byte("s")}, "h0", t0)
+	must(t, err)
+	tm.Close()
+	before0011(t, path)
+	setVersion(t, path, 10)
+	if tm, err = OpenTeam(path); err != nil {
+		t.Fatal(err)
+	}
+	defer tm.Close()
+	if d, ok, _ := tm.Device(old.ID); !ok || !d.Prefs.Wants("task.needs_you") || d.Prefs.Wants("task.done") || d.Prefs.Hide || d.Prefs.Wait != 0 {
+		t.Fatalf("a device from before the settings: %+v", d)
+	}
+
+	a, _ := tm.KeepDevice(PushDevice{User: "u_a", Kind: KindWebPush, Name: "Android", Target: []byte("x")}, "h1", t0)
+	want := DevicePrefs{Events: []string{"task.done"}, Hide: true, Wait: 300}
+	if ok, err := tm.SetDevicePrefs("u_b", a.ID, want); err != nil || ok {
+		t.Fatalf("someone else's device: %v %v", ok, err)
+	}
+	if ok, err := tm.SetDevicePrefs("u_a", a.ID, want); err != nil || !ok {
+		t.Fatalf("%v %v", ok, err)
+	}
+	tm.KeepDevice(PushDevice{User: "u_a", Kind: KindWebPush, Name: "Android", Target: []byte("y")}, "h1", t0.Add(time.Hour))
+	ds, _ := tm.Devices("u_a")
+	if len(ds) != 1 || !reflect.DeepEqual(ds[0].Prefs, want) || ds[0].Prefs.Wants("task.needs_you") || !ds[0].Prefs.Wants("task.done") {
+		t.Fatalf("after renewing: %+v", ds)
+	}
+	if ok, err := tm.SetDevicePrefs("u_a", a.ID, DevicePrefs{Events: []string{}}); err != nil || !ok {
+		t.Fatalf("%v %v", ok, err)
+	}
+	if d, _, _ := tm.Device(a.ID); d.Prefs.Events == nil || d.Prefs.Wants("task.needs_you") || d.Prefs.Wants("task.done") {
+		t.Fatalf("a device that takes nothing: %+v", d.Prefs)
+	}
+	if ok, err := tm.RemoveUserDevice("u_b", a.ID); err != nil || ok {
+		t.Fatalf("someone else removed it: %v %v", ok, err)
+	}
+	if ok, err := tm.RemoveUserDevice("u_a", a.ID); err != nil || !ok {
+		t.Fatalf("%v %v", ok, err)
+	}
+	if _, ok, _ := tm.Device(a.ID); ok {
+		t.Fatal("still there")
 	}
 }

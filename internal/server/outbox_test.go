@@ -37,10 +37,17 @@ type waits struct {
 	hidden map[string]bool            // user + " " + task they may no longer see
 	asks   map[string]agent.Request   // run + "/" + request
 	denies map[string]bool            // user + " " + item they may deny from a notice
+	counts map[string]int             // user → how many things wait on them
 }
 
 func newWaits() *waits {
-	return &waits{items: map[string]coord.InboxItem{}, hidden: map[string]bool{}, asks: map[string]agent.Request{}, denies: map[string]bool{}}
+	return &waits{items: map[string]coord.InboxItem{}, hidden: map[string]bool{}, asks: map[string]agent.Request{}, denies: map[string]bool{}, counts: map[string]int{}}
+}
+
+func (f *waits) WaitingCount(user string) int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.counts[user]
 }
 
 func (f *waits) NoticeActs(user, id string, item task.Pending) []string {
@@ -519,5 +526,61 @@ func TestAPushCarriesADenyOnlyForWhoMayDeny(t *testing.T) {
 		Until: n0.Add(3*time.Minute + actLife).Unix()}
 	if err != nil || c != want {
 		t.Fatalf("the token\n got %+v %v\nwant %+v", c, err, want)
+	}
+}
+
+// What a device wants shapes what it gets: the events it takes, how long a push waits for the page (a task done goes
+// at once), and a lock screen that says only how many things wait.
+func TestADevicesSettingsShapeItsPushes(t *testing.T) {
+	o := newOutbox(t)
+	plain := o.device(store.LocalUser, "/push/plain")
+	hidden := o.device(store.LocalUser, "/push/hidden")
+	late := o.device(store.LocalUser, "/push/late")
+	for id, p := range map[string]store.DevicePrefs{hidden.ID: {Events: []string{store.EventWaiting, store.EventDone}, Hide: true, Wait: -1},
+		late.ID: {Events: []string{store.EventDone, store.EventWaiting}, Wait: 300}} {
+		if ok, err := o.team.SetDevicePrefs(store.LocalUser, id, p); err != nil || !ok {
+			t.Fatal(ok, err)
+		}
+	}
+	o.coord.wait(store.LocalUser, "t_1", permission)
+	o.coord.denies[store.LocalUser+" "+permission.ID] = true
+	o.coord.counts[store.LocalUser] = 3
+	o.n.Send(needs(5, permission))
+	o.drain()
+	got := o.svc.taken()
+	want := PushMessage{V: 1, Server: "c_test", Seq: 5, Event: coord.NotifyTaskWaiting, N: 3}
+	if len(got) != 1 || got[0].path != "/push/hidden" || !reflect.DeepEqual(got[0].msg, want) || got[0].headers.Get("Topic") != "tend" {
+		t.Fatalf("at once, saying only how many: %+v", got)
+	}
+	o.clock.set(n0.Add(30 * time.Second))
+	o.drain()
+	if got := o.svc.taken(); len(got) != 1 || got[0].path != "/push/plain" || got[0].msg.Title == "" || len(got[0].msg.Actions) != 1 {
+		t.Fatalf("the default wait: %+v", got)
+	}
+	o.clock.set(n0.Add(299 * time.Second))
+	o.drain()
+	if got := o.svc.taken(); len(got) != 0 {
+		t.Fatalf("before its five minutes: %+v", got)
+	}
+	o.clock.set(n0.Add(300 * time.Second))
+	o.drain()
+	if got := o.svc.taken(); len(got) != 1 || got[0].path != "/push/late" {
+		t.Fatalf("after them: %+v", got)
+	}
+
+	done := coord.Notice{Seq: 6, Event: coord.NotifyTaskDone, Task: "t_2", Title: "ship it", Project: "infra", To: []string{store.LocalUser}, At: o.clock.now()}
+	o.n.Send(done)
+	o.drain()
+	got = o.svc.taken()
+	paths := map[string]PushMessage{}
+	for _, p := range got {
+		paths[p.path] = p.msg
+	}
+	if len(got) != 2 || !reflect.DeepEqual(paths["/push/late"], PushMessage{V: 1, Server: "c_test", Seq: 6, Event: coord.NotifyTaskDone, Task: "t_2", Title: "ship it",
+		Project: "infra", Link: "#task-t_2", At: done.At}) || paths["/push/hidden"].Title != "" || paths["/push/hidden"].Event != coord.NotifyTaskDone {
+		t.Fatalf("a task done, at once, to the devices that take it: %+v", got)
+	}
+	if _, ok := paths["/push/plain"]; ok || plain.ID == "" {
+		t.Fatal("a device that does not take it")
 	}
 }

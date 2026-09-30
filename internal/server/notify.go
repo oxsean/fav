@@ -51,6 +51,7 @@ type notifyCoord interface {
 	Sees(user, task string) bool
 	Request(run, id string) (agent.Request, bool)
 	NoticeActs(user, task string, item task.Pending) []string
+	WaitingCount(user string) int
 }
 
 // NotifyOptions: Team keeps the outbox and the devices, Seal opens the devices' targets, Push signs to push services
@@ -111,7 +112,7 @@ func (n *Notifier) keep(o *NotifyOptions, x coord.Notice) {
 		if hook, _ := o.Team.Webhook(u); hook != "" {
 			rows = append(rows, row)
 		}
-		if o.Push == nil || x.Event != coord.NotifyTaskWaiting {
+		if o.Push == nil || x.Event != coord.NotifyTaskWaiting && x.Event != coord.NotifyTaskDone {
 			continue
 		}
 		devices, err := o.Team.Devices(u)
@@ -119,7 +120,13 @@ func (n *Notifier) keep(o *NotifyOptions, x coord.Notice) {
 			fmt.Fprintln(os.Stderr, "tend-server: push devices:", err)
 		}
 		for _, d := range devices {
-			row.Device, row.Next = d.ID, x.At.Add(waitFor(x.Items))
+			if !d.Prefs.Wants(x.Event) {
+				continue
+			}
+			row.Device, row.Next = d.ID, x.At
+			if x.Event == coord.NotifyTaskWaiting {
+				row.Next = x.At.Add(waitFor(d.Prefs, x.Items))
+			}
 			rows = append(rows, row)
 		}
 	}
@@ -146,8 +153,15 @@ type noticeRow struct {
 	At      time.Time      `json:"at"`
 }
 
-// waitFor is how long a push waits for the page to be enough: less when an agent asks to use a tool.
-func waitFor(items []task.Pending) time.Duration {
+// waitFor is how long a push waits for the page to be enough: as long as the device asks, else less when an agent asks
+// to use a tool.
+func waitFor(prefs store.DevicePrefs, items []task.Pending) time.Duration {
+	switch {
+	case prefs.Wait < 0:
+		return 0
+	case prefs.Wait > 0:
+		return time.Duration(prefs.Wait) * time.Second
+	}
 	for _, p := range items {
 		if p.Kind == task.PendPermission {
 			return pushWaitAsk
@@ -437,15 +451,15 @@ type PushMessage struct {
 	Server  string       `json:"server"`
 	Seq     int64        `json:"seq"`
 	Event   string       `json:"event"`
-	Task    string       `json:"task"`
-	Item    string       `json:"item"`
-	Kind    string       `json:"kind"`
-	Title   string       `json:"title"`
+	Task    string       `json:"task,omitempty"`
+	Item    string       `json:"item,omitempty"`
+	Kind    string       `json:"kind,omitempty"`
+	Title   string       `json:"title,omitempty"`
 	What    string       `json:"what,omitempty"` // what a permission would do: its command or file
 	Project string       `json:"project,omitempty"`
-	N       int          `json:"n"` // how many things of the task wait on them
-	Link    string       `json:"link"`
-	At      time.Time    `json:"at"`
+	N       int          `json:"n"` // how many things of the task wait on them; with the content hidden, how many wait at all
+	Link    string       `json:"link,omitempty"`
+	At      time.Time    `json:"at,omitzero"`
 	Actions []PushAction `json:"actions,omitempty"` // the buttons that act, besides the one that opens the page
 }
 
@@ -460,7 +474,18 @@ const pushReject = "reject"
 
 // message is what a push about x says to user on device dev now that item is how the task waits on them: a
 // permission they may deny gets a button for it.
-func (n *Notifier) message(user, dev string, x noticeRow, item coord.InboxItem) PushMessage {
+func (n *Notifier) message(user string, dev store.PushDevice, x noticeRow, item coord.InboxItem) PushMessage {
+	if dev.Prefs.Hide {
+		m := PushMessage{V: 1, Server: n.o.Coord.ID(), Seq: x.Seq, Event: x.Event}
+		if x.Event == coord.NotifyTaskWaiting {
+			m.N = n.o.Coord.WaitingCount(user)
+		}
+		return m
+	}
+	if x.Event == coord.NotifyTaskDone {
+		return PushMessage{V: 1, Server: n.o.Coord.ID(), Seq: x.Seq, Event: x.Event, Task: x.Task, Title: clipRunes(x.Title, 200), Project: x.Project,
+			Link: "#task-" + x.Task, At: x.At}
+	}
 	m := PushMessage{V: 1, Server: n.o.Coord.ID(), Seq: x.Seq, Event: x.Event, Task: x.Task, Title: clipRunes(item.Title, 200),
 		Project: item.Project, N: len(item.Pending), Link: "#task-" + x.Task, At: x.At}
 	for _, p := range x.Items {
@@ -479,7 +504,7 @@ func (n *Notifier) message(user, dev string, x noticeRow, item coord.InboxItem) 
 			}
 		}
 		if n.o.Act != nil && slices.Contains(n.o.Coord.NoticeActs(user, x.Task, p), coord.ActDeny) {
-			tok := n.o.Act.mint(actClaim{User: user, Task: x.Task, Item: p.ID, Version: p.Version, Action: coord.ActDeny, Seq: x.Seq, Device: dev,
+			tok := n.o.Act.mint(actClaim{User: user, Task: x.Task, Item: p.ID, Version: p.Version, Action: coord.ActDeny, Seq: x.Seq, Device: dev.ID,
 				Until: n.now().Add(actLife).Unix()})
 			m.Actions = []PushAction{{Action: pushReject, Token: tok}}
 		}
@@ -514,7 +539,7 @@ func (n *Notifier) webpush(ctx context.Context, user string, dev store.PushDevic
 	if err != nil {
 		return false, &sendError{status: http.StatusBadRequest}
 	}
-	m := n.message(user, dev.ID, x, item)
+	m := n.message(user, dev, x, item)
 	b, _ := json.Marshal(m)
 	body, err := sealPush(sub, b)
 	if err != nil {
@@ -537,8 +562,10 @@ func (n *Notifier) webpush(ctx context.Context, user string, dev store.PushDevic
 		urgency = "high"
 	}
 	req.Header.Set("Urgency", urgency)
-	if topic.MatchString(x.Task) {
-		req.Header.Set("Topic", x.Task)
+	if m.Task == "" {
+		req.Header.Set("Topic", "tend") // one count takes the last one's place
+	} else if topic.MatchString(m.Task) {
+		req.Header.Set("Topic", m.Task)
 	}
 	res, err := n.client.Do(req)
 	if err != nil {

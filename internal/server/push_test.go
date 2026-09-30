@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -123,6 +124,48 @@ func TestAPageRegistersItsBrowserForPushAndForgetsIt(t *testing.T) {
 		t.Fatal(got)
 	}
 	if ds, _ := r.team.Devices(store.LocalUser); len(ds) != 0 {
+		t.Fatalf("still there: %+v", ds)
+	}
+}
+
+// A person lists their devices, changes what each wants and removes one; someone else's devices are out of their reach.
+func TestSomeoneSetsUpTheirOwnDevicesOnly(t *testing.T) {
+	r := newRig(t)
+	ann, annC := r.member("Ann")
+	_, bobC := r.member("Bob")
+	ua, _ := ecdh.P256().GenerateKey(rand.Reader)
+	sub := map[string]any{"endpoint": "https://push.example/send/ann", "keys": map[string]string{
+		"p256dh": base64.RawURLEncoding.EncodeToString(ua.PublicKey().Bytes()), "auth": base64.RawURLEncoding.EncodeToString(make([]byte, 16))}}
+	var d struct{ ID string }
+	if got := r.api(annC, "PUT", "/api/push/device", map[string]any{"subscription": sub, "name": "Android"}, &d); got != http.StatusOK {
+		t.Fatal(got)
+	}
+	prefs := store.DevicePrefs{Events: []string{store.EventWaiting, store.EventDone}, Hide: true, Wait: -1}
+	for _, bad := range []store.DevicePrefs{{Events: []string{"task.everything"}}, {Wait: 7200}, {Events: []string{store.EventDone, store.EventDone}}} {
+		if got := r.api(annC, "POST", "/api/push/prefs", map[string]any{"id": d.ID, "prefs": bad}, nil); got != http.StatusBadRequest {
+			t.Fatalf("%+v: %d", bad, got)
+		}
+	}
+	if got := r.api(bobC, "POST", "/api/push/prefs", map[string]any{"id": d.ID, "prefs": prefs}, nil); got != http.StatusNotFound {
+		t.Fatalf("bob sets ann's device: %d", got)
+	}
+	if got := r.api(annC, "POST", "/api/push/prefs", map[string]any{"id": d.ID, "prefs": prefs}, nil); got != http.StatusNoContent {
+		t.Fatal(got)
+	}
+	var mine, bobs []store.PushDevice
+	if got := r.api(annC, "GET", "/api/push/devices", nil, &mine); got != http.StatusOK || len(mine) != 1 || mine[0].Name != "Android" || !reflect.DeepEqual(mine[0].Prefs, prefs) {
+		t.Fatalf("%d %+v", got, mine)
+	}
+	if got := r.api(bobC, "GET", "/api/push/devices", nil, &bobs); got != http.StatusOK || len(bobs) != 0 {
+		t.Fatalf("bob sees ann's: %+v", bobs)
+	}
+	if got := r.api(bobC, "DELETE", "/api/push/devices", map[string]string{"id": d.ID}, nil); got != http.StatusNotFound {
+		t.Fatalf("bob removes ann's device: %d", got)
+	}
+	if got := r.api(annC, "DELETE", "/api/push/devices", map[string]string{"id": d.ID}, nil); got != http.StatusNoContent {
+		t.Fatal(got)
+	}
+	if ds, _ := r.team.Devices(ann.ID); len(ds) != 0 {
 		t.Fatalf("still there: %+v", ds)
 	}
 }

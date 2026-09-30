@@ -31,6 +31,9 @@ func TestANoticesActionIsDoneOnceWhileItsItemWaits(t *testing.T) {
 	perm := e.pendingOf(bob, tid, rid+"/q1")
 	on := ActOn{Task: tid, Item: perm.ID, Version: perm.Version, Action: ActDeny}
 
+	if n := e.c.WaitingCount(bob.User); n != 2 {
+		t.Fatalf("a permission and a question wait on bob: %d", n)
+	}
 	if got := e.c.NoticeActs(bob.User, tid, perm); !slices.Equal(got, []string{ActDeny}) {
 		t.Fatalf("the dispatcher may deny: %v", got)
 	}

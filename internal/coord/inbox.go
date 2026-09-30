@@ -288,6 +288,21 @@ func (c *Coord) Waiting(user, id string) (InboxItem, bool) {
 	return c.inboxItem(p, t)
 }
 
+// WaitingCount is how many things wait on user: each pending item of each task in their inbox.
+func (c *Coord) WaitingCount(user string) int {
+	c.mu.Lock()
+	p, ok := c.principal(user)
+	c.mu.Unlock()
+	if !ok {
+		return 0
+	}
+	n := 0
+	for _, it := range c.inbox(p).Items {
+		n += max(1, len(it.Pending))
+	}
+	return n
+}
+
 // Sees: user may read task id.
 func (c *Coord) Sees(user, id string) bool {
 	c.mu.Lock()

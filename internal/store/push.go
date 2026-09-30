@@ -2,7 +2,9 @@ package store
 
 import (
 	"database/sql"
+	"encoding/json"
 	"errors"
+	"slices"
 	"time"
 )
 
@@ -11,15 +13,52 @@ const KindWebPush = "webpush"
 
 // PushDevice is somewhere a user's notices show: Target says where, sealed by the server.
 type PushDevice struct {
-	ID       string    `json:"id"`
-	User     string    `json:"user"`
-	Kind     string    `json:"kind"`
-	Name     string    `json:"name,omitempty"`
-	Target   []byte    `json:"-"`
-	Created  time.Time `json:"created,omitzero"`
-	Renewed  time.Time `json:"renewed,omitzero"`
-	LastOK   time.Time `json:"last_ok,omitzero"`
-	Failures int       `json:"failures,omitempty"`
+	ID       string      `json:"id"`
+	User     string      `json:"user"`
+	Kind     string      `json:"kind"`
+	Name     string      `json:"name,omitempty"`
+	Target   []byte      `json:"-"`
+	Created  time.Time   `json:"created,omitzero"`
+	Renewed  time.Time   `json:"renewed,omitzero"`
+	LastOK   time.Time   `json:"last_ok,omitzero"`
+	Failures int         `json:"failures,omitempty"`
+	Prefs    DevicePrefs `json:"prefs"`
+}
+
+// ⚠️ The events a device may take: what waits on its user (the default) and a task of theirs done.
+const (
+	EventWaiting = "task.needs_you"
+	EventDone    = "task.done"
+)
+
+// DevicePrefs is what a device wants of the notices; the zero value is the defaults. Events nil is EventWaiting
+// alone; Hide leaves a push saying only how many things wait; Wait is how long, in seconds, a push waits for the page:
+// 0 the default (30 s for a permission, 60 s else), -1 none.
+type DevicePrefs struct {
+	Events []string `json:"events"` // null: the default; [] none
+	Hide   bool     `json:"hide,omitempty"`
+	Wait   int      `json:"wait,omitempty"`
+}
+
+// Wants: the device takes pushes of event.
+func (p DevicePrefs) Wants(event string) bool {
+	if p.Events == nil {
+		return event == EventWaiting
+	}
+	return slices.Contains(p.Events, event)
+}
+
+// Check: p names only events a device takes, each once, and a wait of -1, 0 or 1 s to an hour.
+func (p DevicePrefs) Check() error {
+	for i, e := range p.Events {
+		if e != EventWaiting && e != EventDone || slices.Contains(p.Events[:i], e) {
+			return errors.New("events")
+		}
+	}
+	if p.Wait < -1 || p.Wait > 3600 {
+		return errors.New("wait")
+	}
+	return nil
 }
 
 // Delivery states.
@@ -65,14 +104,40 @@ func (t *Team) KeepDevice(d PushDevice, hash string, now time.Time) (PushDevice,
 	return kept, err
 }
 
-const deviceCols = `id, user_id, kind, target, name, created_at, renewed_at, last_ok_at, failures`
+const deviceCols = `id, user_id, kind, target, name, created_at, renewed_at, last_ok_at, failures, prefs`
 
 func scanDevice(s interface{ Scan(...any) error }) (PushDevice, error) {
 	var d PushDevice
 	var created, renewed, ok int64
-	err := s.Scan(&d.ID, &d.User, &d.Kind, &d.Target, &d.Name, &created, &renewed, &ok, &d.Failures)
+	var prefs string
+	err := s.Scan(&d.ID, &d.User, &d.Kind, &d.Target, &d.Name, &created, &renewed, &ok, &d.Failures, &prefs)
 	d.Created, d.Renewed, d.LastOK = fromNanos(created), fromNanos(renewed), fromNanos(ok)
+	json.Unmarshal([]byte(prefs), &d.Prefs) // one it cannot read is the defaults
 	return d, err
+}
+
+// SetDevicePrefs keeps p as what user's device id wants; false when user has no such device.
+func (t *Team) SetDevicePrefs(user, id string, p DevicePrefs) (bool, error) {
+	b, _ := json.Marshal(p)
+	res, err := t.w.Exec(`UPDATE push_devices SET prefs = ? WHERE id = ? AND user_id = ?`, string(b), id, user)
+	if err != nil {
+		return false, err
+	}
+	n, _ := res.RowsAffected()
+	return n == 1, nil
+}
+
+// RemoveUserDevice removes user's device id, as they asked; false when they have no such device.
+func (t *Team) RemoveUserDevice(user, id string) (bool, error) {
+	var owner string
+	err := t.w.QueryRow(`SELECT user_id FROM push_devices WHERE id = ?`, id).Scan(&owner)
+	if errors.Is(err, sql.ErrNoRows) || err == nil && owner != user {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return true, t.RemoveDevice(id, "removed")
 }
 
 func (t *Team) device(db *sql.DB, id string) (PushDevice, bool, error) {
