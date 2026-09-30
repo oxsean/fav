@@ -63,6 +63,10 @@ register('me', {
   'me.link': ['关联', 'Link'], 'me.unlinked': ['没关联', 'not linked'], 'me.noLogins': ['这台 server 只用 token 登录', 'This server signs in with tokens only'],
   'me.linked': ['账号已关联', 'The account is linked'], 'me.linkTaken': ['这个账号已经属于另一个用户，没有关联', 'That account belongs to someone else; it was not linked'],
   'me.linkFailed': ['没有关联：登录没有完成（%s）', 'Not linked: the sign-in did not finish (%s)'],
+  'me.lastLogin': ['上次登录 %s', 'last signed in %s'], 'me.linkedAt': ['%s 关联', 'linked %s'], 'me.unlink': ['解除关联', 'Unlink'],
+  'me.unlinkTitle': ['解除和 %s 的关联？', 'Unlink %s?'],
+  'me.unlinkNote': ['之后不能再用它登录这个账号，再用它登录会按准入规则当成另一个人；工单里指派给它的 issue 也不再归你。已经登录的浏览器会话不受影响。', 'It no longer signs you in, and signing in with it again goes by the admission rules as someone else; issues assigned to it are no longer yours. Browser sessions already signed in stay.'],
+  'me.unlinkedDone': ['已解除和 %s 的关联', '%s is unlinked'],
   'me.tokens': ['token', 'Tokens'], 'me.tokensNote': ['给 CLI 和 TUI 用；值只在新建时显示一次', 'For the CLI and the TUI; the value shows only when made'],
   'me.noTokens': ['还没有 token：tend login 会建一个，或在这里新建', 'No token yet: tend login makes one, or make one here'],
   'me.newToken': ['新建 token', 'New token'], 'me.tokenName': ['名称', 'Name'], 'me.tokenNameNote': ['让你认得出它用在哪，最多 64 个字符', 'So you know where it is used; up to 64 characters'],
@@ -291,15 +295,17 @@ function PhoneNotices({http, push, platform, toasts}) {
     ${devs.list?.length > 0 && html`<${Devices} devices=${devs.list} mine=${devs.mine} onRemove=${devs.remove} />`}`;
 }
 
-function Logins({logins, identities, onLink}) {
-  const {t} = useWords();
+function Logins({logins, identities, onLink, onUnlink}) {
+  const {t, f} = useWords();
   const display = p => logins.find(l => l.name === p)?.display || p;
   const loose = logins.filter(l => !identities.some(i => i.provider === l.name));
   return html`<${Panel} title=${t('me.logins')} actions=${html`<span class="t-muted">${t('me.loginsNote')}</span>`}>
     <ul class="me-rows">
       ${identities.map(i => html`<li class="me-row" key=${i.provider + i.subject}><span class="st s-success" aria-hidden="true">✓</span>
         <span class="me-main"><b>${display(i.provider)}</b><span class="mono t-muted">${i.username || i.email || i.subject}</span></span>
-        ${i.username && i.email && html`<span class="t-muted me-side">${i.email}</span>`}</li>`)}
+        <span class="t-muted me-side">${[i.username && i.email, i.last_login ? f('me.lastLogin', when(i.last_login)) : i.linked && f('me.linkedAt', when(i.linked))]
+          .filter(Boolean).join(' · ')}</span>
+        ${identities.length > 1 && html`<${Button} kind="quiet danger" onClick=${() => onUnlink(i)}>${t('me.unlink')}<//>`}</li>`)}
       ${loose.map(l => html`<li class="me-row" key=${l.name}><span class="st s-muted" aria-hidden="true">·</span>
         <span class="me-main"><b>${l.display || l.name}</b><span class="t-muted">${t('me.unlinked')}</span></span>
         <a class="btn me-link" href=${linkURL(l.name)} onClick=${onLink}>${t('me.link')}</a></li>`)}
@@ -463,11 +469,15 @@ export function Me({session, http, prefs, toasts, router, notices, tab, platform
   };
   const saveHook = url => http.setWebhook(url).then(() => { setWebhook(url); toasts.show({text: t(url ? 'me.webhookSaved' : 'me.webhookGone')}); }, failed);
   const others = sessions.filter(c => !c.current).length;
+  const loginName = i => [logins.find(l => l.name === i.provider)?.display || i.provider, i.username || i.email].filter(Boolean).join(' ');
+  const unlink = i => http.unlinkIdentity(i).then(() => { toasts.show({text: f('me.unlinkedDone', loginName(i))}); http.identities().then(setIdentities, () => {}); }, failed);
   const dialog = modal && ({
     new: () => html`<${NewToken} busy=${busy} error=${modal.error} made=${modal.made} copy=${copy} onMake=${make} onClose=${close} />`,
     revoke: () => html`<${Confirm} title=${f('me.revokeTitle', modal.cred.name)} note=${t('me.revokeNote')} label=${t('me.revoke')}
       onGo=${() => revoke(modal.cred, f('me.revoked', modal.cred.name))} onClose=${close} />`,
     end: () => html`<${Confirm} title=${t('me.endTitle')} note=${t('me.endNote')} label=${t('me.end')} onGo=${() => revoke(modal.cred, t('me.ended'))} onClose=${close} />`,
+    unlink: () => html`<${Confirm} title=${f('me.unlinkTitle', loginName(modal.id))} note=${t('me.unlinkNote')} label=${t('me.unlink')}
+      onGo=${() => unlink(modal.id)} onClose=${close} />`,
     others: () => html`<${Confirm} title=${f('me.endOthersTitle', others)} note=${t('me.endOthersNote')} label=${t('me.endOthers')} onGo=${endOthers} onClose=${close} />`,
   })[modal.kind]?.();
 
@@ -482,7 +492,7 @@ export function Me({session, http, prefs, toasts, router, notices, tab, platform
         <${Notices} prefs=${prefs} notices=${notices} webhook=${webhook} onWebhook=${saveHook} toasts=${toasts} push=${push} platform=${platform} http=${http} ended=${ended} />
       </div>
       <div class="me-col">
-        <${Logins} logins=${logins} identities=${identities} onLink=${() => linking(tab, now())} />
+        <${Logins} logins=${logins} identities=${identities} onLink=${() => linking(tab, now())} onUnlink=${i => setModal({kind: 'unlink', id: i})} />
         <${Tokens} tokens=${tokens} onNew=${() => setModal({kind: 'new'})} onRevoke=${c => setModal({kind: 'revoke', cred: c})} />
         <${Sessions} sessions=${sessions} tokens=${tokens} onEnd=${c => setModal({kind: 'end', cred: c})} onEndOthers=${() => setModal({kind: 'others'})} />
       </div>

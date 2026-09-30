@@ -38,6 +38,7 @@ func TestUpgradingTheDeliveriesKeepsWhatWentAndSendsNothingAgain(t *testing.T) {
 		t.Fatal(err)
 	}
 	tm.Close()
+	before0013(t, path)
 	before0012(t, path)
 	before0011(t, path)
 	before0010(t, path)
@@ -228,6 +229,7 @@ func TestUpgradingForgetsTheAddressesDeliveriesRecorded(t *testing.T) {
 		t.Fatal(err)
 	}
 	tm.Close()
+	before0013(t, path)
 	before0012(t, path)
 	before0011(t, path)
 	setVersion(t, path, 10)
@@ -286,6 +288,7 @@ func TestADevicesSettingsAreItsOwnersAndOutliveItsRenewals(t *testing.T) {
 	old, err := tm.KeepDevice(PushDevice{User: LocalUser, Kind: KindWebPush, Name: "Mac", Target: []byte("s")}, "h0", t0)
 	must(t, err)
 	tm.Close()
+	before0013(t, path)
 	before0012(t, path)
 	before0011(t, path)
 	setVersion(t, path, 10)

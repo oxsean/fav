@@ -41,6 +41,7 @@ var (
 	ErrExists       = errors.New("exists")
 	ErrOtherMachine = errors.New("bound to another machine")
 	ErrNotFound     = errors.New("not found")
+	ErrLastLogin    = errors.New("the last sign-in account")
 )
 
 type User struct {
@@ -55,13 +56,15 @@ type User struct {
 
 // Identity is an account at a login provider: (provider, issuer, subject) is its key.
 type Identity struct {
-	Provider      string `json:"provider"`
-	Issuer        string `json:"issuer"`
-	Subject       string `json:"subject"`
-	Username      string `json:"username,omitempty"`
-	Email         string `json:"email,omitempty"`
-	EmailVerified bool   `json:"email_verified,omitempty"`
-	Name          string `json:"name,omitempty"`
+	Provider      string    `json:"provider"`
+	Issuer        string    `json:"issuer"`
+	Subject       string    `json:"subject"`
+	Username      string    `json:"username,omitempty"`
+	Email         string    `json:"email,omitempty"`
+	EmailVerified bool      `json:"email_verified,omitempty"`
+	Name          string    `json:"name,omitempty"`
+	Linked        time.Time `json:"linked,omitzero"`
+	LastLogin     time.Time `json:"last_login,omitzero"` // when it last signed its user in
 }
 
 type Admit struct {
@@ -246,8 +249,8 @@ func (t *Team) Admit(id Identity, invite string) (User, error) {
 			return ErrDisabled
 		case err == nil:
 			out = u
-			_, err = tx.Exec(`UPDATE identities SET username = ?, email = ?, email_verified = ? WHERE provider = ? AND issuer = ? AND subject = ?`,
-				id.Username, id.Email, id.EmailVerified, id.Provider, id.Issuer, id.Subject)
+			_, err = tx.Exec(`UPDATE identities SET username = ?, email = ?, email_verified = ?, last_login = ? WHERE provider = ? AND issuer = ? AND subject = ?`,
+				id.Username, id.Email, id.EmailVerified, time.Now().UnixNano(), id.Provider, id.Issuer, id.Subject)
 			return err
 		case !errors.Is(err, sql.ErrNoRows):
 			return err
@@ -270,7 +273,7 @@ func (t *Team) Admit(id Identity, invite string) (User, error) {
 				return err
 			}
 		}
-		return link(tx, out.ID, id)
+		return link(tx, out.ID, id, time.Now())
 	})
 	return out, err
 }
@@ -317,9 +320,10 @@ func admission(tx *sql.Tx, id Identity, invite string) (string, error) {
 	return "", ErrNotAdmitted
 }
 
-func link(tx *sql.Tx, user string, id Identity) error {
-	_, err := tx.Exec(`INSERT INTO identities (provider, issuer, subject, user_id, username, email, email_verified, created) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		id.Provider, id.Issuer, id.Subject, user, id.Username, id.Email, id.EmailVerified, time.Now().UnixNano())
+// link adds id to user; signedIn is when it signed them in, zero when it only proved they hold it.
+func link(tx *sql.Tx, user string, id Identity, signedIn time.Time) error {
+	_, err := tx.Exec(`INSERT INTO identities (provider, issuer, subject, user_id, username, email, email_verified, created, last_login) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		id.Provider, id.Issuer, id.Subject, user, id.Username, id.Email, id.EmailVerified, time.Now().UnixNano(), nanos(signedIn))
 	if err != nil && strings.Contains(err.Error(), "UNIQUE") {
 		return ErrExists
 	}
@@ -328,12 +332,32 @@ func link(tx *sql.Tx, user string, id Identity) error {
 
 // Link adds another account to user: they proved control of both by signing in with each.
 func (t *Team) Link(user string, id Identity) error {
-	return inTx(t.w, func(tx *sql.Tx) error { return link(tx, user, id) })
+	return inTx(t.w, func(tx *sql.Tx) error { return link(tx, user, id, time.Time{}) })
+}
+
+// Unlink takes the account (provider, issuer, subject) of id off user: not found when it is not theirs, ErrLastLogin
+// when it is the only one they have.
+func (t *Team) Unlink(user string, id Identity) error {
+	return inTx(t.w, func(tx *sql.Tx) error {
+		var mine, all int
+		if err := tx.QueryRow(`SELECT count(*) FILTER (WHERE provider = ? AND issuer = ? AND subject = ?), count(*) FROM identities WHERE user_id = ?`,
+			id.Provider, id.Issuer, id.Subject, user).Scan(&mine, &all); err != nil {
+			return err
+		}
+		switch {
+		case mine == 0:
+			return ErrNotFound
+		case all == 1:
+			return ErrLastLogin
+		}
+		_, err := tx.Exec(`DELETE FROM identities WHERE user_id = ? AND provider = ? AND issuer = ? AND subject = ?`, user, id.Provider, id.Issuer, id.Subject)
+		return err
+	})
 }
 
 // Identities are user's linked accounts.
 func (t *Team) Identities(user string) ([]Identity, error) {
-	rows, err := t.r.Query(`SELECT provider, issuer, subject, username, email, email_verified FROM identities WHERE user_id = ? ORDER BY created`, user)
+	rows, err := t.r.Query(`SELECT provider, issuer, subject, username, email, email_verified, created, last_login FROM identities WHERE user_id = ? ORDER BY created`, user)
 	if err != nil {
 		return nil, err
 	}
@@ -341,9 +365,11 @@ func (t *Team) Identities(user string) ([]Identity, error) {
 	var out []Identity
 	for rows.Next() {
 		var id Identity
-		if err := rows.Scan(&id.Provider, &id.Issuer, &id.Subject, &id.Username, &id.Email, &id.EmailVerified); err != nil {
+		var linked, last int64
+		if err := rows.Scan(&id.Provider, &id.Issuer, &id.Subject, &id.Username, &id.Email, &id.EmailVerified, &linked, &last); err != nil {
 			return nil, err
 		}
+		id.Linked, id.LastLogin = fromNanos(linked), fromNanos(last)
 		out = append(out, id)
 	}
 	return out, rows.Err()

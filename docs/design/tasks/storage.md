@@ -35,7 +35,7 @@
 | `receipts` | `(principal, command_id)` 主键，另有 `seq`（唯一）、`method, digest, result`：`principal` 就是 `actor_id`；完整保存第一次的结果；成功但没有产生变化的命令不写收据。读信封时按 `seq` 拼回 `command` |
 | `imports` | `source, sum, last_seq, at`：导入过的日志，按内容摘要识别重复导入 |
 | `snapshots`（未实现） | `seq, state`：Go 状态的 JSON；启动 = 读最新快照 + 回放其后的信封。等实测启动变慢再加 |
-| 团队实体 | `users`（含内置 `local`）、`identities`（`(provider, issuer, subject)` 唯一）、`admits`、`invites`、`credentials`（`web / token / node`，只存 sha256，节点名在未吊销的凭据里唯一；0012 加 `agent`（会话登录时的 User-Agent）和 `last_ip`（最近一次连上的来源地址），之前的凭据两者都空）、`audit`：迁移 `0002_team.sql` |
+| 团队实体 | `users`（含内置 `local`）、`identities`（`(provider, issuer, subject)` 唯一；0013 加 `last_login`，最近一次用它登录的时间，之前的是 0）、`admits`、`invites`、`credentials`（`web / token / node`，只存 sha256，节点名在未吊销的凭据里唯一；0012 加 `agent`（会话登录时的 User-Agent）和 `last_ip`（最近一次连上的来源地址），之前的凭据两者都空）、`audit`：迁移 `0002_team.sql` |
 | 团队实体 | `deliveries`（通知投递，0003，0009 起是发件箱）；`trackers`、`tracker_issues`、`tracker_deliveries`（工单绑定、每个 issue 的回写状态、webhook 去重，0004） |
 | 加列 | `tracker_issues.parent`、`pr`（子 issue 和 PR 链接，0005）；`invites.project`、`access`（邀请带项目，0006）；`tracker_issues.synced`（任务级同步状态，0007）；`tracker_issues.applied`（tend 自己做的关单或标签，任务重开时撤回，0010） |
 | server 自己的密钥 | `secrets`（`name` 主键、`value`、`at`，0008）：值是 `seal.go` 封存过的，密钥是 `server.key` 或 `TEND_SERVER_KEY`，不在库里；先写的赢（`KeepSecret`）。有 Web Push 的密钥对 `vapid` 和推送按钮令牌的签名密钥 `act` |

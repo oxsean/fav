@@ -46,6 +46,7 @@ register('pages', {
   'api.exists': ['这个名字已经有了', 'That name is taken'], 'api.name': ['名字不合法', 'That name is not valid'],
   'api.csrf': ['请求被拒绝，请刷新页面', 'The request was refused: reload the page'], 'api.unauthorized': ['你没有这个权限', 'You may not do that'],
   'api.not_found': ['没有这一项，或者你看不到它', 'No such thing, or it is out of your sight'], 'api.self': ['不能改你自己', 'You cannot change yourself'],
+  'api.last': ['这是你唯一的登录方式，不能解除', 'It is your only way to sign in, so it stays'],
   'api.bad_request': ['填的内容不对', 'Something filled in is not right'], 'api.project': ['没有这个项目', 'No such project'],
   'api.push_key': ['这台 server 没有推送密钥，推送用不了', 'This server has no push key, so pushes cannot be used'],
   'api.offline': ['连不上服务器', 'The server cannot be reached'], 'api.internal': ['服务器出错了', 'The server failed'],

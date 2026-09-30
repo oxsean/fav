@@ -192,3 +192,44 @@ func TestAMemberAddsTheirOwnMachine(t *testing.T) {
 		t.Fatalf("a machine name taken: %d", got)
 	}
 }
+
+// The Me page lists the accounts with when each last signed in, and unlinks one of them, never the last.
+func TestASignInAccountIsUnlinkedButNotTheLast(t *testing.T) {
+	who := map[string]any{"sub": "42", "email": "ann@corp.example", "email_verified": true, "preferred_username": "ann", "name": "Ann"}
+	_, login := idp(t, &who)
+	r := newRig(t, login)
+	r.team.AddAdmit(store.Admit{Kind: store.AdmitDomain, Value: "corp.example", Role: store.RoleMember})
+	c := browser(t)
+	if to := signIn(t, c, r.url, ""); to != "/" {
+		t.Fatal(to)
+	}
+	var ids []store.Identity
+	r.api(c, "GET", "/api/identities", nil, &ids)
+	if len(ids) != 1 || ids[0].LastLogin.IsZero() || ids[0].Linked.IsZero() {
+		t.Fatalf("%+v", ids)
+	}
+	oidc := map[string]string{"provider": ids[0].Provider, "issuer": ids[0].Issuer, "subject": ids[0].Subject}
+	if got := r.api(c, "DELETE", "/api/identities", oidc, nil); got != http.StatusConflict {
+		t.Fatalf("the only account: %d", got)
+	}
+	var me Me
+	r.api(c, "GET", "/session", nil, &me)
+	gh := store.Identity{Provider: "github", Issuer: "https://github.com", Subject: "7", Username: "ann-gh"}
+	if err := r.team.Link(me.ID, gh); err != nil {
+		t.Fatal(err)
+	}
+	if got := r.api(c, "DELETE", "/api/identities", map[string]string{"provider": "github", "issuer": "https://github.com", "subject": "8"}, nil); got != http.StatusNotFound {
+		t.Fatalf("an account that is not theirs: %d", got)
+	}
+	if got := r.api(c, "DELETE", "/api/identities", oidc, nil); got != http.StatusNoContent {
+		t.Fatalf("one of two: %d", got)
+	}
+	r.api(c, "GET", "/api/identities", nil, &ids)
+	if len(ids) != 1 || ids[0].Provider != "github" {
+		t.Fatalf("after unlinking: %+v", ids)
+	}
+	log, _ := r.team.AuditLog(5)
+	if log[0].Kind != "unlink" || log[0].Actor != me.ID {
+		t.Fatalf("the audit: %+v", log[0])
+	}
+}

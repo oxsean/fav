@@ -52,6 +52,7 @@ function fakeHTTP({refuse = []} = {}) {
     addToken: name => ans('POST /api/tokens', {name}),
     revokeToken: id => ans('DELETE /api/tokens', {id}),
     identities: () => ans('GET /api/identities'),
+    unlinkIdentity: ({provider, issuer, subject}) => ans('DELETE /api/identities', {provider, issuer, subject}),
     webhook: () => ans('GET /api/me/webhook').then(v => v?.url || ''),
     setWebhook: url => ans('POST /api/me/webhook', {url}),
     presets: () => ans('GET /theme/presets.json'),
@@ -319,6 +320,21 @@ test('a session is signed out after asking; so are all the others, this one kept
     ['DELETE /api/tokens', {id: 'w4'}]], 'every other, not this one');
   ok(a.el.textContent.includes(words.f('me.endedN', 3)), 'said');
   eq(reads(), 3, 'the devices read again');
+  await a.done();
+});
+
+test('an account says when it last signed in, and is unlinked after asking', async () => {
+  const a = await app();
+  const rows = () => a.el.find('.me-row').filter(r => r.textContent.includes(words.t('me.unlink')));
+  await until(() => rows().length === 2, 'both accounts');
+  ok(rows()[0].textContent.includes(words.f('me.lastLogin', '9-30 08:55')), 'the last sign-in');
+  ok(rows()[1].textContent.includes(words.f('me.linkedAt', '9-20 09:00')), 'linked, never signed in with');
+  await click(buttonOf(rows()[1], words.t('me.unlink')));
+  ok(a.el.one('.modal').textContent.includes(words.t('me.unlinkNote')), 'what it means');
+  await click(buttonOf(a.el.one('.modal-foot'), words.t('me.unlink')));
+  await settled();
+  eq(a.http.calls.filter(c => c[0] === 'DELETE /api/identities'), [['DELETE /api/identities', {provider: 'gitea', issuer: 'https://git.example.com', subject: '17'}]], 'that one');
+  eq(a.http.calls.filter(c => c[0] === 'GET /api/identities').length, 2, 'read again');
   await a.done();
 });
 

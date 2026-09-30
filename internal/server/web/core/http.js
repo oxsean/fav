@@ -86,12 +86,14 @@ export function createHTTP({fetch = (...a) => globalThis.fetch(...a)} = {}) {
     revokeMachine: id => ask('DELETE', '/api/machines', {id}),
     rebindMachine: id => ask('POST', '/api/machines/rebind', {id}),
     // tokens are the caller's personal tokens and browser sessions: [{id, kind: token | web, name, created, last_used,
-    // expires, current}]; addToken makes a token → {id, token}, shown once; revokeToken ends one of either kind.
+    // last_ip, agent (a session's User-Agent), expires, current}]; addToken makes a token → {id, token}, shown once; revokeToken ends one of either kind.
     tokens: async () => (await ask('GET', '/api/tokens')) || [],
     addToken: name => ask('POST', '/api/tokens', {name}),
     revokeToken: id => ask('DELETE', '/api/tokens', {id}),
-    // identities are the sign-in accounts linked to the caller: [{provider, issuer, subject, username?, email?, name?}].
+    // identities are the sign-in accounts linked to the caller: [{provider, issuer, subject, username?, email?, name?,
+    // linked, last_login?}]; unlinkIdentity takes one off them (never the last: 409 last).
     identities: async () => (await ask('GET', '/api/identities')) || [],
+    unlinkIdentity: ({provider, issuer, subject}) => ask('DELETE', '/api/identities', {provider, issuer, subject}),
     // webhook is the caller's personal webhook ('' for none); setWebhook changes it ('' removes it).
     webhook: async () => (await ask('GET', '/api/me/webhook'))?.url || '',
     setWebhook: url => ask('POST', '/api/me/webhook', {url}),

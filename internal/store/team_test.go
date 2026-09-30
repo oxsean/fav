@@ -216,6 +216,7 @@ func TestUpgradingToTheSecretsTableKeepsTheTeam(t *testing.T) {
 		t.Fatal(err)
 	}
 	tm.Close()
+	before0013(t, path)
 	before0012(t, path)
 	before0011(t, path)
 	before0010(t, path)
@@ -254,6 +255,7 @@ func TestACredentialSaysWhereItIsUsedFrom(t *testing.T) {
 	_, old, _ := tm.NewCredential(KindToken, "cli", LocalUser, 0)
 	must(t, tm.Touch(old.ID, "100.64.0.2"))
 	tm.Close()
+	before0013(t, path)
 	before0012(t, path)
 	setVersion(t, path, 11)
 	if tm, err = OpenTeam(path); err != nil {
@@ -281,5 +283,59 @@ func TestACredentialSaysWhereItIsUsedFrom(t *testing.T) {
 	must(t, tm.Touch(web.ID, "2001:db8::1"))
 	if c := byID(web.ID); c.LastIP != "2001:db8::1" || c.LastUsed.IsZero() {
 		t.Fatalf("used: %+v", c)
+	}
+}
+
+// before0013 takes the sign-in accounts back to before they said when they last signed in.
+func before0013(t *testing.T, path string) {
+	exec(t, path, `ALTER TABLE identities DROP COLUMN last_login`)
+}
+
+// An account says when it was linked and when it last signed its user in (linking is no sign-in); one is unlinked
+// only by its own user, and never the last one.
+func TestASignInAccountSaysWhenItSignedInAndIsUnlinkedButNotTheLast(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, File)
+	tm, err := OpenTeam(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tm.AddAdmit(Admit{Kind: AdmitDomain, Value: "corp.example", Role: RoleMember})
+	ann, err := tm.Admit(gitea("1", "ann@corp.example", true), "")
+	must(t, err)
+	tm.Close()
+	before0013(t, path)
+	setVersion(t, path, 12)
+	if tm, err = OpenTeam(path); err != nil {
+		t.Fatal(err)
+	}
+	defer tm.Close()
+	ids, _ := tm.Identities(ann.ID)
+	if len(ids) != 1 || ids[0].Linked.IsZero() || !ids[0].LastLogin.IsZero() {
+		t.Fatalf("an account from before: %+v", ids)
+	}
+	if _, err := tm.Admit(gitea("1", "ann@corp.example", true), ""); err != nil {
+		t.Fatal(err)
+	}
+	gh := Identity{Provider: "github", Issuer: "https://github.com", Subject: "77", Username: "ann-gh"}
+	must(t, tm.Link(ann.ID, gh))
+	ids, _ = tm.Identities(ann.ID)
+	if len(ids) != 2 || ids[0].LastLogin.IsZero() || !ids[1].LastLogin.IsZero() || ids[1].Linked.IsZero() {
+		t.Fatalf("signed in with the first, linked the second: %+v", ids)
+	}
+	bo, err := tm.Admit(gitea("2", "bo@corp.example", true), "")
+	must(t, err)
+	if err := tm.Unlink(bo.ID, gh); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("someone else's account: %v", err)
+	}
+	if err := tm.Unlink(bo.ID, gitea("2", "", false)); !errors.Is(err, ErrLastLogin) {
+		t.Fatalf("bo's only account: %v", err)
+	}
+	must(t, tm.Unlink(ann.ID, gitea("1", "", false)))
+	if ids, _ = tm.Identities(ann.ID); len(ids) != 1 || ids[0].Provider != "github" {
+		t.Fatalf("after unlinking: %+v", ids)
+	}
+	if err := tm.Unlink(ann.ID, gh); !errors.Is(err, ErrLastLogin) {
+		t.Fatalf("now the last: %v", err)
 	}
 }

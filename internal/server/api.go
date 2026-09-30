@@ -90,6 +90,7 @@ func (s *Server) apiRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("DELETE /api/machines", s.api(s.revokeMachine))
 	mux.HandleFunc("POST /api/machines/rebind", s.api(s.rebindMachine))
 	mux.HandleFunc("GET /api/identities", s.api(s.listIdentities))
+	mux.HandleFunc("DELETE /api/identities", s.api(s.unlinkIdentity))
 	mux.HandleFunc("GET /api/audit", s.api(s.adminOnly(s.listAudit)))
 	mux.HandleFunc("GET /api/me/webhook", s.api(s.getWebhook))
 	mux.HandleFunc("POST /api/me/webhook", s.api(s.setWebhook))
@@ -409,6 +410,31 @@ func (s *Server) listIdentities(w http.ResponseWriter, r *http.Request, c caller
 		ids = []store.Identity{}
 	}
 	writeJSON(w, http.StatusOK, ids)
+}
+
+// unlinkIdentity takes one of the caller's sign-in accounts off them; the last one stays (409 last).
+func (s *Server) unlinkIdentity(w http.ResponseWriter, r *http.Request, c caller) {
+	var p struct {
+		Provider string `json:"provider"`
+		Issuer   string `json:"issuer"`
+		Subject  string `json:"subject"`
+	}
+	if !decode(w, r, &p) {
+		return
+	}
+	switch err := s.team().Unlink(c.user.ID, store.Identity{Provider: p.Provider, Issuer: p.Issuer, Subject: p.Subject}); {
+	case errors.Is(err, store.ErrNotFound):
+		apiError(w, http.StatusNotFound, "not_found")
+		return
+	case errors.Is(err, store.ErrLastLogin):
+		apiError(w, http.StatusConflict, "last")
+		return
+	case err != nil:
+		apiError(w, http.StatusInternalServerError, "internal")
+		return
+	}
+	s.audit(r, c.user.ID, "unlink", p.Provider+":"+p.Subject)
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s *Server) listAudit(w http.ResponseWriter, r *http.Request, c caller) {
