@@ -5,10 +5,16 @@
 process.env.TZ = 'UTC';
 import {readFileSync} from 'node:fs';
 import renderToString from './vendor/render-to-string.mjs';
+import {render, h} from '../web/vendor/preact.mjs';
+import {act} from './vendor/test-utils.mjs';
+import {useState} from '../web/vendor/hooks.mjs';
+import {createKeys} from '../web/core/keys.js';
+import {install} from './dom.js';
+import {clock} from './fake.js';
 import * as ch from '../web/core/changes.js';
 import {form} from '../web/core/layout.js';
 import {words} from '../web/core/i18n.js';
-import {html} from '../web/ui/base.js';
+import {html, KeysContext} from '../web/ui/base.js';
 import {Changes, DiffLines} from '../web/pages/changes.js';
 import {Diff} from '../web/ui/output.js';
 import {outputs, home} from './rig.js';
@@ -80,6 +86,22 @@ test('picking lines: one tap picks a line, a second tap in the same file reaches
   eq(ch.pick(ch.pick(null, 4, 4, false), 4, 4, false), null, 'the same line again lets go');
   eq(ch.pick(ch.pick(null, 2, 5, false), 7, 7, false), {a: 2, b: 7, at: [2, 5], one: false}, 'a side-by-side row covers both its lines');
   eq(ch.pick(ch.pick(null, 6, 6, false), 2, 5, false), {a: 2, b: 6, at: [6, 6], one: false});
+});
+
+test('the cursor stops at each file and, in an open one, at each line: one a side-by-side pair; Shift reaches within the file', () => {
+  const rows = ch.rowsOf([{at: '@@ -1,2 +1,2 @@', lines: [' a', '-b', '+B']}]);
+  const groups = ch.ordered([file('x/one.go'), file('x/two.go'), file('bin', {binary: true})]);
+  const rowsOf = p => (p === 'x/one.go' ? rows : []);
+  const open = new Set(['x/one.go', 'bin']);
+  const ss = ch.stops(groups, open, rowsOf, false);
+  eq(ss, [{path: 'bin', lo: -1, hi: -1}, {path: 'x/one.go', lo: -1, hi: -1}, {path: 'x/one.go', lo: 1, hi: 1}, {path: 'x/one.go', lo: 2, hi: 2},
+    {path: 'x/one.go', lo: 3, hi: 3}, {path: 'x/two.go', lo: -1, hi: -1}], 'files in order, the hunk head skipped, a binary file never open');
+  eq(ch.stops(groups, open, rowsOf, true).filter(x => x.lo >= 0), [{path: 'x/one.go', lo: 1, hi: 1}, {path: 'x/one.go', lo: 2, hi: 3}], 'side by side: a pair');
+  eq([ch.stepTo(ss, null, 1), ch.stepTo(ss, null, -1)], [ss[0], ss[5]], 'from nowhere: the first or the last');
+  eq([ch.stepTo(ss, ss[1], 1), ch.stepTo(ss, ss[5], 1), ch.stepTo(ss, ss[0], -1)], [ss[2], ss[5], ss[0]], 'kept within the stops');
+  eq(ch.stepTo(ss, {path: 'gone', lo: -1, hi: -1}, 1), ss[0], 'a cursor no longer there starts again');
+  eq([ch.reach(ss, ss[2], 1), ch.reach(ss, ss[4], 1), ch.reach(ss, ss[2], -1)], [ss[3], ss[4], ss[2]], 'reaching stays on the file\'s lines');
+  eq(ch.spanned({lo: 5, hi: 5}, {lo: 2, hi: 3}), {a: 2, b: 5, at: [5, 5], one: false}, 'a text selection: from where it began to where it ends');
 });
 
 test('a quote is path:lines, the lines in a diff block, cut past its limits', () => {
@@ -267,6 +289,56 @@ test('the changes page draws in both forms and both languages, styled and worded
     'More context']) ok(en.list.includes(want), `en list: no ${want}`);
   ok(en.list.includes('Ignore whitespace') && en.space.includes('Only whitespace changed') && en.spaceOld.includes('too old to ignore whitespace'), 'en whitespace');
   ok(en.split.includes('Side by side') && en.picked.includes('Lines picked: 3') && en.picked.includes('Add to the send-back notes'), 'en picked');
+});
+
+test('on a desktop the keys walk the files and the open lines, pick, reach, send and let go; selected text picks its lines', async () => {
+  const hunks = [{at: '@@ -1,4 +1,4 @@', lines: [' a', '-b', '+B', ' c']}];
+  const data = {files: [file('a.go'), file('b.go')], total: {files: 2, add: 2, del: 0}, snapshot: '', git: true, hidden: 0, at: 0};
+  const log = {quoted: [], toggled: []};
+  function Rig() {
+    const [sel, setSel] = useState(null);
+    log.sel = sel;
+    return html`<${Changes} data=${data} open=${new Set(['a.go'])} diffs=${{'a.go': {hunks, of: 1, context: 3}}} sel=${sel}
+      onToggle=${p => log.toggled.push(p)} onRefresh=${() => {}}
+      onPick=${(path, lo, hi, x) => setSel(s => { const y = ch.pick(s?.path === path ? s : null, lo, hi, x); return y && {...y, path}; })}
+      onSpan=${(path, x) => setSel({...x, path})} onQuote=${(path, rows, to) => log.quoted.push([path, rows.length, to])} onClear=${() => setSel(null)} />`;
+  }
+  form.value = 'desktop';
+  const keys = createKeys({timers: clock()});
+  const root = install();
+  await act(() => render(h(KeysContext.Provider, {value: keys}, h(Rig)), root));
+  const press = (key, more = {}) => act(() => { keys.handle({key, target: globalThis.document.body, preventDefault() {}, ...more}); });
+  const cur = () => root.find('.cur').map(x => x.getAttribute('data-row') || x.className);
+  await press('j');
+  eq(cur(), [], 'keys wait for the tab to have the focus');
+  await act(() => root.one('.chg-list').dispatch('focusin'));
+  await press('j');
+  eq(cur(), ['chg-row cur'], 'the first file');
+  await press('Space');
+  eq(log.toggled, ['a.go'], 'Space opens or closes a file');
+  await press('j');
+  await press('j');
+  eq(cur(), ['2:2'], 'the lines, the hunk head skipped');
+  await press('Space');
+  eq([log.sel.a, log.sel.b], [2, 2], 'Space picks the line');
+  await press('ArrowDown', {shiftKey: true});
+  await press('ArrowDown', {shiftKey: true});
+  await press('ArrowDown', {shiftKey: true});
+  eq([log.sel.a, log.sel.b, cur()], [2, 4, ['4:4']], 'Shift reaches, and stops at the file\'s last line');
+  await press('Enter');
+  eq(log.quoted, [['a.go', 5, 'agent']], 'Enter sends what is picked to the agent');
+  await press('Escape');
+  eq(log.sel, null, 'Esc lets go');
+  await press('j');
+  eq(cur().length, 1, 'the next file');
+  const text = row => root.find('[data-row]').find(x => x.getAttribute('data-row') === row).one('.dv-t').childNodes[0];
+  globalThis.document.getSelection = () => ({isCollapsed: false, anchorNode: text('3:3'), focusNode: text('1:1')});
+  await act(() => globalThis.document.dispatch('selectionchange'));
+  eq([log.sel.path, log.sel.a, log.sel.b, log.sel.at], ['a.go', 1, 3, [3, 3]], 'selected text: its lines');
+  globalThis.document.getSelection = () => ({isCollapsed: true, anchorNode: text('2:2'), focusNode: text('2:2')});
+  await act(() => globalThis.document.dispatch('selectionchange'));
+  eq([log.sel.a, log.sel.b], [1, 3], 'a tap is no selection');
+  await act(() => render(null, root));
 });
 
 test('side by side keeps both sides level: one row a side for every pair', () => {

@@ -108,7 +108,8 @@ test('http: the session, sign-in, invitation and a terminal to allow', async () 
 
 // ⚠️ The design's key table (§6.6), every key once.
 const keyTable = ['g h', 'g t', 'g b', 'g r', 'g m', 'g a', 'g p', 'g s', 'Mod+K', '?', '/', 'n', '[', 'Mod+Z', 'Shift+T', 'Shift+L', 'Shift+M',
-  'v', 'd', 'e', 'x', 'Shift+D', 'j', 'k', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'Space', 'Enter', 'End', 'Home', 'Shift+O', 'Mod+F'];
+  'v', 'd', 'e', 'x', 'Shift+D', 'j', 'k', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'Space', 'Enter', 'End', 'Home', 'Shift+O', 'Mod+F',
+  'Shift+ArrowDown', 'Shift+ArrowUp', 'Esc'];
 
 test('the action table is the key table: one key per action and level, both names for each', () => {
   const all = actions.flatMap(a => a.keys);

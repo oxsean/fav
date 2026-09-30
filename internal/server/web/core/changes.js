@@ -123,6 +123,40 @@ export function pick(sel, lo, hi, extend) {
   return {a: lo, b: hi, at: [lo, hi], one: true};
 }
 
+// stops are where the keyboard's cursor can be, as the tab draws them: each file's row ({path, lo: -1}), then, while it
+// is open, each line of its diff ({path, lo, hi}: a side-by-side pair is one), hunk heads left out. rowsOf(path) is a
+// file's rows as drawn.
+export function stops(groups, open, rowsOf, split) {
+  const out = [];
+  for (const g of groups) for (const f of g.files) {
+    out.push({path: f.path, lo: -1, hi: -1});
+    if (f.binary || !open.has(f.path)) continue;
+    const rows = rowsOf(f.path);
+    const units = split ? sides(rows).map(p => [p.lo, p.hi]) : rows.map((_, i) => [i, i]);
+    for (const [lo, hi] of units) if (rows[lo].kind !== 'hunk') out.push({path: f.path, lo, hi});
+  }
+  return out;
+}
+
+const at = (ss, cur) => (cur ? ss.findIndex(x => x.path === cur.path && x.lo === cur.lo && x.hi === cur.hi) : -1);
+
+// stepTo is the stop n from cur, held at the ends; with no cursor (or one no longer there) the first, or going back
+// the last.
+export function stepTo(ss, cur, n) {
+  const i = at(ss, cur);
+  if (i < 0) return ss[n < 0 ? ss.length - 1 : 0] || null;
+  return ss[Math.min(ss.length - 1, Math.max(0, i + n))];
+}
+
+// reach is the line n from cur within its file (Shift and an arrow), cur itself at the file's ends.
+export function reach(ss, cur, n) {
+  const next = ss[at(ss, cur) + n];
+  return next && next.path === cur.path && next.lo >= 0 ? next : cur;
+}
+
+// spanned is the lines a text selection covers from the row it began on to the row it ends on.
+export const spanned = (from, to) => ({a: Math.min(from.lo, to.lo), b: Math.max(from.hi, to.hi), at: [from.lo, from.hi], one: false});
+
 const span = ns => (ns.length ? (Math.min(...ns) === Math.max(...ns) ? String(ns[0]) : Math.min(...ns) + '-' + Math.max(...ns)) : '');
 
 // quote is what picked rows a..b of path say to the agent: path:lines (the new side's numbers, or the old side's

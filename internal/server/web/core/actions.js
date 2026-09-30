@@ -38,9 +38,12 @@ export const actions = [
   {id: 'start', keys: ['Home'], level: 'list', group: 'output', palette: false},
   {id: 'unfold', keys: ['Shift+O'], level: 'list', group: 'output'},
   {id: 'find', keys: ['Mod+F'], level: 'list', group: 'output'},
+  {id: 'reachDown', keys: ['Shift+ArrowDown'], level: 'list', group: 'changes', bar: true, hint: 'act.reach', palette: false},
+  {id: 'reachUp', keys: ['Shift+ArrowUp'], level: 'list', group: 'changes', bar: true, hint: 'act.reach', palette: false},
+  {id: 'unpick', keys: ['Esc'], level: 'list', group: 'changes', palette: false},
 ];
 
-export const groups = ['go', 'general', 'work', 'list', 'output'];
+export const groups = ['go', 'general', 'work', 'list', 'output', 'changes'];
 
 export const byID = Object.fromEntries(actions.map(a => [a.id, a]));
 
@@ -56,8 +59,10 @@ register('actions', {
   'act.pick': ['选择', 'Pick'], 'act.toggle': ['展开', 'Expand'], 'act.open': ['打开', 'Open'],
   'act.end': ['跳到最新', 'Jump to the latest'], 'act.start': ['跳到开头', 'Jump to the start'], 'act.unfold': ['全部展开', 'Unfold all'],
   'act.find': ['在输出里查找', 'Find in the output'],
+  'act.reachDown': ['往下多选一行', 'Pick one more line below'], 'act.reachUp': ['往上多选一行', 'Pick one more line above'],
+  'act.reach': ['往上下多选一行', 'Pick one more line above / below'], 'act.unpick': ['取消选中的行', 'Let go of the picked lines'],
   'group.go': ['去往', 'Go to'], 'group.general': ['常用', 'General'], 'group.work': ['任务', 'Tasks'], 'group.list': ['列表', 'Lists'],
-  'group.output': ['输出', 'Output'],
+  'group.output': ['输出', 'Output'], 'group.changes': ['改动', 'Changes'],
 });
 
 // bindingsFor turns what a component can do, {id: {run(key, e), when?, label?}}, into key bindings for keys.push. label

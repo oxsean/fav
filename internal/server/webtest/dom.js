@@ -135,7 +135,10 @@ export function layout(scroller, height) {
 }
 
 export function createDocument() {
-  const doc = {activeElement: null};
+  const doc = {activeElement: null, listeners: {}};
+  doc.addEventListener = (type, fn) => { (doc.listeners[type] ||= []).push(fn); };
+  doc.removeEventListener = (type, fn) => { doc.listeners[type] = (doc.listeners[type] || []).filter(f => f !== fn); };
+  doc.dispatch = type => { for (const fn of doc.listeners[type] || []) fn({type}); };
   doc.createElementNS = (ns, tag) => new Element(doc, ns, tag);
   doc.createElement = tag => new Element(doc, HTML, tag);
   doc.createTextNode = data => new Text(doc, data);
