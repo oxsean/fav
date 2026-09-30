@@ -362,7 +362,7 @@ func (c *Coord) command(p Principal, r *wire.Request, do func(Principal, *wire.R
 	digest := journal.Digest(r.Params)
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if rc, ok := c.receipts[receiptKey(p.User, r.CommandID)]; ok {
+	if rc, ok := c.receipts[receiptKey(p.actor().ID, r.CommandID)]; ok {
 		if rc.Method != r.Method || rc.Digest != digest {
 			return nil, conflict("command_id")
 		}

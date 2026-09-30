@@ -32,7 +32,7 @@
   - 两种部署都轮询：`since = 游标 − 2 分钟`，游标取见过的最大 `updated_at`；带上次的 `ETag`（tracker 给的话，`If-None-Match`）；同一 issue 的 `updated_at` 没变就不再读。分页处理完才推进游标，扫描窗口前后重叠一点，再去重。
   - webhook 送得进来就开：公网部署，或者 Gitea、GitLab 和 server 在同一个网络里。进来的请求要按种类验签（`X-Gitea-Signature`、`X-Gitlab-Token`、`X-Hub-Signature-256`），body 上限 1 MiB，按 delivery id 去重，核对绑定的仓库 id。payload 只用来触发一次重新拉取。
   - 同一个 issue 在 tend 里只对应一个任务，唯一键是 `(tracker 实例, 仓库 id, issue 号)`。
-- `task.sync` 只有进程内的 `coord.System` 能调，连接永远带不上它。
+- `task.sync` 只有进程内的 `coord.System` 能调，连接永远带不上它。它的 `command_id` 由参数和这次读到的 issue 的更新时间一起算：同一次读取重试时按回放处理；issue 关了又开以后参数会和导入时一模一样，但更新时间变了，就是新命令。
 
 ## 导入与需求快照
 

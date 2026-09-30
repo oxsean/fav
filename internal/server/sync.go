@@ -518,7 +518,9 @@ func (s *Syncer) requirement(ctx context.Context, x store.Tracker, i tracker.Iss
 	p := coord.TaskSync{Project: x.Project, Kind: x.Kind, Tracker: x.ID, Base: x.Base, Repo: x.Repo, RepoID: x.RepoID, Number: i.Number,
 		URL: i.URL, Title: title, Text: text, Digest: digest, Closed: closed, Reopened: reopened, Owner: owner, Unmapped: owner == "" && len(i.Assignees) > 0}
 	b, _ := json.Marshal(p)
-	res, err := s.do(ctx, &wire.Request{Method: coord.MTaskSync, CommandID: "sync-" + journal.Digest(b), Params: b})
+	// ⚠️ the same params come again once an issue is closed and opened again: the id is one reading of the issue
+	id := journal.Digest(append(b, i.UpdatedAt.UTC().Format(time.RFC3339Nano)...))
+	res, err := s.do(ctx, &wire.Request{Method: coord.MTaskSync, CommandID: "sync-" + id, Params: b})
 	if err != nil {
 		return "", err
 	}

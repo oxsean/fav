@@ -70,7 +70,7 @@ run `state` 转移表（终态单调，重复事件无副作用）：
 ## 命令与收据
 
 - 写命令必带 `command_id`。信封里存收据：`{id, method, digest(params), result}`，`result` 是第一次的完整应答（事件应用之后的 task / run）。
-- 收据按（调用者, `command_id`）存，别人的同一个 id 不会拿到它。重放：method 和 digest 相同 → 调用者仍看得见结果就返回收据里的结果，看不见回 `not_found`；不同 → `conflict`。
+- 收据按（调用者, `command_id`）存，别人的同一个 id 不会拿到它；调用者按信封里的 actor 算，`coord.System` 存和查都用它的 actor。重放：method 和 digest 相同 → 调用者仍看得见结果就返回收据里的结果，看不见回 `not_found`；不同 → `conflict`。
 - 没有产生事件的成功命令（no-op）不写收据，直接回当前结果。
 - 撤销：`task.undo{id, command}` 撤回调用者自己的一条 `task.set_status`（改成 canceled 的除外）或 `task.move`。协调器折叠日志时（启动时重放也一样）在内存里按收据记下这类命令之前任务的样子和它之后任务的 `rev`；任务之后又被改过（`rev` 不同，撤销过一次也算）回 `conflict changed`，不是这个任务的命令回 `not_found`；撤销移动时原位置按 `task.move` 的规则再查一遍（原父任务已结束、有打开的 run、太深等），放不回去回和 `task.move` 同样的错误；完成排了合并 run 的，合并还在排队就取消（`reason: undone`），否则 `conflict merge started`。规则见 [../tasks/workflows.md](../tasks/workflows.md)「撤销」。
 - 超时不代表没执行：客户端重试用同一个 `command_id`（CLI 的写命令超时后同一个 id 最多再发两次）。

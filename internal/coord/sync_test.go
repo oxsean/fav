@@ -81,3 +81,33 @@ func TestAnIssueBecomesARequirementThatFollowsIt(t *testing.T) {
 		t.Fatalf("a closed issue is not imported: %+v %v", none, err)
 	}
 }
+
+func TestTheServersOwnCommandReplaysByItsID(t *testing.T) {
+	e := team(t, tend.Config{})
+	e.start()
+	e.project()
+	sys := e.as(System)
+	issue := TaskSync{Project: "p1", Kind: "gitea", Tracker: "tr1", Base: "http://git", Repo: "o/r", RepoID: 9, Number: 4,
+		Title: "Export CSV", Text: "rows as CSV", Digest: "d1"}
+	var x task.Task
+	if err := callAs(sys, MTaskSync, "s1", issue, &x); err != nil {
+		t.Fatal(err)
+	}
+	closed := issue
+	closed.Closed = true
+	if err := callAs(sys, MTaskSync, "s2", closed, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := callAs(sys, MTaskSync, "s3", issue, nil); err != nil {
+		t.Fatal(err)
+	}
+	var again task.Task
+	if err := callAs(sys, MTaskSync, "s2", closed, &again); err != nil || !again.Source.Closed {
+		t.Fatalf("a replay answers what it answered first: %+v %v", again.Source, err)
+	}
+	e.c.Read(func(st *task.State) {
+		if st.Tasks[x.ID].Source.Closed {
+			t.Fatalf("and changes nothing: %+v", st.Tasks[x.ID].Source)
+		}
+	})
+}

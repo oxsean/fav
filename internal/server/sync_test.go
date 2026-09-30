@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/oxsean/fav/internal/coord"
+	"github.com/oxsean/fav/internal/journal"
 	"github.com/oxsean/fav/internal/store"
 	"github.com/oxsean/fav/internal/task"
 	"github.com/oxsean/fav/internal/tend"
@@ -39,6 +40,15 @@ type syncRig struct {
 	mu      sync.Mutex
 	notices []coord.Notice
 	cmd     int
+}
+
+// sqliteLog is the coordinator's log as tend-server opens it.
+func sqliteLog(dir string, fold func(journal.Envelope) error) (coord.EventLog, error) {
+	l, err := store.Open(filepath.Join(dir, store.File), fold)
+	if err != nil {
+		return nil, err
+	}
+	return l, nil
 }
 
 func newSyncRig(t *testing.T) *syncRig { return newSyncRigOf(t, tracker.KindGitea) }
@@ -63,7 +73,8 @@ func newSyncRigOf(t *testing.T, kind string) *syncRig {
 	r.ann = ann.ID
 	dir, err := NewDirectory(r.team)
 	must(err)
-	r.c, err = coord.Open(coord.Options{Home: home, Version: "test", Remote: true, MachineOwner: dir.MachineOwner, Users: dir.User, Config: tend.Config{}})
+	r.c, err = coord.Open(coord.Options{Home: home, Version: "test", Remote: true, MachineOwner: dir.MachineOwner, Users: dir.User, Config: tend.Config{},
+		OpenLog: sqliteLog})
 	must(err)
 	ctx, cancel := context.WithCancel(context.Background())
 	go r.c.Run(ctx)
