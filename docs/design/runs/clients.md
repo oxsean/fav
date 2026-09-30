@@ -56,7 +56,7 @@ tend journal verify [--json] | repair [-y]
 - 认证：登录页列出 `/auth/logins` 给的登录方式（GitHub、OIDC），另有 token 表单。`POST /login`（表单 `token`）建一条网页会话，写 cookie `tend_session`（HttpOnly、SameSite=Strict、TLS 下 Secure、30 天）；`GET /session` 回 `{id, name, email, username, role, session}` 或 401；`POST /logout` 吊销这条会话。地址里的 `#invite-<secret>` 让登录按钮带上邀请，`#signin-<结果>` 显示登录失败的原因。`/client` 接受 header 里的 token 或这个 cookie；WebSocket 握手校验 Origin（同源）。会话被吊销或用户被停用，连接立即断开，页面回到登录页。
 - 响应头：CSP `default-src 'self'`（不允许内联脚本和 `style` 属性，宽度等动态样式经 CSSOM 设置）、`frame-ancestors 'none'`、`nosniff`、`no-referrer`、`Cache-Control: no-cache`。
 - 没有轮询：页面上的一切随 `state.watch`、`machines.watch`、`inbox.watch` 和 `run.output.watch` 的推送变化，首页的数每次重画时取当前时间。页面不调用 `setInterval`（`TestThePageRunsNoInterval`）；剩下的计时器都只响一次：防抖、重连的退避、调用超时、提示的停留、`g` 开头的两键序列。
-- 页面：首页、任务（列表、看板、树、详情、对话、改动）、运行、机器、团队，以及登录、终端授权、邀请。Agent、我两页在侧栏和标签栏里有位置，打开时写「这一页还在做」；在那之前，个人 token、替别人登记一台机器、agent 定义分别用 `tend-server token`、`tend-server token add --node <机器> --owner <用户>`、`tend agent` 完成，主题、语言、密度用快捷键和用户菜单。
+- 页面：首页、任务（列表、看板、树、详情、对话、改动）、运行、机器、团队、我，以及登录、终端授权、邀请。Agent 页在侧栏里有位置，打开时写「这一页还在做」；在那之前，替别人登记一台机器、agent 定义分别用 `tend-server token add --node <机器> --owner <用户>`、`tend agent` 完成。
 
 ### 结构
 
@@ -100,8 +100,9 @@ tend journal verify [--json] | repair [-y]
     - 组件不直接写键：用 `useActions(层级, {id: {run, when?, label?}})` 绑定自己能做的操作，键从表里来；`label` 让页面换一个更贴切的说法（首页的数字叫「作答」，`d` 叫「重试」）。哪些绑定生效（`when`）随页面变了，作用域就重新推入，键栏跟着变。
     - 命令面板列出此刻生效的操作（`runnable(keys.active())`），按中文名、英文名、id、键都能搜到，开头匹配的排前面；快捷键页按分组列出整张表。
   - `commands.js`：页面的写操作。发出时按 key 记为 pending；可撤销的写（标记完成）在列表里先藏起来，应答之后等那张列表下一次变化再放出来，免得闪回；没收到应答（`unsure`：`timeout` / `offline` / `closed`，页面的出错提示也用它）记为 `unknown`，`retry` 用同一个 command id 重发，coordinator 的回执保证不做两次。状态本身只来自 journal 的折叠。
-  - `http.js`：普通 HTTP：`/session`（未登录是 null）、`/login`（表单提交 token）、`/logout`、`/auth/logins`、`/auth/invite`、`/api/device`、`/api/users`（页面上的人按名字显示，项目成员变了重读；`local` 显示为服务器管理员）。写请求带 `X-Tend`，网络不通报 `offline`。
-  - `prefs.js`：语言、主题（跟随系统 / 浅色 / 深色）、密度（紧凑 / 标准 / 宽松）和皮肤，存在 `tend-lang`、`tend-theme`、`tend-look`；输出的密度（简洁 / 标准 / 详细，默认标准）记在 `tend-output-density`；存储不可用时用默认值。
+  - `http.js`：普通 HTTP：`/session`（未登录是 null）、`/login`（表单提交 token）、`/logout`、`/auth/logins`、`/auth/invite`、`/api/device`、`/api/users`（页面上的人按名字显示，项目成员变了重读；`local` 显示为服务器管理员），以及各页用的 `/api/*` 和皮肤的预设 `/theme/presets.json`。写请求带 `X-Tend`，网络不通报 `offline`。
+  - `prefs.js`：语言（中文 / English / 跟随浏览器，跟随时不存）、主题（跟随系统 / 浅色 / 深色）、密度（紧凑 / 标准 / 宽松）和皮肤（预设、自己的强调色、高对比度，合成样式表的名字 `skin`，换了 `boot.js` 立刻换样式表），存在 `tend-lang`、`tend-theme`、`tend-look`；浏览器通知开不开记在 `tend-notify`（默认开，还要浏览器允许）；输出的密度（简洁 / 标准 / 详细，默认标准）记在 `tend-output-density`；存储不可用时用默认值。
+  - `notices.js`：页面在后台时要弹的浏览器通知：inbox 里等的东西（每个待处理项按 id 和版本，没有就是任务和原因）有了新的那几条。store 的 inbox 在第一次推送之前是 `noInbox`，第一次推送只记下、不弹，已经在等的不算新。
   - `format.js`：数字的写法（`312k` tok、`$3.18`、`1h 04m`、`14:32`）。token 数是 input + cache_write + output，不含读缓存。
   - `select.js`：页面上的数，全是纯函数，输入是 store 的状态、机器、inbox 和当前时间。首页每个数的来源见下面「首页」。
   - `tasks.js`：任务页的纯函数：处境归到哪一列、筛选、列表 / 看板 / 树的行、看板上一次拖放对应的写、目录候选、默认的机器和 agent、派发前的判断、拆解草稿的编辑和检查、一个任务此刻能做哪些操作。规则见下面「任务页」。
@@ -133,6 +134,7 @@ tend journal verify [--json] | repair [-y]
   - `home.js`：首页，见下。
   - `conversation.js`：一个任务的对话，见下面「对话与输出」。
   - `runs.js`：运行页和一次运行自己的页，见下面「运行页」。`changes.js`：改动页签，见下面「改动」。
+  - `me.js`：我页，见下面「我页」；`notify.js`：电脑上按 `notices.js` 弹浏览器通知（标题是任务，正文是原因，`tag` 是任务 id），点一下回到页面、打开那个任务。
   - `machines.js`：机器页，见下面「机器页」；`team.js`：团队页，见下面「团队页」；`project.js`：团队页里项目的抽屉（成员、设置、工单同步）。这些页的推导（分组、摘要、提示、排队、泳道、每个人在哪些项目、项目的数、交接会做什么、审计的分类、项目设置的草稿和只发改了的字段、检出目录的检查结果、工作流定义的名字、工单绑定的状态和 issue 链接）在 `core/team.js`（纯函数）。`ui/secret.js` 的 `Secret` 显示服务器只给一次的值（节点 token、命令），带复制；剪贴板被拒时选中文字让人手动复制。
   - `tasks.js`（列表、看板、树和每个写操作）、`task.js`（一个任务的详情）、`taskforms.js`（新建 / 子任务 / 复制 / 编辑、派发、调整位置、审拆解、验收）、`taskwords.js`（它们的词表）：任务页，见下。
 - **首页**：
@@ -196,6 +198,11 @@ tend journal verify [--json] | repair [-y]
     - 工单同步（`/api/trackers*`，见 [trackers.md](../tasks/trackers.md)）：没绑定时是「绑定仓库」：选 GitHub / Gitea / GitLab（GitHub、GitLab 预填公网地址）、地址、仓库、机器人账号的 token（只存在 server 上）和同步设置；绑好后对话框写明按种类怎么配 webhook，用 `Secret` 显示 webhook 地址和只给一次的密钥，server 没有 `public_url` 时写明只靠轮询。绑定后显示仓库、机器人账号、状态（同步中、token 被拒已停、限流到何时）、需求数和出错数、上次成功和上次扫描、最后的错误、webhook 地址；操作是同步设置、换 token、重新同步、解绑（先确认，已建的任务留着）。同步记录列每个跟着的 issue：链接、对应任务、评论写于何时或还没写、已关闭、待重读、属于哪条的子工单、PR 链接、最后的错误；有任务的可「预览评论」，看现在写会是什么样。
   - 管理员另有三块：没用过的邀请（`GET /api/invites`：编号、身份、加入哪个项目、谁在何时发出、还剩多久，「作废」发 `DELETE /api/invites`）；谁能直接登录进来（`GET /api/admits`：邮箱域名 / 邮箱 / 账号、身份；「加规则」和每条的去掉，写明先认已关联的身份、再认邀请、最后才看规则、只认已验证的邮箱）；审计（`GET /api/audit` 最近 200 条，筛选全部 / 登录 / 凭据 / 被拒，被拒的标红）。这些 `/api` 只给管理员，成员的团队页只有成员和项目两块。
   - 手机上只看：成员卡片（身份和项目）、项目列表，点项目看成员（不能改，没有设置和工单同步）；写明成员、邀请和准入在电脑上管理。
+- **我页**（`g s`）：
+  - 页头：名字、邮箱或用户名和身份，「退出登录」。
+  - 左栏：外观（主题、皮肤的预设、强调色 `#rrggbb` 留空用皮肤自带的、对比度、密度和它的行高、语言），只存在这个浏览器里，改了立刻生效；通知：浏览器通知开 / 关（第一次打开时向浏览器申请，写明浏览器的态度：允许、会问、拒绝了、不是 HTTPS、不支持；后三种不给开关），个人 webhook（`GET/POST /api/me/webhook`，保存只在改了时可按，留空就是去掉）。
+  - 右栏：登录方式（`GET /api/identities` 的已关联账号，`/auth/logins` 里还没关联的带「关联」，去 `/auth/<名>/start?link=1`；出发前在 sessionStorage 记下时间（`tend-linking`），10 分钟内回到页面时打开我页并提示关联上了、账号已属于别人或登录没完成）；token（`GET /api/tokens` 里 `kind: token` 的：名字、建立和最近使用的时间；新建发 `POST /api/tokens {name}`，用 `Secret` 显示一次并写明怎么让 tend 用它；吊销先确认，写明用它登录的网页会话一起失效，发 `DELETE /api/tokens {id}`）；浏览器会话（`kind: web` 的：这个浏览器排最前、标「就是这个」、不给退出；用 token 登录的写那个 token 的名字；其余每条「退出」和「退出其他全部」都先确认，逐条 `DELETE /api/tokens`）。
+  - 手机上只有账号卡片、进团队页的一行（团队页在手机上只看）和退出登录。
 - **改动**（`pages/changes.js`，任务详情和运行页共用）：
   - 一个任务有几次运行时先选看哪一次，默认最新的。头部写文件数和 `+a −d`、筛选（全部、只看 agent 用工具改的、生成的文件，各带数目）；还在跑的运行写「截至 hh:mm」和刷新，状态变了也重读。
   - 文件按目录分组，根目录在前；每个文件一行：`+ ~ − →`（新增、修改、删除、改名，改名写 `旧 → 新`）、路径、生成的标记、`+a −d`。二进制写大小（有 `old_bytes` 时写 `旧 → 新`），不能展开；改动很大的和生成的先折起。
@@ -214,5 +221,6 @@ tend journal verify [--json] | repair [-y]
   - `tasks_test.js`：`core/tasks.js` 对 `tasks-state` 的结果：看板的列、每种拖放、树和收起、筛选 / 进度 / 花费、目录候选和默认值、派发前的判断、拆解草稿的编辑和每种错误、每种处境的操作。`taskpages_test.js`：任务页（列表、看板、树，带选中的任务）和每个表单按两种形态、两种语言画一遍，检查 class 和漏译；按上面五个帧文件走一遍；手机上的上一个 / 下一个和验收的按钮位置。
   - 对话的帧：`output-state.jsonl` 是一个任务的两次运行（第二次续接第一次的会话，一次问两个问题）、它的 `affordances` 和 inbox；`output-conv.jsonl` 接在它后面，是打开对话后 `run.output.watch` 的推送、往前一页和上一次运行的最后一页；`output-send.jsonl` 是插话、去向变了被拒、原地回答两个问题、打断、一条命令在这次运行里都允许（请求带 `allow_run`，回答带 `decision`）；`output-carry.jsonl` 接在 `output-send` 后面，是一条「这一轮结束后再说」、运行结束、协调器用它续接出的下一次运行和它的输出；`output-answer.jsonl` 是首页上一起回答两个问题；`output-answer-gone.jsonl`（首页）和 `output-gone.jsonl`（接在 `output-conv` 后面，任务页）是回答时别人已经先答了（`request_gone`）。`output_test.js`：三种密度的行、折叠和自动展开、查找和筛选、跟随的每种情形、锚点补偿、分页和占位、往前补页时写了一半的回答留着、深链、组件按两种形态两种语言画一遍，并按这几个帧文件走一遍。Go 严格解码其中 `task.message`、`run.interrupt`、`run.answer` 的参数和应答，以及 `affordances` 的 part 和推送（`coord.Affordances`）。Go 另拿 `internal/output` 的 testdata 和几种它没有的形状，分别交给 `output.Items` 和 JS 的 `items`，对照结果。
   - 改动的帧：`changes-list.jsonl` 接在 `output-state` 后面，是一次已结束运行的两页文件（生成的、改名、二进制、改动很大）和一个文件的第一处；`changes-live.jsonl` 是还在跑的运行第二页遇到 `snapshot_changed` 从头再取、刷新、第一处也遇到它；`changes-gone.jsonl` 接在 `home-state` 后面，是不在 git 里、有 `hidden`、清理过的列表和第一处。`home-state` 和 `output-state` 的 hello 里带 `run.changes`、`run.diff`。这两个方法协调器还没有，Go 不严格解码它们，帧文件的 `note` 行写明形状。`changes_test.js`：目录顺序、筛选、折起、预览、按页取和重取、留着不再取、各种说明，改动页按两种形态两种语言画一遍。`runs_test.js`：筛选和机器数、运行页和运行自己的页按两种形态两种语言画一遍，驱动筛选（记住）、移动预览、打开、停止（确认，`Esc` 不发）、手机上的下一个和页签，任务详情的改动页签（自动展开、展开折起的、筛选、刷新、换一次运行）。
+  - `me_test.js`：我页按两种形态两种语言画一遍（在假文档里，读完 `/api` 之后查 class 和漏译）；外观的每一项生效并记住；浏览器通知的申请、只对页面在后台时新出现的条目弹、点开任务、关掉；浏览器拒绝、不是 HTTPS、不支持时的说明；webhook 的保存和去掉；token 的新建（只显示一次）和吊销（确认，`Esc` 不发）；会话的退出和退出其他全部；关联账号前记下、回来后（`Root`）打开我页并提示，没记或记得太久的照旧丢掉片段；手机上的团队入口和退出登录。
   - `pages_test.js`：首页（在应用里）和登录、邀请、登录被拒、终端确认各页按两种形态、两种语言画一遍，检查 class 有规则、没有漏译；按 `home-commands` 用键盘走完完成 → 撤销 → 作答 → 重试（确认）→ 停止（确认，`Esc` 不发）；展开一条看它刚做的三步；`doing` → `note` → `last` 的先后；命令面板按中文名找操作、按标题找任务，快捷键页；token 登录（错的、对的）和终端的允许、已过期。
-- **预览**：`go run ./tools/webpreview` 在 127.0.0.1:18765 用工作区里的文件起一个只给看的页面：`web/` 的文件、`webtest/preview/` 的预览页、帧文件和皮肤，响应头和 server 一样（`server.SecureHeaders`，CSP 不变）。预览页用假 socket 按方法回放上面的帧文件、用假 fetch 回答登录和终端确认，时钟固定在帧文件的时刻；默认的帧另带 `changes-gone`；`?frames=tasks` 换成任务页的帧，`?frames=output` 换成对话的帧加 `changes-list`（打开 `?page=tasks&task=t1`），`?frames=carry` 是这段对话续接出第三次运行，`?frames=gone` 是它的问题被别人先答了（`output-send`、`output-carry` 推在前面文件开的流上的内容接在那个流后面），`?as=signedout` 看登录页，`#device-<码>`、`#invite-<码>` 看另两页。它不连任何 coordinator。
+- **预览**：`go run ./tools/webpreview` 在 127.0.0.1:18765 用工作区里的文件起一个只给看的页面：`web/` 的文件、`webtest/preview/` 的预览页、帧文件、皮肤和它们的预设，响应头和 server 一样（`server.SecureHeaders`，CSP 不变）。预览页用假 socket 按方法回放上面的帧文件、用假 fetch 回答登录和终端确认，时钟固定在帧文件的时刻；默认的帧另带 `changes-gone`；`?frames=tasks` 换成任务页的帧，`?frames=output` 换成对话的帧加 `changes-list`（打开 `?page=tasks&task=t1`），`?frames=carry` 是这段对话续接出第三次运行，`?frames=gone` 是它的问题被别人先答了（`output-send`、`output-carry` 推在前面文件开的流上的内容接在那个流后面），`?as=signedout` 看登录页，`#device-<码>`、`#invite-<码>` 看另两页。它不连任何 coordinator。

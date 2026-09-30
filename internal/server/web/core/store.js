@@ -35,12 +35,15 @@ function mergeAff(into, p) {
 }
 
 // createStore: frame schedules a redraw's worth of version bumps (requestAnimationFrame on the page).
+// noInbox is the inbox before its first push: every push is a list of its own.
+export const noInbox = Object.freeze([]);
+
 export function createStore({wire, frame = fn => globalThis.requestAnimationFrame(fn), onError = e => console.warn(e)}) {
   const state = empty();
   const rev = Object.fromEntries(tables.map(k => [k, signal(0)]));
   // phase: idle before the watch; snapshot while the parts arrive; live once they are all in.
   const phase = signal('idle');
-  const machines = signal([]), inbox = signal([]);
+  const machines = signal([]), inbox = signal(noInbox);
   const affordances = signal(noAffordances());
   let stagedAff = null;
   const session = signal(null), prefs = signal({});

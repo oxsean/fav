@@ -17,8 +17,10 @@ import {form, mac, phoneQuery, narrowQuery, NAV_OPEN_FROM, createNav} from '../c
 import {words} from '../core/i18n.js';
 import {AuthFrame, Login, Device} from './auth.js';
 import {App} from './app.js';
+import {returnedFromLink} from './me.js';
 
 const localStore = () => { try { return globalThis.localStorage; } catch { return null; } };
+const tabStore = () => { try { return globalThis.sessionStorage; } catch { return null; } };
 
 // connect is what a signed-in page runs on: the wire to /client, the store fed by its watches, writes and notices, and
 // the people's names, read again when a project's members change.
@@ -38,7 +40,9 @@ function connect({open, location, clock, doc, http}) {
   return {wire, store, commands, toasts, clock, names, stopNames, fetchOutput: run => wire.call('run.output.page', {run, before: -1, n: 20})};
 }
 
-function Root({http, router, keys, nav, prefs, first, open, location, history, clock, doc, storage}) {
+// Root is the page once boot has asked who is signed in: the sign-in page, a terminal's sign-in, or the app, on the me
+// page when the tab comes back from linking an account. tab is the tab's storage, notices the browser's notices.
+export function Root({http, router, keys, nav, prefs, first, open, location, history, clock, doc, storage, tab = null, notices = {}}) {
   const [session, setSession] = useState(first);
   const [live, setLive] = useState(null);
   const route = router.route.value;
@@ -48,7 +52,9 @@ function Root({http, router, keys, nav, prefs, first, open, location, history, c
     if (!session) return;
     const c = connect({open, location, clock, doc, http});
     setLive(c);
+    const back = returnedFromLink(auth, tab, clock());
     if (auth && auth.kind !== 'device') dropAuth();
+    if (back) { router.go({page: 'me'}); c.toasts.show(back); }
     return () => { c.stopNames(); c.store.stop(); c.wire.close(); };
   }, [session?.id]);
   const lang = () => prefs.toggleLang();
@@ -61,7 +67,7 @@ function Root({http, router, keys, nav, prefs, first, open, location, history, c
   }
   if (!live) return null;
   return html`<${App} ...${live} http=${http} router=${router} keys=${keys} nav=${nav} prefs=${prefs} session=${session} storage=${storage}
-    onLogout=${async () => { try { await http.logout(); } finally { location.assign('/'); } }} />`;
+    tab=${tab} notices=${notices} doc=${doc} onLogout=${async () => { try { await http.logout(); } finally { location.assign('/'); } }} />`;
 }
 
 // boot: root is where the page draws; open makes the socket (default: a WebSocket); fetch, storage, media (matchMedia)
@@ -77,7 +83,7 @@ export async function boot({root = globalThis.document.getElementById('app'), op
     doc.documentElement.dataset.density = prefs.density.value;
   });
   const skin = doc.getElementById('skin');
-  if (skin) skin.setAttribute('href', `theme/${prefs.skin}.css`);
+  effect(() => { skin?.setAttribute('href', `theme/${prefs.skin.value}.css`); });
   const phone = media(phoneQuery);
   const formNow = () => { form.value = phone.matches ? 'phone' : 'desktop'; };
   formNow();
@@ -92,6 +98,7 @@ export async function boot({root = globalThis.document.getElementById('app'), op
   let first = null;
   try { first = await http.session(); } catch {}
   const draw = () => render(html`<${KeysContext.Provider} value=${keys}><${Root} http=${http} router=${router} keys=${keys} nav=${nav}
-    prefs=${prefs} first=${first} open=${open} location=${location} history=${history} clock=${clock} doc=${doc} storage=${storage} /><//>`, root);
+    prefs=${prefs} first=${first} open=${open} location=${location} history=${history} clock=${clock} doc=${doc} storage=${storage}
+    tab=${tabStore()} notices=${{Notification: globalThis.Notification, secure: !!globalThis.isSecureContext}} /><//>`, root);
   effect(() => { void router.route.value; draw(); });
 }

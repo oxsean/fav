@@ -38,13 +38,13 @@
   - 在域名白名单里的。
 
   白名单只认 provider 标明「已验证」的邮箱。第一个管理员用 `tend-server admin add <email> --role admin` 在服务器上建。兜底方式是管理员生成的一次性邀请链接（`<server>/#invite-<secret>`，72 小时，用过即废），网页的管理页和 `tend-server admin invite` 都能生成。
-  - **判定顺序**：已关联的身份 → 邀请 → 邮箱、域名、`provider:username` 规则。一个已验证邮箱若已属于某个用户，不会自动关联，要那个用户登录后在账号页「关联」（`/auth/<provider>/start?link=1`）。
+  - **判定顺序**：已关联的身份 → 邀请 → 邮箱、域名、`provider:username` 规则。一个已验证邮箱若已属于某个用户，不会自动关联，要那个用户登录后在「我」页「关联」（`/auth/<provider>/start?link=1`）。
   - 内置用户 `local`：server 主机本身，管理员；从 `tokens.json` 迁进来的客户端 token 和 `tend-server` 命令行都以它的身份。
   - 登录和回调按 IP 限流：每分钟补 20 次，突发 20 次。
 - **会话**：
   - 网页的 cookie 里只存服务端会话 id（HttpOnly、SameSite=Strict、公网下 Secure），可以轮换，也可以单独吊销。用户能看到自己登录过的设备。
   - 浏览器会话本身就是一条凭据（`kind: web`，30 天），cookie `tend_session`。用 token 登录网页时，另建一条名为 `token:<id>` 的网页会话，随那个 token 一起失效。
-  - TUI 和 CLI 用个人 token，在网页账号页生成，或 `tend login [地址]` 走浏览器授权拿到：
+  - TUI 和 CLI 用个人 token，在网页的「我」页生成，或 `tend login [地址]` 走浏览器授权拿到：
     - `POST /auth/device`（限流，不需要会话）用客户端名字换一个 `device_code`（CLI 轮询用）、一个 `user_code`（人读的 `XXXX-XXXX`，字母表去掉 `0/O/1/I`）、`verify_url`（`<地址>/#device-<user_code>`）、轮询间隔和有效期；待确认的设备码只存在内存里，重启即丢，同时最多 100 个。
     - `POST /auth/device/token` 用 `device_code` 换状态：`pending`；`denied`（读一次即失效）；`expired`；或恰好一次的 `{status: ok, token, user}`，之后这个码就没了。
     - 网页的 `#device-<user_code>`（登录后）打开终端授权页：`GET /api/device?code=` 取码、客户端名字、来源地址、时间；`POST /api/device {code, allow}` 批准即铸一个个人 token（名字 `login:<客户端名字>`），拒绝只记录，两者都写审计（`device.allow` / `device.deny`）。
@@ -168,8 +168,8 @@
 
 ### 实现
 
-- 通知：协调器在每次提交后比较受影响任务的前后 `Situation`，产生 `task.needs_you` / `task.done`，收件人是负责人、在 `accept` 时加上验收人、以及相关 run 的发起人。`tend-server` 把它们交给个人 webhook（`users.webhook`，账号页设置，POST 一段带 `text` 的 JSON；配了 `public_url` 时带任务链接 `#task-<id>`），`deliveries` 表按「seq × 收件人 × 事件」去重；收件人在提交那一刻按当时的状态算出，已停用的人不投。
-- 收件箱：`inbox.list`（跟随用 `inbox.watch`）列出处于 `waiting`（`dispatch` 除外）、与我有关、并且我能写的任务，等得最久的排前面。网页有「等你」页和计数；页面开着且浏览器允许时，新条目弹浏览器通知。
+- 通知：协调器在每次提交后比较受影响任务的前后 `Situation`，产生 `task.needs_you` / `task.done`，收件人是负责人、在 `accept` 时加上验收人、以及相关 run 的发起人。`tend-server` 把它们交给个人 webhook（`users.webhook`，「我」页设置，POST 一段带 `text` 的 JSON；配了 `public_url` 时带任务链接 `#task-<id>`），`deliveries` 表按「seq × 收件人 × 事件」去重；收件人在提交那一刻按当时的状态算出，已停用的人不投。
+- 收件箱：`inbox.list`（跟随用 `inbox.watch`）列出处于 `waiting`（`dispatch` 除外）、与我有关、并且我能写的任务，等得最久的排前面。网页首页有「等你」和计数；电脑上页面开着、在后台，本人在「我」页打开了浏览器通知并且浏览器允许时，等的东西有了新的条目弹浏览器通知（手机上的通知是 Web Push 的事）。
 
 ## 审计与隐私
 

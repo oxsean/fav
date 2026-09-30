@@ -2,7 +2,7 @@
 // the palette, the shortcuts, theme, language, density) and the user's menu.
 import {useState, useMemo} from '../vendor/hooks.mjs';
 import {signal} from '../vendor/signals-core.mjs';
-import {html, useWords, useSignalValue, useActions, NamesContext} from '../ui/base.js';
+import {html, useWords, useSignalValue, useActions, usePhone, NamesContext} from '../ui/base.js';
 import {Shell} from '../ui/shell.js';
 import {Palette, Help} from '../ui/palette.js';
 import {Panel} from '../ui/panel.js';
@@ -13,6 +13,8 @@ import {Tasks} from './tasks.js';
 import {Runs} from './runs.js';
 import {Machines} from './machines.js';
 import {Team} from './team.js';
+import {Me} from './me.js';
+import {useNotices} from './notify.js';
 import {createChanges} from '../core/changes.js';
 import './words.js';
 
@@ -43,8 +45,10 @@ function finder(store, machines, go) {
 // App: router, keys, nav and toasts are core's; prefs core/prefs.js's; session is who signed in; fetchOutput(run) the
 // last events of a run; http is core/http.js's (the pages read /api there); storage is the browser's (the task page
 // keeps its filter and draft there); onLogout signs out; changes reads what runs changed (core/changes.js; one over
-// wire when not given); names is a signal of user id → name.
-export function App({store, commands, toasts, wire, http, router, keys, nav, prefs, session, clock, fetchOutput, storage, onLogout, copy, changes: given, names = null}) {
+// wire when not given); names is a signal of user id → name; notices are the browser's ({Notification, secure}), doc
+// the document, tab the tab's storage (the me page's).
+export function App({store, commands, toasts, wire, http, router, keys, nav, prefs, session, clock, fetchOutput, storage, onLogout, copy, changes: given, names = null,
+  notices = {}, doc = null, tab = null}) {
   const {t, f} = useWords();
   const route = useSignalValue(router.route);
   const machines = useSignalValue(store.machines);
@@ -57,6 +61,8 @@ export function App({store, commands, toasts, wire, http, router, keys, nav, pre
   const intent = useMemo(() => signal(null), []);
   const changes = useMemo(() => given || createChanges({wire}), [wire, given]);
   const go = to => router.go(to);
+  const phone = usePhone();
+  useNotices({store, prefs, notices, doc, active: !phone, onOpen: task => go({page: 'tasks', task})});
   const toTasks = kind => { if (route.page !== 'tasks') go({page: 'tasks', view: 'list'}); intent.value = {kind}; };
 
   useActions('global', {
@@ -93,7 +99,10 @@ export function App({store, commands, toasts, wire, http, router, keys, nav, pre
           : route.page === 'machines'
             ? html`<${Machines} store=${store} commands=${commands} toasts=${toasts} session=${session} http=${http} router=${router} storage=${storage}
               clock=${clock} copy=${copy} />`
-            : html`<${Soon} page=${route.page} />`;
+            : route.page === 'me'
+              ? html`<${Me} session=${session} http=${http} prefs=${prefs} toasts=${toasts} router=${router} notices=${notices} tab=${tab} clock=${clock}
+                copy=${copy} onLogout=${onLogout} />`
+              : html`<${Soon} page=${route.page} />`;
 
   return html`<${NamesContext.Provider} value=${names}><${Shell} keys=${keys} wire=${wire} nav=${nav} toasts=${toasts} page=${route.page} onNavigate=${onNavigate}
     counts=${counts} spent=${{tokens: day.tokens, usd: day.usd}} user=${session} userMenu=${userMenu}

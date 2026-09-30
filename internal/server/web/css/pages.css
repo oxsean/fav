@@ -316,3 +316,37 @@
 .team-card { cursor: default; }
 .team-phone { gap: 10px; }
 @media (max-width: 1100px) { .team-body { grid-template-columns: minmax(0, 1fr); } }
+.me { display: grid; gap: 12px; align-content: start; min-width: 0; }
+.me-head { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.me-who { display: grid; gap: 2px; min-width: 0; }
+.me-who .tasks-title { margin: 0; }
+.me-head-acts { margin-left: auto; display: flex; gap: 8px; }
+.me-avatar { flex: none; width: 40px; height: 40px; display: grid; place-items: center; border-radius: 50%; background: var(--accent); color: var(--surface); font-weight: 700; font-size: 17px; }
+.me-body { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+.me-col { display: grid; gap: 16px; min-width: 0; }
+.me-sets { display: grid; }
+.me-set { display: grid; grid-template-columns: 96px minmax(0, 1fr); align-items: center; gap: 12px; padding: 8px var(--pad); border-top: 1px solid var(--border); font-size: 12px; min-width: 0; }
+.me-set-top { align-items: start; }
+.me-set > .seg { justify-self: start; }
+.me-set .field { margin: 0; }
+.me-set .field > label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.me-k { color: var(--muted); }
+.me-inline { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; min-width: 0; }
+.me-skins { display: flex; gap: 8px; flex-wrap: wrap; }
+.me-skin { display: inline-flex; align-items: center; gap: 6px; min-height: 28px; padding: 3px 9px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); color: var(--text); font: inherit; font-size: 12px; cursor: pointer; }
+.me-skin.on { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+.me-swatch { display: inline-flex; width: 20px; height: 12px; border-radius: 3px; overflow: hidden; }
+.me-swatch i { flex: 1; }
+.me-hook { display: grid; gap: 4px; min-width: 0; }
+.me-hook-row { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.me-hook-row .field { flex: 1; min-width: 0; }
+.me-note { margin: 0; padding: 8px var(--pad); font-size: 11px; }
+.me-rows { list-style: none; margin: 0; padding: 0; }
+.me-row { display: flex; align-items: center; gap: 10px; padding: 8px var(--pad); border-top: 1px solid var(--border); font-size: 12px; min-width: 0; }
+.me-main { flex: 1; min-width: 0; display: grid; gap: 2px; overflow-wrap: anywhere; }
+.me-side { flex: none; font-size: 11px; }
+.me-current { color: var(--accent); }
+.me-link { text-decoration: none; }
+.me-phone { gap: 12px; }
+.me-card { cursor: default; }
+@media (max-width: 1100px) { .me-body { grid-template-columns: minmax(0, 1fr); } }

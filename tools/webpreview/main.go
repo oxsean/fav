@@ -1,6 +1,6 @@
 // Command webpreview serves the new Web UI from the working tree on fake data, for looking at it in a browser:
 // internal/server/web and internal/server/webtest as they lie on disk (the preview page and its fake server are in
-// webtest/preview, the frames it plays in webtest/frames), the preview page at / and the skins at /theme/, all under the
+// webtest/preview, the frames it plays in webtest/frames), the preview page at / and the skins and their presets at /theme/, all under the
 // server's own headers. Nothing reaches a coordinator.
 //
 //	go run ./tools/webpreview [-addr 127.0.0.1:18765]
@@ -10,6 +10,7 @@
 package main
 
 import (
+	"encoding/json"
 	"flag"
 	"fmt"
 	"log"
@@ -34,6 +35,11 @@ func main() {
 	mux.Handle("/web/", http.StripPrefix("/web/", serve("web")))
 	mux.Handle("/webtest/", http.StripPrefix("/webtest/", serve("webtest")))
 	mux.HandleFunc("GET /theme/{file}", func(w http.ResponseWriter, r *http.Request) {
+		if r.PathValue("file") == "presets.json" {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(skin.Presets)
+			return
+		}
 		name, ok := strings.CutSuffix(r.PathValue("file"), ".css")
 		sk, err := skin.Named(name)
 		if !ok || err != nil {

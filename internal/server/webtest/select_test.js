@@ -177,15 +177,35 @@ test('prefs: the old keys, cycling, and storage that refuses', () => {
   const saved = new Map([['tend-lang', 'en'], ['tend-theme', 'dark'], ['tend-look', '{"skin":"forest","accent":"2d7a5b","high":true,"density":"compact"}']]);
   const storage = {getItem: k => saved.get(k) ?? null, setItem: (k, v) => saved.set(k, v)};
   const p = createPrefs({storage, asked: 'zh-CN'});
-  eq([p.lang.value, p.theme.value, p.density.value, p.skin], ['en', 'dark', 'compact', 'forest-2d7a5b-high'], 'read');
+  eq([p.lang.value, p.theme.value, p.density.value, p.skin.value], ['en', 'dark', 'compact', 'forest-2d7a5b-high'], 'read');
   p.toggleLang(); p.cycleTheme(); p.cycleDensity();
   eq([p.lang.value, p.theme.value, p.density.value, saved.get('tend-lang'), saved.get('tend-theme'), JSON.parse(saved.get('tend-look'))],
     ['zh', 'system', 'default', 'zh', 'system', {skin: 'forest', accent: '2d7a5b', high: true, density: 'default'}], 'cycled and kept');
   const broken = {getItem() { throw new Error('denied'); }, setItem() { throw new Error('denied'); }};
   const q = createPrefs({storage: broken, asked: 'zh-TW'});
   q.cycleTheme();
-  eq([q.lang.value, q.theme.value, q.density.value, q.skin], ['zh', 'light', 'default', 'tend'], 'defaults without storage');
-  eq(createPrefs({storage: {getItem: k => (k === 'tend-look' ? '{"skin":"../x"}' : null), setItem() {}}}).skin, 'tend', 'a bad skin name');
+  eq([q.lang.value, q.theme.value, q.density.value, q.skin.value], ['zh', 'light', 'default', 'tend'], 'defaults without storage');
+  eq(createPrefs({storage: {getItem: k => (k === 'tend-look' ? '{"skin":"../x"}' : null), setItem() {}}}).skin.value, 'tend', 'a bad skin name');
+});
+
+test('prefs: the me page sets the language, the look and browser notices', () => {
+  const saved = new Map([['tend-lang', 'en']]);
+  const storage = {getItem: k => saved.get(k) ?? null, setItem: (k, v) => saved.set(k, v), removeItem: k => saved.delete(k)};
+  const p = createPrefs({storage, asked: 'zh-CN'});
+  eq([p.langChoice.value, p.lang.value], ['en', 'en'], 'a language chosen');
+  p.setLang('auto');
+  eq([p.langChoice.value, p.lang.value, saved.has('tend-lang')], ['auto', 'zh', false], 'the browser\'s, forgetting the choice');
+  p.setLang('xx');
+  eq(p.langChoice.value, 'auto', 'no such language');
+  p.setLook({skin: 'ember', accent: 'aa3300'});
+  p.setLook({high: true, accent: 'nothex', skin: '../x'});
+  eq(p.skin.value, 'ember-aa3300-high', 'a skin, an accent and the contrast; what is not well formed left');
+  p.setLook({accent: ''});
+  p.setDensity('comfortable');
+  eq([p.skin.value, JSON.parse(saved.get('tend-look'))], ['ember-high', {skin: 'ember', accent: '', high: true, density: 'comfortable'}], 'the accent dropped, kept with the density');
+  eq(p.notify.value, true, 'notices are on until turned off');
+  p.setNotify(false);
+  eq([p.notify.value, createPrefs({storage}).notify.value], [false, false], 'turned off and kept');
 });
 
 await run();

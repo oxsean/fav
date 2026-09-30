@@ -46,5 +46,24 @@
     {"number": 43, "task": "t4", "last_error": "422 Unprocessable Entity"},
     {"number": 40, "closed": true, "dirty": true}
   ],
-  "GET /api/trackers/preview": {"body": "**tend** is working on this: Refund emails\n\n- [x] Cart totals\n- [ ] Refund emails"}
+  "GET /api/trackers/preview": {"body": "**tend** is working on this: Refund emails\n\n- [x] Cart totals\n- [ ] Refund emails"},
+  "GET /api/tokens": [
+    {"id": "k1", "kind": "token", "name": "login:tend on mba", "owner": "u_b", "created": "2026-09-24T09:00:00Z", "last_used": "2026-09-30T14:20:00Z"},
+    {"id": "k2", "kind": "token", "name": "ci-bot", "owner": "u_b", "created": "2026-09-10T09:00:00Z"},
+    {"id": "w1", "kind": "web", "owner": "u_b", "created": "2026-09-29T08:55:00Z", "last_used": "2026-09-30T14:31:00Z", "expires": "2026-10-29T08:55:00Z", "current": true},
+    {"id": "w2", "kind": "web", "name": "token:k1", "owner": "u_b", "created": "2026-09-28T21:40:00Z", "last_used": "2026-09-29T21:40:00Z", "expires": "2026-10-28T21:40:00Z"},
+    {"id": "w3", "kind": "web", "owner": "u_b", "created": "2026-09-12T10:00:00Z", "last_used": "2026-09-20T10:00:00Z", "expires": "2026-10-12T10:00:00Z"}
+  ],
+  "POST /api/tokens": {"id": "k3", "token": "tend_c_preview0000000000"},
+  "GET /api/identities": [
+    {"provider": "oidc", "issuer": "https://sso.example.com", "subject": "1042", "username": "bo", "email": "bo@example.com", "email_verified": true}
+  ],
+  "GET /api/me/webhook": {"url": "https://ntfy.example.com/tend-bo"},
+  "GET /auth/logins": [{"name": "github", "display": "GitHub"}, {"name": "oidc", "display": "Company SSO"}],
+  "GET /theme/presets.json": [
+    {"name": "tend", "input": {"base": "#5f6b7a", "accent": "#315fa5"}},
+    {"name": "forest", "input": {"base": "#5b6b63", "accent": "#2d7a5b"}},
+    {"name": "ember", "input": {"base": "#76685e", "accent": "#b0502a"}},
+    {"name": "graphite", "input": {"base": "#6b6b6b", "accent": "#5a55c8"}}
+  ]
 }

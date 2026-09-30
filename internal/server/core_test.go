@@ -19,6 +19,7 @@ import (
 	"github.com/oxsean/fav/internal/journal"
 	"github.com/oxsean/fav/internal/node"
 	"github.com/oxsean/fav/internal/output"
+	"github.com/oxsean/fav/internal/skin"
 	"github.com/oxsean/fav/internal/store"
 	"github.com/oxsean/fav/internal/task"
 )
@@ -74,6 +75,8 @@ func TestTheChangesOfARunInPagesAndOnTheTab(t *testing.T) { runModule(t, "webtes
 func TestTheRunsPageAndARunsOwn(t *testing.T) { runModule(t, "webtest/runs_test.js") }
 
 func TestTheMachinesPage(t *testing.T) { runModule(t, "webtest/team_test.js") }
+
+func TestTheMePage(t *testing.T) { runModule(t, "webtest/me_test.js") }
 
 func TestTheTaskPagesBoardsTreesAndDrafts(t *testing.T) { runModule(t, "webtest/tasks_test.js") }
 
@@ -369,6 +372,19 @@ func TestPageAPIAnswersAreTheServersShapes(t *testing.T) {
 		},
 		"GET /api/trackers": func() any { return new([]TrackerView) }, "POST /api/trackers": func() any { return new(TrackerView) },
 		"GET /api/trackers/issues": func() any { return new([]TrackerIssueView) },
+		"GET /api/tokens":          func() any { return new([]credView) }, "GET /api/identities": func() any { return new([]store.Identity) },
+		"POST /api/tokens": func() any {
+			return new(struct {
+				ID    string `json:"id"`
+				Token string `json:"token"`
+			})
+		},
+		"GET /api/me/webhook": func() any {
+			return new(struct {
+				URL string `json:"url"`
+			})
+		},
+		"GET /auth/logins": func() any { return new([]loginInfo) }, "GET /theme/presets.json": func() any { return new([]skin.Preset) },
 		"GET /api/trackers/preview": func() any {
 			return new(struct {
 				Body string `json:"body"`

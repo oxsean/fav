@@ -1,6 +1,7 @@
 // http is the page's plain HTTP: the browser session (/session, /login, /logout), the sign-in methods and invitation
 // (/auth/*), a terminal's sign-in to allow (/api/device), the team's people, admission, invitations and audit log, the
-// machines' node tokens and the projects' tracker bindings (/api/*). Writes carry X-Tend, which the server asks of a
+// machines' node tokens, the projects' tracker bindings, the viewer's own tokens, sessions, linked accounts and webhook
+// (/api/*), and the skins' presets (/theme/presets.json). Writes carry X-Tend, which the server asks of a
 // browser.
 
 export class HTTPError extends Error {
@@ -70,6 +71,18 @@ export function createHTTP({fetch = (...a) => globalThis.fetch(...a)} = {}) {
     addMachine: name => ask('POST', '/api/machines', {name}),
     revokeMachine: id => ask('DELETE', '/api/machines', {id}),
     rebindMachine: id => ask('POST', '/api/machines/rebind', {id}),
+    // tokens are the caller's personal tokens and browser sessions: [{id, kind: token | web, name, created, last_used,
+    // expires, current}]; addToken makes a token → {id, token}, shown once; revokeToken ends one of either kind.
+    tokens: async () => (await ask('GET', '/api/tokens')) || [],
+    addToken: name => ask('POST', '/api/tokens', {name}),
+    revokeToken: id => ask('DELETE', '/api/tokens', {id}),
+    // identities are the sign-in accounts linked to the caller: [{provider, issuer, subject, username?, email?, name?}].
+    identities: async () => (await ask('GET', '/api/identities')) || [],
+    // webhook is the caller's personal webhook ('' for none); setWebhook changes it ('' removes it).
+    webhook: async () => (await ask('GET', '/api/me/webhook'))?.url || '',
+    setWebhook: url => ask('POST', '/api/me/webhook', {url}),
+    // presets are the built-in skins, the default first: [{name, input: {base, accent}}].
+    presets: async () => (await ask('GET', '/theme/presets.json')) || [],
     // trackers are the tracker bindings of the projects the caller manages; bindTracker binds one
     // ({project, kind, base, repo, token, settings}) → the binding with its webhook secret, once.
     trackers: async () => (await ask('GET', '/api/trackers')) || [],
@@ -83,6 +96,9 @@ export function createHTTP({fetch = (...a) => globalThis.fetch(...a)} = {}) {
     trackerPreview: (id, number) => ask('GET', `/api/trackers/preview?id=${encodeURIComponent(id)}&number=${number}`),
   };
 }
+
+// linkURL is where a sign-in method's button goes to link that account to the signed-in user.
+export const linkURL = name => `/auth/${encodeURIComponent(name)}/start?link=1`;
 
 // startURL is where a sign-in method's button goes; an invitation rides along.
 export const startURL = (name, invite = '') => `/auth/${encodeURIComponent(name)}/start${invite ? '?invite=' + encodeURIComponent(invite) : ''}`;
