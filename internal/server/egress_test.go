@@ -21,7 +21,8 @@ func TestEgressConnectsOnlyToPublicAddresses(t *testing.T) {
 		t.Fatal(err)
 	}
 	for a, ok := range map[string]bool{
-		"8.8.8.8": true, "2606:4700::1111": true, "100.64.0.9": true,
+		"8.8.8.8": true, "2606:4700::1111": true, "100.64.0.9": false, "100.127.255.254": false, "100.128.0.1": true,
+		"fd7a:115c:a1e0::1": false, "64:ff9b::6440:9": false,
 		"127.0.0.1": false, "::1": false, "10.1.2.3": false, "172.16.0.1": false, "192.168.1.5": false, "169.254.169.254": false,
 		"fe80::1": false, "fd00::1": false, "0.0.0.0": false, "::": false, "224.0.0.1": false, "255.255.255.255": false,
 		"::ffff:127.0.0.1": false, "64:ff9b::7f00:1": false, "64:ff9b::808:808": true, "100.101.8.10": false,
@@ -33,6 +34,10 @@ func TestEgressConnectsOnlyToPublicAddresses(t *testing.T) {
 	lan, _ := NewEgress([]string{"10.0.0.0/8", "127.0.0.1/32"}, "127.0.0.1:1")
 	if !lan.permits(netip.MustParseAddr("10.9.9.9")) || !lan.permits(netip.MustParseAddr("127.0.0.1")) || lan.permits(netip.MustParseAddr("192.168.0.1")) {
 		t.Error("the allow list takes its prefixes in, and only them")
+	}
+	tailnet, _ := NewEgress([]string{"100.64.0.0/10", "fd7a:115c:a1e0::/48"}, "")
+	if !tailnet.permits(netip.MustParseAddr("100.100.1.2")) || !tailnet.permits(netip.MustParseAddr("fd7a:115c:a1e0::5")) {
+		t.Error("the allow list takes the tailnet in")
 	}
 	if _, err := NewEgress([]string{"10.0.0.0"}, ""); err == nil {
 		t.Error("a prefix without its length is refused")

@@ -24,6 +24,10 @@ var errEgress = errors.New("egress refused")
 // nat64 embeds an IPv4 address in its last four bytes (RFC 6052).
 var nat64 = netip.MustParsePrefix("64:ff9b::/96")
 
+// ⚠️ Shared address space (RFC 6598), where a tailnet's machines sit, and the tailnet's IPv6 range: reachable from
+// the server though not public.
+var tailnet = []netip.Prefix{netip.MustParsePrefix("100.64.0.0/10"), netip.MustParsePrefix("fd7a:115c:a1e0::/48")}
+
 // NewEgress takes allow (server.egress_allow, CIDR prefixes) and the address the server listens on, which it never
 // connects to: all of this host's addresses when it listens on every interface.
 func NewEgress(allow []string, listen string) (*Egress, error) {
@@ -80,6 +84,11 @@ func (e *Egress) permits(ip netip.Addr) bool {
 	}
 	for _, o := range e.own {
 		if o == ip {
+			return false
+		}
+	}
+	for _, p := range tailnet {
+		if p.Contains(ip) {
 			return false
 		}
 	}

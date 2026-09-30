@@ -550,7 +550,7 @@ and an approver; a task that comes to wait for someone reaches its owner, its ap
 dispatched the run it is about — in their **Needs you** list on the web page, as a browser notification while the page is
 open, and at a personal webhook (Account page; a JSON POST with a `text` field for ntfy, Slack and the like, with a link to
 the task when `public_url` is set). The server posts only to public addresses; a webhook, or a tracker, on the team's own
-network needs its prefix in `server.egress_allow` (`["10.0.0.0/8"]`). An admin's **Hand over and disable** on the Team page gives a leaving member's projects,
+network, or on the tailnet (`100.64.0.0/10`, `fd7a:115c:a1e0::/48`), needs its prefix in `server.egress_allow` (`["10.0.0.0/8"]`). An admin's **Hand over and disable** on the Team page gives a leaving member's projects,
 tasks and definitions to others and ends their credentials; their machines retire, and runs still open on them wait in
 the admins' **Needs you**.
 

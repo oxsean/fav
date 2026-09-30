@@ -53,7 +53,8 @@
 - 任务书正文不进 argv / ps。
 - 模式二信任边界按人划分：个人 token 只有它主人的权限；只有主人是 `local` 的客户端 token（`tend-server token add --client` 不带 `--owner`）和 `tend-server` 命令行算内置管理员 `local`，拿到这种 token = 能在 `allow_dirs` 里用允许的档案跑任意任务书、读所有节点的会话；`node.call` 限机器主人和管理员；连 server 的节点默认 `share_sessions: runs`。部署在 tailnet 或公网都行，公网必须 TLS；`--plain` 时只让绑定 tailnet 地址的转发器连它。
 - token 哈希按常量时间比较。
-- server 替成员发出的请求（webhook、Web Push、工单）只连公网地址，内网网段要管理员写进 `server.egress_allow`（[tasks/team.md](../tasks/team.md)「人在任务里」的实现，「出网」）。
+- server 替成员发出的请求（webhook、Web Push、工单）只连公网地址，内网网段要管理员写进 `server.egress_allow`（[tasks/team.md](../tasks/team.md)「人在任务里」的实现，「出网」）。tailnet 的地址（`100.64.0.0/10`、`fd7a:115c:a1e0::/48`）也不连：tailnet 上的工单系统和 webhook 要把它们的地址或这两段写进 `server.egress_allow`（如 `["100.101.8.10/32"]`），写整段就是让每个成员都能让 server 连 tailnet 上任何一台机器。
+- 升级到带 `__Host-` 前缀的会话 cookie 的版本后，https 下旧的 `tend_session` 不再认：每个浏览器（包括主屏幕上的 PWA）要重新登录一次，推送设备在重新登录后打开页面时按新会话重新登记。
 - macOS 没有父进程死亡信号：监督进程被杀后 agent 可能还在跑（Linux 的 Pdeathsig、Windows 的 Job 会带走它），所以 unknown run 的会话守卫看 agent pid 是否还活着。
 - 诊断日志（`service.log`、server 日志）不记 token 和任务书；权威日志 `events.jsonl` 存任务书（0600）。
 - 节点 token 绑定到第一台用它的机器（见上文「凭据与身份」）：token 泄露后换一台机器也连不上，除非有人先 `rebind`。
