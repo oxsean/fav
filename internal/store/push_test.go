@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -68,7 +69,7 @@ func TestUpgradingTheDeliveriesKeepsWhatWentAndSendsNothingAgain(t *testing.T) {
 		got[seq] = status + " " + result + " " + device
 	}
 	rows.Close()
-	want := map[int64]string{3: "ok 200 ", 4: "failed 500 ", 5: "failed  ", 6: "failed error ", 7: "ok 204 "}
+	want := map[int64]string{3: "ok 200 ", 4: "failed 500 ", 5: "failed  ", 6: "failed unreachable ", 7: "ok 204 "}
 	for seq, w := range want {
 		if got[seq] != w {
 			t.Errorf("seq %d: %q, want %q", seq, got[seq], w)
@@ -278,8 +279,7 @@ func TestUpgradingForgetsTheAddressesDeliveriesRecorded(t *testing.T) {
 		}
 		got[id] = result
 	}
-	want := map[int]string{1: "dial: connect: connection refused", 2: "Post: timeout", 3: "dial: no such host", 4: "Post: unreachable",
-		5: "503", 6: "ok", 7: "another owner"}
+	want := map[int]string{1: "connect", 2: "timeout", 3: "dns", 4: "unreachable", 5: "503", 6: "ok", 7: "another owner"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("%v", got)
 	}
@@ -476,5 +476,58 @@ func TestABatchTakesOneDeliveryPerDevice(t *testing.T) {
 	}
 	if got, _ := tm.Batch(now, true, 64, []string{"hook:u_b"}); len(got) != 0 {
 		t.Fatalf("webhook busy: %v", keys(got))
+	}
+}
+
+// What deliveries and webhook tests recorded before 0017 keeps only its class: an error's text could name the address.
+func TestUpgradingKeepsOnlyTheClassOfWhatFailed(t *testing.T) {
+	path := filepath.Join(t.TempDir(), File)
+	tm, err := OpenTeam(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tm.Close()
+	setVersion(t, path, 16)
+	was := map[string]string{
+		`failed to parse Location header "/fcm/send/s3cret": bad`: "unreachable", "Post: timeout": "timeout",
+		"dial: connect: connection refused": "connect", "dial: no such host": "dns", "Post: unreachable": "unreachable",
+		"503": "503", "ok": "ok", "another owner": "another owner", "": "",
+	}
+	i := 0
+	for r := range was {
+		i++
+		q := strings.ReplaceAll(r, "'", "''")
+		exec(t, path, `INSERT INTO deliveries (seq, user_id, event, device_id, status, attempts, next_at, notice, result, at)
+			VALUES (`+strconv.Itoa(i)+`, 'local', 'task.done', '', 'failed', 1, 0, '{}', '`+q+`', 1);
+			INSERT INTO audit (at, actor, kind, detail) VALUES (1, 'local', 'webhook.test', '`+q+`')`)
+	}
+	exec(t, path, `INSERT INTO audit (at, actor, kind, detail) VALUES (1, 'local', 'login_refused', 'gitea: some text')`)
+	if tm, err = OpenTeam(path); err != nil {
+		t.Fatal(err)
+	}
+	defer tm.Close()
+	rows, err := tm.r.Query(`SELECT result FROM deliveries`)
+	must(t, err)
+	var got []string
+	for rows.Next() {
+		var r string
+		must(t, rows.Scan(&r))
+		got = append(got, r)
+	}
+	rows.Close()
+	var want []string
+	for _, v := range was {
+		want = append(want, v)
+	}
+	slices.Sort(got)
+	slices.Sort(want)
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("deliveries: %q", got)
+	}
+	log, _ := tm.AuditLog(100)
+	for _, e := range log {
+		if e.Kind == "webhook.test" && !slices.Contains(want, e.Detail) || e.Kind == "login_refused" && e.Detail != "gitea: some text" {
+			t.Errorf("audit: %+v", e)
+		}
 	}
 }

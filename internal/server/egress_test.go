@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
+	"slices"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -114,5 +116,44 @@ func TestTheSyncReachesNoPrivateTracker(t *testing.T) {
 	}
 	if x := r.tracker(); x.LastError == "" {
 		t.Fatalf("the binding says why: %+v", x)
+	}
+}
+
+// What a failed delivery or webhook test records is a class of error, never the text of one: a redirect whose
+// Location the client cannot read would put the address, a push endpoint's secret path, in it.
+func TestAFailureIsRecordedAsItsClassAlone(t *testing.T) {
+	bad := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header()["Location"] = []string{"https://[::1%25s3cret/fcm/send/s3cret"}
+		w.WriteHeader(http.StatusFound)
+	}))
+	defer bad.Close()
+	loop, _ := NewEgress([]string{"127.0.0.0/8"}, "127.0.0.1:0")
+	err := postWebhook(context.Background(), loop.Client(time.Second), bad.URL+"/s3cret", WebhookPayload{})
+	if err == nil {
+		t.Fatal("a Location it cannot read fails")
+	}
+	for _, e := range []error{err, errEgress, context.DeadlineExceeded, &sendError{status: 503}, nil} {
+		if r := resultOf(e); !slices.Contains(resultClasses, r) && !(len(r) == 3 && r[0] >= '1' && r[0] <= '5') || strings.Contains(r, "s3cret") {
+			t.Errorf("%v: %q", e, r)
+		}
+	}
+	strict, _ := NewEgress(nil, "")
+	_, derr := strict.Client(time.Second).Get("https://127.0.0.1:1/x")
+	if resultOf(derr) != "refused" {
+		t.Errorf("refused by the rules: %q", resultOf(derr))
+	}
+	_, derr = loop.Client(time.Second).Get("http://127.0.0.1:1/x")
+	if resultOf(derr) != "connect" {
+		t.Errorf("nothing listening: %q", resultOf(derr))
+	}
+	_, derr = (&Egress{allow: []netip.Prefix{netip.MustParsePrefix("0.0.0.0/0")}}).Client(time.Second).Get("http://no-such-host.invalid/x")
+	if resultOf(derr) != "dns" {
+		t.Errorf("no such host: %q", resultOf(derr))
+	}
+	tlsSrv := httptest.NewTLSServer(http.NotFoundHandler())
+	defer tlsSrv.Close()
+	_, derr = loop.Client(time.Second).Get(tlsSrv.URL)
+	if resultOf(derr) != "tls" {
+		t.Errorf("an unknown certificate: %q", resultOf(derr))
 	}
 }

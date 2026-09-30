@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"cmp"
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -417,30 +419,43 @@ func (e *sendError) final() bool {
 	return e.status >= 300 && e.status < 500 && e.status != http.StatusRequestTimeout && e.status != http.StatusTooManyRequests
 }
 
+// resultClasses are what resultOf answers besides an HTTP status.
+var resultClasses = []string{"ok", "timeout", "dns", "connect", "tls", "refused", "unreachable"}
+
+// resultOf is the class of how a try went, what the outbox and the audit keep: an HTTP status, or one of
+// resultClasses. Never an error's text: it can name the address, whose path is a push device's secret.
 func resultOf(err error) string {
-	if err == nil {
-		return "ok"
-	}
 	var se *sendError
-	if errors.As(err, &se) {
-		return se.Error()
-	}
-	var ue *url.Error
-	if errors.As(err, &ue) {
-		if ue.Timeout() {
-			return ue.Op + ": timeout"
-		}
-		err = ue.Err // ue names the endpoint, whose path is the device's secret
-	}
-	s := err.Error()
+	var ne net.Error
+	var dns *net.DNSError
 	var oe *net.OpError
-	if errors.As(err, &oe) {
-		s = oe.Op + ": " + oe.Err.Error()
+	switch {
+	case err == nil:
+		return "ok"
+	case errors.As(err, &se):
+		return strconv.Itoa(se.status)
+	case errors.Is(err, errEgress):
+		return "refused"
+	case errors.Is(err, context.DeadlineExceeded) || errors.As(err, &ne) && ne.Timeout():
+		return "timeout"
+	case errors.As(err, &dns):
+		return "dns"
+	case tlsFailure(err):
+		return "tls"
+	case errors.As(err, &oe) && oe.Op == "dial":
+		return "connect"
 	}
-	if len(s) > 200 {
-		s = s[:200]
-	}
-	return s
+	return "unreachable"
+}
+
+func tlsFailure(err error) bool {
+	var cv *tls.CertificateVerificationError
+	var rh tls.RecordHeaderError
+	var al tls.AlertError
+	var ua x509.UnknownAuthorityError
+	var he x509.HostnameError
+	var ci x509.CertificateInvalidError
+	return errors.As(err, &cv) || errors.As(err, &rh) || errors.As(err, &al) || errors.As(err, &ua) || errors.As(err, &he) || errors.As(err, &ci)
 }
 
 // answer turns an HTTP answer into a channel's: nil for a success, gone for 404 and 410 when the channel says a
