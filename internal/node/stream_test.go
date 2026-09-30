@@ -11,6 +11,7 @@ import (
 
 	"github.com/oxsean/fav/internal/agent"
 	"github.com/oxsean/fav/internal/proc"
+	"github.com/oxsean/fav/internal/tend"
 	"github.com/oxsean/fav/internal/wire"
 )
 
@@ -180,5 +181,26 @@ func TestAQuestionsOptionsCarryWhatTheySay(t *testing.T) {
 	}
 	if got := questionsOf(json.RawMessage(`{"questions":[{"question":"Go?","options":[{"label":"yes"},{"label":"no"}]}]}`)); got[0].Descriptions != nil {
 		t.Fatalf("options that say nothing more carry no descriptions: %+v", got)
+	}
+}
+
+// ⚠️ the order under load: the agent takes a message in and ends its turn before the write's confirmation comes back
+func TestALateConfirmationOfAMessageTakenInLeavesItsTurnEnded(t *testing.T) {
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { r.Close(); w.Close() })
+	s := &sup{dir: t.TempDir(), spec: Spec{Agent: tend.ProviderClaude, Stream: true},
+		st: State{State: StateRunning, Stream: true, Sends: []agent.Send{{ID: "m2", Text: "two", State: agent.SendSeen}}}, inputs: map[string]pending{}, userDenied: map[string]bool{}}
+	s.in = newStreamIn(w)
+	s.proto = newProto(s)
+	s.line([]byte(`{"type":"result","subtype":"success","is_error":false,"result":"heard","num_turns":1}`))
+	s.delivered("m2", nil)
+	s.mu.Lock()
+	done := s.out.turnDone
+	s.mu.Unlock()
+	if done.IsZero() {
+		t.Fatal("the turn it answered with has ended: stdin closes after the grace")
 	}
 }

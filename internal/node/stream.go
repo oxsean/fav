@@ -395,7 +395,11 @@ func (s *sup) delivered(id string, err error) {
 	if err == nil {
 		state = agent.SendSent
 		s.mu.Lock()
-		s.out.turnDone, s.seen, s.sent = time.Time{}, time.Now(), true // it starts a turn, or joins the one running
+		// it starts a turn, or joins the one running; one it already took in may have had its turn end
+		if !slices.ContainsFunc(s.st.Sends, func(m agent.Send) bool { return m.ID == id && m.State == agent.SendSeen }) {
+			s.out.turnDone = time.Time{}
+		}
+		s.seen, s.sent = time.Now(), true
 		s.mu.Unlock()
 	}
 	s.keep(func(st *State) {
