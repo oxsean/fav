@@ -1039,6 +1039,8 @@
   "tasks.run_title": "Run: %s",
   "tasks.run_hint": "↑ ↓ pick a row · ← → change it · Enter runs",
   "tasks.run_dir": "in %s",
+  "tasks.field_run_note": "A word to add (optional)",
+  "tasks.run_note_hint": "added under this run's brief only; the task stays as it is",
   "help.group.tasks": "Tasks (view 5)",
   "help.task_view": "Open the Tasks view",
   "help.task_new": "New task",

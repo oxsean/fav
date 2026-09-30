@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -799,5 +800,48 @@ func TestTheHomeAskSaysWhatThePickedOptionMeans(t *testing.T) {
 	key(m, "2")
 	if s := screenText(m); !strings.Contains(s, "One file, for tests") || strings.Contains(s, "Postgres, as production runs") {
 		t.Fatalf("picking the second says what it means:\n%s", s)
+	}
+}
+
+func TestTheRunDialogAddsAWordUnderThisRunsBrief(t *testing.T) {
+	m, _ := tasksModel(t)
+	key(m, "5")
+	var tk task.Task
+	if err := m.tasks.cl.CallCommand(t.Context(), coord.MTaskCreate, "c1", coord.TaskCreate{Title: "word", Brief: "Fix it.", Dir: t.TempDir(), Agent: "fake"}, &tk); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, m, func() bool { return len(m.tasks.list) == 1 })
+	key(m, "enter")
+	key(m, "enter")
+	if m.ov.kind != ovTaskRun {
+		t.Fatalf("%v", m.ov.kind)
+	}
+	label := i18n.T("tasks.field_run_note")
+	rows := strings.Split(screenText(m), "\n")
+	y := slices.IndexFunc(rows, func(l string) bool { return strings.Contains(l, label) })
+	if y < 0 {
+		t.Fatalf("the run dialog offers a word:\n%s", screenText(m))
+	}
+	click(m, strings.Index(rows[y+1], "│")+4, y+1)
+	if m.ov.field != runNote || !m.ov.edit.Focused() {
+		t.Fatalf("a click on the word's row focuses it: field %d", m.ov.field)
+	}
+	typeText(m, " keep hjkl q ")
+	if m.ov.kind != ovTaskRun || m.ov.edit.Value() != " keep hjkl q " {
+		t.Fatalf("letters go into the word: %v %q", m.ov.kind, m.ov.edit.Value())
+	}
+	key(m, "enter")
+	waitFor(t, m, func() bool { r := m.selectedRun(); return r != nil })
+	st := task.New()
+	if err := m.tasks.cl.Call(t.Context(), coord.MStateGet, coord.StateParams{}, st); err != nil {
+		t.Fatal(err)
+	}
+	if len(st.Runs) != 1 {
+		t.Fatalf("one run: %d", len(st.Runs))
+	}
+	for _, r := range st.Runs {
+		if !strings.HasSuffix(r.Brief, "Fix it.\n\n---\n\nkeep hjkl q") {
+			t.Fatalf("the word goes under this run's brief, trimmed: %q", r.Brief)
+		}
 	}
 }

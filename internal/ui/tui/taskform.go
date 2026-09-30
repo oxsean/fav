@@ -24,10 +24,11 @@ const (
 	formButtons
 )
 
-// The run dialog: machine and agent, then the buttons.
+// The run dialog: machine and agent, a word for this run's brief, then the buttons.
 const (
 	runMachine = iota
 	runAgent
+	runNote
 	runButtons
 )
 
@@ -248,6 +249,7 @@ func (m *Model) selector(body *[]string, label string, field, i, inner int, focu
 		if mm.ov.kind == ovTaskForm {
 			mm.pending = mm.formField(field)
 		} else {
+			mm.ov.edit.Blur()
 			mm.ov.field, mm.ov.focus = field, -1
 		}
 		mm.pickNext(i, 1)
@@ -311,13 +313,15 @@ func (m *Model) openRunDialog() {
 		return
 	}
 	machines, agents := m.machineNames(), m.agentNames()
+	note := newInput()
+	note.Placeholder = i18n.T("tasks.run_note_hint")
 	m.ov = overlay{kind: ovTaskRun, focus: -1, taskID: x.ID, taskIDs: m.markedToRun(), opts: [][]string{machines, agents},
-		pick: []int{choice(machines, firstNonEmpty(x.Machine, coord.Local)), choice(agents, firstNonEmpty(x.Agent, "claude"))}}
+		pick: []int{choice(machines, firstNonEmpty(x.Machine, coord.Local)), choice(agents, firstNonEmpty(x.Agent, "claude"))}, edit: note}
 	m.pending = tea.Batch(m.pending, m.previewRun())
 }
 
 func (m *Model) runTask() tea.Cmd {
-	id, machine, agentName := m.ov.taskID, m.picked(0), m.picked(1)
+	id, machine, agentName, word := m.ov.taskID, m.picked(0), m.picked(1), strings.TrimSpace(m.ov.edit.Value())
 	if ids := m.ov.taskIDs; len(ids) > 1 {
 		m.closeOverlay()
 		m.tasks.marked, m.tasks.anchor = nil, ""
@@ -327,17 +331,36 @@ func (m *Model) runTask() tea.Cmd {
 			if i == len(ids)-1 {
 				note = i18n.F("tasks.queued_n", len(ids), machine, agentName)
 			}
-			cmds = append(cmds, m.write(coord.MRunDispatch, coord.Dispatch{Task: id, Machine: machine, Agent: agentName}, note, nil))
+			cmds = append(cmds, m.write(coord.MRunDispatch, coord.Dispatch{Task: id, Machine: machine, Agent: agentName, Note: word}, note, nil))
 		}
 		return tea.Batch(cmds...)
 	}
 	m.closeOverlay()
-	return m.write(coord.MRunDispatch, coord.Dispatch{Task: id, Machine: machine, Agent: agentName},
+	return m.write(coord.MRunDispatch, coord.Dispatch{Task: id, Machine: machine, Agent: agentName, Note: word},
 		i18n.F("tasks.queued", machine, agentName), nil)
 }
 
 func (m *Model) taskRunKey(msg tea.KeyPressMsg) tea.Cmd {
 	f := m.ov.field
+	// ⚠️ the word's own text takes every key but esc, tab, up, down and enter: inTaskRun's letter bindings
+	// (h, j, k, l, q) would otherwise swallow what the user types.
+	if f == runNote {
+		switch msg.String() {
+		case "esc":
+			m.closeOverlay()
+		case "tab", "down":
+			m.runStop(1)
+		case "shift+tab", "up":
+			m.runStop(-1)
+		case "enter":
+			return m.runTask()
+		default:
+			var cmd tea.Cmd
+			m.ov.edit, cmd = m.ov.edit.Update(msg)
+			return cmd
+		}
+		return nil
+	}
 	switch a := keyAct(inTaskRun, msg.String()); a {
 	case actClose:
 		m.closeOverlay()
@@ -351,7 +374,7 @@ func (m *Model) taskRunKey(msg tea.KeyPressMsg) tea.Cmd {
 		m.runStop(-1)
 	case actLeft, actRight:
 		d := map[act]int{actLeft: -1, actRight: 1}[a]
-		if f < runButtons {
+		if f < runNote {
 			m.pickNext(f, d)
 			return m.previewRun()
 		} else {
@@ -361,7 +384,7 @@ func (m *Model) taskRunKey(msg tea.KeyPressMsg) tea.Cmd {
 	return nil
 }
 
-// runStop moves among the two choices and the buttons.
+// runStop moves among the two choices, the word and the buttons.
 func (m *Model) runStop(d int) {
 	stops := runButtons + len(m.ov.btns)
 	cur := m.ov.field
@@ -372,6 +395,11 @@ func (m *Model) runStop(d int) {
 	m.ov.field, m.ov.focus = min(i, runButtons), -1
 	if i >= runButtons {
 		m.ov.focus = i - runButtons
+	}
+	if m.ov.field == runNote {
+		m.ov.edit.Focus()
+	} else {
+		m.ov.edit.Blur()
 	}
 }
 
@@ -390,6 +418,14 @@ func (m *Model) renderTaskRun() string {
 		dimmed.Render(i18n.T("tasks.run_hint")), ""}
 	m.selector(&body, i18n.T("tasks.field_machine"), runMachine, 0, inner, m.ov.field == runMachine)
 	m.selector(&body, i18n.T("tasks.field_agent"), runAgent, 1, inner, m.ov.field == runAgent)
+	m.ov.edit.SetWidth(inner - 4)
+	body = append(body, dimmed.Render(i18n.T("tasks.field_run_note")))
+	m.markRows(len(body)+1, ovPad, inner, 1, func(mm *Model) {
+		mm.ov.field, mm.ov.focus = runNote, -1
+		mm.ov.edit.Focus()
+		mm.placeCursor(&mm.ov.edit, 2)
+	})
+	body = append(body, inputView(m.ov.edit), "")
 	if x != nil && x.Dir != "" {
 		body = append(body, dimmed.Render(render.Truncate(i18n.F("tasks.run_dir", x.Dir), inner)))
 	}
