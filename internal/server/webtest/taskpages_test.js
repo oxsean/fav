@@ -21,7 +21,7 @@ import {FILTER_KEY, PANE_KEY} from '../web/pages/tasks.js';
 import {install} from './dom.js';
 import {settle} from './fake.js';
 import {NOW, tasks} from './rig.js';
-import {test, eq, ok, run} from './check.js';
+import {test, eq, ok, run, until} from './check.js';
 
 const css = ['base.css', 'components.css', 'pages.css'].map(f => readFileSync(new URL(`../web/css/${f}`, import.meta.url), 'utf8')).join('\n');
 const cssClasses = new Set([...css.matchAll(/\.([a-zA-Z][\w-]*)/g)].map(m => m[1]));
@@ -75,14 +75,6 @@ async function mount(vnode, f = 'desktop') {
   return root;
 }
 const settled = () => act(() => settle());
-// until waits in real time for what preact's deferred effects do: a render outside act runs them after a 35 ms timer,
-// later on a loaded machine.
-async function until(cond, what, ms = 5000) {
-  for (const end = Date.now() + ms; !cond();) {
-    if (Date.now() > end) throw new Error(`waited ${ms} ms for ${what}`);
-    await act(() => new Promise(res => setTimeout(res, 5)));
-  }
-}
 const click = el => act(() => el.dispatch('click'));
 const type = (el, text) => act(() => { el.value = text; el.dispatch('input'); });
 const buttonOf = (root, text) => {

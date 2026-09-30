@@ -21,7 +21,7 @@ import {PANE_KEY} from '../web/pages/tasks.js';
 import {install} from './dom.js';
 import {settle} from './fake.js';
 import {NOW, home, outputs} from './rig.js';
-import {test, eq, ok, run} from './check.js';
+import {test, eq, ok, run, until} from './check.js';
 
 const css = ['base.css', 'components.css', 'pages.css'].map(f => readFileSync(new URL(`../web/css/${f}`, import.meta.url), 'utf8')).join('\n');
 const cssClasses = new Set([...css.matchAll(/\.([a-zA-Z][\w-]*)/g)].map(m => m[1]));
@@ -83,8 +83,6 @@ async function mount(vnode, f = 'desktop') {
   return root;
 }
 const settled = () => act(() => settle());
-// painted waits out the effects preact defers to after a paint when a render happened outside act.
-const painted = () => act(() => new Promise(res => setTimeout(res, 120))).then(settled);
 const click = el => act(() => el.dispatch('click'));
 const key = (keys, k, more) => act(() => { keys.handle(press(k, more)); });
 const buttonOf = (root, text) => {
@@ -186,23 +184,23 @@ test('a task\'s changes tab: its latest run\'s files, the unfolded ones open on 
   const ch = changesOf({r2: list('w-1'), r1: list('t-9a1')});
   const a = app(r, {url: '/?page=tasks&task=t1', storage: memory({[PANE_KEY]: 'changes'}), changes: ch});
   const root = await mount(a.vnode());
-  await painted();
+  const text = () => root.one('.chg').textContent;
+  await until(() => ch.asked.filter(x => x[0] === 'diff').length === 2 && root.find('.chg').length && text().includes('+new internal/receipt/pdf.go'), 'the unfolded files drawn');
   eq(ch.asked[0], ['list', 'r2', false], 'the latest run, still running');
   eq(ch.asked.filter(x => x[0] === 'diff').map(x => x[2]).sort(), ['internal/receipt/pdf.go', 'internal/receipt/pdf_test.go'], 'the unfolded open on their own');
-  const text = () => root.one('.chg').textContent;
   ok(text().includes('+new internal/receipt/pdf.go') && text().includes('还有 1 处'), 'the first hunk and what is left');
   ok(text().includes('改动很大：+3,200 −1,100'), 'the big one folded');
   const row = path => root.find('.chg-row').find(b => b.textContent.includes(path));
   await click(row('golden.txt'));
-  await painted();
+  await until(() => ch.asked.some(x => x[0] === 'diff' && x[2].endsWith('golden.txt')), 'golden.txt asked for');
   ok(ch.asked.some(x => x[0] === 'diff' && x[2].endsWith('golden.txt')), 'opened on asking');
   await click(root.find('.chip').find(c => c.textContent.startsWith('生成的文件')));
   eq(root.find('.chg-file').length, 1, 'the generated only');
   await click(buttonOf(root, '刷新'));
-  await painted();
+  await until(() => ch.asked.filter(x => x[0] === 'list').length === 2, 'the list read again');
   eq(ch.asked.filter(x => x[0] === 'list').length, 2, 'read again');
   await click(root.find('button').find(b => b.textContent.trim() === 'r1'));
-  await painted();
+  await until(() => ch.asked.some(x => x[0] === 'list' && x[1] === 'r1'), 'r1 listed');
   eq(ch.asked.filter(x => x[0] === 'list').at(-1), ['list', 'r1', true], 'an ended run, kept');
   eq(r.errors, [], 'errors');
 });

@@ -2,6 +2,7 @@
 // for the Go test that runs the file (runModule) to report as subtests. What a case returns goes along as its data, for
 // the Go test to compare with its own.
 import {isDeepStrictEqual, inspect} from 'node:util';
+import {act} from './vendor/test-utils.mjs';
 
 const cases = [];
 
@@ -13,6 +14,15 @@ export function eq(got, want, what = 'value') {
 
 export function ok(cond, what) {
   if (!cond) throw new Error(what);
+}
+
+// until waits in real time, in short acts, for what preact's deferred effects do: after a render outside act they run on
+// a 35 ms timer, later on a loaded machine.
+export async function until(cond, what, ms = 5000) {
+  for (const end = Date.now() + ms; !cond();) {
+    if (Date.now() > end) throw new Error(`waited ${ms} ms for ${what}`);
+    await act(() => new Promise(res => setTimeout(res, 5)));
+  }
 }
 
 export async function throws(fn, pattern, what = 'call') {
