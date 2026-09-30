@@ -105,6 +105,22 @@ func TestBrokenArgsPickWhatIsTrashed(t *testing.T) {
 	}
 }
 
+// A record id is 16 hex digits and sometimes all decimal ones: past the list's end it is an id, not a position.
+func TestBrokenPickTakesAnIdOfDigits(t *testing.T) {
+	brokenMachine(t)
+	_, _, list, _, _ := loadPick(nil)
+	list[2].rec.ID = "8616379268231720"
+	if got, err := pickBroken(list, []string{"8616379268231720"}); err != nil || !slices.Equal(sids(got), []string{"cccc0005-gone"}) {
+		t.Fatalf("pick an id of digits = %v %v, want [cccc0005-gone]", sids(got), err)
+	}
+	if got, err := pickBroken(list, []string{"3"}); err != nil || !slices.Equal(sids(got), []string{"cccc0005-gone"}) {
+		t.Fatalf("a number within the list is still a position: %v %v", sids(got), err)
+	}
+	if _, err := pickBroken(list, []string{"4"}); err == nil {
+		t.Fatal("a number past the list that is no id must fail")
+	}
+}
+
 func TestCleanAllTrashesOnlyTheBroken(t *testing.T) {
 	brokenMachine(t)
 	if out := stdoutOf(t, func() {

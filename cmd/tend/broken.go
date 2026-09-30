@@ -145,14 +145,16 @@ func pickBroken(list []broken, args []string) ([]broken, error) {
 			return list, nil
 		}
 		var hit broken
-		if n, err := strconv.Atoi(a); err == nil {
-			if n < 1 || n > len(list) {
-				return nil, i18n.E("cli.broken.bad_number", a)
-			}
+		// ⚠️ a record id is hex and may be all decimal digits: a number is a position only within the list.
+		if n, err := strconv.Atoi(a); err == nil && n >= 1 && n <= len(list) {
 			hit = list[n-1]
 		} else {
 			var n int
-			if hit, n = matchRef(list, a, brokenKeys); refErr(a, n) != nil {
+			hit, n = matchRef(list, a, brokenKeys)
+			switch {
+			case n == 0 && err == nil:
+				return nil, i18n.E("cli.broken.bad_number", a)
+			case refErr(a, n) != nil:
 				return nil, refErr(a, n)
 			}
 		}
