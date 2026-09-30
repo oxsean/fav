@@ -80,9 +80,12 @@ export function useActions(level, impls, options) {
   useKeys(level, bindingsFor(impls), options);
 }
 
-// keyParts spells a key as its caps show it: "Mod+K" is ⌘K on a Mac and Ctrl+K elsewhere; "g h" is two caps.
+const arrows = {ArrowUp: '↑', ArrowDown: '↓', ArrowLeft: '←', ArrowRight: '→'};
+
+// keyParts spells a key as its caps show it: "Mod+K" is ⌘K on a Mac and Ctrl+K elsewhere, "Shift+ArrowDown" Shift+↓;
+// "g h" is two caps.
 export function keyParts(key, onMac = mac.peek()) {
-  return key.split(' ').map(k => k.replace(/^Mod\+/, onMac ? '⌘' : 'Ctrl+'));
+  return key.split(' ').map(k => k.replace(/^Mod\+/, onMac ? '⌘' : 'Ctrl+').replace(/Arrow(Up|Down|Left|Right)$/, a => arrows[a]));
 }
 
 export function useMac() {

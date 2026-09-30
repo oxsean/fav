@@ -142,6 +142,11 @@ test('Kbd spells Mod by the platform', () => {
   eq([onMac, elsewhere], ['<kbd>⌘K</kbd> <kbd>g</kbd> <kbd>h</kbd>', '<kbd>Ctrl+K</kbd>'], 'caps');
 });
 
+test('Kbd spells the arrows as arrows', () => {
+  const caps = renderToString(html`<${Kbd} k="Shift+ArrowDown" /> <${Kbd} k="ArrowUp" /> <${Kbd} k="ArrowLeft" /> <${Kbd} k="Shift+ArrowRight" />`);
+  eq(caps, '<kbd>Shift+↓</kbd> <kbd>↑</kbd> <kbd>←</kbd> <kbd>Shift+→</kbd>', 'arrows');
+});
+
 // mount draws vnode into a fresh document inside the keys' context, flushing effects.
 async function mount(vnode, keys = createKeys({timers: clock()})) {
   const root = install();
