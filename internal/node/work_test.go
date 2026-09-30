@@ -205,3 +205,12 @@ func TestAWorkspaceIsChecked(t *testing.T) {
 		t.Error("a hook needs node.allow_hooks")
 	}
 }
+
+func TestAMergeRefusedForAChangedCheckoutCountsItsFiles(t *testing.T) {
+	if got := dirtyError("/w", 1).Error(); got != "/w has 1 uncommitted file" {
+		t.Errorf("%q", got)
+	}
+	if got := dirtyError("/w", 2).Error(); got != "/w has 2 uncommitted files" {
+		t.Errorf("%q", got)
+	}
+}

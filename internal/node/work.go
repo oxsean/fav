@@ -427,8 +427,10 @@ func (s *sup) merge() error {
 		return s.workFailed(err)
 	}
 	g := gitIn{dir: s.spec.Dir}
-	if n, err := g.dirty(); err != nil || n > 0 {
-		return s.workFailed(fmt.Errorf("%s has %d uncommitted files", s.spec.Dir, n))
+	if n, err := g.dirty(); err != nil {
+		return s.workFailed(err)
+	} else if n > 0 {
+		return s.workFailed(dirtyError(s.spec.Dir, n))
 	}
 	source := gitIn{dir: w.Checkout}
 	if w.Remote != "" {
@@ -530,3 +532,10 @@ const workConvention = `
 const copyConvention = `
 - This directory is a read-only copy of branch %[1]s at its latest commit. Whatever you change here is thrown away.
 `
+
+func dirtyError(dir string, n int) error {
+	if n == 1 {
+		return fmt.Errorf("%s has 1 uncommitted file", dir)
+	}
+	return fmt.Errorf("%s has %d uncommitted files", dir, n)
+}

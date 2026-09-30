@@ -283,3 +283,17 @@ func TestTheDatabaseAndItsBackupsArePrivate(t *testing.T) {
 		}
 	}
 }
+
+// Counts in the store's errors agree with their nouns.
+func TestTheStoresCountsAgree(t *testing.T) {
+	for _, c := range []struct{ got, want string }{
+		{tornError("a.jsonl", 1).Error(), "a.jsonl: a torn last line of 1 byte (tend journal repair)"},
+		{tornError("a.jsonl", 7).Error(), "a.jsonl: a torn last line of 7 bytes (tend journal repair)"},
+		{orphansProblem(1), "1 event or receipt without its envelope"},
+		{orphansProblem(3), "3 events or receipts without their envelope"},
+	} {
+		if c.got != c.want {
+			t.Errorf("%q, want %q", c.got, c.want)
+		}
+	}
+}

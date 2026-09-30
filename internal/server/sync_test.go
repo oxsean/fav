@@ -464,3 +464,14 @@ func TestTheTrackerAccountsAreThoseOfTheCallersProjects(t *testing.T) {
 		t.Fatalf("%+v", got)
 	}
 }
+
+func TestTheProgressLineCountsItsSubtasks(t *testing.T) {
+	for _, c := range []struct {
+		finished, total int
+		want            string
+	}{{0, 1, "Progress: 0/1 subtask finished"}, {1, 1, "Progress: 1/1 subtask finished"}, {1, 2, "Progress: 1/2 subtasks finished"}} {
+		if got := progressLine(c.finished, c.total); got != c.want {
+			t.Errorf("%q, want %q", got, c.want)
+		}
+	}
+}

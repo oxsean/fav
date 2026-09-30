@@ -61,7 +61,7 @@ func Import(db, src string, fold func(journal.Envelope) error) (ImportReport, er
 		case r.Damage != nil:
 			return fmt.Errorf("%s: seq %d at %d: %s", src, r.Damage.Seq, r.Damage.Offset, r.Damage.Reason)
 		case r.Torn > 0:
-			return fmt.Errorf("%s: a torn last line of %d bytes (tend journal repair)", src, r.Torn)
+			return tornError(src, r.Torn)
 		}
 		_, err := tx.Exec(`INSERT INTO imports (source, sum, last_seq, at) VALUES (?, ?, ?, ?)`, src, sum, r.LastSeq, time.Now().UnixNano())
 		return err
@@ -168,7 +168,7 @@ func Check(db string, fold func(journal.Envelope) error) (Report, error) {
 	err = r.QueryRow(`SELECT (SELECT count(*) FROM events WHERE seq NOT IN (SELECT seq FROM envelopes))
 		+ (SELECT count(*) FROM receipts WHERE seq NOT IN (SELECT seq FROM envelopes))`).Scan(&orphans)
 	if err == nil && orphans > 0 {
-		rep.Problem = fmt.Sprintf("%d events or receipts without their envelope", orphans)
+		rep.Problem = orphansProblem(orphans)
 	}
 	return rep, err
 }
@@ -187,4 +187,18 @@ func Backup(db, to string) error {
 	}
 	defer c.Close()
 	return vacuumInto(c, to)
+}
+
+func tornError(src string, n int64) error {
+	if n == 1 {
+		return fmt.Errorf("%s: a torn last line of 1 byte (tend journal repair)", src)
+	}
+	return fmt.Errorf("%s: a torn last line of %d bytes (tend journal repair)", src, n)
+}
+
+func orphansProblem(n int) string {
+	if n == 1 {
+		return "1 event or receipt without its envelope"
+	}
+	return fmt.Sprintf("%d events or receipts without their envelope", n)
 }

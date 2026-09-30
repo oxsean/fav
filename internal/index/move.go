@@ -181,7 +181,7 @@ func rescanAfterRestore(e tend.TrashEntry) map[string]bool {
 func (p *MovePlan) Apply(store *tend.Store) (MoveReport, error) {
 	rep := MoveReport{Touched: map[string]bool{}}
 	if len(p.Live) > 0 {
-		return rep, fmt.Errorf("%d sessions still running", len(p.Live))
+		return rep, liveError(len(p.Live))
 	}
 	// re-check: the plan was computed earlier and a session may have started while the dialog was open
 	live := capture.LiveSessions()
@@ -528,4 +528,11 @@ func (idx *Index) FindMissing(store *tend.Store, only string) []Missing {
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Dir < out[j].Dir })
 	return out
+}
+
+func liveError(n int) error {
+	if n == 1 {
+		return errors.New("1 session is still running")
+	}
+	return fmt.Errorf("%d sessions are still running", n)
 }

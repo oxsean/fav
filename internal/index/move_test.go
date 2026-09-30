@@ -370,3 +370,12 @@ func TestRestoreIdempotentAfterPartialFailure(t *testing.T) {
 		t.Fatal("重来一次不能把已经放回去的原件删掉")
 	}
 }
+
+func TestAMoveRefusedForRunningSessionsCountsThem(t *testing.T) {
+	if got := liveError(1).Error(); got != "1 session is still running" {
+		t.Errorf("%q", got)
+	}
+	if got := liveError(2).Error(); got != "2 sessions are still running" {
+		t.Errorf("%q", got)
+	}
+}

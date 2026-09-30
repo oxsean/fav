@@ -614,7 +614,7 @@ func (s *Syncer) progress(x store.Tracker, set TrackerSettings, taskID string) (
 		b.WriteString("\n" + stages + "\n")
 	}
 	if total > 0 {
-		fmt.Fprintf(&b, "\nProgress: %d/%d subtasks finished\n", finished, total)
+		b.WriteString("\n" + progressLine(finished, total) + "\n")
 	}
 	if pr != "" {
 		b.WriteString("\nPull request: " + pr + "\n")
@@ -702,4 +702,12 @@ func oneLine(s string) string {
 		s = s[:120] + "…"
 	}
 	return s
+}
+
+// progressLine is how many of a task's subtasks are finished, in its progress comment.
+func progressLine(finished, total int) string {
+	if total == 1 {
+		return fmt.Sprintf("Progress: %d/1 subtask finished", finished)
+	}
+	return fmt.Sprintf("Progress: %d/%d subtasks finished", finished, total)
 }
