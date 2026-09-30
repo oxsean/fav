@@ -71,6 +71,7 @@ export function Home({store, commands, toasts, clock = () => Date.now(), fetchOu
   const [confirm, setConfirm] = useState(null);
   const [confirmNote, setConfirmNote] = useState('');
   useEffect(() => { setConfirmNote(''); }, [confirm]);
+  const [rework, setRework] = useState(null);
   const st = store.state, now = clock();
 
   const shown = inbox.filter(x => !hidden.has(x.task));
@@ -107,6 +108,21 @@ export function Home({store, commands, toasts, clock = () => Date.now(), fetchOu
     label: t('home.retry'), noteLabel: t('home.retryNote'),
     go: note => send('run.dispatch', {task: v.task.id, ...(v.run ? {machine: v.run.machine, agent: v.run.agent} : {}), ...(note.trim() ? {note: note.trim()} : {})},
       {key: 'task:' + v.task.id}).catch(() => {})});
+  // askRework opens a failed task's brief to edit on a phone; goRework saves it (task.edit, when it changed) and only
+  // then dispatches the task again as askRetry would.
+  const askRework = v => {
+    setRework({v, text: null});
+    store.brief(v.task.id).then(b => setRework(x => (x?.v.task.id === v.task.id && x.text === null ? {...x, text: b} : x)), e => { setRework(null); failed(e); });
+  };
+  const goRework = async () => {
+    const {v, text} = rework, key = 'task:' + v.task.id;
+    try {
+      if (text !== store.briefOf(v.task.id)) await send('task.edit', {id: v.task.id, brief: text}, {key});
+    } catch { return; }
+    setRework(null);
+    send('run.dispatch', {task: v.task.id, ...(v.run ? {machine: v.run.machine, agent: v.run.agent} : {})}, {key})
+      .then(() => toasts.show({text: f('home.reworked', v.task.title)}), () => {});
+  };
   const askStop = (run, task) => setConfirm({title: t('home.confirmStop'), note: f('home.confirmStopNote', task?.title || run.task, run.machine),
     label: t('home.stop'), go: () => send('run.stop', {id: run.id}, {key: 'run:' + run.id}).catch(() => {})});
 
@@ -172,7 +188,7 @@ export function Home({store, commands, toasts, clock = () => Date.now(), fetchOu
   };
   const body = v => html`<${WaitBody} v=${v} busy=${busy(v)} scope=${allowsRun(v.req, aff.runs?.[v.run?.id])} gone=${v.req && gone[v.run?.id + '\n' + v.req.id]}
     fetchOutput=${fetchOutput} changes=${changes} onOpen=${onOpen} onClose=${() => setOpen('')}
-    onDone=${canDone(v) ? () => markDone(v) : null} onRetry=${canRetry(v) ? () => askRetry(v) : null}
+    onDone=${canDone(v) ? () => markDone(v) : null} onRetry=${canRetry(v) ? () => askRetry(v) : null} onRework=${phone && canRetry(v) ? () => askRework(v) : null}
     onAnswer=${p => answer(v, p)} onReply=${text => reply(v, text)} />`;
   const item = v => html`<${ExpandItem} key=${v.x.task} id=${v.x.task} open=${!phone && open === v.x.task} selected=${selected === v.x.task} page=${phone}
       onToggle=${phone ? () => onWait(v.x.task) : () => { setSelected(v.x.task); setOpen(open === v.x.task ? '' : v.x.task); }}
@@ -216,10 +232,17 @@ export function Home({store, commands, toasts, clock = () => Date.now(), fetchOu
     })}</div>` : html`<p class="empty">${t('home.nothingRuns')}</p>`}
   <//>`;
 
-  const dialog = confirm && html`<${Modal} title=${confirm.title} onClose=${() => setConfirm(null)}
+  const confirmDialog = confirm && html`<${Modal} title=${confirm.title} onClose=${() => setConfirm(null)}
     actions=${[{label: t('home.cancel'), onClick: () => setConfirm(null)}, {label: confirm.label, kind: 'primary',
       keyName: 'Mod+Enter', onClick: () => { setConfirm(null); confirm.go(confirmNote); }}]}><p>${confirm.note}</p>
     ${confirm.noteLabel && html`<${TextArea} label=${confirm.noteLabel} value=${confirmNote} onInput=${setConfirmNote} rows=${3} note=${t('home.retryNoteHint')} />`}<//>`;
+  const reworkDialog = rework && html`<${Modal} full title=${f('home.reworkTitle', rework.v.task.title)} onClose=${() => setRework(null)}
+    actions=${[{label: t('home.cancel'), onClick: () => setRework(null)}, {label: t('home.reworkGo'), kind: 'primary', keyName: 'Mod+Enter',
+      disabled: rework.text === null || !rework.text.trim() || busy(rework.v), onClick: goRework}]}>
+    <${TextArea} label=${t('home.reworkBrief')} value=${rework.text ?? ''} onInput=${text => setRework(x => ({...x, text}))} rows=${14}
+      note=${rework.text === null ? t('home.reworkLoading') : t('home.reworkNote')} />
+  <//>`;
+  const dialog = confirmDialog || reworkDialog;
 
   if (phone && wait) {
     const pool = list.some(v => v.x.task === wait) ? list : sel.waits(shown, '').map(viewOf);
@@ -353,7 +376,7 @@ function WaitPage({wait, list, loaded, title, body, toasts, onWait, onBack, onOp
 // WaitBody is an open waiting item: what it asks or how it failed, what it just did, and the ways to answer: the
 // answer form for a request (every question, allow for the run when offered), a reply for a run that ended asking.
 // On a phone it also says whose it is, where an answer goes, and, for a run to accept, what it changed.
-function WaitBody({v, busy, scope, gone, fetchOutput, changes, onOpen, onClose, onDone, onRetry, onAnswer, onReply}) {
+function WaitBody({v, busy, scope, gone, fetchOutput, changes, onOpen, onClose, onDone, onRetry, onRework, onAnswer, onReply}) {
   const {t, f} = useWords();
   const phone = usePhone();
   const [steps, setSteps] = useState(null);
@@ -402,6 +425,7 @@ function WaitBody({v, busy, scope, gone, fetchOutput, changes, onOpen, onClose, 
     ${phone ? html`
       ${(onDone || onRetry) && html`<div class="wait-foot">
         ${onDone && html`<${Button} kind="primary" disabled=${busy} onClick=${onDone}>${t('home.done')}<//>`}
+        ${onRework && html`<${Button} disabled=${busy} onClick=${onRework}>${t('home.rework')}<//>`}
         ${onRetry && html`<${Button} kind="primary" disabled=${busy} onClick=${onRetry}>${t('home.retry')}<//>`}
       </div>`}
       <div class="wait-goes"><span class="ell">${goes}</span><${Button} kind="quiet" onClick=${() => onOpen(v.x.task)}>${t('home.openTask')}<//></div>`

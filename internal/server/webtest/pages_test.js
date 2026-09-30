@@ -186,6 +186,42 @@ test('the phone list allows in one press; the page of a run to accept shows what
   } finally { form.value = 'desktop'; }
 });
 
+test('the phone reworks a failed task: its brief edited in place, then dispatched again; a refused edit dispatches nothing', async () => {
+  const r = await home();
+  const calls = [];
+  r.store.brief = id => Promise.resolve(id === 't5' ? 'Limit logins per IP.' : '');
+  const answers = {'task.edit': p => (p.brief.includes('refuse') ? Promise.reject(Object.assign(new Error('bad'), {code: 'bad_request'})) : {id: p.id}), 'run.dispatch': () => ({id: 'r9'})};
+  const wire = {...r.wire, call: async (method, params) => { calls.push([method, params]); return (answers[method] || (() => new Promise(() => {})))(params); }};
+  const a = app(r, {wire});
+  form.value = 'phone';
+  try {
+    const root = await mount(a.vnode());
+    await act(() => a.router.go({page: 'home', wait: 't5'}));
+    const editor = () => root.find('.page-over').at(-1);
+    const rework = () => root.one('.wait-page').find('button').find(b => b.textContent.startsWith(words.t('home.rework')));
+    await act(() => rework().dispatch('click'));
+    await act(() => settle());
+    const box = editor().one('textarea');
+    eq(box.value ?? box.getAttribute('value'), 'Limit logins per IP.', 'the brief as it is');
+    await act(() => { box.value = 'Limit logins per IP and per account.'; box.dispatch('input'); });
+    await act(() => editor().one('.page-foot').find('button').find(b => b.textContent.startsWith(words.t('home.reworkGo'))).dispatch('click'));
+    await act(() => settle());
+    eq(calls, [['task.edit', {id: 't5', brief: 'Limit logins per IP and per account.'}], ['run.dispatch', {task: 't5', machine: 'mba', agent: 'codex'}]],
+      'edited, then dispatched as it ran');
+    eq(root.find('.page-over').length, 1, 'closed: the wait page only');
+
+    calls.length = 0;
+    await act(() => rework().dispatch('click'));
+    await act(() => settle());
+    const again = editor().one('textarea');
+    await act(() => { again.value = 'please refuse this'; again.dispatch('input'); });
+    await act(() => editor().one('.page-foot').find('button').find(b => b.textContent.startsWith(words.t('home.reworkGo'))).dispatch('click'));
+    await act(() => settle());
+    eq(calls.map(([m]) => m), ['task.edit'], 'a refused edit dispatches nothing');
+    eq(root.find('.page-over').length, 2, 'the editor stays with what was written');
+  } finally { form.value = 'desktop'; }
+});
+
 test('a notice opened on another page stands on the list: handled, the next takes its place, back is the list', async () => {
   const r = await home();
   const wire = {...r.wire, call: () => new Promise(() => {})};
