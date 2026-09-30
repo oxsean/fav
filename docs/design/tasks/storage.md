@@ -65,7 +65,7 @@
 - 驱动用 `modernc.org/sqlite`。`hosts install` 和 release 都用 `CGO_ENABLED=0` 交叉编译，纯 Go 是硬性要求。
 - schema 版本记在 `PRAGMA user_version`：
   - 迁移文件 `migrations/sqlite/NNNN_*.sql` 嵌入二进制，编号必须连续，每个文件一个事务；
-  - 已有 schema 的库升级前自动 `VACUUM INTO` 一份 `tend.db.v<旧版本>-<时间>.bak`；
+  - 已有 schema 的库升级前自动 `VACUUM INTO` 一份 `tend.db.v<旧版本>-<时间>.bak`（和库放在一起，文件 0600）。它和库一样敏感，而且是迁移之前的样子：迁移清掉的东西还在里面，比如 0011、0015 改写之前发件箱和审计里的错误原文，它可能带着推送 endpoint（每台设备的密钥）和 webhook 地址。server 不会自己删它：升级确认无误后删掉，不放进共享的备份位置；它流出过时，受影响的人在「我」页关掉再打开推送（换一个 endpoint）并换 webhook 地址。token 只存哈希、工单凭据是封存的（密钥不在库里），不用为此轮换；
   - 遇到比自己新的 schema 只读打开，拒绝写入；回放时 seq 断号或折叠失败也只读，和 JSONL 的 `ErrReadOnly` 一样；
   - 需要真正迁移的只有 `envelopes/events/receipts` 和团队实体表，快照和投影可以直接重建。
 

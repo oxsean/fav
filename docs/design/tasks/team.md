@@ -67,6 +67,7 @@
   - `tokens.json` 在 `tend-server` 启动时迁进数据库（主人是 `local`），原文件改名留底。
 - `User { id u_…, email, name, avatar, logins[{provider, issuer, subject, username}], tracker_accounts[{kind, base_url, username}], role: admin|member, disabled }`。
   - 停用用户会立即断开他的连接，他的会话和 token 一律失效。
+  - 成员之间看得到什么：`GET /api/users` 给每个成员列出团队里所有的人，不分项目：id、显示名、登录名（`username`）、角色、是否停用；邮箱、登录方式和最近使用只给管理员。任务、项目、机器、定义里出现的人另按各自的可见范围。
   - `tracker_accounts` 在登录账号和工单账号不是同一家时，由用户手动绑定，用来对应指派人（见 [trackers.md](trackers.md)）；未实现。
 
 ## 权限：两层，外加三种归属
@@ -124,6 +125,7 @@
   - 主人可用。可以分享给指定成员、指定项目，或所有人。这和 Multica 的 `permission_mode: private | public_to` 是同一思路；管理员也不能越权使用别人没分享的 agent。
   - 用得到别人定义的人可以「不再使用」，不管是点名、经项目还是所有人分享到的：只对他自己生效，主人点名分享回来才恢复（[agent-definitions.md](agent-definitions.md)「存放、归属与分享」）。
   - **可用不等于可读**：分享只给使用权。要让别人查看、复制定义内容，另外勾选「可查看」。
+  - 管理员读得到每一个定义的全文，没分享、没勾「可查看」的私人定义也一样（和他看得到所有项目同一个口径：对管理员的信任），他的 run 视图因此不裁；使用仍要分享。「可用不等于可读」是对成员说的：定义里不要写连管理员也不该看的东西。
   - run 的客户端视图：读得到这个定义的人（它的管理者，或分享时勾了「可查看」的使用者）看到全部；读不到的人看到的 run 里，任务书去掉定义正文那一段（`Run.def` 记下正文在 `brief` 里的起止，派发时写；没记的旧 run 整段任务书不给，接着对话的 run 本来就不含正文），档案只剩执行摘要（名字、provider、模型、强度、机器；权限、禁用的工具、参数、hooks、MCP、技能都去掉）。命令的回答、`state.get`、`state.watch` 的快照和 `run_queued` 事件、`run.preview` 的档案、`agent.list` 都这样裁（`coord/defview.go`）；定义已经删了的，只有管理员看全。节点拿到的仍是完整的 run。agent 自己的输出和会话记录不在此列：agent 能把自己拿到的指令说出来。
   - 定义也可以**归项目所有**：项目负责人管理，项目默认角色引用它，不会因为某人离开而失效。
   - 格式与方法见 [agent-definitions.md](agent-definitions.md)「存放、归属与分享」。
