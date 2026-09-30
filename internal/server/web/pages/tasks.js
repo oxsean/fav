@@ -260,7 +260,7 @@ export function Tasks({store, commands, toasts, wire, router, session, clock = (
       storage=${storage} busy=${commands.state('new') === 'pending' || busy(modal.task)} onClose=${close} onSubmit=${(how, p) => submitForm(modal, how, p).catch(() => {})} />`,
     dispatch: () => html`<${Dispatch} store=${store} wire=${wire} task=${modal.task} agents=${agents || []} machines=${machines} busy=${busy(modal.task)} onClose=${close}
       onLater=${() => { close(); act('backlog', modal.task); }}
-      onDispatch=${(machine, agent) => quiet(send('run.dispatch', {task: modal.task.id, machine, agent}, 'task:' + modal.task.id)
+      onDispatch=${(machine, agent, note) => quiet(send('run.dispatch', {task: modal.task.id, machine, agent, ...(note ? {note} : {})}, 'task:' + modal.task.id)
         .then(() => { close(); toasts.show({text: f('toast.dispatched', modal.task.title)}); }))} />`,
     move: () => html`<${Move} store=${store} task=${modal.task} busy=${busy(modal.task)} onClose=${close} onMove=${(parent, after) => {
       const x = modal.task;

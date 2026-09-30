@@ -144,6 +144,20 @@ test('a task with no directory dispatches into its project\'s checkout on the ma
   ok(root.textContent.includes(words.f('disp.dir', '/srv/shop')), `the dialog names the directory: ${root.textContent}`);
 });
 
+test('a word typed in the dispatch dialog goes with the dispatch, trimmed; none is an empty word', async () => {
+  const r = await tasks();
+  const keys = createKeys();
+  const sent = [];
+  const root = await mount(html`<${KeysContext.Provider} value=${keys}><${Dispatch} store=${r.store} task=${r.store.state.tasks.q9}
+    agents=${[{name: 'codex', provider: 'codex'}]} machines=${r.store.machines.value} onDispatch=${(...x) => sent.push(x)} onClose=${() => {}} /><//>`);
+  const go = () => click(root.find('button').find(b => b.textContent.includes(words.t('disp.go'))));
+  ok(root.textContent.includes(words.t('disp.note')), 'the dialog offers a word to add');
+  await go();
+  await type(root.one('.modal').find('textarea')[0], '  Keep the old endpoint.  ');
+  await go();
+  eq(sent.map(x => x[2]), ['', 'Keep the old endpoint.']);
+});
+
 test('the workflow picker offers the built-in workflows beside the project default and none', async () => {
   const r = await tasks();
   const none = () => {};

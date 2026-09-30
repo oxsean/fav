@@ -185,7 +185,7 @@ function ChoiceRows({label, options, value, onChange}) {
 }
 
 // Dispatch picks the machine and agent a task runs with, says what they meet (the page's rules, then the
-// coordinator's preview) and queues it, or holds the task back.
+// coordinator's preview) and queues it, with an optional word added under this run's brief, or holds the task back.
 export function Dispatch({store, wire, task, agents = [], machines = [], busy = false, onDispatch, onLater, onClose}) {
   const w = useWords();
   const {t, f} = w;
@@ -194,6 +194,7 @@ export function Dispatch({store, wire, task, agents = [], machines = [], busy = 
   const [machine, setMachine] = useState(def.machine);
   const [agent, setAgent] = useState(def.agent);
   const [pv, setPv] = useState(null);
+  const [note, setNote] = useState('');
   const m = machines.find(x => x.name === machine), a = agents.find(x => x.name === agent);
   const adv = tk.advice(store.state, task, m, a);
   const dir = tk.runDir(store.state, task, machine);
@@ -216,10 +217,11 @@ export function Dispatch({store, wire, task, agents = [], machines = [], busy = 
       <${Picker} label=${t('form.agent')} value=${agent} onChange=${setAgent} options=${agentOpts} /></div>`;
   const actions = [
     ...(task.status === 'todo' && onLater ? [{label: t('disp.later'), disabled: busy, onClick: onLater}] : []),
-    {label: t('disp.go'), kind: 'primary', keyName: 'Mod+Enter', disabled: busy || blocked, onClick: () => onDispatch(machine, agent)},
+    {label: t('disp.go'), kind: 'primary', keyName: 'Mod+Enter', disabled: busy || blocked, onClick: () => onDispatch(machine, agent, note.trim())},
   ];
   return html`<${Modal} title=${f('disp.title', task.title)} onClose=${onClose} actions=${actions}>
     ${pick}
+    <${TextArea} label=${t('disp.note')} value=${note} onInput=${setNote} rows=${2} note=${t('disp.noteHint')} />
     <div class="advice" aria-live="polite">
       ${adv.block && html`<p class="notice notice-bad">${f('adv.' + adv.block, adv.detail || '')}</p>`}
       ${!adv.block && dir?.project && html`<p class="t-muted">${f('disp.dir', dir.dir)}</p>`}

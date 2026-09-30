@@ -62,6 +62,7 @@ register('tasks', {
   'form.save': ['保存', 'Save'], 'form.failed': ['没有办成：%s', 'That did not work: %s'],
   'm.inUse': ['%d/%d 在用', '%d/%d in use'], 'm.full': ['%d/%d 满', '%d/%d full'], 'm.offline': ['离线', 'offline'], 'a.only': ['只在 %s', 'only on %s'],
   'disp.title': ['派发「%s」', 'Dispatch %s'], 'disp.go': ['确认并排队', 'Confirm and queue'], 'disp.later': ['先不开始', 'Not yet'],
+  'disp.note': ['补充一句（可选）', 'A word to add (optional)'], 'disp.noteHint': ['只加在这次运行的任务书后面，任务本身不改。', 'Added under this run\'s brief only; the task stays as it is.'],
   'disp.checking': ['正在预览…', 'Previewing…'], 'disp.cli': ['%s %s', '%s %s'],
   'disp.dir': ['任务没有自己的目录，在项目目录 %s 里跑。', 'The task has no directory of its own: it runs in the project\'s %s.'],
   'adv.open': ['已经有一个没结束的运行 %s：先让它结束。', 'Run %s is still open: let it end first.'],
