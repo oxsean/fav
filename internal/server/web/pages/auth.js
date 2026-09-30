@@ -158,7 +158,8 @@ export function Login({http, auth, onSignedIn, onSwitch, copy = text => globalTh
 
 const gone404 = e => e.status === 404 || e.code === codes.notFound;
 
-// Device is a terminal's sign-in (#device-<code>): check the code it shows, then allow or deny it.
+// Device is a terminal's sign-in (#device-<code>): check the code it shows, then allow or deny it. A browser's
+// sign-in asked for from another address than this page's is allowed only with its code's last four typed again.
 export function Device({http, code, onBack}) {
   const w = useWords();
   const {t, f} = w;
@@ -166,16 +167,19 @@ export function Device({http, code, onBack}) {
   const [gone, setGone] = useState(false);
   const [result, setResult] = useState('');
   const [error, setError] = useState('');
+  const [typed, setTyped] = useState('');
+  const [wrong, setWrong] = useState(false);
   useEffect(() => {
     http.device(code).then(setInfo, e => (gone404(e) ? setGone(true) : setError(f('device.failed', e.code))));
   }, [code]);
   const decide = async allow => {
     setError('');
+    setWrong(false);
     try {
-      await http.decideDevice(code, allow);
+      await http.decideDevice(code, allow, allow && info?.confirm ? typed.trim() : '');
       setResult(allow ? 'allowed' : 'denied');
     } catch (e) {
-      if (gone404(e)) setGone(true); else setError(f('device.failed', e.code));
+      if (gone404(e)) setGone(true); else if (e.code === 'confirm') setWrong(true); else setError(f('device.failed', e.code));
     }
   };
   const back = html`<${Button} onClick=${onBack}>${t('device.back')}<//>`;
@@ -192,8 +196,11 @@ export function Device({http, code, onBack}) {
         <dt>${t('device.ip')}</dt><dd class="mono">${info.ip}</dd>
         <dt>${t('device.at')}</dt><dd>${info.created ? when(w, info.created) : '—'}</dd>
       </dl>
+      ${info.confirm && html`<div class="auth-problem device-elsewhere" role="alert">${t('device.elsewhere')}</div>
+        <${TextInput} label=${t('device.confirm')} value=${typed} onInput=${v => { setTyped(v); setWrong(false); }} mono
+          error=${wrong ? t('device.confirmWrong') : ''} />`}
       <div class="auth-actions">
-        <${Button} kind="primary" onClick=${() => decide(true)}>${t('device.allow')}<//>
+        <${Button} kind="primary" disabled=${info.confirm && typed.trim().length !== 4} onClick=${() => decide(true)}>${t('device.allow')}<//>
         <${Button} onClick=${() => decide(false)}>${t('device.deny')}<//>
       </div>` : !error && html`<p class="t-muted">${t('device.loading')}</p>`}
   </div>`;

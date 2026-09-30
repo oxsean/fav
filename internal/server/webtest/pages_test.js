@@ -499,6 +499,31 @@ test('allowing another device signs it in as you', async () => {
   eq([decided, d.one('h1').textContent], [[['K7QX-M2PA', true]], words.t('device.allowedSession')], 'allowed');
 });
 
+// A browser's sign-in asked for from another address may be a link someone sent: the page says so, shows the code
+// without its last four, and allows it only with them typed again.
+test('allowing a device that asked from elsewhere takes its code typed again', async () => {
+  const decided = [];
+  let answer = null;
+  const dev = {device: async () => ({code: 'K7QX-····', name: 'Android', ip: '100.64.0.9', created: '2026-09-30T14:30:00Z', session: true, confirm: true}),
+    decideDevice: async (code, allow, confirm) => { decided.push([code, allow, confirm]); if (answer) throw answer; }};
+  const d = await mount(html`<${Device} http=${dev} code="K7QX-M2PA" onBack=${() => {}} />`);
+  await act(() => settle());
+  eq([d.one('.device-code').textContent, d.one('.device-elsewhere').textContent], ['K7QX-····', words.t('device.elsewhere')], 'warned');
+  const allow = () => d.find('button').find(b => b.textContent === words.t('device.allow'));
+  ok(allow().disabled, 'nothing typed yet');
+  const box = d.one('input');
+  await act(() => { box.value = 'zzzz'; box.dispatch('input'); });
+  answer = Object.assign(new Error('400'), {status: 400, code: 'confirm'});
+  await act(() => allow().dispatch('click'));
+  await act(() => settle());
+  eq(d.one('.field-note').textContent, words.t('device.confirmWrong'), 'the wrong four');
+  answer = null;
+  await act(() => { box.value = ' m2pa '; box.dispatch('input'); });
+  await act(() => allow().dispatch('click'));
+  await act(() => settle());
+  eq([decided, d.one('h1').textContent], [[['K7QX-M2PA', true, 'zzzz'], ['K7QX-M2PA', true, 'm2pa']], words.t('device.allowedSession')], 'allowed');
+});
+
 await // ⚠️ a heuristic, as TestEnglishCountsAgree in internal/i18n: a word after %d ending in s is taken for a plural noun
 test('an English count reads right for 1: every plural after %d carries its {one|other}', () => {
   ok(['out.files', 'ans.left', 'shell.counts', 'mach.summary'].every(k => words.has(k)), 'the page registered every module');

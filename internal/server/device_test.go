@@ -453,3 +453,83 @@ func TestTheTrustedProxiesAreTheConfiguredOnes(t *testing.T) {
 		}
 	}
 }
+
+// A browser sign-in asked for from another address than the page allowing it is one someone may have sent a link to:
+// the page is told, shows the code without its last four, and allowing it takes those four typed again; the name the
+// asker gave is cut to 64 characters without control or format characters.
+func TestADeviceSessionAskedFromElsewhereNeedsItsCodeTypedAgain(t *testing.T) {
+	r := newRig(t)
+	phone := browser(t)
+	name := "Your iPhone‮\x07\n" + strings.Repeat("长", 80)
+	got, out, _ := ask(t, r, phone, "/auth/device", map[string]any{"name": name, "session": true}, map[string]string{"X-Forwarded-For": "100.64.0.9"})
+	if got != http.StatusOK {
+		t.Fatal(got, out)
+	}
+	userCode := out["user_code"].(string)
+	desk := browser(t)
+	login(t, desk, r.url, r.client)
+	var info struct {
+		Code    string `json:"code"`
+		Name    string `json:"name"`
+		Confirm bool   `json:"confirm"`
+	}
+	if got := r.api(desk, "GET", "/api/device?code="+userCode, nil, &info); got != 200 || !info.Confirm || info.Code != userCode[:5]+"····" {
+		t.Fatalf("%d %+v", got, info)
+	}
+	if n := []rune(info.Name); len(n) != 64 || strings.ContainsAny(info.Name, "‮\x07\n") || !strings.HasPrefix(info.Name, "Your iPhone长") {
+		t.Fatalf("the name: %q", info.Name)
+	}
+	var e map[string]string
+	for _, typed := range []string{"", "ZZZZ", userCode} {
+		if got := r.api(desk, "POST", "/api/device", map[string]any{"code": userCode, "allow": true, "confirm": typed}, &e); got != http.StatusBadRequest || e["error"] != "confirm" {
+			t.Fatalf("typed %q: %d %v", typed, got, e)
+		}
+	}
+	if got := r.api(desk, "POST", "/api/device", map[string]any{"code": userCode, "allow": true, "confirm": strings.ToLower(userCode[5:])}, nil); got != http.StatusNoContent {
+		t.Fatalf("with its last four: %d", got)
+	}
+
+	_, out, _ = ask(t, r, phone, "/auth/device", map[string]any{"name": "x", "session": true}, map[string]string{"X-Forwarded-For": "100.64.0.9"})
+	if got := r.api(desk, "POST", "/api/device", map[string]any{"code": out["user_code"], "allow": false}, nil); got != http.StatusNoContent {
+		t.Fatalf("denying takes nothing typed: %d", got)
+	}
+	_, cliCode := startDevice(t, r, "laptop")
+	var term map[string]any
+	if got := r.api(desk, "GET", "/api/device?code="+cliCode, nil, &term); got != 200 || term["confirm"] != nil {
+		t.Fatalf("a terminal's code: %v", term)
+	}
+}
+
+// Browser sign-ins are counted apart from terminals': one address holding its five of them still starts a
+// `tend login`, and so does everyone once all browser sign-ins are taken.
+func TestDeviceSessionsAreBoundedApartFromTerminals(t *testing.T) {
+	r := newRig(t)
+	start := func(ip string, session bool) int {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest("POST", "/auth/device", strings.NewReader(fmt.Sprintf(`{"name":"x","session":%t}`, session)))
+		req.RemoteAddr = ip + ":40000"
+		req.Host = "tend.test"
+		req.Header.Set("X-Tend", "1")
+		req.Header.Set("Origin", "http://tend.test")
+		r.srv.deviceStart(rec, req)
+		return rec.Code
+	}
+	for i := range maxDevicesPerIP {
+		if got := start("203.0.113.7", true); got != http.StatusOK {
+			t.Fatalf("session %d: %d", i+1, got)
+		}
+	}
+	if start("203.0.113.7", true) != http.StatusTooManyRequests || start("203.0.113.7", false) != http.StatusOK {
+		t.Fatal("an address's browser sign-ins and terminals' are apart")
+	}
+	for i := 0; ; i++ {
+		if got := start(fmt.Sprintf("198.51.100.%d", i), true); got == http.StatusTooManyRequests {
+			break
+		} else if got != http.StatusOK || i > maxSessionDevices {
+			t.Fatalf("filling up: %d at %d", got, i)
+		}
+	}
+	if start("192.0.2.1", false) != http.StatusOK {
+		t.Fatal("a terminal still starts")
+	}
+}

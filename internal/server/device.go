@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/oxsean/fav/internal/store"
 )
@@ -17,12 +18,17 @@ const deviceAge = 10 * time.Minute
 // deviceInterval is how often a polling client should ask again.
 const deviceInterval = 3 * time.Second
 
-// maxDevices bounds how many device codes wait at once, and maxDevicesPerIP how many of them one address holds;
-// requests beyond either are refused.
+// maxDevices bounds how many terminals' device codes wait at once, maxSessionDevices how many browsers' (anyone who
+// opens the sign-in page asks for one), and maxDevicesPerIP how many of either one address holds; requests beyond are
+// refused.
 const (
-	maxDevices      = 100
-	maxDevicesPerIP = 5
+	maxDevices        = 100
+	maxSessionDevices = 30
+	maxDevicesPerIP   = 5
 )
+
+// maxDeviceName bounds the name an asker gives itself, in characters.
+const maxDeviceName = 64
 
 // userCodeAlphabet excludes characters easy to confuse when copied by eye: 0/O, 1/I.
 const userCodeAlphabet = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ"
@@ -85,15 +91,33 @@ func (s *Server) expireDevices() {
 	s.expireDevicesLocked()
 }
 
-// devicesFromLocked counts the device codes waiting that ip asked for. Callers hold s.mu.
-func (s *Server) devicesFromLocked(ip string) int {
-	n := 0
+// devicesLocked counts the device codes of the mode (session: browsers') waiting: all, and those ip asked for. Callers
+// hold s.mu.
+func (s *Server) devicesLocked(ip string, session bool) (all, from int) {
 	for _, d := range s.devices {
-		if d.ip == ip && d.status == deviceStatusPending {
-			n++
+		if d.session == session {
+			all++
+			if d.ip == ip && d.status == deviceStatusPending {
+				from++
+			}
 		}
 	}
-	return n
+	return all, from
+}
+
+// deviceName is the name an asker gave, as the authorization page shows it: without control or format characters
+// (a right-to-left override would turn it around), at most maxDeviceName characters.
+func deviceName(s string) string {
+	var out []rune
+	for _, r := range strings.TrimSpace(s) {
+		if unicode.IsControl(r) || unicode.Is(unicode.Cf, r) {
+			continue
+		}
+		if out = append(out, r); len(out) == maxDeviceName {
+			break
+		}
+	}
+	return strings.TrimSpace(string(out))
 }
 
 func (s *Server) findDeviceLocked(userCode string) *deviceAuth {
@@ -127,13 +151,14 @@ func (s *Server) deviceStart(w http.ResponseWriter, r *http.Request) {
 	ip := s.clientIP(r)
 	s.mu.Lock()
 	s.expireDevicesLocked()
-	if len(s.devices) >= maxDevices || s.devicesFromLocked(ip) >= maxDevicesPerIP {
+	all, from := s.devicesLocked(ip, p.Session)
+	if all >= map[bool]int{false: maxDevices, true: maxSessionDevices}[p.Session] || from >= maxDevicesPerIP {
 		s.mu.Unlock()
 		apiError(w, http.StatusTooManyRequests, "busy")
 		return
 	}
 	now := time.Now()
-	d := &deviceAuth{code: newDeviceCode(), userCode: newUserCode(), name: strings.TrimSpace(p.Name), ip: ip,
+	d := &deviceAuth{code: newDeviceCode(), userCode: newUserCode(), name: deviceName(p.Name), ip: ip,
 		created: now, expires: now.Add(deviceAge), status: deviceStatusPending, session: p.Session}
 	s.devices[d.code] = d
 	s.mu.Unlock()
@@ -232,6 +257,14 @@ type deviceView struct {
 	Created time.Time `json:"created"`
 	Expires time.Time `json:"expires"`
 	Session bool      `json:"session,omitempty"` // allowing it signs a browser in, rather than making a token
+	// Confirm: a browser's sign-in asked for from another address than the page's; Code then hides its last four,
+	// which allowing it takes typed again.
+	Confirm bool `json:"confirm,omitempty"`
+}
+
+// confirms: allowing d from r takes its code's last four typed again. Callers hold s.mu.
+func (s *Server) confirms(d *deviceAuth, r *http.Request) bool {
+	return d.session && d.ip != s.clientIP(r)
 }
 
 // deviceLookup is what the terminal-authorization page reads to show the code, client and source address.
@@ -245,7 +278,11 @@ func (s *Server) deviceLookup(w http.ResponseWriter, r *http.Request, c caller) 
 		apiError(w, http.StatusNotFound, "not_found")
 		return
 	}
-	writeJSON(w, http.StatusOK, deviceView{Code: d.userCode, Name: d.name, IP: d.ip, Created: d.created, Expires: d.expires, Session: d.session})
+	v := deviceView{Code: d.userCode, Name: d.name, IP: d.ip, Created: d.created, Expires: d.expires, Session: d.session, Confirm: s.confirms(d, r)}
+	if v.Confirm {
+		v.Code = d.userCode[:5] + "····"
+	}
+	writeJSON(w, http.StatusOK, v)
 }
 
 // deviceDecide is Allow or Deny on the terminal-authorization page. Allow mints a personal token owned by the
@@ -253,8 +290,9 @@ func (s *Server) deviceLookup(w http.ResponseWriter, r *http.Request, c caller) 
 // poll gets a session of theirs.
 func (s *Server) deviceDecide(w http.ResponseWriter, r *http.Request, c caller) {
 	var p struct {
-		Code  string `json:"code"`
-		Allow bool   `json:"allow"`
+		Code    string `json:"code"`
+		Allow   bool   `json:"allow"`
+		Confirm string `json:"confirm"` // the code's last four, when the page was told to ask them
 	}
 	if !decode(w, r, &p) {
 		return
@@ -264,6 +302,11 @@ func (s *Server) deviceDecide(w http.ResponseWriter, r *http.Request, c caller) 
 	if d == nil || d.status != deviceStatusPending || time.Now().After(d.expires) {
 		s.mu.Unlock()
 		apiError(w, http.StatusNotFound, "not_found")
+		return
+	}
+	if p.Allow && s.confirms(d, r) && !strings.EqualFold(strings.TrimSpace(p.Confirm), d.userCode[5:]) {
+		s.mu.Unlock()
+		apiError(w, http.StatusBadRequest, "confirm")
 		return
 	}
 	if !p.Allow {

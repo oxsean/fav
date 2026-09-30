@@ -62,7 +62,7 @@ export function createHTTP({fetch = (...a) => globalThis.fetch(...a)} = {}) {
     pollDevice: code => ask('POST', '/auth/device/token', {device_code: code}),
     // device is a pending sign-in to allow: {code, name, ip, created, session?} (session: a browser, not a terminal).
     device: code => ask('GET', '/api/device?code=' + encodeURIComponent(code)),
-    decideDevice: (code, allow) => ask('POST', '/api/device', {code, allow}),
+    decideDevice: (code, allow, confirm) => ask('POST', '/api/device', {code, allow, ...(confirm ? {confirm} : {})}),
     // users are the people on this server: [{id, name, username, role, disabled}].
     users: async () => (await ask('GET', '/api/users')) || [],
     // setUser changes a user's role (member | admin) or disables them ({id, role?, disabled?}); admins only.
