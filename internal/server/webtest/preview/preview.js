@@ -19,7 +19,7 @@ const sets = {home: ['home-state', 'output-page', 'home-commands', 'changes-gone
   output: ['output-state', 'output-conv', 'output-send', 'output-answer', 'changes-list'],
   carry: ['output-state', 'output-conv', 'output-send', 'output-carry', 'changes-list'],
   gone: ['output-state', 'output-conv', 'output-answer-gone', 'changes-list'],
-  team: ['team-state', 'team-share']};
+  team: ['team-state', 'team-share', 'team-project']};
 // joins are the files whose pushes on a stream an earlier file opened go on that stream, after what it pushed there.
 const joins = new Set(['output-send', 'output-carry']);
 const keyOf = (f, run = true) => [f.method, run && f.params?.run, f.params?.after, f.params?.path].filter(Boolean).join(' ');

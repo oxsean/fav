@@ -4,12 +4,33 @@
     {"id": "u_a", "name": "Ann Lee", "username": "ann", "email": "ann@example.com", "role": "admin", "logins": ["github"], "seen": "2026-09-30T14:30:00Z"},
     {"id": "u_b", "name": "Bo Lin", "username": "bo", "email": "bo@example.com", "role": "member", "logins": ["oidc"], "seen": "2026-09-30T14:12:00Z"},
     {"id": "u_c", "name": "Cy Park", "username": "cy", "email": "cy@example.com", "role": "member", "logins": ["github", "oidc"], "seen": "2026-09-28T17:40:00Z"},
-    {"id": "u_d", "name": "Di Wu", "username": "di", "email": "di@example.com", "role": "member", "disabled": true, "logins": ["github"], "seen": "2026-09-20T10:00:00Z"}
+    {"id": "u_d", "name": "Di Wu", "username": "di", "email": "di@example.com", "role": "member", "disabled": true, "logins": ["github"], "seen": "2026-09-20T10:00:00Z"},
+    {"id": "u_e", "name": "Eve Ng", "username": "eve", "email": "eve@example.com", "role": "member", "logins": ["oidc"]}
+  ],
+  "GET /api/admits": [
+    {"kind": "domain", "value": "example.com", "role": "member", "added_by": "u_a", "created": "2026-09-20T09:00:00Z"},
+    {"kind": "login", "value": "github:cy-dev", "role": "member", "added_by": "u_a", "created": "2026-09-21T09:00:00Z"},
+    {"kind": "email", "value": "ann@example.com", "role": "admin", "added_by": "local", "created": "2026-09-19T09:00:00Z"}
+  ],
+  "GET /api/invites": [
+    {"id": "a1f3c9e2b7d0", "role": "member", "created_by": "u_b", "created": "2026-09-28T15:00:00Z", "expires": "2026-10-01T15:00:00Z", "project": "p2", "access": "participant"},
+    {"id": "7c0e44b19a2f", "role": "member", "created_by": "u_a", "created": "2026-09-30T09:10:00Z", "expires": "2026-10-03T09:10:00Z"}
+  ],
+  "GET /api/audit": [
+    {"at": "2026-09-30T14:29:00Z", "actor": "u_a", "kind": "run.answer", "detail": "r3 allow", "ip": "100.64.0.2"},
+    {"at": "2026-09-30T13:05:00Z", "actor": "u_a", "kind": "machine.share", "detail": "mba u_c p1", "ip": "100.64.0.2"},
+    {"at": "2026-09-30T11:40:00Z", "kind": "login_refused", "detail": "github mallory", "ip": "203.0.113.9"},
+    {"at": "2026-09-30T10:21:00Z", "actor": "u_b", "kind": "device.allow", "detail": "login:mba", "ip": "100.64.0.5"},
+    {"at": "2026-09-30T09:15:00Z", "actor": "u_b", "kind": "project.member", "detail": "p2 u_c participant", "ip": "100.64.0.5"},
+    {"at": "2026-09-30T09:10:00Z", "actor": "u_a", "kind": "invite", "detail": "member", "ip": "100.64.0.2"},
+    {"at": "2026-09-29T18:02:00Z", "actor": "u_c", "kind": "denied", "detail": "GET /api/audit", "ip": "100.64.0.7"},
+    {"at": "2026-09-29T08:00:00Z", "actor": "u_a", "kind": "token", "detail": "k9", "ip": "100.64.0.2"}
   ],
   "GET /api/machines": [
     {"id": "n1", "kind": "node", "name": "mba", "owner": "u_a", "node_id": "7f3a", "host": "mba.lan", "created": "2026-09-20T09:00:00Z", "last_used": "2026-09-30T14:31:00Z"},
     {"id": "n2", "kind": "node", "name": "bo-laptop", "owner": "u_b", "node_id": "9c21", "host": "bo-mbp", "created": "2026-09-24T09:00:00Z", "last_used": "2026-09-30T14:30:00Z"},
     {"id": "n3", "kind": "node", "name": "old-box", "owner": "u_d", "created": "2026-09-10T09:00:00Z"}
   ],
-  "POST /api/machines": {"id": "n4", "token": "tend_node_example_secret", "command": "tend node install-service --connect https://tend.example.com --token-file ~/.config/tend/node-token"}
+  "POST /api/machines": {"id": "n4", "token": "tend_node_example_secret", "command": "tend node install-service --connect https://tend.example.com --token-file ~/.config/tend/node-token"},
+  "POST /api/invites": {"url": "https://tend.example.com/#invite-example", "expires": "2026-10-03T14:32:00Z"}
 }

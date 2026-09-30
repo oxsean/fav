@@ -1,6 +1,7 @@
 // team derives what the machines and team pages show from the store and the server's lists: whose machine is whose,
 // what each one lacks, what waits on it, and who may change what. Every function is pure.
 import * as sel from './select.js';
+import {finished} from './tasks.js';
 
 export const isAdmin = session => session?.role === 'admin';
 
@@ -71,3 +72,63 @@ export const credsOf = (creds, name) => creds.filter(c => c.name === name);
 
 // ⚠️ A machine name as the server takes it (server.CheckMachine): letters, digits, '-', '_', '.', up to 64.
 export const machineName = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
+
+// ⚠️ The roles a project member takes (task.Member*), and a user's roles on the server (store.Role*).
+export const accessRoles = ['participant', 'reader'];
+export const userRoles = ['member', 'admin'];
+
+// projectsOf are the projects user takes part in, by name, each with the part: owner, participant or reader.
+export const projectsOf = (state, user) => Object.values(state.projects || {})
+  .filter(p => inProject(p, user)).sort((a, b) => a.name.localeCompare(b.name))
+  .map(p => ({id: p.id, name: p.name, role: p.owner === user ? 'owner' : p.members[user]}));
+
+// people are the users the server listed, the server admin (local) left out: active ones by name, then the disabled,
+// each with their projects and the machines they own.
+export function people(users, state, machines) {
+  return users.filter(u => u.id !== 'local').map(u => ({
+    ...u, projects: projectsOf(state, u.id), machines: machines.filter(m => m.owner === u.id && !m.retired).map(m => m.name).sort(),
+  })).sort((a, b) => (a.disabled === b.disabled ? (a.name || a.id).localeCompare(b.name || b.id) : a.disabled ? 1 : -1));
+}
+
+// projectFacts are a project's counts: its tasks and those not finished, its participants and readers (its owner
+// counted as taking part).
+export function projectFacts(state, p) {
+  const tasks = Object.values(state.tasks || {}).filter(t => t.project === p.id);
+  const roles = Object.values(p.members || {});
+  return {tasks: tasks.length, open: tasks.filter(t => !finished(t.status)).length,
+    participants: roles.filter(r => r === 'participant').length + (p.owner ? 1 : 0), readers: roles.filter(r => r === 'reader').length};
+}
+
+// mayManage: session may change project p's members and settings (its owner or an admin).
+export const mayManage = (session, p) => !!p && (isAdmin(session) || p.owner === session?.id);
+
+// offboardPlan is what handing user's work to to does, as the coordinator does it (coord.userOffboard): the projects
+// they own go to to, they leave the projects they are in, their unfinished tasks (as owner or approver) go to each
+// project's owner once this is done (to without a project), their machines close to everyone else and the runs others
+// queued there are canceled.
+export function offboardPlan(state, machines, user, to) {
+  const owned = Object.values(state.projects || {}).filter(p => p.owner === user).map(p => p.id);
+  const heir = p => (owned.includes(p) || !state.projects?.[p] ? to : state.projects[p].owner);
+  const tasks = Object.values(state.tasks || {}).filter(t => !finished(t.status) && (t.owner === user || t.approver === user));
+  const mine = machines.filter(m => m.owner === user && !m.retired).map(m => m.name);
+  const canceled = Object.values(state.runs || {}).filter(r => r.state === 'queued' && mine.includes(r.machine) && r.dispatcher !== user);
+  return {
+    projects: owned,
+    left: Object.values(state.projects || {}).filter(p => (p.members || {})[user] !== undefined).map(p => p.id),
+    tasks: tasks.map(t => ({id: t.id, to: heir(t.project)})),
+    machines: mine, canceled: canceled.length,
+  };
+}
+
+// ⚠️ The security log's kinds (server.audit) in the page's groups: sign-ins, credentials, refusals.
+const auditGroups = {
+  login: ['login', 'login_refused', 'device.allow', 'device.deny', 'link'],
+  creds: ['token', 'machine', 'rebind', 'revoke', 'tracker.credential', 'webhook'],
+  refused: ['denied', 'login_refused', 'refused', 'invite.project_failed'],
+};
+export const auditFilters = ['all', 'login', 'creds', 'refused'];
+export const auditIn = (filter, e) => filter === 'all' || (auditGroups[filter] || []).includes(e.kind);
+export const auditRefused = e => auditGroups.refused.includes(e.kind);
+
+// ⚠️ How a sign-in rule matches (store.Admit*): a verified email, a verified email's domain, provider:username.
+export const admitKinds = ['domain', 'email', 'login'];

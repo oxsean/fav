@@ -56,7 +56,7 @@ tend journal verify [--json] | repair [-y]
 - 认证：登录页列出 `/auth/logins` 给的登录方式（GitHub、OIDC），另有 token 表单。`POST /login`（表单 `token`）建一条网页会话，写 cookie `tend_session`（HttpOnly、SameSite=Strict、TLS 下 Secure、30 天）；`GET /session` 回 `{id, name, email, username, role, session}` 或 401；`POST /logout` 吊销这条会话。地址里的 `#invite-<secret>` 让登录按钮带上邀请，`#signin-<结果>` 显示登录失败的原因。`/client` 接受 header 里的 token 或这个 cookie；WebSocket 握手校验 Origin（同源）。会话被吊销或用户被停用，连接立即断开，页面回到登录页。
 - 响应头：CSP `default-src 'self'`（不允许内联脚本和 `style` 属性，宽度等动态样式经 CSSOM 设置）、`frame-ancestors 'none'`、`nosniff`、`no-referrer`、`Cache-Control: no-cache`。
 - 没有轮询：页面上的一切随 `state.watch`、`machines.watch`、`inbox.watch` 和 `run.output.watch` 的推送变化，首页的数每次重画时取当前时间。页面不调用 `setInterval`（`TestThePageRunsNoInterval`）；剩下的计时器都只响一次：防抖、重连的退避、调用超时、提示的停留、`g` 开头的两键序列。
-- 页面：首页、任务（列表、看板、树、详情、对话、改动）、运行、机器，以及登录、终端授权、邀请。Agent、团队、我三页在侧栏和标签栏里有位置，打开时写「这一页还在做」；在那之前，用户和准入、凭据、替别人登记一台机器、agent 定义、项目设置分别用 `tend-server admin`、`tend-server token`、`tend-server token add --node <机器> --owner <用户>`、`tend agent`、TUI 的项目设置完成，主题、语言、密度用快捷键和用户菜单。
+- 页面：首页、任务（列表、看板、树、详情、对话、改动）、运行、机器、团队，以及登录、终端授权、邀请。Agent、我两页在侧栏和标签栏里有位置，打开时写「这一页还在做」；在那之前，个人 token、替别人登记一台机器、agent 定义、项目设置分别用 `tend-server token`、`tend-server token add --node <机器> --owner <用户>`、`tend agent`、TUI 的项目设置完成，主题、语言、密度用快捷键和用户菜单。
 
 ### 结构
 
@@ -133,7 +133,7 @@ tend journal verify [--json] | repair [-y]
   - `home.js`：首页，见下。
   - `conversation.js`：一个任务的对话，见下面「对话与输出」。
   - `runs.js`：运行页和一次运行自己的页，见下面「运行页」。`changes.js`：改动页签，见下面「改动」。
-  - `machines.js`：机器页，见下面「机器页」；分组、摘要、提示、排队和泳道这些推导在 `core/team.js`（纯函数）。`ui/secret.js` 的 `Secret` 显示服务器只给一次的值（节点 token、命令），带复制；剪贴板被拒时选中文字让人手动复制。
+  - `machines.js`：机器页，见下面「机器页」；`team.js`：团队页，见下面「团队页」。两页的推导（分组、摘要、提示、排队、泳道、每个人在哪些项目、项目的数、交接会做什么、审计的分类）在 `core/team.js`（纯函数）。`ui/secret.js` 的 `Secret` 显示服务器只给一次的值（节点 token、命令），带复制；剪贴板被拒时选中文字让人手动复制。
   - `tasks.js`（列表、看板、树和每个写操作）、`task.js`（一个任务的详情）、`taskforms.js`（新建 / 子任务 / 复制 / 编辑、派发、调整位置、审拆解、验收）、`taskwords.js`（它们的词表）：任务页，见下。
 - **首页**：
   - 上面四个数：
@@ -185,6 +185,13 @@ tend journal verify [--json] | repair [-y]
   - 改分享：先写信任声明（agent 以主人的账号跑，读主人 home 下的文件、用主人的 CLI 额度，提交的 committer 是主人），再选人、项目和权限请求（只能派发 / 也能批准，附说明），保存发 `machine.share`（整份替换）。
   - 添加机器：填机器名（`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`），`POST /api/machines {name}` 回 `{id, token, command}`；对话框用 `Secret` 显示 token 和命令，说明把 token 存进 `~/.config/tend/node-token` 再在那台机器上运行命令；关掉后 token 不再显示。新机器的主人是添加的人。服务器的错误码经 `apiText` 变成一句话（`api.<code>`，没有的写码本身）。
   - 手机上只看：分组的卡片列表，点一台占满整屏看它的事实（不含 token）；添加、分享和 token 写明在电脑上管理。
+- **团队页**（`g p`）：
+  - 页头一行：几人在用、几人已停用、你是管理员还是成员；管理员有「新建项目」（名称、负责人，`project.create`，建好打开它的抽屉）和「邀请」（身份，可选加入的项目和在项目里的角色，`POST /api/invites`；对话框用 `Secret` 显示链接一次，写明到期时间）。
+  - 成员（`GET /api/users`，服务器管理员 `local` 不列）：在用的按名字排，停用的在后；每人写名字、身份、参与的项目（负责人 / 参与者 / 只读，来自状态里的项目）、名下的机器（退役的不算）。管理员另看到邮箱、登录方式和最近活动（他的凭据最近一次被用），和除自己以外每人的「⋯」菜单：设为管理员 / 成员、停用（先确认，写明会话立刻断开、工作不动）、启用、交接并停用。
+  - 交接并停用：选交给谁（默认自己），列出这次会做的事：他负责的项目转给对方，离开参与的项目，没结束的任务（他负责或验收的）交给各自项目的负责人（不在项目里的交给对方），他的机器不再对别人开放、别人排在那里的运行取消，最后停用他、吊销他的全部凭据；确认发 `POST /api/users/offboard {user, to}`。
+  - 项目：看得到的项目，每个写负责人、任务数和未结束数、参与和只读的人数。`j` / `k` 移动，`Enter` 或点击打开右侧抽屉：负责人和成员；项目负责人和管理员在这里加成员（没在项目里的在用的人，参与者 / 只读）、改角色、移出（先确认），都是 `project.member`。
+  - 管理员另有三块：没用过的邀请（`GET /api/invites`：编号、身份、加入哪个项目、谁在何时发出、还剩多久，「作废」发 `DELETE /api/invites`）；谁能直接登录进来（`GET /api/admits`：邮箱域名 / 邮箱 / 账号、身份；「加规则」和每条的去掉，写明先认已关联的身份、再认邀请、最后才看规则、只认已验证的邮箱）；审计（`GET /api/audit` 最近 200 条，筛选全部 / 登录 / 凭据 / 被拒，被拒的标红）。这些 `/api` 只给管理员，成员的团队页只有成员和项目两块。
+  - 手机上只看：成员卡片（身份和项目）、项目列表，点项目看成员（不能改）；写明成员、邀请和准入在电脑上管理。
 - **改动**（`pages/changes.js`，任务详情和运行页共用）：
   - 一个任务有几次运行时先选看哪一次，默认最新的。头部写文件数和 `+a −d`、筛选（全部、只看 agent 用工具改的、生成的文件，各带数目）；还在跑的运行写「截至 hh:mm」和刷新，状态变了也重读。
   - 文件按目录分组，根目录在前；每个文件一行：`+ ~ − →`（新增、修改、删除、改名，改名写 `旧 → 新`）、路径、生成的标记、`+a −d`。二进制写大小（有 `old_bytes` 时写 `旧 → 新`），不能展开；改动很大的和生成的先折起。

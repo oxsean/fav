@@ -529,9 +529,9 @@ listed in the server's `config.json`:
 ```
 
 The provider's callback is `<public_url>/auth/<name>/callback`. Nobody joins on their own: `tend-server admin add
-ann@corp.example --role admin` makes the first admin, and after that admins add people on the Admin page or with
+ann@corp.example --role admin` makes the first admin, and after that admins add sign-in rules on the Team page or with
 `tend-server admin add <email | domain | provider:username>` (a verified email, any verified email of a domain, or an
-account), or send a one-time invitation link (`tend-server admin invite`, or the Admin page; it lasts 3 days), which can also make
+account), or send a one-time invitation link (`tend-server admin invite`, or the Team page; it lasts 3 days), which can also make
 the invitee a participant or reader of a project (`--project`, `--access`).
 `tend-server admin disable <user>` signs someone out everywhere at once.
 
@@ -548,7 +548,7 @@ is on each machine (a task without a directory uses that), the default agent and
 and an approver; a task that comes to wait for someone reaches its owner, its approver when it is to be accepted, and whoever
 dispatched the run it is about — in their **Needs you** list on the web page, as a browser notification while the page is
 open, and at a personal webhook (Account page; a JSON POST with a `text` field for ntfy, Slack and the like, with a link to
-the task when `public_url` is set). An admin's **Hand over and disable** on the Admin page gives a leaving member's projects,
+the task when `public_url` is set). An admin's **Hand over and disable** on the Team page gives a leaving member's projects,
 tasks and definitions to others and ends their credentials; their machines retire, and runs still open on them wait in
 the admins' **Needs you**.
 
@@ -585,7 +585,7 @@ answers in place: `1` allows, `2` denies with an optional reason, a digit picks 
 **Runs** (`g r`) lists every run by state and machine with a preview of its latest output. A task's detail shows its
 workflow budget against what its runs spent; an agent definition shows where it is used and the command a run of it
 starts, and imports or exports as Markdown; project settings check each repository directory on its machine; a tracker
-binding's **Sync log** lists its issues and previews the progress comment; the Admin page lists pending invitations to
+binding's **Sync log** lists its issues and previews the progress comment; the Team page lists pending invitations to
 revoke, and a handover lists what goes where before it runs.
 **Settings** picks the theme (light, dark or the system's), a skin (tend, Forest,
 Ember, Graphite) with its own accent if you like, standard or high contrast, and one of three densities, kept in the

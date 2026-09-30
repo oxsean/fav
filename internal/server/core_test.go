@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/oxsean/fav/internal/coord"
 	"github.com/oxsean/fav/internal/journal"
@@ -350,12 +351,20 @@ func strictDecode(t *testing.T, where string, raw json.RawMessage, v any) {
 // The /api answers the page tests read (webtest/api.json) are the server's shapes.
 func TestPageAPIAnswersAreTheServersShapes(t *testing.T) {
 	shapes := map[string]func() any{
-		"GET /api/users": func() any { return new([]PublicUser) }, "GET /api/machines": func() any { return new([]store.Credential) },
+		"GET /api/users": func() any { return new([]PublicUser) }, "GET /api/admits": func() any { return new([]store.Admit) },
+		"GET /api/invites": func() any { return new([]store.PendingInvite) }, "GET /api/audit": func() any { return new([]store.AuditEntry) },
+		"GET /api/machines": func() any { return new([]store.Credential) },
 		"POST /api/machines": func() any {
 			return new(struct {
 				ID      string `json:"id"`
 				Token   string `json:"token"`
 				Command string `json:"command"`
+			})
+		},
+		"POST /api/invites": func() any {
+			return new(struct {
+				URL     string    `json:"url"`
+				Expires time.Time `json:"expires"`
 			})
 		},
 	}
@@ -392,7 +401,8 @@ func TestFrameWritesAndListsAreTheCoordinatorsShapes(t *testing.T) {
 		coord.MTaskMessage: func() any { return new(coord.TaskMessage) }, coord.MTaskMessagePreview: func() any { return new(coord.MessagePreview) },
 		coord.MRunSend: func() any { return new(coord.SendMessage) }, coord.MRunInterrupt: func() any { return new(coord.Interrupt) },
 		coord.MRunChanges: func() any { return new(node.ChangesParams) }, coord.MRunDiff: func() any { return new(node.DiffParams) },
-		coord.MMachineShare: func() any { return new(task.Share) },
+		coord.MMachineShare: func() any { return new(task.Share) }, coord.MProjectCreate: func() any { return new(coord.ProjectCreate) },
+		coord.MProjectMember: func() any { return new(task.MemberSet) },
 	}
 	results := map[string]func() any{
 		coord.MTaskStatus: func() any { return new(task.Task) }, coord.MRunDispatch: func() any { return new(task.Run) },
@@ -406,7 +416,8 @@ func TestFrameWritesAndListsAreTheCoordinatorsShapes(t *testing.T) {
 		coord.MTaskMessage: func() any { return new(coord.MessageResult) }, coord.MTaskMessagePreview: func() any { return new(coord.MessageRoute) },
 		coord.MRunSend: func() any { return new(task.Run) }, coord.MRunInterrupt: func() any { return new(task.Run) },
 		coord.MRunChanges: func() any { return new(node.Changes) }, coord.MRunDiff: func() any { return new(node.Diff) },
-		coord.MMachineShare: func() any { return new(task.Share) },
+		coord.MMachineShare: func() any { return new(task.Share) }, coord.MProjectCreate: func() any { return new(task.Project) },
+		coord.MProjectMember: func() any { return new(task.Project) },
 	}
 	files, _ := filepath.Glob(filepath.Join("webtest", "frames", "*.jsonl"))
 	seen := map[string]int{}
@@ -450,7 +461,7 @@ func TestFrameWritesAndListsAreTheCoordinatorsShapes(t *testing.T) {
 	}
 	for _, m := range []string{coord.MTaskStatus, coord.MRunDispatch, coord.MRunStop, coord.MRunAnswer, coord.MRunOutputPage, coord.MTaskCreate,
 		coord.MTaskStart, coord.MTaskMerge, coord.MTaskMove, coord.MTaskPlanSave, coord.MTaskPlanApply, coord.MTaskGate, coord.MTaskSourceAck,
-		coord.MRunPreview, coord.MAgentList, coord.MTaskMessage, coord.MRunInterrupt, coord.MRunChanges, coord.MRunDiff, coord.MMachineShare, "machines", "inbox", coord.PushAffordances, "affordances part"} {
+		coord.MRunPreview, coord.MAgentList, coord.MTaskMessage, coord.MRunInterrupt, coord.MRunChanges, coord.MRunDiff, coord.MMachineShare, coord.MProjectCreate, coord.MProjectMember, "machines", "inbox", coord.PushAffordances, "affordances part"} {
 		if seen[m] == 0 {
 			t.Errorf("no frame file has %s", m)
 		}

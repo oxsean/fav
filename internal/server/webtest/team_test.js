@@ -1,7 +1,9 @@
-// team_test draws the machines page in both forms and both languages from the team frames and the /api answers in
-// api.json, and drives it in a fake document: grouped as each viewer sees them, a machine's sharing changed by its
-// owner, a machine added and its token shown once, a node token moved and revoked, Enter opening the runs page on a
-// machine, and a phone showing a machine's facts without the controls.
+// team_test draws the machines and team pages in both forms and both languages from the team frames and the /api
+// answers in api.json, and drives them in a fake document. Machines: grouped as each viewer sees them, a machine's
+// sharing changed by its owner, a machine added and its token shown once, a node token moved and revoked, Enter
+// opening the runs page on a machine, a phone showing a machine's facts without the controls. Team: a person's role,
+// disabling and handing over, an invitation and the sign-in rules, the log's filters, a project created and its
+// members changed by who may, and a phone that only shows.
 process.env.TZ = 'UTC';
 import {readFileSync} from 'node:fs';
 import {render} from '../web/vendor/preact.mjs';
@@ -45,6 +47,16 @@ function fakeHTTP() {
   const ans = (key, body) => { calls.push(body === undefined ? [key] : [key, body]); return Promise.resolve(structuredClone(api[key] ?? null)); };
   return {
     calls,
+    users: () => ans('GET /api/users'),
+    admits: () => ans('GET /api/admits'),
+    invites: () => ans('GET /api/invites'),
+    audit: () => ans('GET /api/audit'),
+    setUser: p => ans('POST /api/users', p),
+    offboard: p => ans('POST /api/users/offboard', p),
+    addAdmit: a => ans('POST /api/admits', a),
+    removeAdmit: a => ans('DELETE /api/admits', a),
+    makeInvite: p => ans('POST /api/invites', p),
+    revokeInvite: id => ans('DELETE /api/invites', {id}),
     machineCreds: () => ans('GET /api/machines'),
     addMachine: name => ans('POST /api/machines', {name}),
     rebindMachine: id => ans('POST /api/machines/rebind', {id}),
@@ -70,7 +82,7 @@ function app(r, {url = '/?page=machines', session = admin, http = fakeHTTP(), st
   const props = {store: r.store, commands, toasts, wire: r.wire, http, router, keys, nav: createNav({storage: noStore, width: 1440}),
     prefs: createPrefs({storage: noStore, asked: 'zh'}), session, names, clock: () => NOW, fetchOutput: () => Promise.resolve({events: []}),
     storage, copy, onLogout() {}};
-  return {...props, vnode: () => html`<${KeysContext.Provider} value=${keys}><${App} ...${props} /><//>`};
+  return {...props, http, vnode: () => html`<${KeysContext.Provider} value=${keys}><${App} ...${props} /><//>`};
 }
 
 function drawn(vnode, f, lang) {
@@ -226,6 +238,168 @@ test('machines: a phone lists them and shows one\'s facts, the controls left to 
     ok(page && page.textContent.includes(words.f('mach.note.missing', 'files')), 'its facts');
     eq(page.find('button').filter(b => [words.t('mach.share'), words.t('mach.rebind'), words.t('mach.revoke'), words.t('mach.add')].includes(labelOf(b))).length, 0, 'no controls');
     eq(http.calls, [], 'no token read');
+  } finally { form.value = 'desktop'; }
+});
+
+// mounted draws the page into a fake document in form and lang, with its /api answers read, and checks its classes
+// and words as styled does.
+async function mounted(a, f, lang, what) {
+  words.lang.value = lang;
+  const root = await mount(a.vnode(), f);
+  await until(() => a.http.calls.some(c => c[0] === 'GET /api/users'), 'the people');
+  await settled();
+  const classes = new Set(root.all().flatMap(e => e.className.split(' ').filter(Boolean)));
+  eq([...classes].filter(c => !cssClasses.has(c)), [], `${what}: classes without a rule`);
+  eq(wordsLeft(root.textContent), null, `${what}: words not found`);
+  return root;
+}
+const writes = http => http.calls.filter(c => !c[0].startsWith('GET '));
+const rowOf = (root, name) => root.find('.team-who').find(x => x.textContent.includes(name)).parentNode;
+const menuOf = async (root, name, item) => {
+  await click(rowOf(root, name).one('.menu-wrap').one('button'));
+  await click(root.find('[role=menuitem]').find(b => b.textContent === item));
+};
+
+test('team: drawn in both forms and languages, for an admin and for a member', async () => {
+  const r = await team();
+  try {
+    for (const session of [admin, bo]) for (const f of ['desktop', 'phone']) for (const lang of ['zh', 'en']) {
+      await mounted(app(r, {url: '/?page=team', session}), f, lang, `${session.id} ${f}/${lang}`);
+    }
+  } finally { words.lang.value = 'zh'; form.value = 'desktop'; }
+  const root = await mounted(app(r, {url: '/?page=team'}), 'desktop', 'zh', 'admin');
+  eq(root.find('.team-tr').filter(x => !x.classList.contains('team-th')).map(x => x.one('b').textContent),
+    [words.f('team.you', 'Ann Lee'), 'Bo Lin', 'Cy Park', 'Eve Ng', 'Di Wu'], 'active people by name, then the disabled');
+  ok(rowOf(root, 'Bo Lin').textContent.includes(words.f('team.inProject', 'Docs', words.t('role.owner'))), 'the projects they take part in');
+  ok(rowOf(root, 'Bo Lin').textContent.includes('bo-laptop'), 'the machines they own');
+  eq(rowOf(root, 'Ann Lee').find('.menu-wrap').length, 0, 'nothing to change about oneself');
+  const member = await mounted(app(r, {url: '/?page=team', session: bo}), 'desktop', 'zh', 'member');
+  eq(member.find('.panel').map(x => x.one('h2').textContent), [words.t('team.members'), words.t('team.projects')], 'a member sees the people and the projects');
+  eq(member.one('.team').find('.menu-wrap').length + member.one('.team').find('button').filter(b => [words.t('team.new'), words.t('team.invite')].includes(labelOf(b))).length, 0, 'and changes nothing there');
+  eq(r.errors, [], 'errors');
+});
+
+test('team: an admin changes a role, disables and enables, and hands someone\'s work over', async () => {
+  const r = await team();
+  const a = app(r, {url: '/?page=team'});
+  const root = await mounted(a, 'desktop', 'zh', 'admin');
+  await menuOf(root, 'Bo Lin', words.t('team.makeAdmin'));
+  await settled();
+  await menuOf(root, 'Cy Park', words.t('team.disable'));
+  ok(root.one('.modal').textContent.includes(words.t('team.disableNote')), 'what disabling does');
+  await click(buttonOf(root.one('.modal-foot'), words.t('team.disable')));
+  await settled();
+  await menuOf(root, 'Di Wu', words.t('team.enable'));
+  await settled();
+  await menuOf(root, 'Bo Lin', words.t('team.offboard'));
+  const steps = root.one('.team-steps').textContent;
+  ok(steps.includes(words.f('team.offProjects', 1, 'Ann Lee')) && steps.includes(words.f('team.offLeft', 1)) && steps.includes(words.t('team.offEnd')), 'the steps: ' + steps);
+  await click(buttonOf(root.one('.modal-foot'), words.t('team.offGo')));
+  await settled();
+  eq(writes(a.http), [['POST /api/users', {id: 'u_b', role: 'admin'}], ['POST /api/users', {id: 'u_c', disabled: true}],
+    ['POST /api/users', {id: 'u_d', disabled: false}], ['POST /api/users/offboard', {user: 'u_b', to: 'u_a'}]], 'the writes');
+  ok(root.find('.toast-text').some(x => x.textContent === words.f('team.offDone', 'Bo Lin', 'Ann Lee')), 'said');
+});
+
+test('team: an invitation made and one revoked, sign-in rules added and removed, the log filtered', async () => {
+  const r = await team();
+  const copied = [];
+  const a = app(r, {url: '/?page=team', copy: text => { copied.push(text); return Promise.resolve(); }});
+  const root = await mounted(a, 'desktop', 'en', 'admin');
+  try {
+    await click(buttonOf(root, words.t('team.invite')));
+    await click(root.one('.modal').one('.picker-btn'));
+    await click(root.find('[role=option]').find(o => o.textContent.includes('Docs')));
+    await click(root.one('.modal').find('[role=radio]').find(b => b.textContent === words.t('role.reader')));
+    await click(buttonOf(root.one('.modal-foot'), words.t('team.inviteGo')));
+    await settled();
+    eq(root.one('.modal').one('.secret-value').textContent, api['POST /api/invites'].url, 'the link, once');
+    await click(root.one('.modal').one('.secret').one('button'));
+    await settled();
+    eq(copied, [api['POST /api/invites'].url], 'copied');
+    await click(buttonOf(root.one('.modal-foot'), words.t('team.done')));
+    await click(root.find('.team-row').find(x => x.textContent.includes('#a1f3c9e2b7d0')).one('button'));
+    await settled();
+    await click(buttonOf(root, words.t('team.addAdmit')));
+    await click(root.one('.modal').find('[role=radio]').find(b => b.textContent === words.t('team.admit.email')));
+    await type(root.one('.modal').find('input')[0], ' eve@example.com ');
+    await click(buttonOf(root.one('.modal-foot'), words.t('team.addAdmit')));
+    await settled();
+    await click(root.find('button').find(b => b.getAttribute('aria-label') === words.f('team.admitRemove', 'example.com')));
+    await settled();
+    eq(writes(a.http), [['POST /api/invites', {role: 'member', project: 'p2', access: 'reader'}], ['DELETE /api/invites', {id: 'a1f3c9e2b7d0'}],
+      ['POST /api/admits', {kind: 'email', value: 'eve@example.com', role: 'member'}], ['DELETE /api/admits', {kind: 'domain', value: 'example.com'}]], 'the writes');
+    const kinds = () => root.one('.team-log').find('li').map(x => x.find('span')[2].textContent);
+    eq(kinds().length, api['GET /api/audit'].length, 'every entry');
+    await click(root.find('.chip').find(c => c.textContent.startsWith(words.t('team.audit.refused'))));
+    eq(kinds(), ['login_refused', 'denied'], 'the refusals');
+  } finally { words.lang.value = 'zh'; }
+});
+
+test('team: a project created for someone; an admin changes another\'s members', async () => {
+  const r = await team();
+  const a = app(r, {url: '/?page=team'});
+  const root = await mounted(a, 'desktop', 'zh', 'admin');
+  await r.srv.play('team-project', {
+    async create() {
+      await click(buttonOf(root, words.t('team.new')));
+      await type(root.one('.modal').find('input')[0], ' Billing ');
+      await click(root.one('.modal').one('.picker-btn'));
+      await click(root.find('[role=option]').find(o => o.textContent.includes('Bo Lin')));
+      await click(buttonOf(root.one('.modal-foot'), words.t('team.create')));
+    },
+    async add() {
+      await settled();
+      eq(root.find('.modal').length, 0, 'created');
+      await click(root.find('.team-project').find(b => b.textContent.includes('Shop')));
+      const drawer = root.one('.drawer');
+      ok(drawer.textContent.includes('Shop'), 'Shop opens');
+      await click(buttonOf(drawer, words.t('team.add')));
+      await click(root.one('.modal').one('.picker-btn'));
+      eq(root.find('[role=option]').map(o => o.textContent.includes('Eve Ng')).filter(Boolean).length, 1, 'those not in it yet');
+      await click(root.find('[role=option]').find(o => o.textContent.includes('Eve Ng')));
+      await click(root.one('.modal').find('[role=radio]').find(b => b.textContent === words.t('role.reader')));
+      await click(buttonOf(root.one('.modal-foot'), words.t('team.add')));
+    },
+    async role() {
+      await settled();
+      const cy = root.one('.drawer').find('.team-row').find(x => x.textContent.includes('Cy Park'));
+      await click(cy.find('[role=radio]').find(b => b.textContent === words.t('role.participant')));
+    },
+    async remove() {
+      await settled();
+      const bo = root.one('.drawer').find('.team-row').find(x => x.textContent.includes('Bo Lin'));
+      await click(buttonOf(bo, words.t('team.remove')));
+      await click(buttonOf(root.one('.modal-foot'), words.t('team.remove')));
+    },
+    async done() { await settled(); },
+  });
+  eq(r.errors, [], 'errors');
+});
+
+test('team: j and Enter open a project; a member manages the one they own and only reads the others', async () => {
+  const r = await team();
+  const a = app(r, {url: '/?page=team', session: bo});
+  const root = await mounted(a, 'desktop', 'zh', 'member');
+  await act(() => { a.keys.handle(press('j')); });
+  await act(() => { a.keys.handle(press('Enter')); });
+  ok(root.one('.drawer').textContent.includes('Shop'), 'the second project opens');
+  eq(root.one('.drawer').find('[role=radio]').length, 0, 'Shop is Ann\'s');
+  await click(root.one('.drawer').find('button').find(b => b.getAttribute('aria-label') === words.t('ui.close')));
+  await click(root.find('.team-project').find(b => b.textContent.includes('Docs')));
+  ok(buttonOf(root.one('.drawer'), words.t('team.add')), 'Docs is Bo\'s');
+});
+
+test('team: a phone lists the people and the projects, and changes nothing', async () => {
+  const r = await team();
+  const a = app(r, {url: '/?page=team'});
+  try {
+    const root = await mounted(a, 'phone', 'zh', 'phone');
+    ok(root.textContent.includes(words.t('team.desktop')), 'where they are managed');
+    eq(root.find('.menu-wrap').length + root.find('.team-log').length, 0, 'no controls, no log');
+    await click(root.find('.team-project').find(b => b.textContent.includes('Shop')));
+    eq(root.find('[role=radio]').length + root.find('button').filter(b => labelOf(b) === words.t('team.add')).length, 0, 'the members only read');
+    eq(writes(a.http), [], 'no writes');
   } finally { form.value = 'desktop'; }
 });
 

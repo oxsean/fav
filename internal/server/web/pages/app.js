@@ -12,6 +12,7 @@ import {Home} from './home.js';
 import {Tasks} from './tasks.js';
 import {Runs} from './runs.js';
 import {Machines} from './machines.js';
+import {Team} from './team.js';
 import {createChanges} from '../core/changes.js';
 import './words.js';
 
@@ -87,10 +88,12 @@ export function App({store, commands, toasts, wire, http, router, keys, nav, pre
         intent=${intent} prefs=${prefs} copy=${copy} changes=${changes} />`
       : route.page === 'runs'
         ? html`<${Runs} store=${store} commands=${commands} toasts=${toasts} router=${router} prefs=${prefs} copy=${copy} changes=${changes} storage=${storage} clock=${clock} />`
-        : route.page === 'machines'
-          ? html`<${Machines} store=${store} commands=${commands} toasts=${toasts} session=${session} http=${http} router=${router} storage=${storage}
-            clock=${clock} copy=${copy} />`
-          : html`<${Soon} page=${route.page} />`;
+        : route.page === 'team'
+          ? html`<${Team} store=${store} commands=${commands} toasts=${toasts} session=${session} http=${http} clock=${clock} copy=${copy} />`
+          : route.page === 'machines'
+            ? html`<${Machines} store=${store} commands=${commands} toasts=${toasts} session=${session} http=${http} router=${router} storage=${storage}
+              clock=${clock} copy=${copy} />`
+            : html`<${Soon} page=${route.page} />`;
 
   return html`<${NamesContext.Provider} value=${names}><${Shell} keys=${keys} wire=${wire} nav=${nav} toasts=${toasts} page=${route.page} onNavigate=${onNavigate}
     counts=${counts} spent=${{tokens: day.tokens, usd: day.usd}} user=${session} userMenu=${userMenu}
