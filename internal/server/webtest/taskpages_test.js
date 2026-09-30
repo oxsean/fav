@@ -75,6 +75,14 @@ async function mount(vnode, f = 'desktop') {
   return root;
 }
 const settled = () => act(() => settle());
+// until waits in real time for what preact's deferred effects do: a render outside act runs them after a 35 ms timer,
+// later on a loaded machine.
+async function until(cond, what, ms = 5000) {
+  for (const end = Date.now() + ms; !cond();) {
+    if (Date.now() > end) throw new Error(`waited ${ms} ms for ${what}`);
+    await act(() => new Promise(res => setTimeout(res, 5)));
+  }
+}
 const click = el => act(() => el.dispatch('click'));
 const type = (el, text) => act(() => { el.value = text; el.dispatch('input'); });
 const buttonOf = (root, text) => {
@@ -178,8 +186,7 @@ test('d dispatches the selected task where it says, after the preview', async ()
   const root = await mount(a.vnode());
   await r.srv.play('tasks-dispatch', {
     async dispatch() { await act(() => { a.keys.handle(press('d')); }); },
-    // ⚠️ Preact runs effects after the next frame; outside act that is a 35 ms timer.
-    async loaded() { await act(() => new Promise(res => setTimeout(res, 40))); },
+    async loaded() { await until(() => r.srv.current().sent.length > 0, 'the preview request'); },
     async queue() {
       await settled();
       const box = root.one('.modal');
