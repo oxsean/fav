@@ -43,15 +43,19 @@ function fakeHistory(url) {
 }
 
 // changesOf is a changes reader over fixed lists: lists[run] is what list gives (an Error with a code rejects); every
-// file has two hunks, a page each, and one hunk with more context; asked records the calls.
-function changesOf(lists) {
+// file has two hunks, a page each, and one hunk with more context; ignoring whitespace, pdf.go changed only in its
+// whitespace, unless old (the node answers unsupported); asked records the calls.
+function changesOf(lists, {old = false} = {}) {
   const asked = [];
-  const page = (path, {hunk = 0, context = 3} = {}) => (context > 3 ? {hunks: [{at: '@@ -1,12 +1,12 @@', lines: [' a', '-old ' + path, '+new ' + path, ' b', '-x', '+y']}], of: 1}
+  const page = (path, {hunk = 0, context = 3, ignoreSpace = false} = {}) => (ignoreSpace && path.endsWith('pdf.go') ? {hunks: [], of: 0} : context > 3 ? {hunks: [{at: '@@ -1,12 +1,12 @@', lines: [' a', '-old ' + path, '+new ' + path, ' b', '-x', '+y']}], of: 1}
     : hunk === 0 ? {hunks: [{at: '@@ -1,2 +1,2 @@', lines: ['-old ' + path, '+new ' + path]}], of: 2, next: {hunk: 1}}
     : {hunks: [{at: '@@ -9 +9 @@', lines: ['-x', '+y']}], of: 2});
   return {asked, can: () => true,
     list: (run, o) => { asked.push(['list', run, !!o?.ended]); const x = lists[run]; return x instanceof Error ? Promise.reject(x) : Promise.resolve(x); },
-    diff: (run, path, snap, o) => { asked.push(['diff', run, path, snap, o]); return Promise.resolve(page(path, o)); }};
+    diff: (run, path, snap, o) => {
+      asked.push(['diff', run, path, snap, o]);
+      return old && o?.ignoreSpace ? Promise.reject(Object.assign(new Error('unsupported'), {code: 'unsupported'})) : Promise.resolve(page(path, o));
+    }};
 }
 
 function app(r, {url = '/?page=runs', storage = memory(), changes} = {}) {
@@ -228,6 +232,44 @@ test('a file\'s next page and more context on asking', async () => {
   await until(() => fileOf(root, pdf).textContent.includes('上下文 23 行'), 'more context');
   eq(ch.asked.filter(x => x[0] === 'diff' && x[2] === pdf).at(-1)[4], {hunk: 0, context: 23}, 'from the start, 20 lines more');
   ok(!fileOf(root, pdf).textContent.includes('@@ -9 +9 @@'), 'the hunks as they are now');
+  eq(r.errors, [], 'errors');
+});
+
+test('ignoring whitespace asks for the open files again from their start, and this viewer\'s choice is kept', async () => {
+  const r = await outputs();
+  const ch = changesOf({r2: list('w-1')});
+  const a = app(r, {url: '/?page=tasks&task=t1', storage: memory({[PANE_KEY]: 'changes'}), changes: ch});
+  const root = await mount(a.vnode());
+  const pdf = 'internal/receipt/pdf.go', test = 'internal/receipt/pdf_test.go';
+  await until(() => fileOf(root, pdf)?.textContent.includes('+new ' + pdf), 'pdf.go drawn');
+  await click(buttonOf(fileOf(root, pdf), '显示后面 1 处'));
+  await until(() => fileOf(root, pdf).textContent.includes('@@ -9 +9 @@'), 'the next page');
+  await click(root.find('[role=checkbox]').find(b => b.textContent.includes('忽略空白')));
+  await until(() => fileOf(root, pdf).textContent.includes('只有空白改动'), 'pdf.go again');
+  const spaced = ch.asked.filter(x => x[0] === 'diff' && x[4]?.ignoreSpace);
+  eq(spaced.map(x => [x[2], x[4]]).sort(), [[pdf, {hunk: 0, context: 3, ignoreSpace: true}], [test, {hunk: 0, context: 3, ignoreSpace: true}]], 'each open file from its start');
+  ok(!fileOf(root, pdf).textContent.includes('@@ -9 +9 @@'), 'no page of the plain diff left');
+  ok(fileOf(root, test).textContent.includes('+new ' + test), 'the other file as the node gives it');
+  eq(a.prefs.ignoreSpace.value, true, 'kept for this viewer');
+  await click(root.find('[role=checkbox]').find(b => b.textContent.includes('忽略空白')));
+  await until(() => fileOf(root, pdf).textContent.includes('+new ' + pdf), 'the plain diff again');
+  eq(ch.asked.filter(x => x[0] === 'diff' && x[2] === pdf).at(-1)[4], {hunk: 0, context: 3}, 'asked without it');
+  eq(r.errors, [], 'errors');
+});
+
+test('a node too old to ignore whitespace: the toggle goes off and says why, the files come back plain', async () => {
+  const r = await outputs();
+  const ch = changesOf({r2: list('w-1')}, {old: true});
+  const a = app(r, {url: '/?page=tasks&task=t1', storage: memory({[PANE_KEY]: 'changes'}), changes: ch});
+  a.prefs.setIgnoreSpace(true);
+  const root = await mount(a.vnode());
+  const pdf = 'internal/receipt/pdf.go';
+  await until(() => fileOf(root, pdf)?.textContent.includes('+new ' + pdf), 'pdf.go drawn plain');
+  ok(root.one('.chg').textContent.includes('这台机器上的 tend 太旧，不能忽略空白'), 'why');
+  const box = root.find('[role=checkbox]').find(b => b.textContent.includes('忽略空白'));
+  ok(box.getAttribute('aria-checked') === 'false' && box.disabled, 'off and not to be turned on');
+  ok(!root.one('.chg').textContent.includes('只有空白改动'), 'nothing claims whitespace was ignored');
+  eq(a.prefs.ignoreSpace.value, true, 'the viewer\'s choice stays for newer nodes');
   eq(r.errors, [], 'errors');
 });
 

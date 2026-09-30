@@ -191,6 +191,9 @@ func TestChangesWhileRunning(t *testing.T) {
 	if _, err := n.Diff(DiffParams{Run: id, Path: "f1000", Snapshot: first.Snapshot}); codeOf(err) != wire.CodeSnapshotChanged {
 		t.Fatalf("diff: %v", err)
 	}
+	if _, err := n.Diff(DiffParams{Run: id, Path: "f1000", Snapshot: first.Snapshot, IgnoreSpace: true}); codeOf(err) != wire.CodeSnapshotChanged {
+		t.Fatalf("diff ignoring whitespace: %v", err)
+	}
 	again, _ := n.Changes(ChangesParams{Run: id})
 	if again.Snapshot == first.Snapshot || again.Total.Files != changesPage+21 {
 		t.Fatalf("%+v", again.Total)
@@ -231,6 +234,89 @@ func TestChangesOutsideGit(t *testing.T) {
 	}
 	if _, err := n.Diff(DiffParams{Run: id, Path: "x.txt"}); codeOf(err) != wire.CodeGone {
 		t.Fatalf("cleared: %v", err)
+	}
+}
+
+// Ignoring whitespace, a file changed only in its whitespace keeps its place and counts in the list and has no hunks;
+// the others' hunks are git diff -w's between the run's trees, paged by the same next, and another snapshot still
+// answers snapshot_changed.
+func TestDiffIgnoringSpace(t *testing.T) {
+	needGit(t)
+	dir := repo(t)
+	ws, mixed := filepath.Join(dir, "ws.txt"), filepath.Join(dir, "mixed.txt")
+	os.WriteFile(ws, []byte("one\ntwo\n"), 0o644)
+	os.WriteFile(mixed, []byte(numbered(60)), 0o644)
+	git(t, dir, "add", ".")
+	git(t, dir, "commit", "--quiet", "-m", "files")
+	// every tenth line changes: lines 5, 25 and 45 in their whitespace only, 15, 35 and 55 in their text
+	changed := strings.NewReplacer("l5\n", "  l5\n", "l15\n", "L15\n", "l25\n", "l25 \n", "l35\n", "L35\n", "l45\n", "\tl45\n",
+		"l55\n", "L55\n").Replace(numbered(60))
+	n := New(t.TempDir())
+	id, _ := act(t, n, dir, nil, actScript{
+		Write: map[string]string{ws: "one  \n\ttwo\n", mixed: changed},
+		Say:   editLine(ws, "one\ntwo\n") + editLine(mixed, numbered(60)),
+	})
+	res, err := n.Changes(ChangesParams{Run: id})
+	if err != nil || fileOps(res.Files) != "mixed.txt:modify ws.txt:modify" || res.Files[1].Add != 2 || res.Files[1].Del != 2 ||
+		res.Total != (ChangeTotal{2, 8, 8}) {
+		t.Fatalf("the list does not ignore whitespace: %+v %v", res, err)
+	}
+	if d, err := n.Diff(DiffParams{Run: id, Path: "ws.txt", Snapshot: res.Snapshot, IgnoreSpace: true}); err != nil || d.Of != 0 ||
+		len(d.Hunks) != 0 || d.Next != nil {
+		t.Fatalf("only whitespace changed: %+v %v", d, err)
+	}
+	if d, _ := n.Diff(DiffParams{Run: id, Path: "ws.txt", Snapshot: res.Snapshot}); d.Of != 1 {
+		t.Fatalf("not ignoring: %+v", d)
+	}
+	want := parseHunks(git(t, dir, "diff", "--no-color", "-w", "-U3", refPrefix+id+"/base", refPrefix+id+"/end", "--", "mixed.txt"))
+	if len(want) != 3 {
+		t.Fatalf("git -w: %+v", want)
+	}
+	var got []hunk
+	for from := (DiffNext{}); ; {
+		d, err := n.Diff(DiffParams{Run: id, Path: "mixed.txt", Snapshot: res.Snapshot, IgnoreSpace: true, Hunk: from.Hunk, Line: from.Line, N: 2})
+		if err != nil || d.Of != len(want) {
+			t.Fatalf("%+v %v", d, err)
+		}
+		got = append(got, d.Hunks...)
+		if d.Next == nil {
+			break
+		}
+		from = *d.Next
+	}
+	if joinHunks(got) != joinHunks(want) {
+		t.Fatalf("paged:\n%s\ngit -w:\n%s", joinHunks(got), joinHunks(want))
+	}
+	if d, _ := n.Diff(DiffParams{Run: id, Path: "mixed.txt", Snapshot: res.Snapshot}); d.Of != 6 {
+		t.Fatalf("not ignoring, every change: %d", d.Of)
+	}
+	if _, err := n.Diff(DiffParams{Run: id, Path: "mixed.txt", Snapshot: "other", IgnoreSpace: true}); codeOf(err) != wire.CodeSnapshotChanged {
+		t.Fatalf("another snapshot: %v", err)
+	}
+}
+
+// Outside git, ignoring whitespace is the same comparison: a file changed only in its whitespace has no hunks, and the
+// context lines are the new side's.
+func TestDiffIgnoringSpaceOutsideGit(t *testing.T) {
+	dir := t.TempDir()
+	ws, text := filepath.Join(dir, "ws.txt"), filepath.Join(dir, "text.txt")
+	os.WriteFile(ws, []byte("a\nb\n"), 0o644)
+	os.WriteFile(text, []byte("p\nq\nr\n"), 0o644)
+	n := New(t.TempDir())
+	id, _ := act(t, n, dir, nil, actScript{
+		Write: map[string]string{ws: "a \n\tb\r\n", text: "p \nQ\nr\n"},
+		Say:   editLine(ws, "a\nb\n") + editLine(text, "p\nq\nr\n"),
+	})
+	res, err := n.Changes(ChangesParams{Run: id})
+	if err != nil || res.Git || fileOps(res.Files) != "text.txt:modify ws.txt:modify" || res.Files[1].Add != 2 {
+		t.Fatalf("%+v %v", res, err)
+	}
+	if d, err := n.Diff(DiffParams{Run: id, Path: "ws.txt", IgnoreSpace: true}); err != nil || d.Of != 0 || len(d.Hunks) != 0 {
+		t.Fatalf("only whitespace changed: %+v %v", d, err)
+	}
+	d, err := n.Diff(DiffParams{Run: id, Path: "text.txt", IgnoreSpace: true})
+	if err != nil || d.Of != 1 || d.Hunks[0].At != "@@ -1,3 +1,3 @@" || strings.Join(d.Hunks[0].Lines, "|") != " p |-q|+Q| r" {
+		t.Fatalf("%+v %v", d, err)
 	}
 }
 
@@ -318,6 +404,7 @@ func TestChangesFramesDecode(t *testing.T) {
 		{&Diff{}, `{"hunks":[{"at":"@@ -40,7 +40,12 @@ func Render(r Receipt) ([]byte, error) {","lines":[" \tpdf := gofpdf.New(\"P\", \"mm\", \"A4\", \"\")","-\tpdf.SetFont(\"Arial\", \"\", 12)"]}],"of":3,"next":{"hunk":1}}`},
 		{&ChangesParams{}, `{"run":"r1","after":"internal/receipt/pdf_test.go"}`},
 		{&DiffParams{}, `{"run":"r1","path":"internal/receipt/pdf.go","snapshot":"t-9a1","hunk":0,"n":1}`},
+		{&DiffParams{}, `{"run":"r1","path":"internal/receipt/pdf.go","snapshot":"t-9a1","hunk":0,"n":10,"ignore_space":true}`},
 	} {
 		d := json.NewDecoder(strings.NewReader(c.raw))
 		d.DisallowUnknownFields()

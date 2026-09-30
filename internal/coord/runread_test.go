@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -49,7 +50,7 @@ func TestOnlyTheMachinesOwnerSeesEveryChangeOfARun(t *testing.T) {
 		if wire.Code(err) == wire.CodeNotFound || wire.Code(err) == wire.CodeUnauthorized {
 			t.Fatalf("%s: %v", c.what, err)
 		}
-		if err := callAs(e.as(c.who), MRunDiff, "", node.DiffParams{Run: r.ID, Path: "a.txt", All: true}, nil); wire.Code(err) == wire.CodeUnauthorized {
+		if err := callAs(e.as(c.who), MRunDiff, "", node.DiffParams{Run: r.ID, Path: "a.txt", All: true, IgnoreSpace: true}, nil); wire.Code(err) == wire.CodeUnauthorized {
 			t.Fatalf("%s: %v", c.what, err)
 		}
 		asked := f.calls(MRunChanges)
@@ -61,7 +62,7 @@ func TestOnlyTheMachinesOwnerSeesEveryChangeOfARun(t *testing.T) {
 		var dp node.DiffParams
 		json.Unmarshal(asked[len(asked)-1], &cp)
 		json.Unmarshal(diffs[len(diffs)-1], &dp)
-		if cp.All != c.all || dp.All != c.all || cp.Run != r.ID {
+		if cp.All != c.all || dp.All != c.all || cp.Run != r.ID || !dp.IgnoreSpace {
 			t.Errorf("%s: changes %+v, diff %+v", c.what, cp, dp)
 		}
 	}
@@ -73,6 +74,27 @@ func TestOnlyTheMachinesOwnerSeesEveryChangeOfARun(t *testing.T) {
 	}
 	if len(f.calls(MRunChanges)) != n {
 		t.Error("nothing is forwarded for someone who may not read the run")
+	}
+}
+
+// A diff ignoring whitespace goes only to a node that has the feature: an older one would answer the plain diff.
+func TestADiffIgnoringSpaceNeedsTheNodesFeature(t *testing.T) {
+	old := node.Features
+	node.Features = slices.DeleteFunc(slices.Clone(old), func(f string) bool { return f == node.FeatureIgnoreSpace })
+	t.Cleanup(func() { node.Features = old })
+	f := newFar(t)
+	e, r := farRun(t, f)
+	before := len(f.calls(MRunDiff))
+	err := callAs(e.as(bob), MRunDiff, "", node.DiffParams{Run: r.ID, Path: "a.txt", IgnoreSpace: true}, nil)
+	if wire.Code(err) != wire.CodeUnsupported || err.(*wire.Error).Detail != node.FeatureIgnoreSpace {
+		t.Fatalf("%v", err)
+	}
+	if len(f.calls(MRunDiff)) != before {
+		t.Fatal("nothing is forwarded")
+	}
+	callAs(e.as(bob), MRunDiff, "", node.DiffParams{Run: r.ID, Path: "a.txt"}, nil)
+	if len(f.calls(MRunDiff)) != before+1 {
+		t.Fatal("the plain diff is")
 	}
 }
 

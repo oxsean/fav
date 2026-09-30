@@ -24,13 +24,17 @@ type diffOp struct {
 	ai, bi int  // the line of a (' ', '-') and of b (' ', '+')
 }
 
-// lineDiff is the unified diff of a to b with context lines around each change (Myers).
-func lineDiff(a, b string, context int) []hunk {
+// lineDiff is the unified diff of a to b with context lines around each change (Myers). ignoreSpace compares lines as
+// git diff -w does, and takes the lines both keep from b, as git shows them.
+func lineDiff(a, b string, context int, ignoreSpace bool) []hunk {
 	al, bl := splitLines(a), splitLines(b)
 	ids := map[string]int{}
 	intern := func(ls []string) []int {
 		out := make([]int, len(ls))
 		for i, l := range ls {
+			if ignoreSpace {
+				l = withoutSpace(l)
+			}
 			id, ok := ids[l]
 			if !ok {
 				id = len(ids)
@@ -59,7 +63,17 @@ func lineDiff(a, b string, context int) []hunk {
 	for i := suf; i > 0; i-- {
 		ops = append(ops, diffOp{' ', len(A) - i, len(B) - i})
 	}
-	return hunksOf(ops, al, bl, context)
+	return hunksOf(ops, al, bl, context, ignoreSpace)
+}
+
+// withoutSpace is l without what git diff -w ignores: ⚠️ git's isspace, space, tab, CR and LF only.
+func withoutSpace(l string) string {
+	return strings.Map(func(r rune) rune {
+		if r == ' ' || r == '\t' || r == '\r' || r == '\n' {
+			return -1
+		}
+		return r
+	}, l)
 }
 
 // splitLines is s's lines, each with its newline (a last one may lack it).
@@ -174,7 +188,7 @@ func backtrack(trace [][]int, x, y, d int) []diffOp {
 
 // hunksOf groups ops into hunks with context lines of what both keep around each change; changes closer than twice
 // that share a hunk.
-func hunksOf(ops []diffOp, a, b []string, context int) []hunk {
+func hunksOf(ops []diffOp, a, b []string, context int, keptFromB bool) []hunk {
 	cover := make([]int, len(ops)+1)
 	for i, o := range ops {
 		if o.kind != ' ' {
@@ -193,7 +207,7 @@ func hunksOf(ops []diffOp, a, b []string, context int) []hunk {
 			start, sa, sb = i, aPos, bPos
 		}
 		if start >= 0 && (i == len(ops) || depth == 0) {
-			out = append(out, makeHunk(ops[start:i], a, b, sa, sb))
+			out = append(out, makeHunk(ops[start:i], a, b, sa, sb, keptFromB))
 			start = -1
 		}
 		if i < len(ops) {
@@ -208,7 +222,7 @@ func hunksOf(ops []diffOp, a, b []string, context int) []hunk {
 	return out
 }
 
-func makeHunk(ops []diffOp, a, b []string, sa, sb int) hunk {
+func makeHunk(ops []diffOp, a, b []string, sa, sb int, keptFromB bool) hunk {
 	var lines []string
 	na, nb := 0, 0
 	for _, o := range ops {
@@ -216,6 +230,9 @@ func makeHunk(ops []diffOp, a, b []string, sa, sb int) hunk {
 		switch o.kind {
 		case ' ':
 			text, na, nb = a[o.ai], na+1, nb+1
+			if keptFromB {
+				text = b[o.bi]
+			}
 		case '-':
 			text, na = a[o.ai], na+1
 		case '+':

@@ -28,6 +28,9 @@ const (
 	MRunBlob    = "run.blob"    // a blob's content (BlobParams)
 )
 
+// FeatureIgnoreSpace: run.diff takes ignore_space; a node without it would answer the plain diff.
+const FeatureIgnoreSpace = "ignore_space"
+
 const (
 	changesFile   = "changes.json"
 	changesPage   = 500       // files a run.changes page lists
@@ -86,6 +89,9 @@ type DiffParams struct {
 	N        int    `json:"n,omitempty"`       // hunks at most (default 20)
 	Context  *int   `json:"context,omitempty"` // lines around each change (default 3)
 	All      bool   `json:"all,omitempty"`
+	// IgnoreSpace compares lines as git diff -w does: a file changed only in its whitespace has no hunks. The list
+	// (run.changes) counts every change.
+	IgnoreSpace bool `json:"ignore_space,omitempty"`
 }
 
 type DiffNext struct {
@@ -361,7 +367,7 @@ func localChanges(runDir, dir string, touched []touch, keepEnd *slimmer) ([]chan
 			if binary(before) || binary(cur) {
 				c.Binary, c.OldBytes = true, int64(len(before))
 			} else {
-				for _, h := range lineDiff(string(before), string(cur), 0) {
+				for _, h := range lineDiff(string(before), string(cur), 0, false) {
 					for _, l := range h.Lines {
 						switch l[0] {
 						case '+':
@@ -574,9 +580,9 @@ func (n *Node) Diff(p DiffParams) (Diff, error) {
 	switch {
 	case f.Binary:
 	case cs.Git:
-		hunks, err = gitHunks(tr, cs.Snapshot, f, ctx)
+		hunks, err = gitHunks(tr, cs.Snapshot, f, ctx, p.IgnoreSpace)
 	default:
-		hunks, err = n.localHunks(p.Run, spec, f, ctx)
+		hunks, err = n.localHunks(p.Run, spec, f, ctx, p.IgnoreSpace)
 	}
 	if err != nil {
 		return Diff{}, err
@@ -585,13 +591,16 @@ func (n *Node) Diff(p DiffParams) (Diff, error) {
 }
 
 // gitHunks is the diff of f between the base and tree.
-func gitHunks(tr trees, tree string, f changedFile, ctx int) ([]hunk, error) {
+func gitHunks(tr trees, tree string, f changedFile, ctx int, ignoreSpace bool) ([]hunk, error) {
 	paths := []string{tr.Prefix + f.Path}
 	if f.From != "" {
 		paths = append(paths, tr.Prefix+f.From)
 	}
-	out, err := gitInput(tr.repo(), "", append([]string{"diff", "--no-color", "--no-ext-diff", "--no-textconv", "-M",
-		"-U" + strconv.Itoa(ctx), tr.Base, tree, "--"}, paths...)...)
+	args := []string{"diff", "--no-color", "--no-ext-diff", "--no-textconv", "-M", "-U" + strconv.Itoa(ctx)}
+	if ignoreSpace {
+		args = append(args, "-w")
+	}
+	out, err := gitInput(tr.repo(), "", append(append(args, tr.Base, tree, "--"), paths...)...)
 	if err != nil {
 		return nil, &wire.Error{Code: wire.CodeGone, Detail: err.Error()}
 	}
@@ -614,7 +623,7 @@ func parseHunks(diff string) []hunk {
 }
 
 // localHunks is the diff of f outside git: from its first base to its end (or to the file now while it runs).
-func (n *Node) localHunks(run string, spec Spec, f changedFile, ctx int) ([]hunk, error) {
+func (n *Node) localHunks(run string, spec Spec, f changedFile, ctx int, ignoreSpace bool) ([]hunk, error) {
 	dir := n.runDir(run)
 	if f.Lost || fileExists(filepath.Join(dir, blobsGone)) {
 		return nil, errGone
@@ -644,7 +653,7 @@ func (n *Node) localHunks(run string, spec Spec, f changedFile, ctx int) ([]hunk
 	if err != nil {
 		return nil, errGone
 	}
-	return lineDiff(before, after, ctx), nil
+	return lineDiff(before, after, ctx, ignoreSpace), nil
 }
 
 // page is hunks from hunk (its line on) to n hunks or diffPage bytes; a hunk past diffPage goes on by its lines.

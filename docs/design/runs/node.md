@@ -108,9 +108,10 @@ claude 的工具结果里带着整份文件，codex 反复推一轮的全部 dif
   - 运行目录清理（`forget`）时两个 ref 一起删。
 - **不在 git 里**：每个 edit 过的文件，从 `base` 到文件现在的内容，用节点里的行 diff（Myers，`lineDiff`；超过 2000 处改动的那一段整块算删掉再加上）数 `+a −d`；结束时文件现在的内容存成 blob（`end`）。命令改的文件不在里面。含 NUL 或不是 UTF-8 的文件算二进制。
 - **运行中**：节点现取：git 里用 `live.index`（从 `base.index` 复制）写当前的树，不在 git 里读盘；同一个运行 2 s 内复用上一次的结果。`snapshot` 是这棵树（不在 git 里是各文件内容的哈希）。结束后只读 `changes.json`，`snapshot` 是终点树。
-- **方法**（方法名进 `hello.methods`；`run.start` 的参数没变，没有节点 feature；旧节点起的运行没有 `trees.json`，回 `gone`）：
+- **方法**（方法名进 `hello.methods`；`run.start` 的参数没变；旧节点起的运行没有 `trees.json`，回 `gone`）：
   - `run.changes{run, after?, snapshot?, all?}` → `{files: [{path, op add|modify|delete|rename, from?, add, del, bytes, old_bytes?, binary?, generated?, big?, agent?}], total: {files, add, del}, snapshot, git, hidden?, next?}`：按路径排序，`after` 之后的 500 个，`next` 是这一页最后一个路径；`path` 相对运行目录。
   - `run.diff{run, path, snapshot?, hunk?, line?, n?, context?, all?}` → `{hunks: [{at, lines}], of, next?: {hunk, line?}}`：从第 `hunk` 处（这一处从第 `line` 行）起最多 `n`（默认 20）处、256 KiB；一处放不下就在这一处里按行续；`context` 默认 3、最多 10000。git 里是 `git diff --no-ext-diff --no-textconv -M` 两棵树之间这个文件；二进制没有 hunk。
+  - `run.diff` 的 `ignore_space`：比较时忽略空白，和 `git diff -w` 一样（git 里就是加 `-w`）：只差空格、制表符、回车和末尾换行的两行算相同，上下文行取改之后的样子；只改了空白的文件没有 hunk（`of: 0`）。不在 git 里时 `lineDiff` 用同样的规则比较（按去掉这四种字符后的行配对），配对的取舍和不忽略时一样是节点自己的 Myers。`run.changes` 的 `+a −d` 和列表不受影响，只改了空白的文件照样在列表里。节点 feature `ignore_space`；协调器转发带 `ignore_space` 的 `run.diff` 前核对，节点没有这个 feature（它会不声不响地回不忽略的 diff）→ `unsupported`（`detail` 是 `ignore_space`）。
   - `run.blob{run, sha, off?, n?}` → `{text, off, size, next?}`：这个运行 `blobs/` 里的 blob，每页最多 256 KiB，只在字符边界切。
   - `snapshot` 和现在的不一样 → `snapshot_changed`；`path` 不在这个人能看到的列表里 → `not_found`；blob 已清理（`blobs.gone`）、不在 git 里的 `lost` 文件、或者没有起点 → `gone`。
   - `all`：看的人是机器主人。目录运行（没有 `Workspace`）不带 `all` 时只列 `agent` 的文件，其余只给个数 `hidden`；工作树运行全列。`all` 由协调器按看的人填，节点照信。
@@ -145,7 +146,7 @@ claude 的工具结果里带着整份文件，codex 反复推一轮的全部 dif
 - agent 已接收（`seen`）：claude 回放 `isReplay:true` 的 user 消息，按 `uuid` 对上 send；codex 的 userMessage `item/started` 按 `item.clientId` 对上。第一次对上时 send 改成 `seen`，在这一行的开头记 `input{id}` 标记；再出现就忽略（claude 连发几条时各回放一次，最后一条的回放里是拼起来的全文，所以文字以 journal 为准）。回放行照旧进 `output.log`；协调器按它的 `uuid` / `clientId` 对上 journal 的 send，把它显示成 `you`（见 [output.md](output.md)「标记和 journal」），`input` 标记只表示位置和 `seen`。对不上的（进程被杀、崩溃）停在 sent。一轮结束时还有 sent 的消息，stdin 最多多开 30 s 等它（claude 在纯文字回复中收到的消息要等 `result` 之后另起一轮）。
 - codex 的 `serverRequest/resolved{requestId}` 记 `resolved{rpc-<id>}`；这个请求还在等回答（codex 自己撤回了它）就从 `state.requests` 里去掉。
 - 结束时：关 stdin，等排队的写完，最多 2 s，还没写进去的（agent 留下的子进程拿着 stdin 不读）记 failed；还没送出的消息记 failed，没回答的请求清掉；用户拒绝过的工具不算「等你批准」（只有权限模式没问就拒的才算）。
-- 节点 feature：`input_marks`（`input`、`resolved` 标记和 `seen`）、`interrupt`（`run.interrupt`，方法名同时进 `hello.methods`）、`answer_scope`（`run.answer` 的 `decision`）。
+- 节点 feature：`input_marks`（`input`、`resolved` 标记和 `seen`）、`interrupt`（`run.interrupt`，方法名同时进 `hello.methods`）、`answer_scope`（`run.answer` 的 `decision`）；`ignore_space`（`run.diff` 的 `ignore_space`，见「改动」）。
 - 回答的 `decision`：`allow`（这一次）、`allow_run`（这次运行里这条命令都允许）、`deny`；`allow` 跟着 `decision` 定，不认识 `decision` 的一端照 `allow` 读，`allow_run` 在那里就是允许一次；别的值 → `bad_request decision`。`allow_run` 只对 `requests[].allow_run` 的请求生效，其余照允许一次：
   - claude：请求的 `permission_suggestions` 里有 `addRules`（`behavior: allow`）才算。回答的 `updatedPermissions` 只有一条 `{type: addRules, rules, behavior: allow, destination: session}`，`rules` 只取 `toolName`、`ruleContent`（Bash 是这一条命令）；`destination` 写死 `session`，建议里的 `localSettings` 会把规则写进仓库的 `.claude/settings.local.json`；`setMode`、`addDirectories` 一律不转发。规则只活在这个进程里，续接以后就没了。
   - codex：`item/commandExecution/requestApproval`、`item/fileChange/requestApproval` 回 `acceptForSession`（不用长期写进 execpolicy 的 `acceptWithExecpolicyAmendment`）；`item/permissions/requestApproval` 仍只授予这一轮。

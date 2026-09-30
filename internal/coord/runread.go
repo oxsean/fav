@@ -94,6 +94,14 @@ func (c *Coord) runDiff(ctx context.Context, p Principal, r *wire.Request) (any,
 		return nil, err
 	}
 	dp.All = c.ownsMachine(p, run)
+	if dp.IgnoreSpace {
+		c.mu.Lock()
+		has := c.nodeHas(run.Machine, node.FeatureIgnoreSpace)
+		c.mu.Unlock()
+		if !has {
+			return nil, &wire.Error{Code: wire.CodeUnsupported, Detail: node.FeatureIgnoreSpace}
+		}
+	}
 	var out node.Diff
 	return out, c.runCall(ctx, run, node.MRunDiff, dp, &out)
 }

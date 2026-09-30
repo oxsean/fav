@@ -2,6 +2,10 @@ package node
 
 import (
 	"math/rand"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"testing"
@@ -95,7 +99,7 @@ func TestLineDiffShapes(t *testing.T) {
 		{"single", "a\n", "b\n", []string{"@@ -1 +1 @@"}, [][]string{{"-a", "+b"}}},
 	}
 	for _, c := range cases {
-		hs := lineDiff(c.a, c.b, 3)
+		hs := lineDiff(c.a, c.b, 3, false)
 		if len(hs) != len(c.ats) {
 			t.Fatalf("%s: %d hunks %+v", c.name, len(hs), hs)
 		}
@@ -129,7 +133,7 @@ func TestLineDiffApplies(t *testing.T) {
 	for i := 0; i < 2000; i++ {
 		a, b := text(), text()
 		ctx := r.Intn(5)
-		if got, ok := apply(a, lineDiff(a, b, ctx)); !ok || got != b {
+		if got, ok := apply(a, lineDiff(a, b, ctx, false)); !ok || got != b {
 			t.Fatalf("%q → %q (context %d): %q ok %v", a, b, ctx, got, ok)
 		}
 	}
@@ -137,8 +141,67 @@ func TestLineDiffApplies(t *testing.T) {
 	maxDiffEdits = 3
 	for i := 0; i < 500; i++ {
 		a, b := text(), text()
-		if got, ok := apply(a, lineDiff(a, b, 2)); !ok || got != b {
+		if got, ok := apply(a, lineDiff(a, b, 2, false)); !ok || got != b {
 			t.Fatalf("over budget %q → %q: %q ok %v", a, b, got, ok)
+		}
+	}
+}
+
+var funcName = regexp.MustCompile(`^(@@ [^@]* @@).*$`)
+
+// gitNoIndex is the hunks git diff --no-index gives from a to b, each "at\nline\n…", without the text git puts after
+// a hunk's @@.
+func gitNoIndex(t *testing.T, a, b string, args ...string) string {
+	t.Helper()
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "a"), []byte(a), 0o644)
+	os.WriteFile(filepath.Join(dir, "b"), []byte(b), 0o644)
+	cmd := exec.Command("git", append(append([]string{"-c", "core.autocrlf=false", "diff", "--no-index", "--no-color"}, args...), "a", "b")...)
+	cmd.Dir = dir
+	out, err := cmd.Output()
+	if ee, ok := err.(*exec.ExitError); err != nil && (!ok || ee.ExitCode() != 1) {
+		t.Fatalf("git diff: %v", err)
+	}
+	return joinHunks(parseHunks(string(out)))
+}
+
+func joinHunks(hs []hunk) string {
+	var b strings.Builder
+	for _, h := range hs {
+		b.WriteString(funcName.ReplaceAllString(h.At, "$1") + "\n")
+		for _, l := range h.Lines {
+			b.WriteString(l + "\n")
+		}
+	}
+	return b.String()
+}
+
+// Ignoring whitespace is git diff -w: lines that differ only in spaces, tabs, carriage returns and the last newline
+// are the same, and are shown as the new side has them; other characters, however blank, count.
+func TestLineDiffIgnoringSpaceIsGits(t *testing.T) {
+	needGit(t)
+	cases := [][2]string{
+		{"a\nX\n c\nd\ne\n", "a\nY\nc \nd\ne\n"},
+		{"a\nb", "a\nb\n"},
+		{"a\nb\n", "a\r\nb\n"},
+		{"a\nb\nc\n", "a\nb\nc\nd"},
+		{"a\nb", "a\nb\nc\n"},
+		{"a\nb\nc\n", "a\nb"},
+		{"q\na\nb\n", "Q\na\nb"},
+		{"a b\n", "ab\n"},
+		{"a\n\nb\n", "a\n  \nb\n"},
+		{"a\n", "a\v\n"},
+		{"a\n", "a\f\n"},
+		{"a\n", "a\u00a0\n"},
+		{"", "x\n"},
+		{"x\n", ""},
+		{"func f() {\n\treturn 1\n}\n", "func f() {\n    return 2\n}\n"},
+		{numbered(30), strings.NewReplacer("l3\n", "  l3\n", "l15\n", "L15\n", "l27\n", "\tl27\t\n").Replace(numbered(30))},
+	}
+	for _, c := range cases {
+		want := gitNoIndex(t, c[0], c[1], "-w", "-U3")
+		if got := joinHunks(lineDiff(c[0], c[1], 3, true)); got != want {
+			t.Errorf("%q → %q:\n%s\ngit:\n%s", c[0], c[1], got, want)
 		}
 	}
 }

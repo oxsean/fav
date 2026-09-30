@@ -7,7 +7,7 @@ import * as sel from '../web/core/select.js';
 import {createHTTP, HTTPError, startURL} from '../web/core/http.js';
 import {actions, groups, bindingsFor, runnable, rank} from '../web/core/actions.js';
 import {createCommands} from '../web/core/commands.js';
-import {createPrefs} from '../web/core/prefs.js';
+import {createPrefs, SPACE_KEY} from '../web/core/prefs.js';
 import {words} from '../web/core/i18n.js';
 import {signal} from '../web/vendor/signals-core.mjs';
 import {NOW, rig, home} from './rig.js';
@@ -186,6 +186,22 @@ test('prefs: the old keys, cycling, and storage that refuses', () => {
   q.cycleTheme();
   eq([q.lang.value, q.theme.value, q.density.value, q.skin.value], ['zh', 'light', 'default', 'tend'], 'defaults without storage');
   eq(createPrefs({storage: {getItem: k => (k === 'tend-look' ? '{"skin":"../x"}' : null), setItem() {}}}).skin.value, 'tend', 'a bad skin name');
+});
+
+test('prefs: the changes tab ignores whitespace once this viewer asked, remembered in this browser', () => {
+  const saved = new Map();
+  const storage = {getItem: k => saved.get(k) ?? null, setItem: (k, v) => saved.set(k, v), removeItem: k => saved.delete(k)};
+  const p = createPrefs({storage, asked: 'zh-CN'});
+  eq(p.ignoreSpace.value, false, 'not by default');
+  p.setIgnoreSpace(true);
+  eq([p.ignoreSpace.value, saved.get(SPACE_KEY)], [true, 'on'], 'kept');
+  eq(createPrefs({storage, asked: 'zh-CN'}).ignoreSpace.value, true, 'read back');
+  p.setIgnoreSpace(false);
+  eq([p.ignoreSpace.value, saved.has(SPACE_KEY)], [false, false], 'forgotten');
+  const broken = {getItem() { throw new Error('denied'); }, setItem() { throw new Error('denied'); }, removeItem() { throw new Error('denied'); }};
+  const q = createPrefs({storage: broken});
+  q.setIgnoreSpace(true);
+  eq(q.ignoreSpace.value, true, 'for this page without storage');
 });
 
 test('prefs: the me page sets the language, the look and browser notices', () => {

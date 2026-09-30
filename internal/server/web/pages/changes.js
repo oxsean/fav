@@ -1,11 +1,12 @@
 // changes is the changes tab of a task and of a run: what a run changed, file by file in directory order with its
 // +a −d, filtered to the agent tools' own or the generated files. A file opens on its diff, in pages of hunks, with
-// both sides' line numbers, more context on asking, and side by side on a wide desktop. Big, generated and binary
+// both sides' line numbers, more context on asking, whitespace ignored when the viewer asks, and side by side on a wide
+// desktop. Big, generated and binary
 // files start folded. Lines picked by their numbers make a quote for the agent's box or the send-back notes.
 import {useState, useEffect, useRef, useMemo} from '../vendor/hooks.mjs';
 import {signal} from '../vendor/signals-core.mjs';
 import {html, cx, usePhone, useWords, useSignalValue} from '../ui/base.js';
-import {Button, Chip, Chips, Segmented} from '../ui/controls.js';
+import {Button, Check, Chip, Chips, Segmented} from '../ui/controls.js';
 import * as ch from '../core/changes.js';
 import {clock} from '../core/format.js';
 import {openStates} from '../core/select.js';
@@ -33,6 +34,8 @@ register('changes', {
   'chg.moved': ['工作区又变了，重读一次', 'The workspace moved on: read it again'], 'chg.run': ['看哪次运行的改动', 'Which run\'s changes'],
   'chg.notYet': ['运行开始后才有改动', 'Changes show once the run starts'],
   'chg.noHunk': ['这个文件没有可显示的改动行', 'No changed lines to show for this file'],
+  'chg.space': ['忽略空白', 'Ignore whitespace'], 'chg.onlySpace': ['只有空白改动，忽略空白时不显示', 'Only whitespace changed: not shown while whitespace is ignored'],
+  'chg.spaceOld': ['这台机器上的 tend 太旧，不能忽略空白', 'The tend on this machine is too old to ignore whitespace'],
 });
 
 // ⚠️ A desktop opens this many unfolded files on its own, fetching their first pages; a phone opens none.
@@ -41,6 +44,7 @@ export const AUTO_OPEN = 8;
 export const SPLIT_WIDTH = 880;
 
 const unified = signal('unified');
+const keepSpace = signal(false);
 
 const num = n => Number(n || 0).toLocaleString('en-US');
 const size = b => (b >= 1024 * 1024 ? (b / 1024 / 1024).toFixed(1) + ' MB' : b >= 1024 ? Math.round(b / 1024) + ' KB' : (b || 0) + ' B');
@@ -119,7 +123,7 @@ function FileBody({f, diff, split, sel, notes, onMore, onContext, onPick, onQuot
   const rows = useMemo(() => (diff?.hunks ? ch.rowsOf(diff.hunks) : []), [diff?.hunks]);
   if (!diff || (diff.loading && !diff.hunks)) return html`<p class="chg-note t-muted">${t('chg.loading')}</p>`;
   if (diff.error && !diff.hunks) return html`<p class="chg-note t-muted">${diff.error === code.gone ? t('chg.hunkGone') : diff.error === code.snapshotChanged ? t('chg.moved') : fmt('chg.failed', diff.error)}</p>`;
-  if (!rows.length) return html`<p class="chg-note t-muted">${t('chg.noHunk')}</p>`;
+  if (!rows.length) return html`<p class="chg-note t-muted">${t(ch.onlySpace(f, diff) ? 'chg.onlySpace' : 'chg.noHunk')}</p>`;
   const shown = diff.hunks.length - (diff.next?.line ? 1 : 0);
   const left = Math.min(ch.HUNKS, diff.of - shown);
   const context = f.op === 'modify' || f.op === 'rename';
@@ -156,13 +160,15 @@ function FileRow({f, open, diff, split, sel, notes, onToggle, onMore, onContext,
 }
 
 // Changes draws a run's changes: data is its list (core/changes.js list), error why there is none, unsupported an older
-// server; open is the files shown open and diffs what they show ({hunks, of, next, context, loading?, error?}); running
+// server; open is the files shown open and diffs what they show ({hunks, of, next, context, ignoreSpace?, loading?,
+// error?}); ignoreSpace the toggle (onIgnoreSpace changes it), spaceOff a node that cannot ignore whitespace; running
 // says the list is the workspace as it was at data.at, refreshed with onRefresh; runs and run pick which run. view is
 // the layout asked for (unified or split, onView changes it; side by side only where wide); sel the lines picked
 // ({path, a, b, at, one}, onPick(path, lo, hi, extend) and onClear change it); onQuote(path, rows, to) sends them on,
 // to the agent or, when notes, into the send-back notes.
 export function Changes({data = null, error = '', unsupported = false, running = false, open = new Set(), diffs = {}, onToggle, onRefresh,
-  runs = [], run = '', onRun, view = 'unified', onView, wide = false, sel = null, notes = false, onMore, onContext, onPick, onQuote, onClear}) {
+  ignoreSpace = false, spaceOff = false, onIgnoreSpace, runs = [], run = '', onRun,
+  view = 'unified', onView, wide = false, sel = null, notes = false, onMore, onContext, onPick, onQuote, onClear}) {
   const {t, f} = useWords();
   const phone = usePhone();
   const [filter, setFilter] = useState('all');
@@ -181,9 +187,11 @@ export function Changes({data = null, error = '', unsupported = false, running =
         <${Chips} label=${t('chg.filter')}>${ch.filters.map(x => html`<${Chip} label=${t('chg.f.' + x)} count=${c[x]} on=${filter === x} onClick=${() => setFilter(x)} />`)}<//>
         ${!phone && wide && html`<${Segmented} label=${t('chg.view')} value=${view} onChange=${onView}
           options=${['unified', 'split'].map(v => ({value: v, label: t('chg.v.' + v)}))} />`}
+        <${Check} label=${t('chg.space')} on=${ignoreSpace && !spaceOff} disabled=${spaceOff} onChange=${on => onIgnoreSpace?.(on)} />
         ${running && html`<span class="chg-at"><span class="t-muted">${f('chg.at', clock(data.at))}</span><${Button} kind="quiet" onClick=${onRefresh}>${t('chg.refresh')}<//></span>`}
       </div>
       ${!data.git && html`<p class="chg-warn">${t('chg.outside')}</p>`}
+      ${spaceOff && html`<p class="chg-warn">${t('chg.spaceOld')}</p>`}
       ${data.hidden > 0 && html`<p class="chg-warn">${f('chg.hidden', data.hidden)}</p>`}
       ${onPick && groups.length > 0 && open.size > 0 && html`<p class="chg-hint t-muted">${t('chg.pickHint')}</p>`}
       ${!groups.length ? html`<p class="empty">${t('chg.none')}</p>` : html`<div class="chg-list">${groups.map(g => html`<section class="chg-group" key=${g.dir}>
@@ -200,7 +208,8 @@ export function Changes({data = null, error = '', unsupported = false, running =
 }
 
 // RunChanges loads the changes of one of runs (the first unless picked) through changes (core/changes.js) and draws
-// them; a running run's are read again when its state moves and on asking. prefs keeps the layout; onQuote(text, to)
+// them; a running run's are read again when its state moves and on asking. prefs keeps the layout and whether to
+// ignore whitespace (a run whose node cannot is shown plain, the toggle off); onQuote(text, to)
 // takes a quote of picked lines to the agent's box ('agent') or, when notes, the send-back notes ('notes').
 export function RunChanges({changes, runs, prefs = null, notes = false, onQuote}) {
   const w = useWords();
@@ -216,6 +225,11 @@ export function RunChanges({changes, runs, prefs = null, notes = false, onQuote}
   const box = useRef(null);
   const wide = useWidth(box) >= SPLIT_WIDTH;
   const view = useSignalValue(prefs?.diff || unified);
+  const [old, setOld] = useState('');
+  const spaceOff = !!run && old === run.id;
+  const space = useSignalValue(prefs?.ignoreSpace || keepSpace) && !spaceOff;
+  const spaceNow = useRef(space);
+  spaceNow.current = space;
   const running = !!run && openStates.includes(run.state);
   const ended = !!run && !running;
   const can = changes.can();
@@ -235,16 +249,17 @@ export function RunChanges({changes, runs, prefs = null, notes = false, onQuote}
   // fetch asks for a page of path's diff from `from` with context lines, adding it to what it shows (restart: in its
   // place); a list moved on under a running run is read again.
   const fetch = (path, from, context, restart) => {
-    const data = got.data, n = seq.current;
-    setDiffs(d => ({...d, [path]: {...(restart ? {} : d[path]), context, loading: true, error: ''}}));
-    changes.diff(run.id, path, data.snapshot, {...from, context}).then(page => {
-      if (n !== seq.current) return;
+    const data = got.data, n = seq.current, ignoreSpace = space, id = run.id;
+    setDiffs(d => ({...d, [path]: {...(restart ? {} : d[path]), context, ignoreSpace, loading: true, error: ''}}));
+    changes.diff(id, path, data.snapshot, {...from, context, ...(ignoreSpace ? {ignoreSpace} : {})}).then(page => {
+      if (n !== seq.current || ignoreSpace !== spaceNow.current) return;
       setDiffs(d => {
         const pages = [...(restart ? [] : d[path]?.pages || []), {from, page}];
-        return {...d, [path]: {...ch.joined(pages), pages, context}};
+        return {...d, [path]: {...ch.joined(pages), pages, context, ignoreSpace}};
       });
     }, e => {
-      if (n !== seq.current) return;
+      if (n !== seq.current || ignoreSpace !== spaceNow.current) return;
+      if (ignoreSpace && e.code === code.unsupported) { setOld(id); return; }
       setDiffs(d => ({...d, [path]: {...d[path], loading: false, error: e.code || 'error'}}));
       if (e.code === code.snapshotChanged && running) setTick(x => x + 1);
     });
@@ -253,15 +268,18 @@ export function RunChanges({changes, runs, prefs = null, notes = false, onQuote}
     const data = got.data;
     if (!data) return;
     for (const path of open) {
-      if (diffs[path]) continue;
+      const d = diffs[path];
+      if (d && d.ignoreSpace === space) continue;
       const file = data.files.find(x => x.path === path);
       if (!file || file.binary) continue;
-      fetch(path, {hunk: 0}, ch.CONTEXT, true);
+      if (sel?.path === path) setSel(null);
+      fetch(path, {hunk: 0}, d?.context || ch.CONTEXT, true);
     }
-  }, [got.data, [...open].join('\n')]);
+  }, [got.data, [...open].join('\n'), space]);
+  const shown = useMemo(() => Object.fromEntries(Object.entries(diffs).filter(([, d]) => d.ignoreSpace === space)), [diffs, space]);
   const toggle = path => setOpen(o => { const s = new Set(o); if (s.has(path)) { s.delete(path); if (sel?.path === path) setSel(null); } else s.add(path); return s; });
-  const more = path => { const d = diffs[path]; if (d?.next && !d.loading) fetch(path, d.next, d.context, false); };
-  const context = path => { const d = diffs[path]; if (d && !d.loading) { if (sel?.path === path) setSel(null); fetch(path, {hunk: 0}, d.context + ch.MORE_CONTEXT, true); } };
+  const more = path => { const d = shown[path]; if (d?.next && !d.loading) fetch(path, d.next, d.context, false); };
+  const context = path => { const d = shown[path]; if (d && !d.loading) { if (sel?.path === path) setSel(null); fetch(path, {hunk: 0}, d.context + ch.MORE_CONTEXT, true); } };
   const pick = (path, lo, hi, extend) => setSel(s => { const x = ch.pick(s?.path === path ? s : null, lo, hi, extend); return x && {...x, path}; });
   const quote = (path, rows, to) => {
     if (!sel) return;
@@ -269,8 +287,9 @@ export function RunChanges({changes, runs, prefs = null, notes = false, onQuote}
     setSel(null);
   };
   if (!run) return null;
-  return html`<div class="chg-box" ref=${box}><${Changes} data=${got.data || null} error=${got.error || ''} unsupported=${!can} running=${running} open=${open} diffs=${diffs}
+  return html`<div class="chg-box" ref=${box}><${Changes} data=${got.data || null} error=${got.error || ''} unsupported=${!can} running=${running} open=${open} diffs=${shown}
     onToggle=${toggle} onRefresh=${() => setTick(n => n + 1)} runs=${runs} run=${run.id} onRun=${id => { setPicked(id); setGot({}); setOpen(new Set()); setSel(null); }}
+    ignoreSpace=${space} spaceOff=${spaceOff} onIgnoreSpace=${on => (prefs ? prefs.setIgnoreSpace(on) : (keepSpace.value = on))}
     view=${view} onView=${v => prefs?.setDiff(v)} wide=${wide} sel=${onQuote ? sel : null} notes=${notes}
     onMore=${more} onContext=${context} onPick=${onQuote ? pick : null} onQuote=${quote} onClear=${() => setSel(null)} /></div>`;
 }

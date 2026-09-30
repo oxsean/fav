@@ -1,8 +1,8 @@
 // changes is what a run changed, for the changes tab: its files (run.changes, read in pages of the node's size), a
-// file's diff in pages of hunks (run.diff), and how the tab lays them out: line numbers, side by side, picked lines
-// and the quote they make for the agent. A running run's list is compared against its workspace as it is (a
-// snapshot); when that moves between two pages the list is taken again from its start. An ended run's changes do not
-// change, so they are kept; a running run's pages are kept by their snapshot.
+// file's diff in pages of hunks (run.diff, ignoring whitespace as git diff -w does when asked), and how the tab lays
+// them out: line numbers, side by side, picked lines and the quote they make for the agent. A running run's list is
+// compared against its workspace as it is (a snapshot); when that moves between two pages the list is taken again from
+// its start. An ended run's changes do not change, so they are kept; a running run's pages are kept by their snapshot.
 import {code} from './proto.js';
 
 // ⚠️ How many times a list is taken again from its start before its snapshot_changed is given up to.
@@ -68,6 +68,10 @@ export function rowsOf(hunks) {
   });
   return rows;
 }
+
+// onlySpace: a file whose lines changed has no hunks left once its diff ignores whitespace (the list counts every
+// change).
+export const onlySpace = (f, diff) => !!diff?.ignoreSpace && !(diff.hunks || []).length && !diff.of && (f.add || 0) + (f.del || 0) > 0;
 
 // joined is a file's pages ({from: {hunk, line?}, page}, in order) as one: its hunks, a page that starts inside a
 // hunk adding to it; of, the file's hunks in all; next, where a page after them starts (null past the last).
@@ -176,12 +180,13 @@ export function createChanges({wire, now = () => Date.now()}) {
       }
     },
     // diff is a page of a file's hunks in the snapshot its list was taken at ('' outside git): from hunk (its line
-    // on), with context lines around each change (the node's own when not given).
-    async diff(run, path, snapshot, {hunk = 0, line = 0, context = CONTEXT} = {}) {
-      const k = [run, snapshot, path, hunk, line, context].join('\n');
+    // on), with context lines around each change (the node's own when not given), ignoring whitespace when asked (a
+    // node that cannot answers unsupported).
+    async diff(run, path, snapshot, {hunk = 0, line = 0, context = CONTEXT, ignoreSpace = false} = {}) {
+      const k = [run, snapshot, path, hunk, line, context, ignoreSpace].join('\n');
       if (pages.has(k)) return pages.get(k);
       const got = await wire.call('run.diff', {run, path, ...(snapshot ? {snapshot} : {}), hunk, ...(line ? {line} : {}), n: HUNKS,
-        ...(context !== CONTEXT ? {context} : {})});
+        ...(context !== CONTEXT ? {context} : {}), ...(ignoreSpace ? {ignore_space: true} : {})});
       pages.set(k, got);
       if (pages.size > KEPT_PAGES) pages.delete(pages.keys().next().value);
       return got;

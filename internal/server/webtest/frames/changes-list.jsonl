@@ -1,4 +1,4 @@
-{"note":"the changes of an ended run (output-state's r1), after output-state: the file list in two pages, then a file's diff in pages of hunks: the first page of pdf.go (ten of its twelve hunks), the page after it, a big file whose one hunk goes past a page and goes on inside it, and pdf.go again with 20 more lines of context (fewer, longer hunks); the list of an ended run is kept, so asking again sends nothing. Go decodes run.changes and run.diff as node.Changes / node.Diff."}
+{"note":"the changes of an ended run (output-state's r1), after output-state: the file list in two pages, then a file's diff in pages of hunks: the first page of pdf.go (ten of its twelve hunks), the page after it, a big file whose one hunk goes past a page and goes on inside it, pdf.go again with 20 more lines of context (fewer, longer hunks), and pdf.go ignoring whitespace (the hunks that changed only whitespace gone); the list of an ended run is kept, so asking again sends nothing. Go decodes run.changes and run.diff as node.Changes / node.Diff."}
 {"step":"list"}
 {"c":{"type":"req","id":5,"method":"run.changes","params":{"run":"r1"}}}
 {"s":{"type":"res","id":5,"result":{"files":[{"path":"go.sum","op":"modify","add":14,"del":2,"bytes":9310,"generated":true},{"path":"internal/receipt/pdf.go","op":"modify","add":48,"del":6,"bytes":6120,"agent":true},{"path":"internal/receipt/pdf_test.go","op":"add","add":62,"del":0,"bytes":1840,"agent":true}],"total":{"files":6,"add":3327,"del":1111},"snapshot":"t-9a1","next":"internal/receipt/pdf_test.go","git":true}}}
@@ -18,4 +18,7 @@
 {"step":"context"}
 {"c":{"type":"req","id":11,"method":"run.diff","params":{"run":"r1","path":"internal/receipt/pdf.go","snapshot":"t-9a1","hunk":0,"n":10,"context":23}}}
 {"s":{"type":"res","id":11,"result":{"hunks":[{"at":"@@ -20,60 +20,66 @@ func Render(r Receipt) ([]byte, error) {","lines":[" \tvar b bytes.Buffer","-\tpdf.SetFont(\"Arial\", \"\", 12)","+\tpdf.SetFont(\"Inter\", \"\", 12)"]},{"at":"@@ -380,50 +386,51 @@","lines":[" \treturn buf","+\t// flushed"]}],"of":2}}}
+{"step":"space"}
+{"c":{"type":"req","id":12,"method":"run.diff","params":{"run":"r1","path":"internal/receipt/pdf.go","snapshot":"t-9a1","hunk":0,"n":10,"ignore_space":true}}}
+{"s":{"type":"res","id":12,"result":{"hunks":[{"at":"@@ -40,7 +40,11 @@ func Render(r Receipt) ([]byte, error) {","lines":[" \tpdf := gofpdf.New(\"P\", \"mm\", \"A4\", \"\")","-\tpdf.SetFont(\"Arial\", \"\", 12)","+\tpdf.AddUTF8Font(\"Inter\", \"\", fontPath)","+\tpdf.SetFont(\"Inter\", \"\", 12)"," \tpdf.AddPage()"]}],"of":1}}}
 {"step":"again"}

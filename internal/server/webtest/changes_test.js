@@ -133,8 +133,12 @@ test('an ended run\'s changes are read in pages once, then kept; a file\'s diff 
       eq(pages.golden.hunks.map(x => x.lines.length), [6], 'a hunk past a page goes on inside it');
       c.diff('r1', pdf, 't-9a1', {context: ch.CONTEXT + ch.MORE_CONTEXT}).then(x => { pages.wide = x; });
     },
-    again: async () => {
+    space: () => {
       eq(pages.wide.of, 2, 'more context, fewer hunks');
+      c.diff('r1', pdf, 't-9a1', {ignoreSpace: true}).then(x => { pages.space = x; });
+    },
+    again: async () => {
+      eq([pages.space.of, pages.space.next], [1, undefined], 'ignoring whitespace, what is left');
       const again = await c.list('r1', {ended: true});
       ok(again === got, 'kept');
       ok((await c.diff('r1', pdf, 't-9a1')) === pages.first, 'the page kept');
@@ -172,6 +176,27 @@ test('what cannot be shown: outside git, files only the owner sees, cleared chan
   eq([got.r4.git, got.r4.snapshot, got.r5.hidden, got.r8, got.diff], [false, '', 4, 'gone', 'gone']);
 });
 
+test('a diff ignoring whitespace asks the node for it and is kept apart from the plain one', async () => {
+  const calls = [];
+  const wire = {has: () => true, call: (m, p) => { calls.push([m, p]); return Promise.resolve({hunks: [], of: calls.length}); }};
+  const c = ch.createChanges({wire});
+  const plain = await c.diff('r1', 'a.go', 't-1');
+  const spaceless = await c.diff('r1', 'a.go', 't-1', {ignoreSpace: true});
+  const next = await c.diff('r1', 'a.go', 't-1', {hunk: 10, ignoreSpace: true});
+  eq(calls.map(x => x[1]), [{run: 'r1', path: 'a.go', snapshot: 't-1', hunk: 0, n: ch.HUNKS}, {run: 'r1', path: 'a.go', snapshot: 't-1', hunk: 0, n: ch.HUNKS, ignore_space: true},
+    {run: 'r1', path: 'a.go', snapshot: 't-1', hunk: 10, n: ch.HUNKS, ignore_space: true}], 'asked of the node, every page');
+  ok(plain !== spaceless && next.of === 3, 'each its own page');
+  ok((await c.diff('r1', 'a.go', 't-1', {ignoreSpace: true})) === spaceless && (await c.diff('r1', 'a.go', 't-1')) === plain, 'both kept');
+  eq(calls.length, 3, 'nothing asked again');
+});
+
+test('only whitespace changed: said so when ignoring it, not taken for a file with nothing to show', () => {
+  eq(ch.onlySpace(file('a', {add: 2, del: 2}), {hunks: [], of: 0, ignoreSpace: true}), true);
+  eq(ch.onlySpace(file('a', {add: 2, del: 2}), {hunks: [], of: 0}), false, 'not ignoring');
+  eq(ch.onlySpace(file('a', {add: 0, del: 0, op: 'rename'}), {hunks: [], of: 0, ignoreSpace: true}), false, 'a rename with no lines changed');
+  eq(ch.onlySpace(file('a', {add: 2, del: 2}), {hunks: [{at: '@@ -1 +1 @@', lines: ['-a', '+b']}], of: 1, ignoreSpace: true}), false, 'hunks left');
+});
+
 test('the list gives up after restarting a few times', async () => {
   let n = 0;
   const wire = {has: () => true, call: () => { n++; return Promise.reject(Object.assign(new Error('moved'), {code: 'snapshot_changed'})); }};
@@ -204,6 +229,8 @@ test('the changes page draws in both forms and both languages, styled and worded
     running: {data: sample, running: true},
     outside: {data: {...sample, git: false, snapshot: ''}},
     hidden: {data: {...sample, hidden: 4}},
+    space: {data: sample, open, diffs: {'internal/receipt/pdf.go': {hunks: [], of: 0, context: 3, ignoreSpace: true}}, ignoreSpace: true, onIgnoreSpace: none},
+    spaceOld: {data: sample, open, diffs: shown, spaceOff: true, onIgnoreSpace: none},
     gone: {error: 'gone'}, unsupported: {unsupported: true}, loading: {}, empty: {data: {...sample, files: [], total: {files: 0, add: 0, del: 0}}},
   };
   const zh = {}, en = {};
@@ -231,8 +258,14 @@ test('the changes page draws in both forms and both languages, styled and worded
   ok(zh.gone.includes('这次运行的改动已经清理'), 'cleared');
   ok(zh.unsupported.includes('这台 server 还不能看改动'), 'an older server');
   ok(zh.empty.includes('没有改动'), 'nothing changed');
+  for (const f of ['list', 'list/phone']) ok(zh[f].includes('忽略空白') && zh[f].includes('role="checkbox" aria-checked="false"'), `${f}: the toggle, off`);
+  ok(zh.space.includes('忽略空白') && zh.space.includes('aria-checked="true"'), 'the toggle, on');
+  ok(zh.space.includes('只有空白改动') && !zh.space.includes('这个文件没有可显示的改动行'), 'a file changed only in its whitespace');
+  ok(zh.spaceOld.includes('disabled') && zh.spaceOld.includes('这台机器上的 tend 太旧，不能忽略空白'), 'an older node');
+  ok(!zh.unsupported.includes('忽略空白') && !zh.loading.includes('忽略空白'), 'no toggle without a list');
   for (const want of ['Files: 6', 'Only the agent\'s tools', 'Binary · 12 KB → 14 KB', 'Large change: +3,200 −1,100', 'Showing 1 of 3 hunks', 'Show the next 2 hunks',
     'More context']) ok(en.list.includes(want), `en list: no ${want}`);
+  ok(en.list.includes('Ignore whitespace') && en.space.includes('Only whitespace changed') && en.spaceOld.includes('too old to ignore whitespace'), 'en whitespace');
   ok(en.split.includes('Side by side') && en.picked.includes('Lines picked: 3') && en.picked.includes('Add to the send-back notes'), 'en picked');
 });
 
