@@ -49,6 +49,9 @@
     - `POST /auth/device/token` 用 `device_code` 换状态：`pending`；`denied`（读一次即失效）；`expired`；或恰好一次的 `{status: ok, token, user}`，之后这个码就没了。
     - 网页的 `#device-<user_code>`（登录后）打开终端授权页：`GET /api/device?code=` 取码、客户端名字、来源地址、时间；`POST /api/device {code, allow}` 批准即铸一个个人 token（名字 `login:<客户端名字>`），拒绝只记录，两者都写审计（`device.allow` / `device.deny`）。
     - `tend login` 只用 `net/http`：打印 `verify_url` 和 `user_code`，按 `interval` 轮询，成功后把 token 写到 `<tend 数据目录>/coordinator.token`（0600）、把 `config.json` 的 `coordinator.url/token_file` 指过去；Ctrl+C 或过期都给出明确提示。
+  - 网页也能用设备码登录（手机、主屏幕上的 PWA：它的 cookie 和浏览器分开，在独立窗口里走 OAuth，回调设置的会话可能落不进去）：页面发 `POST /auth/device {name, session: true}`，在别的已登录的设备上批准；批准不铸 token，只记下批准人，页面的轮询拿到的是一条批准人的网页会话（`Set-Cookie` 设 `tend_session`，名字 `device:<客户端名字>`，30 天），回 `{status: ok, user}`，不带 token，只给一次；轮询时批准人已被停用就回 `denied`。
+    - 会话只给这台 server 自己的页面：带 `session` 的开始请求和它的轮询都要 `X-Tend: 1` 且 `Origin` 同源，否则 403 `csrf`，被拒的轮询不作废这个码。别的站点既不能替浏览器发起，也不能让浏览器收下一条别人的会话（登录 CSRF）。
+    - 模式在开始时定下：不带 `session` 的码（`tend login`）无论怎么轮询都只给 token。`GET /api/device` 对会话码多回 `session: true`，终端授权页据此写明「那台设备会以你的身份登录网页」；审计 `device.allow` 的 detail 带 `session`，落会话时另记 `login`。
   - 终端授权页在登录后才打开：登录只清掉它自己留下的 `#signin-…`，`#device-` 和 `#task-` 链接保留；完成或出错后有「回到 tend」。
   - 邀请可以带一个项目和在项目里的身份（`participant` / `reader`）：`POST /api/invites {role, project, access}`、`tend-server admin invite --project p --access reader`。登录页的邀请卡片写明「登录后加入项目「x」」。对方经这条邀请**新建**账号时，server 以发出邀请的人的身份执行 `project.member`（他要仍能管理那个项目），记审计 `member`；失败只记 `invite.project_failed`，不挡登录。
   - 邀请可以列出和作废：`GET /api/invites`（管理员）列未用且未过期的，按 hash 的前 12 位称呼（不暴露 secret）；`DELETE /api/invites {id}` 作废，记审计 `invite.revoke`。管理页的成员行给出登录方式、所在项目、名下机器、最近活动（他凭据最近一次使用的时间）。

@@ -1,9 +1,11 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"net/http"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -184,5 +186,169 @@ func TestAProjectInviteMakesItsInviteeAMember(t *testing.T) {
 	resp.Body.Close()
 	if me.ID == "" || r.c.State().Projects["p1"].Members[me.ID] != "reader" {
 		t.Fatalf("eve reads p1: %+v %v", me, r.c.State().Projects["p1"].Members)
+	}
+}
+
+// ask posts body to path the way a page (X-Tend, same origin) or anything else would: extra sets or, with "", drops
+// headers. It answers the status, the JSON and the cookies set.
+func ask(t *testing.T, r *rig, c *http.Client, path string, body any, extra map[string]string) (int, map[string]any, []string) {
+	t.Helper()
+	b, _ := json.Marshal(body)
+	req, _ := http.NewRequest("POST", r.url+path, bytes.NewReader(b))
+	req.Header.Set("X-Tend", "1")
+	req.Header.Set("Origin", r.url)
+	for k, v := range extra {
+		if v == "" {
+			req.Header.Del(k)
+		} else {
+			req.Header.Set(k, v)
+		}
+	}
+	resp, err := c.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var out map[string]any
+	json.NewDecoder(resp.Body).Decode(&out)
+	return resp.StatusCode, out, resp.Header.Values("Set-Cookie")
+}
+
+func startSession(t *testing.T, r *rig, phone *http.Client, name string) (deviceCode, userCode string) {
+	t.Helper()
+	got, out, _ := ask(t, r, phone, "/auth/device", map[string]any{"name": name, "session": true}, nil)
+	if got != http.StatusOK || out["device_code"] == nil || !strings.Contains(out["verify_url"].(string), "#device-") {
+		t.Fatalf("%d %v", got, out)
+	}
+	return out["device_code"].(string), out["user_code"].(string)
+}
+
+// A phone (a home-screen app keeps its own cookies) signs in by a device code someone allows elsewhere: its poll
+// comes back with a browser session of its own, never a token, once.
+func TestADeviceCodeSignsTheAskingBrowserIn(t *testing.T) {
+	r := newRig(t)
+	phone := browser(t)
+	deviceCode, userCode := startSession(t, r, phone, "Android")
+	if got, out, cookies := ask(t, r, phone, "/auth/device/token", map[string]string{"device_code": deviceCode}, nil); got != 200 || out["status"] != "pending" || len(cookies) > 0 {
+		t.Fatalf("%d %v %v", got, out, cookies)
+	}
+
+	desk := browser(t)
+	login(t, desk, r.url, r.client)
+	var info struct {
+		Code    string `json:"code"`
+		Name    string `json:"name"`
+		Session bool   `json:"session"`
+	}
+	if got := r.api(desk, "GET", "/api/device?code="+userCode, nil, &info); got != 200 || !info.Session || info.Name != "Android" {
+		t.Fatalf("the allowing page is told it signs a browser in: %d %+v", got, info)
+	}
+	var before []store.Credential
+	r.api(desk, "GET", "/api/tokens", nil, &before)
+	if got := r.api(desk, "POST", "/api/device", map[string]any{"code": userCode, "allow": true}, nil); got != http.StatusNoContent {
+		t.Fatal(got)
+	}
+
+	got, out, cookies := ask(t, r, phone, "/auth/device/token", map[string]string{"device_code": deviceCode}, nil)
+	if got != 200 || out["status"] != "ok" || out["token"] != nil || out["user"] == "" {
+		t.Fatalf("%d %v", got, out)
+	}
+	if len(cookies) != 1 || !strings.HasPrefix(cookies[0], sessionCookie+"=") || !strings.Contains(cookies[0], "HttpOnly") || !strings.Contains(cookies[0], "SameSite=Strict") {
+		t.Fatalf("the session cookie: %v", cookies)
+	}
+	var me Me
+	if got := r.api(phone, "GET", "/session", nil, &me); got != 200 || me.ID != store.LocalUser {
+		t.Fatalf("the phone is signed in as who allowed it: %d %+v", got, me)
+	}
+	var mine []struct {
+		Kind, Name string
+		Current    bool
+	}
+	r.api(phone, "GET", "/api/tokens", nil, &mine)
+	found := false
+	for _, c := range mine {
+		found = found || c.Current && c.Kind == store.KindWeb && c.Name == "device:Android"
+	}
+	if !found {
+		t.Fatalf("the phone's session is a browser session named for it: %+v", mine)
+	}
+	var after []store.Credential
+	r.api(desk, "GET", "/api/tokens", nil, &after)
+	for _, c := range after {
+		if c.Kind == store.KindToken && !slices.ContainsFunc(before, func(b store.Credential) bool { return b.ID == c.ID }) {
+			t.Fatalf("allowing a browser made a token: %+v", c)
+		}
+	}
+
+	if got, out, cookies := ask(t, r, browser(t), "/auth/device/token", map[string]string{"device_code": deviceCode}, nil); out["status"] != "expired" || len(cookies) > 0 {
+		t.Fatalf("the session is given once: %d %v %v", got, out, cookies)
+	}
+}
+
+// Only this server's own page asks for or takes a session: another site can neither start one nor have a browser
+// receive one (it would sign the browser in as someone else), and a refused poll leaves the code as it was.
+func TestADeviceSessionIsOnlyForThisServersPage(t *testing.T) {
+	r := newRig(t)
+	phone := browser(t)
+	for _, h := range []map[string]string{{"X-Tend": ""}, {"Origin": "https://else.example"}} {
+		if got, _, _ := ask(t, r, phone, "/auth/device", map[string]any{"name": "x", "session": true}, h); got != http.StatusForbidden {
+			t.Fatalf("a session started with %v: %d", h, got)
+		}
+	}
+	deviceCode, userCode := startSession(t, r, phone, "iPhone")
+	desk := browser(t)
+	login(t, desk, r.url, r.client)
+	r.api(desk, "POST", "/api/device", map[string]any{"code": userCode, "allow": true}, nil)
+	for _, h := range []map[string]string{{"X-Tend": ""}, {"Origin": "https://else.example"}} {
+		if got, out, cookies := ask(t, r, phone, "/auth/device/token", map[string]string{"device_code": deviceCode}, h); got != http.StatusForbidden || len(cookies) > 0 {
+			t.Fatalf("a poll with %v: %d %v %v", h, got, out, cookies)
+		}
+	}
+	if _, out, cookies := ask(t, r, phone, "/auth/device/token", map[string]string{"device_code": deviceCode}, nil); out["status"] != "ok" || len(cookies) != 1 {
+		t.Fatalf("the refused polls used the code up: %v %v", out, cookies)
+	}
+}
+
+// A terminal's code stays a token however it is polled: asking for a session at the poll changes nothing.
+func TestATerminalsDeviceCodeNeverSetsACookie(t *testing.T) {
+	r := newRig(t)
+	deviceCode, userCode := startDevice(t, r, "mba")
+	desk := browser(t)
+	login(t, desk, r.url, r.client)
+	var info struct{ Session bool }
+	r.api(desk, "GET", "/api/device?code="+userCode, nil, &info)
+	if info.Session {
+		t.Fatal("a terminal's code is shown as a browser sign-in")
+	}
+	r.api(desk, "POST", "/api/device", map[string]any{"code": userCode, "allow": true}, nil)
+	got, out, cookies := ask(t, r, browser(t), "/auth/device/token", map[string]any{"device_code": deviceCode, "session": true}, nil)
+	if got != 200 || out["status"] != "ok" || out["token"] == "" || len(cookies) > 0 {
+		t.Fatalf("%d %v %v", got, out, cookies)
+	}
+}
+
+// Someone disabled between allowing a browser and its poll gives it no session.
+func TestADeviceSessionIsNotGivenForSomeoneDisabled(t *testing.T) {
+	r := newRig(t)
+	r.team.AddAdmit(store.Admit{Kind: store.AdmitEmail, Value: "bob@corp.example", Role: store.RoleMember})
+	bob, err := r.team.Admit(store.Identity{Provider: "gitea", Issuer: "https://git.example", Subject: "7", Email: "bob@corp.example", EmailVerified: true}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	secret, _, _ := r.team.NewCredential(store.KindToken, "cli", bob.ID, 0)
+	r.srv.opt.Dir.Reload()
+	desk := browser(t)
+	if login(t, desk, r.url, secret) != http.StatusNoContent {
+		t.Fatal("bob signs in")
+	}
+	phone := browser(t)
+	deviceCode, userCode := startSession(t, r, phone, "Android")
+	if got := r.api(desk, "POST", "/api/device", map[string]any{"code": userCode, "allow": true}, nil); got != http.StatusNoContent {
+		t.Fatal(got)
+	}
+	yes := true
+	r.team.SetUser(bob.ID, nil, &yes)
+	if _, out, cookies := ask(t, r, phone, "/auth/device/token", map[string]string{"device_code": deviceCode}, nil); out["status"] != "denied" || len(cookies) > 0 {
+		t.Fatalf("%v %v", out, cookies)
 	}
 }

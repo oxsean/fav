@@ -31,8 +31,9 @@ const (
 	deviceStatusDenied  = "denied"
 )
 
-// deviceAuth is a `tend login` waiting for someone to confirm it in a browser. It lives only in memory: a restart
-// loses pending device codes, which is fine, the CLI starts over.
+// deviceAuth is a `tend login`, or a browser signing in (session), waiting for someone to confirm it in a browser
+// already signed in. It lives only in memory: a restart loses pending device codes, which is fine, the asker starts
+// over.
 type deviceAuth struct {
 	code     string // the secret a polling client presents
 	userCode string // what a person reads and types, formatted XXXX-XXXX
@@ -41,8 +42,10 @@ type deviceAuth struct {
 	created  time.Time
 	expires  time.Time
 	status   string
+	session  bool   // the asker is this server's own page, which gets a browser session instead of a token
 	secret   string // the minted personal token, set once allowed; delivered once, then the code is dropped
 	user     string // the display name of who allowed it
+	userID   string // who allowed it: a session is made for them when the page polls
 }
 
 func newDeviceCode() string {
@@ -88,8 +91,8 @@ func (s *Server) findDeviceLocked(userCode string) *deviceAuth {
 	return nil
 }
 
-// deviceStart begins `tend login`: a device code the CLI polls, and a user code someone types (or the link carries)
-// into the browser to confirm it.
+// deviceStart begins `tend login`, or a browser's sign-in (session: the page itself asks, with its header and origin):
+// a device code the asker polls, and a user code someone types (or the link carries) into a browser to confirm it.
 func (s *Server) deviceStart(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "", http.StatusMethodNotAllowed)
@@ -97,9 +100,14 @@ func (s *Server) deviceStart(w http.ResponseWriter, r *http.Request) {
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, 1024)
 	var p struct {
-		Name string `json:"name"`
+		Name    string `json:"name"`
+		Session bool   `json:"session"`
 	}
 	if !decode(w, r, &p) {
+		return
+	}
+	if p.Session && !fromPage(r) {
+		apiError(w, http.StatusForbidden, "csrf")
 		return
 	}
 	ip, _, _ := net.SplitHostPort(r.RemoteAddr)
@@ -112,7 +120,7 @@ func (s *Server) deviceStart(w http.ResponseWriter, r *http.Request) {
 	}
 	now := time.Now()
 	d := &deviceAuth{code: newDeviceCode(), userCode: newUserCode(), name: strings.TrimSpace(p.Name), ip: ip,
-		created: now, expires: now.Add(deviceAge), status: deviceStatusPending}
+		created: now, expires: now.Add(deviceAge), status: deviceStatusPending, session: p.Session}
 	s.devices[d.code] = d
 	s.mu.Unlock()
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -124,7 +132,11 @@ func (s *Server) deviceStart(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// devicePoll is what `tend login` calls every interval until it gets a token, a denial, or an expiry.
+// fromPage: the request comes from this server's own page, which alone sends X-Tend from this origin.
+func fromPage(r *http.Request) bool { return r.Header.Get("X-Tend") == "1" && sameOrigin(r) }
+
+// devicePoll is what the asker calls every interval until it gets a token (or, for a session, the session's cookie),
+// a denial, or an expiry. A session's poll that is not the page's is refused and leaves the code as it was.
 func (s *Server) devicePoll(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "", http.StatusMethodNotAllowed)
@@ -150,6 +162,17 @@ func (s *Server) devicePoll(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "expired"})
 		return
 	}
+	if d.session && !fromPage(r) {
+		s.mu.Unlock()
+		apiError(w, http.StatusForbidden, "csrf")
+		return
+	}
+	if d.session && d.status == deviceStatusAllowed {
+		delete(s.devices, p.DeviceCode)
+		s.mu.Unlock()
+		s.deviceSession(w, r, d)
+		return
+	}
 	switch d.status {
 	case deviceStatusDenied:
 		delete(s.devices, p.DeviceCode)
@@ -166,12 +189,35 @@ func (s *Server) devicePoll(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// deviceSession signs the polling page in as whoever allowed d, unless they were disabled since.
+func (s *Server) deviceSession(w http.ResponseWriter, r *http.Request, d *deviceAuth) {
+	u, ok, err := s.team().User(d.userID)
+	if err != nil {
+		apiError(w, http.StatusInternalServerError, "internal")
+		return
+	}
+	if !ok || u.Disabled {
+		s.audit(r, d.userID, "login_refused", "device "+d.userCode)
+		writeJSON(w, http.StatusOK, map[string]string{"status": deviceStatusDenied})
+		return
+	}
+	if err := s.startSession(w, r, u, viaDevice+d.name); err != nil {
+		apiError(w, http.StatusInternalServerError, "internal")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "user": displayName(u)})
+}
+
+// viaDevice starts the name of a browser session a device code signed in; the asker's own name follows.
+const viaDevice = "device:"
+
 type deviceView struct {
 	Code    string    `json:"code"`
 	Name    string    `json:"name"`
 	IP      string    `json:"ip"`
 	Created time.Time `json:"created"`
 	Expires time.Time `json:"expires"`
+	Session bool      `json:"session,omitempty"` // allowing it signs a browser in, rather than making a token
 }
 
 // deviceLookup is what the terminal-authorization page reads to show the code, client and source address.
@@ -185,11 +231,12 @@ func (s *Server) deviceLookup(w http.ResponseWriter, r *http.Request, c caller) 
 		apiError(w, http.StatusNotFound, "not_found")
 		return
 	}
-	writeJSON(w, http.StatusOK, deviceView{Code: d.userCode, Name: d.name, IP: d.ip, Created: d.created, Expires: d.expires})
+	writeJSON(w, http.StatusOK, deviceView{Code: d.userCode, Name: d.name, IP: d.ip, Created: d.created, Expires: d.expires, Session: d.session})
 }
 
 // deviceDecide is Allow or Deny on the terminal-authorization page. Allow mints a personal token owned by the
-// signed-in user, delivered to the polling CLI exactly once.
+// signed-in user, delivered to the polling CLI exactly once; for a browser it notes who allowed it, and the page's
+// poll gets a session of theirs.
 func (s *Server) deviceDecide(w http.ResponseWriter, r *http.Request, c caller) {
 	var p struct {
 		Code  string `json:"code"`
@@ -209,6 +256,13 @@ func (s *Server) deviceDecide(w http.ResponseWriter, r *http.Request, c caller) 
 		d.status = deviceStatusDenied
 		s.mu.Unlock()
 		s.audit(r, c.user.ID, "device.deny", p.Code)
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	if d.session {
+		d.status, d.userID, d.user = deviceStatusAllowed, c.user.ID, displayName(c.user)
+		s.mu.Unlock()
+		s.audit(r, c.user.ID, "device.allow", "session "+p.Code)
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
