@@ -1,7 +1,8 @@
 // me is the viewer's own page: who they are, how the page looks in this browser, how they hear that something needs
 // them (browser notices while the page is open, a personal webhook), the sign-in accounts linked to them, their
 // personal tokens and their browser sessions. On a phone it keeps only the account, the ways into the team and agent
-// pages (which only show there) and signing out.
+// pages (which only show there), putting tend on the home screen and signing out. Where the address is not HTTPS it
+// says so, on either form.
 import {useState, useEffect} from '../vendor/hooks.mjs';
 import {html, cx, usePhone, useWords, useSignalValue} from '../ui/base.js';
 import {Panel} from '../ui/panel.js';
@@ -13,6 +14,7 @@ import {register, t as say, f as fill} from '../core/i18n.js';
 import {linkURL} from '../core/http.js';
 import {themes, densities} from '../core/prefs.js';
 import {clock, day} from '../core/format.js';
+import {nowhere} from '../core/platform.js';
 import {apiText} from './words.js';
 
 register('me', {
@@ -56,6 +58,15 @@ register('me', {
   'me.endedN': ['已退出 %d 个会话', '%d sessions signed out'],
   'me.team': ['团队', 'Team'], 'me.teamNote': ['成员和项目，在手机上只看', 'People and projects; a phone only shows them'],
   'me.agents': ['Agent', 'Agents'], 'me.agentsNote': ['定义和能跑的机器，在手机上只看', 'Definitions and where they run; a phone only shows them'],
+  'me.install': ['装到主屏幕', 'The home screen'],
+  'me.installIOS': ['在 Safari 里把 tend 装到主屏幕，才收得到推送：', 'Put tend on the home screen from Safari to receive pushes:'],
+  'me.installIOS1': ['点「分享」', 'Tap Share'], 'me.installIOS2': ['选「添加到主屏幕」', 'Choose Add to Home Screen'],
+  'me.installIOS3': ['从主屏幕打开 tend 再登录', 'Open tend from the home screen and sign in'],
+  'me.installAndroid': ['在浏览器菜单里选「安装应用」或「添加到主屏幕」，tend 就像 App 一样打开', 'Choose Install app or Add to Home screen in the browser menu, and tend opens like an app'],
+  'me.https': ['不是 HTTPS', 'Not HTTPS'],
+  'me.insecure': ['这个地址不是 HTTPS，不能装到主屏幕，也收不到推送。有两种办法换成 HTTPS 地址：', 'This address is not HTTPS: tend cannot go on the home screen and receives no pushes. Two ways to an HTTPS address:'],
+  'me.insecureTailnet': ['在 tailnet 里：tailscale serve 把 server 放到 *.ts.net 的 HTTPS 地址上，或用 tailscale cert 取证书', 'On a tailnet: tailscale serve puts the server on an HTTPS *.ts.net address, or tailscale cert gets a certificate'],
+  'me.insecureTLS': ['公网部署：tend-server 加 --tls-cert 和 --tls-key 启动', 'Deployed in public: start tend-server with --tls-cert and --tls-key'],
 });
 
 // ⚠️ Where this tab remembers, across the sign-in's round trip, that it went to link an account (sessionStorage), and
@@ -227,10 +238,32 @@ function Avatar({name}) {
   return html`<span class="me-avatar" aria-hidden="true">${(name || '?').slice(0, 1).toUpperCase()}</span>`;
 }
 
+// Install tells this device what it lacks: on an address that is not HTTPS, the two ways to one; on a phone's browser,
+// how to put tend on the home screen (Safari's three steps, the Android browser's menu). An installed page, or a
+// computer on HTTPS, lacks nothing.
+function Install({platform, phone}) {
+  const {t} = useWords();
+  if (!platform.secure) {
+    return html`<${Panel} title=${t('me.https')}>
+      <p class="me-note">${t('me.insecure')}</p>
+      <ul class="me-steps"><li>${t('me.insecureTailnet')}</li><li>${t('me.insecureTLS')}</li></ul>
+    <//>`;
+  }
+  if (!phone || platform.kind === 'pwa') return null;
+  if (platform.os === 'ios') {
+    return html`<${Panel} title=${t('me.install')}>
+      <p class="me-note">${t('me.installIOS')}</p>
+      <ol class="me-steps"><li>${t('me.installIOS1')}</li><li>${t('me.installIOS2')}</li><li>${t('me.installIOS3')}</li></ol>
+    <//>`;
+  }
+  if (platform.os === 'android') return html`<${Panel} title=${t('me.install')}><p class="me-note">${t('me.installAndroid')}</p><//>`;
+  return null;
+}
+
 // Me: session is who is signed in; http reads and changes their tokens, sessions, accounts and webhook; prefs are this
 // browser's; notices are the browser's notices ({Notification, secure}); tab is the tab's storage (linking an account
-// goes through it); clock is now; onLogout signs out; copy is the clipboard's.
-export function Me({session, http, prefs, toasts, router, notices, tab, clock: now = () => Date.now(), copy, onLogout}) {
+// goes through it); platform is this device's (core/platform.js); clock is now; onLogout signs out; copy is the clipboard's.
+export function Me({session, http, prefs, toasts, router, notices, tab, platform = nowhere, clock: now = () => Date.now(), copy, onLogout}) {
   const w = useWords();
   const {t, f} = w;
   const phone = usePhone();
@@ -265,6 +298,7 @@ export function Me({session, http, prefs, toasts, router, notices, tab, clock: n
         <li><button type="button" class="card-row" onClick=${() => router.go({page: 'agents'})}>
           <span class="card-main"><span class="card-primary">${t('me.agents')}</span><span class="card-secondary">${t('me.agentsNote')}</span></span></button></li>
       </ul>
+      <${Install} platform=${platform} phone />
       <${Button} kind="danger" wide onClick=${onLogout}>${t('app.logout')}<//>
     </div>`;
   }
@@ -300,6 +334,7 @@ export function Me({session, http, prefs, toasts, router, notices, tab, clock: n
     <div class="me-head"><${Avatar} name=${session?.name} />
       <span class="me-who"><h1 class="tasks-title">${session?.name}</h1><span class="mono t-muted">${sub}</span></span>
       <span class="me-head-acts"><${Button} onClick=${onLogout}>${t('app.logout')}<//></span></div>
+    <${Install} platform=${platform} />
     <div class="me-body">
       <div class="me-col">
         <${Look} prefs=${prefs} presets=${presets} />

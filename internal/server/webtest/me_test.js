@@ -111,7 +111,7 @@ function browser(permission = 'default', answer = 'granted') {
 
 // app mounts the signed-in page on the me page with a store no server feeds; its inbox is the test's to set.
 async function app({f = 'desktop', lang = 'zh', session = bo, http = fakeHTTP(), notices = browser().notices, doc = {visibilityState: 'visible'},
-  prefsStore = memory(), tab = memory(), url = '/?page=me'} = {}) {
+  prefsStore = memory(), tab = memory(), url = '/?page=me', platform = {kind: 'browser', os: 'other', name: 'Mac', secure: true}} = {}) {
   const r = rig();
   const keys = createKeys({timers: r.clk});
   const toasts = createToasts({timers: r.clk});
@@ -126,7 +126,7 @@ async function app({f = 'desktop', lang = 'zh', session = bo, http = fakeHTTP(),
   const el = install();
   const props = {store: r.store, commands, toasts, wire: r.wire, http, router, keys, nav: createNav({storage: noStore, width: 1440}), prefs, session,
     names: signal({u_b: 'Bo Lin'}), clock: () => NOW, fetchOutput: () => Promise.resolve({events: []}), storage: memory(),
-    copy: text => { out.copied.push(text); return Promise.resolve(); }, onLogout() { out.logouts++; }, notices, doc, tab};
+    copy: text => { out.copied.push(text); return Promise.resolve(); }, onLogout() { out.logouts++; }, notices, doc, tab, platform};
   await act(() => render(html`<${KeysContext.Provider} value=${keys}><${App} ...${props} /><//>`, el));
   await settled();
   return Object.assign(out, {el, r, keys, router, http, prefs, prefsStore, tab, done: async () => {
@@ -342,6 +342,29 @@ test('a sign-in fragment without a link in flight, or long after one, is dropped
     ok(!r.el.textContent.includes(words.t('me.linkTaken')), 'no notice');
     eq(tab.getItem('tend-linking'), null, 'forgotten');
     await r.done();
+  }
+});
+
+// This device: on a phone, how to put tend on the home screen where it is not there yet (Safari's three steps, the
+// Android browser's menu), and on an address that is not HTTPS, why it cannot be and the two ways to make it so, on
+// a computer too.
+test('this device: installing to the home screen, and an address that is not HTTPS', async () => {
+  const cases = [
+    ['phone', 'ios', 'browser', true, ['me.installIOS', 'me.installIOS1', 'me.installIOS2', 'me.installIOS3'], ['me.insecure']],
+    ['phone', 'android', 'browser', true, ['me.installAndroid'], ['me.installIOS', 'me.insecure']],
+    ['phone', 'ios', 'pwa', true, [], ['me.installIOS', 'me.installAndroid', 'me.insecure']],
+    ['phone', 'android', 'browser', false, ['me.insecure', 'me.insecureTailnet', 'me.insecureTLS'], ['me.installAndroid']],
+    ['desktop', 'other', 'browser', false, ['me.insecure', 'me.insecureTailnet', 'me.insecureTLS'], []],
+    ['desktop', 'other', 'browser', true, [], ['me.insecure', 'me.installAndroid', 'me.installIOS']],
+  ];
+  for (const lang of ['zh', 'en']) for (const [f, os, kind, secure, shown, hidden] of cases) {
+    const a = await app({f, lang, platform: {kind, os, name: 'x', secure}});
+    const text = a.el.textContent;
+    for (const k of shown) ok(text.includes(words.t(k)), `${lang} ${f} ${os} ${kind} ${secure}: ${k}`);
+    for (const k of hidden) ok(!text.includes(words.t(k)), `${lang} ${f} ${os} ${kind} ${secure}: no ${k}`);
+    const classes = new Set(a.el.all().flatMap(e => e.className.split(' ').filter(Boolean)));
+    eq([...classes].filter(c => !cssClasses.has(c)), [], `${lang} ${f} ${os} ${kind} ${secure}: classes without a rule`);
+    await a.done();
   }
 });
 

@@ -101,7 +101,7 @@ export function App({store, commands, toasts, wire, http, router, keys, nav, pre
             ? html`<${Machines} store=${store} commands=${commands} toasts=${toasts} session=${session} http=${http} router=${router} storage=${storage}
               clock=${clock} copy=${copy} />`
             : route.page === 'me'
-              ? html`<${Me} session=${session} http=${http} prefs=${prefs} toasts=${toasts} router=${router} notices=${notices} tab=${tab} clock=${clock}
+              ? html`<${Me} session=${session} http=${http} prefs=${prefs} toasts=${toasts} router=${router} notices=${notices} tab=${tab} platform=${platform} clock=${clock}
                 copy=${copy} onLogout=${onLogout} />`
               : route.page === 'agents'
                 ? html`<${Agents} store=${store} commands=${commands} toasts=${toasts} session=${session} wire=${wire} agentDefs=${agentDefs} download=${download} />`

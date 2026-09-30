@@ -591,6 +591,10 @@ revoke, and a handover lists what goes where before it runs.
 Ember, Graphite) with its own accent if you like, standard or high contrast, and one of three densities, kept in the
 browser; skins are made on the server (`/theme/<name>.css`) and keep text at 4.5:1 (7:1 in high contrast) whatever the
 accent.
+On a phone, over HTTPS, the page installs to the home screen (the Account page says how: Share and Add to Home Screen
+in Safari, or Install app in the Android browser's menu); the installed page signs in from another device, where you
+open its link and allow it. On an address that is not HTTPS the Account page says the page cannot install or receive
+pushes: put the server behind tailscale serve, or give it a certificate with `--tls-cert/--tls-key`.
 
 **The server's database.** `tend-server import` moves a mode 1 journal (`coord/events.jsonl`) into the database, with
 the server stopped; the server refuses to start while that journal holds events and no database exists. Beside a
