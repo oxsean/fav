@@ -40,6 +40,7 @@ type DefShare struct {
 	Projects []string `json:"projects,omitempty"`
 	All      bool     `json:"all,omitempty"`
 	View     bool     `json:"view,omitempty"` // those it is shared with may read its instructions
+	Left     []string `json:"left,omitempty"` // who stopped using it: a project or everyone no longer gives it to them
 }
 
 type AgentDefRef struct {
@@ -70,7 +71,11 @@ func (d *AgentDef) Usable(user, project, role string) bool {
 	switch {
 	case d == nil:
 		return false
-	case d.Owner == user, d.Share.All, slices.Contains(d.Share.Users, user):
+	case d.Owner == user, slices.Contains(d.Share.Users, user):
+		return true
+	case slices.Contains(d.Share.Left, user):
+		return false
+	case d.Share.All:
 		return true
 	case project == "" || role != RoleParticipant:
 		return false

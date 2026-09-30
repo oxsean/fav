@@ -34,7 +34,7 @@ type AgentDefView struct {
 	Owner       string         `json:"owner"`
 	Share       *task.DefShare `json:"share,omitempty"` // to whoever manages it
 	Manage      bool           `json:"manage,omitempty"`
-	Leave       bool           `json:"leave,omitempty"` // it is shared with the caller by name, who may stop using it (agentdef.leave)
+	Leave       bool           `json:"leave,omitempty"` // the caller uses it without managing it, and may stop using it (agentdef.leave)
 	Text        string         `json:"text,omitempty"`
 	Warnings    []string       `json:"warnings,omitempty"`
 	Require     []string       `json:"require,omitempty"` // the machines it runs on only
@@ -113,7 +113,7 @@ func (c *Coord) defView(p Principal, d *task.AgentDef) AgentDefView {
 		share := d.Share
 		v.Share, v.Manage = &share, true
 	} else {
-		v.Leave = slices.Contains(d.Share.Users, p.User)
+		v.Leave = c.usesDefSomewhere(p, d)
 	}
 	if c.readsDef(p, d) {
 		v.Text = string(defs.Format(d.AgentDef))
@@ -302,15 +302,17 @@ func (c *Coord) agentDefShare(who Principal, r *wire.Request) (string, []journal
 	if p.Share.All {
 		p.Share.Users, p.Share.Projects = nil, nil
 	}
+	p.Share.Left = slices.DeleteFunc(slices.Clone(d.Share.Left), func(u string) bool { return slices.Contains(p.Share.Users, u) })
 	if slices.Equal(p.Share.Users, d.Share.Users) && slices.Equal(p.Share.Projects, d.Share.Projects) &&
-		p.Share.All == d.Share.All && p.Share.View == d.Share.View {
+		p.Share.All == d.Share.All && p.Share.View == d.Share.View && slices.Equal(p.Share.Left, d.Share.Left) {
 		return d.Name, nil, nil
 	}
 	return d.Name, []journal.Event{journal.NewEvent(task.EAgentDefShared, p)}, nil
 }
 
-// agentDefLeave is agentdef.leave: who stops using a definition shared with them by name; one they manage, or have
-// through a project or everyone, stays.
+// agentDefLeave is agentdef.leave: who stops using a definition they do not manage. It is shared with them by name no
+// more, and when a project or everyone would still give it to them, they are one who left it (Share.Left), until its
+// sharing names them again.
 func (c *Coord) agentDefLeave(who Principal, r *wire.Request) (string, []journal.Event, error) {
 	var p task.AgentDefRef
 	if err := r.Decode(&p); err != nil {
@@ -323,11 +325,15 @@ func (c *Coord) agentDefLeave(who Principal, r *wire.Request) (string, []journal
 	switch {
 	case d == nil || !c.manages(who, d) && !c.usesDefSomewhere(who, d):
 		return "", nil, notFound("agent " + p.Name)
-	case c.manages(who, d) || !slices.Contains(d.Share.Users, who.User):
-		return "", nil, conflict("agent " + p.Name + " is not shared with you by name")
+	case c.manages(who, d):
+		return "", nil, conflict("agent " + p.Name + " is yours to manage")
 	}
 	share := d.Share
 	share.Users = slices.DeleteFunc(slices.Clone(d.Share.Users), func(u string) bool { return u == who.User })
+	if rest := (task.AgentDef{AgentDef: d.AgentDef, Owner: d.Owner, Share: share}); c.usesDefSomewhere(who, &rest) {
+		share.Left = append(slices.Clone(d.Share.Left), who.User)
+		slices.Sort(share.Left)
+	}
 	return d.Name, []journal.Event{journal.NewEvent(task.EAgentDefShared, task.AgentDefShare{Name: d.Name, Share: share})}, nil
 }
 

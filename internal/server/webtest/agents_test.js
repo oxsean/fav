@@ -209,8 +209,8 @@ test('the picked one: its facts, notes, text, command and sharing as far as the 
   let text = aside(root).textContent;
   for (const s of [f('ag.note.auth', 'mba', 'codex'), f('ag.note.missing', 'bo-laptop', 'codex'), t('ag.note.codex'), f('ag.note.kept', 'output'), t('ag.warn.claudeOnly'),
     f('ag.usedRoles', 'Shop', 'review'), t('ag.usedTask'), f('ag.revBy', 3, 'Ann Lee', '9-28 10:00')]) ok(text.includes(s), 'shop-review: ' + s);
-  eq(aside(root).find('button').map(labelOf).filter(l => ![t('ag.tab.def'), t('ag.tab.launch'), t('ag.tab.share')].includes(l)), [t('ag.copy'), t('ag.export')],
-    'a project\'s he may read: copied or exported');
+  eq(aside(root).find('button').map(labelOf).filter(l => ![t('ag.tab.def'), t('ag.tab.launch'), t('ag.tab.share')].includes(l)), [t('ag.copy'), t('ag.export'), t('ag.leave')],
+    'a project\'s he may read: copied, exported or left');
   await tabTo(root, 'launch');
   ok(aside(root).one('pre').textContent.startsWith('codex app-server -c approval_policy=on-request -c model=gpt-6'), 'its command');
   await tabTo(root, 'share');

@@ -36,7 +36,7 @@ func foldScenario() []journal.Envelope {
 	add(ev(task.EProjectEdited, task.ProjectEdit{ID: "p1", Context: ptr("ctx"), Repos: &[]task.Repo{{Name: "app", Dirs: map[string]string{"mba": "/w"}}},
 		Defaults: &task.Defaults{Machine: "mba", Roles: map[string]string{"implement": "fake"}}, Hooks: &map[string][]string{"check": {"gate"}}}))
 	add(ev(task.EAgentDefSaved, task.AgentDef{AgentDef: defs.AgentDef{Name: "careful", Provider: "claude", Machines: defs.Machines{Prefer: []string{"mba"}}}, Owner: "u_b", SavedBy: "u_b"}))
-	add(ev(task.EAgentDefShared, task.AgentDefShare{Name: "careful", Share: task.DefShare{Users: []string{"u_c"}}}))
+	add(ev(task.EAgentDefShared, task.AgentDefShare{Name: "careful", Share: task.DefShare{Users: []string{"u_c"}, Projects: []string{"p1"}, Left: []string{"u_d"}}}))
 	add(ev(task.EAgentDefTransferred, task.AgentDefTransfer{Name: "careful", Owner: "project:p1"}))
 	add(ev(task.EMachineShared, task.Share{Machine: "mba", Projects: []string{"p1"}, Approve: true}))
 	add(ev(task.EMachineShared, task.Share{Machine: "old", Users: []string{"u_b"}}))

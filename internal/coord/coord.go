@@ -81,7 +81,7 @@ const (
 	MAgentDefCheck      = "agentdef.check" // what agentdef.save would say, without saving (AgentDefSave)
 	MAgentDefRemove     = "agentdef.remove"
 	MAgentDefShare      = "agentdef.share"
-	MAgentDefLeave      = "agentdef.leave"    // stop using one shared with you by name (AgentDefRef)
+	MAgentDefLeave      = "agentdef.leave"    // stop using one you do not manage, however it reached you (AgentDefRef)
 	MAgentDefTransfer   = "agentdef.transfer" // give one to a project (AgentDefTransfer)
 	MInboxList          = "inbox.list"
 	MUserOffboard       = "user.offboard"

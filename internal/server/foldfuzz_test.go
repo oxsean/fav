@@ -71,6 +71,15 @@ func (g *journalGen) flow() *task.Flow {
 
 func (g *journalGen) user() string { return g.of("u_a", "u_b", "u_c", "") }
 
+// users is none, one or two users.
+func (g *journalGen) users() []string {
+	var out []string
+	for range g.n(3) {
+		out = append(out, g.of("u_a", "u_b", "u_c"))
+	}
+	return out
+}
+
 func (g *journalGen) workspace(t string) *agent.Workspace {
 	if g.chance(60) {
 		return nil
@@ -258,7 +267,7 @@ func (g *journalGen) event() journal.Event {
 			g.names = append(g.names, name)
 			return ev(task.EAgentDefSaved, task.AgentDef{AgentDef: defs.AgentDef{Name: name, Provider: "claude"}, Owner: g.user(), SavedBy: g.user()})
 		case 1:
-			return ev(task.EAgentDefShared, task.AgentDefShare{Name: g.pick(g.names, "d"), Share: task.DefShare{All: g.chance(50)}})
+			return ev(task.EAgentDefShared, task.AgentDefShare{Name: g.pick(g.names, "d"), Share: task.DefShare{All: g.chance(50), Left: g.users()}})
 		case 2:
 			return ev(task.EAgentDefTransferred, task.AgentDefTransfer{Name: g.pick(g.names, "d"), Owner: task.ProjectOwner + g.pick(g.projects, "p")})
 		}

@@ -34,7 +34,7 @@ register('agents', {
   'ag.none': ['还没有 agent', 'No agent yet'], 'ag.noneHere': ['这一类没有 agent', 'No agent of this kind'], 'ag.loading': ['正在读取…', 'Loading…'],
   'ag.rev': ['第 %d 版 · %s 改过', 'Version %d · changed %s'], 'ag.revBy': ['第 %d 版 · %s 在 %s 改过', 'Version %d · changed by %s on %s'],
   'ag.leave': ['不再使用', 'Stop using it'], 'ag.leaveTitle': ['不再使用 %s？', 'Stop using %s?'],
-  'ag.leaveNote': ['它是点名分享给你的；不再使用后你看不到它，派活时也不能选它，要再用得请主人重新分享。', 'It is shared with you by name. Once you stop, you no longer see it or pick it for a task; its owner would have to share it again.'],
+  'ag.leaveNote': ['不再使用后你看不到它，派活时也不能选它，经项目或所有人分享到的也一样；要再用得请主人点名分享给你。', 'Once you stop, you no longer see it or pick it for a task, even where a project or everyone has it; its owner would have to share it with you by name.'],
   'ag.leftDone': ['不再使用 %s', 'No longer using %s'],
   'ag.transfer': ['转给项目', 'Give to a project'], 'ag.transferTitle': ['把 %s 转给项目', 'Give %s to a project'], 'ag.transferTarget': ['项目', 'Project'],
   'ag.transferNote': ['转给项目后由项目负责人管理，项目的参与者都能用；分享设置不变。', 'The project\'s owner then manages it and its participants use it; its sharing stays as it is.'],
@@ -54,6 +54,7 @@ register('agents', {
   'ag.launchNone': ['协调器只给定义算启动参数', 'The coordinator works out the command for definitions only'],
   'ag.shareUser': ['%s 可以用', '%s may use it'], 'ag.shareProject': ['项目 %s 的参与者可以用', 'Participants of project %s may use it'],
   'ag.shareAll': ['所有人都能用', 'Everyone may use it'], 'ag.shareView': ['他们能看说明书', 'They may read its instructions'],
+  'ag.shareLeft': ['%s 不再使用它', '%s stopped using it'],
   'ag.shareNoView': ['他们只能用，不能看说明书', 'They may use it, not read it'], 'ag.shareNone': ['没有分享：只有主人和管理员能用', 'Not shared: only its owner and admins use it'],
   'ag.projectOwned': ['归项目 %s 所有：参与者能用，负责人管理', 'Owned by project %s: its participants use it, its owner manages it'],
   'ag.toYou': ['%s 分享给你', '%s shares it with you'], 'ag.youRead': ['你能用，也能看说明书', 'You may use it and read it'], 'ag.youUse': ['你只能用，不能看说明书', 'You may use it, not read it'],
@@ -231,6 +232,7 @@ function Body({r, st, tab, onTab}) {
       for (const x of v.share.projects || []) lines.push(f('ag.shareProject', st.projects?.[x]?.name || x));
       if (v.share.all || v.share.users?.length || v.share.projects?.length) lines.push(t(v.share.view ? 'ag.shareView' : 'ag.shareNoView'));
       else if (!p) lines.push(t('ag.shareNone'));
+      for (const u of v.share.left || []) lines.push(f('ag.shareLeft', name(u)));
     } else {
       if (!p) lines.push(f('ag.toYou', name(v.owner)));
       lines.push(t(v.text ? 'ag.youRead' : 'ag.youUse'));
