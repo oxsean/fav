@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"net"
 	"net/http"
 	"net/url"
@@ -237,14 +238,26 @@ func (n *Notifier) loop(ctx context.Context) {
 }
 
 // dispatch starts the deliveries that are due, each on its channel's slots, one at a time per device, and answers
-// how many it started.
+// how many it started. Each channel asks the outbox for as many as it has slots free, one per device not busy.
 func (n *Notifier) dispatch(ctx context.Context) int {
 	o := n.o
-	due, err := o.Team.Due(n.now(), 64)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "tend-server: outbox:", err)
-		return 0
+	n.mu.Lock()
+	busy := slices.Collect(maps.Keys(n.flying))
+	n.mu.Unlock()
+	var due []store.Delivery
+	for ch, webhooks := range map[string]bool{channelWebhook: true, store.KindWebPush: false} {
+		free := cap(n.slots[ch]) - len(n.slots[ch])
+		if free <= 0 {
+			continue
+		}
+		batch, err := o.Team.Batch(n.now(), webhooks, free, busy)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "tend-server: outbox:", err)
+			return 0
+		}
+		due = append(due, batch...)
 	}
+	var err error
 	started := 0
 	for _, d := range due {
 		ch, key := channelWebhook, "hook:"+d.User

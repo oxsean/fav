@@ -328,10 +328,29 @@ func (t *Team) Enqueue(ds []Delivery) (int, error) {
 	return n, err
 }
 
+const deliveryCols = `id, seq, user_id, event, device_id, device_version, status, attempts, next_at, notice, result, at`
+
 // Due are up to n pending deliveries whose time has come by now, soonest first.
 func (t *Team) Due(now time.Time, n int) ([]Delivery, error) {
-	rows, err := t.r.Query(`SELECT id, seq, user_id, event, device_id, device_version, status, attempts, next_at, notice, result, at FROM deliveries
-		WHERE status = ? AND next_at <= ? ORDER BY next_at, id LIMIT ?`, DeliveryPending, now.UnixNano(), n)
+	return t.deliveries(`SELECT `+deliveryCols+` FROM deliveries WHERE status = ? AND next_at <= ? ORDER BY next_at, id LIMIT ?`,
+		DeliveryPending, now.UnixNano(), n)
+}
+
+// deliveryKey is the SQL for what a delivery takes its turn by: its device, or for a webhook its recipient ("hook:"
+// and their id).
+const deliveryKey = `CASE WHEN device_id = '' THEN 'hook:' || user_id ELSE device_id END`
+
+// Batch is what a channel starts next: the soonest delivery due by now of each device (webhooks: of each recipient's
+// webhook) whose key is not busy, up to n, soonest first.
+func (t *Team) Batch(now time.Time, webhooks bool, n int, busy []string) ([]Delivery, error) {
+	b, _ := json.Marshal(append([]string{}, busy...))
+	return t.deliveries(`SELECT `+deliveryCols+` FROM (SELECT *, ROW_NUMBER() OVER (PARTITION BY `+deliveryKey+` ORDER BY next_at, id) AS turn
+		FROM deliveries WHERE status = ? AND next_at <= ? AND (device_id = '') = ? AND `+deliveryKey+` NOT IN (SELECT value FROM json_each(?)))
+		WHERE turn = 1 ORDER BY next_at, id LIMIT ?`, DeliveryPending, now.UnixNano(), webhooks, string(b), n)
+}
+
+func (t *Team) deliveries(query string, args ...any) ([]Delivery, error) {
+	rows, err := t.r.Query(query, args...)
 	if err != nil {
 		return nil, err
 	}

@@ -735,3 +735,34 @@ func TestAPushOnItsWayWhenItsBrowserChangesHandsSettlesNothing(t *testing.T) {
 		})
 	}
 }
+
+// A device with a long queue on its way holds up no other device.
+func TestASlowDeviceHoldsUpNoOther(t *testing.T) {
+	o := newOutbox(t)
+	must(t, o.team.AddAdmit(store.Admit{Kind: store.AdmitEmail, Value: "ann@corp.example", Role: store.RoleMember}))
+	ann, err := o.team.Admit(store.Identity{Provider: "gitea", Issuer: "https://git.example", Subject: "1", Email: "ann@corp.example", EmailVerified: true}, "")
+	must(t, err)
+	for _, d := range []store.PushDevice{o.device(store.LocalUser, "/slow"), o.device(ann.ID, "/push/other")} {
+		if _, err := o.team.SetDevicePrefs(d.User, d.ID, store.DevicePrefs{Events: []string{store.EventDone}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for i := range 70 {
+		o.n.Send(coord.Notice{Seq: int64(i + 1), Event: coord.NotifyTaskDone, Task: "t_1", Title: "x", To: []string{store.LocalUser}, At: n0})
+	}
+	o.n.Send(coord.Notice{Seq: 100, Event: coord.NotifyTaskDone, Task: "t_2", Title: "y", To: []string{ann.ID}, At: n0.Add(time.Second)})
+	o.clock.set(n0.Add(time.Minute))
+	if started := o.n.dispatch(context.Background()); started != 2 {
+		t.Fatalf("started %d", started)
+	}
+	<-o.svc.arrived
+	o.svc.release <- struct{}{}
+	o.n.wg.Wait()
+	paths := map[string]int{}
+	for _, p := range o.svc.taken() {
+		paths[p.path]++
+	}
+	if paths["/push/other"] != 1 {
+		t.Fatalf("the other device waited: %v", paths)
+	}
+}

@@ -438,3 +438,43 @@ func TestAClaimedDeliveryIsPendingAgainAfterARestart(t *testing.T) {
 		t.Fatal("pending again")
 	}
 }
+
+// A batch takes each device's (and each person's webhook's) soonest delivery alone, leaves out those busy, and a
+// channel's batch holds only its own: a device with a long queue holds up no other.
+func TestABatchTakesOneDeliveryPerDevice(t *testing.T) {
+	tm := openTeam(t)
+	var rows []Delivery
+	for i := range 70 {
+		d := webhookRow(int64(i+1), LocalUser, "task.needs_you", t0)
+		d.Device = "d_slow"
+		rows = append(rows, d)
+	}
+	other := webhookRow(100, "u_b", "task.needs_you", t0.Add(time.Second))
+	other.Device = "d_other"
+	rows = append(rows, other, webhookRow(101, "u_b", "task.done", t0.Add(time.Second)), webhookRow(102, "u_b", "task.needs_you", t0.Add(2*time.Second)))
+	_, err := tm.Enqueue(rows)
+	must(t, err)
+	now := t0.Add(time.Minute)
+	keys := func(ds []Delivery) []string {
+		var out []string
+		for _, d := range ds {
+			out = append(out, d.Device+"/"+strconv.FormatInt(d.Seq, 10))
+		}
+		return out
+	}
+	if got, _ := tm.Batch(now, false, 64, nil); !reflect.DeepEqual(keys(got), []string{"d_slow/1", "d_other/100"}) {
+		t.Fatalf("devices: %v", keys(got))
+	}
+	if got, _ := tm.Batch(now, false, 64, []string{"d_slow"}); !reflect.DeepEqual(keys(got), []string{"d_other/100"}) {
+		t.Fatalf("with d_slow busy: %v", keys(got))
+	}
+	if got, _ := tm.Batch(now, false, 1, nil); !reflect.DeepEqual(keys(got), []string{"d_slow/1"}) {
+		t.Fatalf("one: %v", keys(got))
+	}
+	if got, _ := tm.Batch(now, true, 64, nil); !reflect.DeepEqual(keys(got), []string{"/101"}) {
+		t.Fatalf("webhooks: %v", keys(got))
+	}
+	if got, _ := tm.Batch(now, true, 64, []string{"hook:u_b"}); len(got) != 0 {
+		t.Fatalf("webhook busy: %v", keys(got))
+	}
+}
