@@ -39,6 +39,51 @@
       },
       "type": "object"
     },
+    "output.Edit": {
+      "properties": {
+        "add": {
+          "type": "integer"
+        },
+        "cut": {
+          "type": "boolean"
+        },
+        "del": {
+          "type": "integer"
+        },
+        "from": {
+          "type": "string"
+        },
+        "hunks": {
+          "type": "integer"
+        },
+        "lines": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "op": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "preview": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "path",
+        "op",
+        "add",
+        "del",
+        "hunks"
+      ],
+      "type": "object"
+    },
     "output.Event": {
       "properties": {
         "at": {
@@ -59,11 +104,14 @@
         "decision": {
           "type": "string"
         },
-        "diff": {
-          "type": "string"
-        },
         "dur_ms": {
           "type": "integer"
+        },
+        "edits": {
+          "items": {
+            "$ref": "#/$defs/output.Edit"
+          },
+          "type": "array"
         },
         "error": {
           "type": "boolean"

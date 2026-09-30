@@ -150,14 +150,16 @@ func claudeLine(l string, whole bool) ([]Event, bool) {
 			ID      string          `json:"id"`
 			Content json.RawMessage `json:"content"`
 		} `json:"message"`
-		Result     string       `json:"result"`
-		IsError    bool         `json:"is_error"`
-		Cost       float64      `json:"total_cost_usd"`
-		DurationMS int64        `json:"duration_ms"`
-		Usage      *claudeUsage `json:"usage"`
-		RequestID  string       `json:"request_id"`
-		UUID       string       `json:"uuid"`
-		IsReplay   bool         `json:"isReplay"`
+		Result     string          `json:"result"`
+		IsError    bool            `json:"is_error"`
+		Cost       float64         `json:"total_cost_usd"`
+		DurationMS int64           `json:"duration_ms"`
+		Usage      *claudeUsage    `json:"usage"`
+		RequestID  string          `json:"request_id"`
+		UUID       string          `json:"uuid"`
+		ToolResult json.RawMessage `json:"tool_use_result"`
+		Tend       Stat            `json:"tend"`
+		IsReplay   bool            `json:"isReplay"`
 		Request    struct {
 			Subtype     string          `json:"subtype"`
 			ToolName    string          `json:"tool_name"`
@@ -178,6 +180,16 @@ func claudeLine(l string, whole bool) ([]Event, bool) {
 			}
 			if m.IsReplay && evs[i].Kind == KindUser {
 				evs[i].Echo = m.UUID
+			}
+		}
+		if len(m.ToolResult) > 0 {
+			if es := editsOf(m.Tend.Edits, ClaudeEdits(m.ToolResult), whole); es != nil {
+				for i := range evs {
+					if evs[i].Kind == KindToolResult {
+						evs[i].Edits = es
+						break
+					}
+				}
 			}
 		}
 		return evs, true
@@ -271,6 +283,30 @@ func claudeResultText(raw json.RawMessage) string {
 	return strings.Join(texts, "\n")
 }
 
+// editsOf is an edit step's files: read from its line when whole and the line has its hunks, else the node's counts
+// (stat), else what the line gives, as a preview.
+func editsOf(stat, read []Edit, whole bool) []Edit {
+	switch {
+	case whole && counted(read):
+		return read
+	case len(stat) > 0:
+		return stat
+	case whole:
+		return read
+	}
+	return Brief(read)
+}
+
+// counted: some of edits say what changed.
+func counted(edits []Edit) bool {
+	for _, e := range edits {
+		if len(e.Lines) > 0 || len(e.Preview) > 0 || e.Add > 0 || e.Del > 0 || e.Op == "rename" {
+			return true
+		}
+	}
+	return false
+}
+
 // toolEvent is a call of the tool name with input, its family and title from the one table.
 func toolEvent(name string, input json.RawMessage) Event {
 	e := Event{Kind: KindTool, Tool: name, Input: input, Family: FamilyOf(name)}
@@ -301,14 +337,11 @@ type codexItem struct {
 	ExitCode2        *int              `json:"exit_code"`
 	DurationMS       int64             `json:"durationMs"`
 	Status           string            `json:"status"`
-	Changes          []struct {
-		Path string `json:"path"`
-		Diff string `json:"diff"`
-	} `json:"changes"`
-	Server    string          `json:"server"`
-	Tool      string          `json:"tool"`
-	Arguments json.RawMessage `json:"arguments"`
-	Result    *struct {
+	Changes          json.RawMessage   `json:"changes"`
+	Server           string            `json:"server"`
+	Tool             string            `json:"tool"`
+	Arguments        json.RawMessage   `json:"arguments"`
+	Result           *struct {
 		Content []struct {
 			Text *string `json:"text"`
 		} `json:"content"`
@@ -325,6 +358,7 @@ func codexNotice(l, method string, whole bool) ([]Event, bool) {
 	var m struct {
 		ID     json.RawMessage `json:"id"`
 		Params json.RawMessage `json:"params"`
+		Tend   Stat            `json:"tend"`
 	}
 	json.Unmarshal([]byte(l), &m)
 	var p struct {
@@ -358,7 +392,7 @@ func codexNotice(l, method string, whole bool) ([]Event, bool) {
 	json.Unmarshal(m.Params, &p)
 	switch {
 	case method == "item/completed" && p.Item != nil:
-		return codexItemEvents(*p.Item, whole)
+		return codexItemEvents(*p.Item, m.Tend.Edits, whole)
 	case method == "item/completed", method == "item/started", method == "item/updated", strings.HasSuffix(strings.ToLower(method), "delta"):
 		return nil, true
 	case strings.HasPrefix(method, "item/") && (strings.HasSuffix(method, "/requestApproval") || method == "item/tool/requestUserInput"):
@@ -473,15 +507,16 @@ func codexExec(l, typ string, whole bool) ([]Event, bool) {
 		return nil, true
 	case "item.completed":
 		if m.Item != nil {
-			return codexItemEvents(*m.Item, whole)
+			return codexItemEvents(*m.Item, nil, whole)
 		}
 		return nil, true
 	}
 	return nil, false
 }
 
-// codexItemEvents reads a finished item, in the app-server's camelCase or exec's snake_case.
-func codexItemEvents(it codexItem, whole bool) ([]Event, bool) {
+// codexItemEvents reads a finished item, in the app-server's camelCase or exec's snake_case; stat is what the node
+// counted of its files.
+func codexItemEvents(it codexItem, stat []Edit, whole bool) ([]Event, bool) {
 	switch it.Type {
 	case "userMessage":
 		var texts []string
@@ -521,18 +556,15 @@ func codexItemEvents(it codexItem, whole bool) ([]Event, bool) {
 		return []Event{e}, true
 	case "fileChange", "file_change":
 		e := Event{Kind: KindEdit, Tool: it.Type, Call: it.ID, Family: FamilyOf(it.Type), Error: it.Status == "failed" || it.Status == "declined"}
-		var diffs []string
-		for _, c := range it.Changes {
+		read := CodexEdits(it.Changes)
+		for _, c := range read {
 			e.Files = append(e.Files, c.Path)
-			if c.Diff != "" {
-				diffs = append(diffs, c.Diff)
-			}
 		}
-		e.Diff = strings.Join(diffs, "\n")
+		e.Edits = editsOf(stat, read, whole)
 		if len(e.Files) > 0 {
 			e.Title, e.More = e.Files[0], len(e.Files)-1
-			if e.Diff != "" {
-				e.Title += " " + counts(diffCounts(e.Diff))
+			if counted(e.Edits) {
+				e.Title, e.More = editTitle(e.Edits)
 			}
 		}
 		return []Event{e}, true

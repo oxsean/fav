@@ -271,7 +271,10 @@ func shown(e output.Event) string {
 	if title == "" {
 		title = e.Tool
 	}
-	parts := []string{e.Text, title, e.Output, e.Diff}
+	parts := []string{e.Text, title, e.Output}
+	for _, ed := range e.Edits {
+		parts = append(parts, ed.Preview...)
+	}
 	var in struct {
 		Command   any `json:"command"`
 		Questions []struct {

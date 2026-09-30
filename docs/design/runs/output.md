@@ -29,9 +29,9 @@
 | `say` | claude 的 `text` 块；codex 的 `agentMessage` / `agent_message`；不是 JSON 的行 | `text` |
 | `think` | claude 的 `thinking` 块；codex 的 `reasoning`（app-server 取 `summary`）。文字为空的不出事件 | `text` |
 | `tool` | claude 的 `tool_use`；提问和审批（见下）；codex 的 `webSearch`、`turn/plan/updated`、exec 的 `web_search` / `todo_list` | `tool` `call` `family` `title` `more` `input`；提问和审批另带 `request` |
-| `tool_result` | claude 的 `tool_result` 块 | `ref` `output` `lines` `bytes` `error`（`is_error`） `truncated` |
+| `tool_result` | claude 的 `tool_result` 块 | `ref` `output` `lines` `bytes` `error`（`is_error`） `truncated`；改文件的结果另带 `edits` |
 | `cmd` | codex 的 `commandExecution` / `command_execution`，带输出 | `tool` `call` `family` `title` `more` `input`（`{"command"}`） `output` `exit` `dur_ms` `lines` `bytes` `error` `truncated` |
-| `edit` | codex 的 `fileChange` / `file_change` | `files` `diff` `title` `more` `error` |
+| `edit` | codex 的 `fileChange` / `file_change` | `files` `edits` `title` `more` `error` |
 | `mcp` | codex 的 `mcpToolCall` / `mcp_tool_call` | `server` `tool` `input` `output` `error` |
 | `sys` | claude 的 `system`（`name` 是 subtype，另带 `model`）；codex 的 `thread/started` `turn/started` `thread.started` `turn.started` `deprecationNotice`；`warning` 和会重试的 `error`（`level: "warning"`）；用量 | `name` `level` `text` `usage` |
 | `result` | claude 的 `result`；codex 的 `turn/completed`、`turn.completed`、`turn.failed` | `text` `error` `usage` `cost` `dur_ms` |
@@ -68,7 +68,7 @@
 | shell | 命令的第一行；`sh` / `bash` / `zsh` 的 `-c` / `-lc` 包着的，取里面的命令 | 其余的行数 |
 | read | 路径，有范围时加 `:起-止` | — |
 | search | `模式 · 路径`（或 glob） | — |
-| edit | 路径和 `+加 −减`（claude 按新旧文字的行数算，codex 按 diff 算） | 其余的文件数 |
+| edit | 路径和 `+加 −减`（claude 按新旧文字的行数算，codex 取 `edits` 的合计） | 其余的文件数 |
 | web | 域名加路径；搜索是搜的词 | — |
 | agent | 子 agent 的描述 | — |
 | plan | 完成的步数 / 总步数 | — |
@@ -77,6 +77,12 @@
 | other | 参数里第一个字符串值 | — |
 
 节点在写日志前把整份文件的副本移出了行（[node.md](node.md)「瘦身」）：原处是 `output.Ref`，`{"$blob":"<sha256>","bytes":n,"lines":k}` 或 `{"$omit":"<字段>","bytes":n,"lines":k,"cap"?:true}`。解析时字符串字段读作 `output.Text`（字符串或引用），edit 的 `+加 −减` 用引用里的 `lines`，所以标题和瘦身前一样。
+
+**改动**（`edits`，`output.Edit`）：一步改了的每个文件 `{path, op, from?, add, del, hunks, preview?, cut?, lines?}`，`op` 是 `add` `modify` `delete` `rename`（`from` 是原路径）。节点在瘦身之前算好，写在同一行的 `tend` 字段里（`{"edits": [...]}`，见 [node.md](node.md)「瘦身」），所以处数和计数不受瘦身和截断影响；没有这个字段的行（旧日志）从行里现算。
+- claude：`tool_use_result` 带 `filePath` 的才算。`structuredPatch` 每一项是一处，行首的 `+` `-` 计数，`@@ -a,b +c,d @@` 按它的四个数写；`type: create` 是新文件，内容整份算一处新增。
+- codex：`changes` 每项一个文件；`update` 的 `diff` 是统一格式，按 `@@` 数处；`add` / `delete` 的 `diff` 是文件内容本身，整份算一处；`kind.move_path` 是改名。
+- `preview` 是第一处：`@@` 行加上它的行，最多 `PreviewLines`（40）行，一步里所有文件合起来最多 `PreviewBytes`（8 KiB）；放不下的截掉，标 `cut`，超出预算的文件只剩计数。流里的事件不带全部的处。
+- `Whole`（`run.output.item`）从行里读出每一处放进 `lines`；行里的处被移进 blob 或留在 git 里、读不出来时，退回 `tend` 的计数。
 
 **输出**（`tool_result`、`cmd`、`mcp` 的 `output`）：不超过 80 行、32 KiB 时原样；否则留头 40 行和尾 40 行，每头最多 16 KiB，中间放一行 `…`。`lines` 和 `bytes` 是原来的总行数和字节数，`truncated.output` 是略掉的字节数。
 

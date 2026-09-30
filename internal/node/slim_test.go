@@ -344,3 +344,44 @@ func TestTouchCodex(t *testing.T) {
 		t.Fatalf("%q", got)
 	}
 }
+
+// An edit's counts and first hunk are written on its line before slimming takes the hunks away, so the timeline has
+// them however big the patch: claude's result, codex's finished fileChange.
+func TestSlimCountsEditsOnTheLine(t *testing.T) {
+	sl := newSlimmer(t.TempDir(), true)
+	var hunk []string
+	for i := 0; i < 3000; i++ {
+		hunk = append(hunk, "+ a line added to the file that makes the patch long")
+	}
+	patch, _ := json.Marshal([]map[string]any{{"oldStart": 1, "oldLines": 0, "newStart": 1, "newLines": len(hunk), "lines": hunk},
+		{"oldStart": 5000, "oldLines": 1, "newStart": 8000, "newLines": 0, "lines": []string{"-gone"}}})
+	out, _, _ := sl.line(editResult(big("x", 200), string(patch)))
+	refAt(t, out, "tool_use_result", "structuredPatch")
+	var st output.Stat
+	if err := json.Unmarshal(field(t, out, "tend"), &st); err != nil || len(st.Edits) != 1 {
+		t.Fatalf("tend: %s", field(t, out, "tend"))
+	}
+	e := st.Edits[0]
+	if e.Path != "/w/a.txt" || e.Op != "modify" || e.Add != 3000 || e.Del != 1 || e.Hunks != 2 || len(e.Preview) != output.PreviewLines || !e.Cut || len(e.Lines) != 0 {
+		t.Fatalf("claude edit %+v", e)
+	}
+	evs, _, _ := output.Parse("f", 0, string(out), output.State{})
+	if len(evs) != 1 || len(evs[0].Edits) != 1 || evs[0].Edits[0].Add != 3000 {
+		t.Fatalf("parsed %+v", evs)
+	}
+
+	diff := "@@ -1,2 +1,2 @@\n-" + strings.Repeat("o", 70<<10) + "\n+n\n"
+	line := `{"method":"item/completed","params":{"item":{"type":"fileChange","id":"f1","changes":[{"path":"/w/a.go","kind":{"type":"update"},"diff":` + jsonStr(diff) + `}],"status":"completed"}}}` + "\n"
+	out, _, _ = sl.line([]byte(line))
+	refAt(t, out, "params", "item", "changes", "0", "diff")
+	st = output.Stat{}
+	json.Unmarshal(field(t, out, "tend"), &st)
+	if len(st.Edits) != 1 || st.Edits[0].Add != 1 || st.Edits[0].Del != 1 || st.Edits[0].Hunks != 1 || len(st.Edits[0].Preview) != 2 {
+		t.Fatalf("codex edit %s", field(t, out, "tend"))
+	}
+	// started, the item has not changed anything yet
+	started := strings.Replace(line, "item/completed", "item/started", 1)
+	if out, _, _ = sl.line([]byte(started)); bytes.Contains(out, []byte(`"tend"`)) {
+		t.Fatal("item/started is not counted")
+	}
+}

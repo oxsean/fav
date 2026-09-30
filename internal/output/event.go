@@ -67,7 +67,7 @@ type Event struct {
 	More    int             `json:"more,omitempty"`
 	Input   json.RawMessage `json:"input,omitempty"`
 	Files   []string        `json:"files,omitempty"`
-	Diff    string          `json:"diff,omitempty"`
+	Edits   []Edit          `json:"edits,omitempty"` // an edit step's files; claude's are on its tool_result
 
 	Ref       string         `json:"ref,omitempty"`
 	Output    string         `json:"output,omitempty"`

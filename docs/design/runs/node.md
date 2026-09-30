@@ -87,6 +87,7 @@ claude 的工具结果里带着整份文件，codex 反复推一轮的全部 dif
 - 除了 git 里的 `originalFile`，短于 4 KiB 的字符串（`slimMin`）留在行里。
 - 原处换成 `{"$blob":"<sha256>","bytes":n,"lines":k}`；去掉的换成 `{"$omit":"<字段>","bytes":n,"lines":k}`（`output.Ref`）。blob 先用 `fileio.WriteAtomic` 写完整（临时文件再改名），才写引用它的那一行；写不成就原样留在行里。
 - codex：`turn/diff/updated` 不进日志，每一轮只记最后一份，`turn/completed` 时写 `diffs/turn-<id>.patch` 并记 `diff` 标记；`item/fileChange/patchUpdated` 不进日志。
+- 改动的统计先于瘦身：claude 带 `filePath` 的工具结果、codex 的 `item/completed` 里的 `fileChange`，按 `output.ClaudeEdits` / `CodexEdits` 数出每个文件的 `+加 −减`、处数和第一处的预览（`output.Brief`），写进同一行的 `tend` 字段 `{"edits": [...]}`（[output.md](output.md)「改动」）。
 - 超过 32 MiB、按块写的行不瘦身。
 - 上限：
   - 每个运行 256 MiB（`maxRunBlobs`），从 `blobs/` 已有的大小算起；超了新的字段不再存，换成 `{"$omit":"<字段>","bytes":n,"lines":k,"cap":true}`，只剩统计。

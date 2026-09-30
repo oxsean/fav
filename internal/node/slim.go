@@ -98,7 +98,8 @@ func containsAny(b []byte, ps [][]byte) bool {
 // claude slims a claude stream-json line: what a tool call writes, and what its result copies of the files.
 func (sl *slimmer) claude(m map[string]json.RawMessage) bool {
 	changed := false
-	if _, ok := m["tool_use_result"]; ok {
+	if res, ok := m["tool_use_result"]; ok {
+		changed = counted(m, output.ClaudeEdits(res))
 		changed = edit(m, "tool_use_result", func(res map[string]json.RawMessage) bool {
 			c := false
 			if sl.git {
@@ -117,7 +118,7 @@ func (sl *slimmer) claude(m map[string]json.RawMessage) bool {
 				}
 			}
 			return edit(res, "file", func(f map[string]json.RawMessage) bool { return sl.slim(f, "content", slimMin) }) || c
-		})
+		}) || changed
 	}
 	if _, ok := m["message"]; ok {
 		changed = edit(m, "message", func(msg map[string]json.RawMessage) bool {
@@ -178,6 +179,18 @@ func (sl *slimmer) codex(method string, m map[string]json.RawMessage) (drop, cha
 		}
 		return false, false, &Mark{Event: markDiff, ID: p.Turn.ID, Files: files, Add: add, Del: del}
 	case "item/started", "item/completed":
+		if method == "item/completed" {
+			var it struct {
+				Item struct {
+					Type    string          `json:"type"`
+					Changes json.RawMessage `json:"changes"`
+				} `json:"item"`
+			}
+			json.Unmarshal(m["params"], &it)
+			if it.Item.Type == "fileChange" {
+				changed = counted(m, output.CodexEdits(it.Item.Changes))
+			}
+		}
 		changed = edit(m, "params", func(pm map[string]json.RawMessage) bool {
 			return edit(pm, "item", func(it map[string]json.RawMessage) bool {
 				if str(it["type"]) != "fileChange" {
@@ -185,9 +198,18 @@ func (sl *slimmer) codex(method string, m map[string]json.RawMessage) (drop, cha
 				}
 				return eachOf(it, "changes", func(ch map[string]json.RawMessage) bool { return sl.slim(ch, "diff", slimPatch) })
 			})
-		})
+		}) || changed
 	}
 	return false, changed, nil
+}
+
+// counted writes what edits changed on the line (its "tend" field), before slimming takes their hunks out of it.
+func counted(m map[string]json.RawMessage, edits []output.Edit) bool {
+	if len(edits) == 0 {
+		return false
+	}
+	m["tend"] = encode(output.Stat{Edits: output.Brief(edits)})
+	return true
 }
 
 var safeName = regexp.MustCompile(`^[A-Za-z0-9_-]{1,100}$`)

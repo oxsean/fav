@@ -225,19 +225,6 @@ func ownReport(tool string, input json.RawMessage) bool {
 
 func counts(add, del int) string { return "+" + strconv.Itoa(add) + " −" + strconv.Itoa(del) }
 
-func diffCounts(diff string) (add, del int) {
-	for l := range strings.Lines(diff) {
-		switch {
-		case strings.HasPrefix(l, "+++"), strings.HasPrefix(l, "---"):
-		case strings.HasPrefix(l, "+"):
-			add++
-		case strings.HasPrefix(l, "-"):
-			del++
-		}
-	}
-	return add, del
-}
-
 func oneLine(s string) string {
 	first, _, _ := strings.Cut(strings.TrimSpace(s), "\n")
 	return clip(strings.TrimRight(first, "\r"))
