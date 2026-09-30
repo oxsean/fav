@@ -103,7 +103,7 @@ func TestSigningInWithAProviderNeedsAnAdmission(t *testing.T) {
 	resp, _ := c.Get(r.url + "/session")
 	json.NewDecoder(resp.Body).Decode(&me)
 	resp.Body.Close()
-	if me.Name != "Ann" || me.Role != store.RoleMember || !strings.HasPrefix(me.ID, "u_") {
+	if me.Name != "Ann" || me.Role != store.RoleMember || !strings.HasPrefix(me.ID, "u_") || me.Joined.IsZero() {
 		t.Fatalf("%+v", me)
 	}
 

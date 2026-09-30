@@ -154,12 +154,13 @@ func (s *Server) logout(w http.ResponseWriter, r *http.Request) {
 
 // Me is who a session belongs to.
 type Me struct {
-	ID       string `json:"id"`
-	Name     string `json:"name"`
-	Email    string `json:"email,omitempty"`
-	Username string `json:"username,omitempty"`
-	Role     string `json:"role"`
-	Session  string `json:"session"` // this credential's id
+	ID       string    `json:"id"`
+	Name     string    `json:"name"`
+	Email    string    `json:"email,omitempty"`
+	Username string    `json:"username,omitempty"`
+	Role     string    `json:"role"`
+	Session  string    `json:"session"`         // this credential's id
+	Joined   time.Time `json:"joined,omitzero"` // when they were let in; the server host has none
 }
 
 func (s *Server) session(w http.ResponseWriter, r *http.Request) {
@@ -168,7 +169,7 @@ func (s *Server) session(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
 		return
 	}
-	writeJSON(w, http.StatusOK, Me{ID: u.ID, Name: displayName(u), Email: u.Email, Username: u.Username, Role: u.Role, Session: c.ID})
+	writeJSON(w, http.StatusOK, Me{ID: u.ID, Name: displayName(u), Email: u.Email, Username: u.Username, Role: u.Role, Session: c.ID, Joined: u.Created})
 }
 
 func displayName(u store.User) string {

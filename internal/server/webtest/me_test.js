@@ -25,7 +25,7 @@ import {NOW, rig} from './rig.js';
 import {test, eq, ok, run, until} from './check.js';
 
 const api = JSON.parse(readFileSync(new URL('./api.json', import.meta.url), 'utf8'));
-const bo = {id: 'u_b', name: 'Bo Lin', email: 'bo@example.com', username: 'bo', role: 'member', session: 'w1'};
+const bo = {id: 'u_b', name: 'Bo Lin', email: 'bo@example.com', username: 'bo', role: 'member', session: 'w1', joined: '2026-08-03T09:00:00Z'};
 
 function memory(init = {}) {
   const m = new Map(Object.entries(init));
@@ -171,7 +171,7 @@ test('the page draws in both forms and both languages, styled and worded', async
       eq(a.http.calls, [['GET /api/push/devices']], `${lang}: a phone reads only the devices`);
     } else {
       for (const k of ['me.look', 'me.notices', 'me.logins', 'me.tokens', 'me.sessions']) ok(text.includes(words.t(k)), `${lang}: ${k}`);
-      ok(text.includes('bo@example.com · ' + words.t('role.member')), `${lang}: who`);
+      ok(text.includes('bo@example.com · ' + words.t('role.member') + ' · ' + words.f('me.joined', '8-03')), `${lang}: who, and since when`);
       ok(text.includes(words.f('me.viaToken', 'login:tend on mba')), `${lang}: a session a token signed in`);
       ok(text.includes(words.f('me.viaDevice', 'Android')), `${lang}: a session another device allowed`);
       eq(rowOf(a.el, words.t('me.thisBrowser')).find('button').length, 0, `${lang}: this browser signs out at the top`);

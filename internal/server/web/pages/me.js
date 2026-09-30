@@ -87,6 +87,7 @@ register('me', {
   'me.ended': ['会话已退出', 'The session is signed out'],
   'me.endOthersTitle': ['退出其他 %d 个会话？', 'Sign out the %d other sessions?'], 'me.endOthersNote': ['只留下这个浏览器，其他浏览器的推送一起停。', 'Only this browser stays signed in; the others\' pushes stop too.'],
   'me.endedN': ['已退出 %d 个会话', '%d sessions signed out'],
+  'me.joined': ['加入于 %s', 'joined %s'],
   'me.team': ['团队', 'Team'], 'me.teamNote': ['成员和项目，在手机上只看', 'People and projects; a phone only shows them'],
   'me.agents': ['Agent', 'Agents'], 'me.agentsNote': ['定义和能跑的机器，在手机上只看', 'Definitions and where they run; a phone only shows them'],
   'me.install': ['装到主屏幕', 'The home screen'],
@@ -440,7 +441,7 @@ export function Me({session, http, prefs, toasts, router, notices, tab, platform
   }, [phone]);
 
   const role = session?.role ? t('role.' + session.role) : '';
-  const sub = [session?.email || session?.username, role].filter(Boolean).join(' · ');
+  const sub = [session?.email || session?.username, role, session?.joined && f('me.joined', day(session.joined))].filter(Boolean).join(' · ');
 
   if (phone) {
     return html`<div class="me me-phone">
