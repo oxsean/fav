@@ -122,6 +122,9 @@ type Options struct {
 	// Notice receives each task that came to need someone or got done (mode 2 delivers them); it runs under the
 	// coordinator's lock and must not block.
 	Notice func(Notice)
+	// Seen keeps when a machine was last connected, for the next coordinator's Expect: the time a connection to it
+	// ended, zero once it is connected again. It runs under the coordinator's lock.
+	Seen func(machine string, at time.Time)
 	// OpenLog opens the event log in dir, folding every envelope in order; nil is the JSONL journal.
 	OpenLog func(dir string, fold func(journal.Envelope) error) (EventLog, error)
 }
@@ -226,7 +229,11 @@ func (c *Coord) ID() string { return c.id }
 // Close ends every connection and gives up the lock.
 func (c *Coord) Close() {
 	c.mu.Lock()
+	now := time.Now()
 	for _, m := range c.ms {
+		if m.conn != nil && c.opt.Seen != nil {
+			c.opt.Seen(m.name, now) // ⚠️ m.conn stays: a pass that finds it gone dials again while Close waits on localCalls
+		}
 		if m.conn != nil {
 			m.conn.Close()
 		}

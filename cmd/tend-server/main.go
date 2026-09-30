@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"sync"
 	"syscall"
 	"text/tabwriter"
 	"time"
@@ -100,8 +101,17 @@ func cmdServe(args []string) error {
 	}
 	cfg := tend.LoadConfig()
 	var dir *server.Directory
+	var team *store.Team
 	notifier := server.NewNotifier()
 	c, err := coord.Open(coord.Options{Home: home, Version: version, Build: server.Build(), Config: cfg, Remote: true, OpenLog: openLog, Notice: notifier.Send,
+		Seen: func(m string, at time.Time) {
+			if team == nil {
+				return
+			}
+			if err := team.MachineSeen(m, at); err != nil {
+				fmt.Fprintln(os.Stderr, "tend-server:", err)
+			}
+		},
 		MachineOwner: func(m string) string {
 			if dir == nil {
 				return ""
@@ -120,12 +130,13 @@ func cmdServe(args []string) error {
 	if err != nil {
 		return err
 	}
-	defer c.Close()
-	team, err := store.OpenTeam(dbPath(home))
-	if err != nil {
+	closeCoord := sync.OnceFunc(c.Close)
+	defer closeCoord()
+	if team, err = store.OpenTeam(dbPath(home)); err != nil {
 		return err
 	}
 	defer team.Close()
+	defer closeCoord() // before the team: closing tells Seen of the machines still connected
 	if n, err := server.ImportTokens(home, team); err != nil {
 		return err
 	} else if n > 0 {
@@ -134,8 +145,12 @@ func cmdServe(args []string) error {
 	if dir, err = server.NewDirectory(team); err != nil {
 		return err
 	}
+	seen, err := team.MachinesSeen()
+	if err != nil {
+		return err
+	}
 	for _, name := range dir.NodeNames() {
-		c.Expect(name)
+		c.Expect(name, seen[name])
 	}
 	var sc tend.ServerConfig
 	if cfg.Server != nil {

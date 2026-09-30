@@ -370,7 +370,7 @@ func (s *Server) addMachine(w http.ResponseWriter, r *http.Request, c caller) {
 		return
 	}
 	s.opt.Dir.Reload()
-	s.opt.Coord.Expect(p.Name)
+	s.opt.Coord.Expect(p.Name, time.Time{})
 	s.audit(r, c.user.ID, "machine", cr.ID+" "+p.Name)
 	writeJSON(w, http.StatusOK, map[string]string{"id": cr.ID, "token": secret,
 		"command": "tend node install-service --connect " + s.base(r) + " --token-file ~/.config/tend/node-token"})

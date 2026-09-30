@@ -216,6 +216,7 @@ func TestUpgradingToTheSecretsTableKeepsTheTeam(t *testing.T) {
 		t.Fatal(err)
 	}
 	tm.Close()
+	before0014(t, path)
 	before0013(t, path)
 	before0012(t, path)
 	before0011(t, path)
@@ -255,6 +256,7 @@ func TestACredentialSaysWhereItIsUsedFrom(t *testing.T) {
 	_, old, _ := tm.NewCredential(KindToken, "cli", LocalUser, 0)
 	must(t, tm.Touch(old.ID, "100.64.0.2"))
 	tm.Close()
+	before0014(t, path)
 	before0013(t, path)
 	before0012(t, path)
 	setVersion(t, path, 11)
@@ -286,6 +288,11 @@ func TestACredentialSaysWhereItIsUsedFrom(t *testing.T) {
 	}
 }
 
+// before0014 takes the machines back to before their last connection was kept.
+func before0014(t *testing.T, path string) {
+	exec(t, path, `DROP TABLE machine_seen`)
+}
+
 // before0013 takes the sign-in accounts back to before they said when they last signed in.
 func before0013(t *testing.T, path string) {
 	exec(t, path, `ALTER TABLE identities DROP COLUMN last_login`)
@@ -304,6 +311,7 @@ func TestASignInAccountSaysWhenItSignedInAndIsUnlinkedButNotTheLast(t *testing.T
 	ann, err := tm.Admit(gitea("1", "ann@corp.example", true), "")
 	must(t, err)
 	tm.Close()
+	before0014(t, path)
 	before0013(t, path)
 	setVersion(t, path, 12)
 	if tm, err = OpenTeam(path); err != nil {
@@ -337,5 +345,29 @@ func TestASignInAccountSaysWhenItSignedInAndIsUnlinkedButNotTheLast(t *testing.T
 	}
 	if err := tm.Unlink(ann.ID, gh); !errors.Is(err, ErrLastLogin) {
 		t.Fatalf("now the last: %v", err)
+	}
+}
+
+// A machine's last connection is kept until it connects again (a zero time forgets it) or a machine is added by its name.
+func TestAMachinesLastConnectionIsKept(t *testing.T) {
+	tm := openTeam(t)
+	at := time.Date(2026, 9, 30, 11, 2, 0, 0, time.Local)
+	must(t, tm.MachineSeen("n1", at))
+	must(t, tm.MachineSeen("n2", at.Add(time.Minute)))
+	must(t, tm.MachineSeen("n2", at.Add(2*time.Minute)))
+	seen, err := tm.MachinesSeen()
+	must(t, err)
+	if len(seen) != 2 || !seen["n1"].Equal(at) || !seen["n2"].Equal(at.Add(2*time.Minute)) {
+		t.Fatalf("%v", seen)
+	}
+	must(t, tm.MachineSeen("n1", time.Time{}))
+	if seen, _ = tm.MachinesSeen(); len(seen) != 1 || !seen["n1"].IsZero() {
+		t.Fatalf("connected again, n1 is forgotten: %v", seen)
+	}
+	if _, _, err := tm.NewCredential(KindNode, "n2", LocalUser, 0); err != nil {
+		t.Fatal(err)
+	}
+	if seen, _ = tm.MachinesSeen(); len(seen) != 0 {
+		t.Fatalf("a machine added by that name again starts unknown: %v", seen)
 	}
 }

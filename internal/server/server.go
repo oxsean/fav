@@ -114,7 +114,7 @@ func (s *Server) sweep() {
 		return
 	}
 	for _, name := range s.opt.Dir.NodeNames() {
-		s.opt.Coord.Expect(name)
+		s.opt.Coord.Expect(name, time.Time{})
 	}
 	s.opt.Coord.Reaffirm() // who owns a machine, who is disabled
 	s.dropSignedOut()

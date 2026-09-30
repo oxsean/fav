@@ -83,7 +83,7 @@ type Machine struct {
 	Error     string                 `json:"error,omitempty"`
 	Detail    string                 `json:"detail,omitempty"`
 	RetryAt   *time.Time             `json:"retry_at,omitzero"`
-	LastSeen  *time.Time             `json:"last_seen,omitzero"` // offline: when this coordinator last had it connected; absent when not since it started
+	LastSeen  *time.Time             `json:"last_seen,omitzero"` // offline: when it was last connected, as this coordinator or the one before it knew
 	Slots     int                    `json:"slots"`
 	Active    int                    `json:"active"` // starting, running or unknown runs
 	Queued    int                    `json:"queued"`

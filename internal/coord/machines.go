@@ -51,7 +51,7 @@ type machine struct {
 	dialing   bool
 	attached  bool // mode 2: the node dialed in; never dialed from here
 	busyAt    time.Time
-	seenAt    time.Time              // when this coordinator last let go of a connection to it; zero: not since it started
+	seenAt    time.Time              // when a connection to it last ended, here or before a restart (Expect); zero: not known
 	checks    map[string]agent.Check // node.agents, when it last answered
 	checkedAt time.Time              // when node.agents last probed afresh
 	probing   *probe                 // a fresh node.agents under way
@@ -131,6 +131,7 @@ func (c *Coord) dial(m *machine) {
 		c.failed(m, err)
 	} else {
 		m.conn, m.hello, m.err, m.backoff = conn, h, nil, 0
+		c.seen(m, time.Time{})
 	}
 	c.machinesMoved()
 	c.mu.Unlock()
@@ -189,6 +190,7 @@ func (c *Coord) Attach(name string, conn Conn, check func(remote.Hello) error) e
 		m.seenAt = time.Now()
 	}
 	m.attached, m.conn, m.hello, m.err = true, conn, h, nil
+	c.seen(m, time.Time{})
 	c.machinesMoved()
 	c.mu.Unlock()
 	c.poke()
@@ -197,13 +199,24 @@ func (c *Coord) Attach(name string, conn Conn, check func(remote.Hello) error) e
 	return nil
 }
 
-// Expect makes name a machine of mode 2 before its node first dials in: it is listed offline and can be shared.
-func (c *Coord) Expect(name string) {
+// Expect makes name a machine of mode 2 before its node first dials in: it is listed offline and can be shared. since
+// is when a coordinator before this one last had it connected (Options.Seen), zero when not known.
+func (c *Coord) Expect(name string, since time.Time) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.ms[name] == nil {
-		c.ms[name] = &machine{name: name, attached: true}
+		c.ms[name] = &machine{name: name, attached: true, seenAt: since}
 		c.machinesMoved()
+	}
+}
+
+// seen records when m was last connected, zero while it is; the caller holds mu.
+func (c *Coord) seen(m *machine, at time.Time) {
+	if m.conn == nil {
+		m.seenAt = at
+	}
+	if c.opt.Seen != nil {
+		c.opt.Seen(m.name, at)
 	}
 }
 
@@ -233,7 +246,8 @@ func (c *Coord) lost(m *machine, conn Conn, err error) {
 	defer c.mu.Unlock()
 	if m.conn == conn {
 		conn.Close()
-		m.conn, m.seenAt = nil, time.Now()
+		m.conn = nil
+		c.seen(m, time.Now())
 		c.failed(m, err)
 	}
 }
@@ -320,7 +334,8 @@ func (c *Coord) Pass(ctx context.Context) {
 			select {
 			case <-m.conn.Done():
 				err := error(m.conn.Err())
-				m.conn, m.seenAt = nil, time.Now()
+				m.conn = nil
+				c.seen(m, time.Now())
 				c.failed(m, err)
 			default:
 			}
@@ -334,7 +349,8 @@ func (c *Coord) Pass(ctx context.Context) {
 			}
 		case m.conn != nil && m.host != nil && now.Sub(m.busyAt) > idleClose:
 			m.conn.Close()
-			m.conn, m.seenAt = nil, now
+			m.conn = nil
+			c.seen(m, now)
 			c.machinesMoved()
 		}
 	}

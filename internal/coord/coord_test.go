@@ -77,6 +77,7 @@ type env struct {
 	users  map[string]User
 	usersM sync.Mutex
 	notice func(Notice)
+	seen   func(machine string, at time.Time)
 }
 
 func newEnv(t *testing.T, cfg tend.Config) *env {
@@ -137,7 +138,7 @@ func (e *env) start() {
 	n.Probe = e.probe
 	n.Limits.AllowHooks = e.cfg.Node.AllowHooks
 	opt := Options{Home: e.home, Version: "test", Config: e.cfg, Node: n, Sessions: remote.NewLocal("test"), Dial: e.dial, MachineOwner: e.owner,
-		Notice: e.notice}
+		Notice: e.notice, Seen: e.seen}
 	if e.users != nil {
 		opt.Users = func(id string) (User, bool) {
 			e.usersM.Lock()
@@ -472,8 +473,8 @@ func TestAnOfflineMachineSaysWhenItWasLastConnected(t *testing.T) {
 	f := newFar(t)
 	e := newEnv(t, tend.Config{})
 	e.start()
-	e.c.Expect("n1")
-	e.c.Expect("n2")
+	e.c.Expect("n1", time.Time{})
+	e.c.Expect("n2", time.Time{})
 	machine := func(name string) Machine {
 		var ms Machines
 		e.must(MMachineList, MachinesParams{}, &ms)
@@ -504,6 +505,79 @@ func TestAnOfflineMachineSaysWhenItWasLastConnected(t *testing.T) {
 			t.Fatal("still connected")
 		}
 		time.Sleep(50 * time.Millisecond)
+	}
+}
+
+// A machine's offline time outlives its coordinator: each drop and each connection is told to Options.Seen, with a
+// zero time for a connection; one still connected when the coordinator closes is told the close; Expect takes the time
+// kept back.
+func TestAMachinesOfflineTimeOutlivesItsCoordinator(t *testing.T) {
+	f := newFar(t)
+	e := newEnv(t, tend.Config{})
+	var mu sync.Mutex
+	kept := map[string]time.Time{}
+	e.seen = func(m string, at time.Time) {
+		mu.Lock()
+		defer mu.Unlock()
+		kept[m] = at
+	}
+	keptOf := func(m string) (time.Time, bool) {
+		mu.Lock()
+		defer mu.Unlock()
+		at, ok := kept[m]
+		return at, ok
+	}
+	e.start()
+	for _, name := range []string{"n1", "n2"} {
+		e.c.Expect(name, time.Time{})
+		conn, _ := f.dial(tend.Host{Name: name}, e.c.NodeOptions())
+		if err := e.c.Attach(name, conn, nil); err != nil {
+			t.Fatal(err)
+		}
+		if at, ok := keptOf(name); !ok || !at.IsZero() {
+			t.Fatalf("%s connected: %v %v", name, at, ok)
+		}
+	}
+	before := time.Now()
+	f.mu.Lock()
+	f.conns[0].Close()
+	f.mu.Unlock()
+	for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(50 * time.Millisecond) {
+		e.c.Pass(context.Background())
+		if at, _ := keptOf("n1"); !at.IsZero() {
+			if at.Before(before) || at.After(time.Now()) {
+				t.Fatalf("dropped: %v", at)
+			}
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the drop is not told")
+		}
+	}
+	dropped, _ := keptOf("n1")
+	closing := time.Now()
+	e.stop()
+	if at, _ := keptOf("n2"); at.Before(closing) || at.After(time.Now()) {
+		t.Fatalf("n2 was connected until the coordinator closed: %v", at)
+	}
+	if at, _ := keptOf("n1"); !at.Equal(dropped) {
+		t.Fatalf("n1 keeps its drop: %v, not %v", at, dropped)
+	}
+
+	e.start()
+	for _, name := range []string{"n1", "n2"} {
+		at, _ := keptOf(name)
+		e.c.Expect(name, at)
+	}
+	var ms Machines
+	e.must(MMachineList, MachinesParams{}, &ms)
+	for _, m := range ms.Machines {
+		if m.Name != "n1" && m.Name != "n2" {
+			continue
+		}
+		if at, _ := keptOf(m.Name); m.State != MachineOffline || m.LastSeen == nil || !m.LastSeen.Equal(at) {
+			t.Fatalf("after the restart %s says when it was last connected: %+v, kept %v", m.Name, m, at)
+		}
 	}
 }
 

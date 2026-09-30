@@ -555,6 +555,9 @@ func (t *Team) ImportCredential(c Credential, ttl time.Duration) (Credential, er
 	if err != nil && strings.Contains(err.Error(), "UNIQUE") {
 		return Credential{}, ErrExists
 	}
+	if err == nil && c.Kind == KindNode { // a machine new by this name: nothing is known of when it was connected
+		err = t.MachineSeen(c.Name, time.Time{})
+	}
 	return c, err
 }
 
@@ -696,6 +699,35 @@ func (t *Team) RetiredMachines() (map[string]string, error) {
 			return nil, err
 		}
 		out[name] = owner
+	}
+	return out, rows.Err()
+}
+
+// MachineSeen records when machine was last connected; a zero at forgets it (it is connected).
+func (t *Team) MachineSeen(machine string, at time.Time) error {
+	if at.IsZero() {
+		_, err := t.w.Exec(`DELETE FROM machine_seen WHERE name = ?`, machine)
+		return err
+	}
+	_, err := t.w.Exec(`INSERT INTO machine_seen (name, at) VALUES (?, ?) ON CONFLICT (name) DO UPDATE SET at = excluded.at`, machine, at.UnixNano())
+	return err
+}
+
+// MachinesSeen are the machines not connected since a time MachineSeen recorded, with that time.
+func (t *Team) MachinesSeen() (map[string]time.Time, error) {
+	rows, err := t.r.Query(`SELECT name, at FROM machine_seen`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]time.Time{}
+	for rows.Next() {
+		var name string
+		var at int64
+		if err := rows.Scan(&name, &at); err != nil {
+			return nil, err
+		}
+		out[name] = fromNanos(at)
 	}
 	return out, rows.Err()
 }
