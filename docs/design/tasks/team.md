@@ -60,6 +60,7 @@
   - 邀请可以列出和作废：`GET /api/invites`（管理员）列未用且未过期的，按 hash 的前 12 位称呼（不暴露 secret）；`DELETE /api/invites {id}` 作废，记审计 `invite.revoke`。管理页的成员行给出登录方式、所在项目、名下机器、最近活动（他凭据最近一次使用的时间）。
   - 会话、个人 token、节点 token 在同一张 `credentials` 表，`kind` 区分（`web | token | node`），只存 sha256。
   - 网页的 `/api/*`（用户、准入规则、邀请、token、机器、登录账号、审计）凡是改状态的请求，都要带 `X-Tend: 1` 头且 `Origin` 同源，别的站点既发不出这个头，也读不到结果。浏览器带了 `Sec-Fetch-Site` 时它还得是 `same-origin` 或 `none`：同一站点的别的子域（`same-site`）和跨站一样回 403 `csrf`；`POST /login` 同样检查。
+  - 每条路由要什么凭据（谁都行、个人凭据、管理员、节点）、防不防跨站、用哪一组限流、最多读多少请求体，登记在一张表里（`TestEveryRouteTakesWhatItsRuleSays`）：测试逐条去试，server 注册了表里没有的路由也算失败，所以新加的路由必须先写明这几样。
 - **机器身份**：节点 token 有主人，绑定一个稳定的 `machine_id`（`node.ID`）；token 只是可以轮换的凭据。
   - 成员在网页上「添加机器」：生成一个归本人所有的节点 token，只显示一次，并给出 `tend node install-service --connect …` 命令。
   - 模式二拒绝不报 node ID 的节点。节点 token 第一次连接时绑定 node ID，之后别的机器拿它连接会被拒；换机器用「换机」（`rebind`），下次连接的机器成为新主机。

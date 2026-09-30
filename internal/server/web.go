@@ -68,7 +68,7 @@ func SecureHeaders(w http.ResponseWriter) {
 	h.Set("Referrer-Policy", "no-referrer")
 }
 
-func (s *Server) webRoutes(mux *http.ServeMux) {
+func (s *Server) webRoutes(mux router) {
 	mux.HandleFunc("/login", s.limited(s.login))
 	mux.HandleFunc("/logout", s.logout)
 	mux.HandleFunc("/session", s.session)

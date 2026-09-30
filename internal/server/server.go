@@ -335,17 +335,26 @@ func subjectOf(params json.RawMessage) string {
 	return strings.Join(parts, " ")
 }
 
+// router is where the server's routes are registered: a ServeMux, or a test's list of them.
+type router interface {
+	HandleFunc(pattern string, h func(http.ResponseWriter, *http.Request))
+}
+
 // Handler is the server's HTTP handler.
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
+	s.routes(mux)
+	return mux
+}
+
+func (s *Server) routes(mux router) {
 	mux.HandleFunc("/node", s.handleNode)
 	mux.HandleFunc("/client", s.handleClient)
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) { w.Write([]byte("ok\n")) })
 	s.webRoutes(mux)
 	s.apiRoutes(mux)
 	s.trackerRoutes(mux)
-	mux.Handle("/", page())
-	return mux
+	mux.HandleFunc("/", page().ServeHTTP)
 }
 
 // Serve listens until ctx ends; credentials revoked meanwhile lose their connections within a few seconds.

@@ -38,7 +38,7 @@ type TrackerView struct {
 	Failing   int             `json:"failing"` // issues whose last read or write failed
 }
 
-func (s *Server) trackerRoutes(mux *http.ServeMux) {
+func (s *Server) trackerRoutes(mux router) {
 	mux.HandleFunc("GET /api/trackers", s.api(s.listTrackers))
 	mux.HandleFunc("POST /api/trackers", s.api(s.addTracker))
 	mux.HandleFunc("DELETE /api/trackers", s.api(s.removeTracker))

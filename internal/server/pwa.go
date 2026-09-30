@@ -25,7 +25,7 @@ const (
 	swBoot    = `const BOOT = {"build":"","files":[]};`
 )
 
-func (s *Server) pwaRoutes(mux *http.ServeMux) {
+func (s *Server) pwaRoutes(mux router) {
 	mux.HandleFunc("GET /{$}", indexPage)
 	mux.HandleFunc("GET /sw.js", serviceWorker)
 	mux.HandleFunc("GET /manifest.webmanifest", manifest)

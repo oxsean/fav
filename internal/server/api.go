@@ -67,7 +67,7 @@ func decode(w http.ResponseWriter, r *http.Request, v any) bool {
 	return true
 }
 
-func (s *Server) apiRoutes(mux *http.ServeMux) {
+func (s *Server) apiRoutes(mux router) {
 	mux.HandleFunc("GET /api/users", s.api(s.listUsers))
 	mux.HandleFunc("POST /api/users", s.api(s.adminOnly(s.setUser)))
 	mux.HandleFunc("GET /api/admits", s.api(s.adminOnly(s.listAdmits)))
