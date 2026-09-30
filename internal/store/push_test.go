@@ -183,6 +183,32 @@ func TestADeviceIsFoundAgainByItsEndpoint(t *testing.T) {
 	}
 }
 
+// A browser someone else signs in on takes nothing of its last owner's still to go: those rows are canceled, while the
+// same owner renewing keeps them.
+func TestADeviceTakenOverDropsWhatWasStillToGoToItsLastOwner(t *testing.T) {
+	tm := openTeam(t)
+	a, _ := tm.KeepDevice(PushDevice{User: LocalUser, Kind: KindWebPush, Target: []byte("s")}, "h1", t0)
+	mine := webhookRow(4, LocalUser, "task.needs_you", t0)
+	mine.Device = a.ID
+	hook := mine
+	hook.Device = ""
+	_, err := tm.Enqueue([]Delivery{mine, hook})
+	must(t, err)
+	tm.KeepDevice(PushDevice{User: LocalUser, Kind: KindWebPush, Target: []byte("s2")}, "h1", t0.Add(time.Minute))
+	if due, _ := tm.Due(t0, 10); len(due) != 2 {
+		t.Fatalf("renewed by its owner: %+v", due)
+	}
+	tm.KeepDevice(PushDevice{User: "u_b", Kind: KindWebPush, Target: []byte("s3")}, "h1", t0.Add(2*time.Minute))
+	due, _ := tm.Due(t0, 10)
+	if len(due) != 1 || due[0].Device != "" {
+		t.Fatalf("still to go to the browser someone else signed in on: %+v", due)
+	}
+	var status string
+	if err := tm.r.QueryRow(`SELECT status FROM deliveries WHERE device_id = ?`, a.ID).Scan(&status); err != nil || status != DeliveryCanceled {
+		t.Fatalf("%q %v", status, err)
+	}
+}
+
 // A device's notice settings start as the defaults, are its owner's alone to change or to remove the device by, and
 // stay through its renewals; a database from before them gives every device the defaults.
 func TestADevicesSettingsAreItsOwnersAndOutliveItsRenewals(t *testing.T) {

@@ -440,6 +440,44 @@ func TestAPushWaitsForThePageAndGoesNowhereOnceHandled(t *testing.T) {
 	}
 }
 
+// A browser someone else signs in on gets nothing its last owner was still to be pushed, even a row already taken when
+// it changed hands.
+func TestAPushGoesOnlyToItsOwnersDevice(t *testing.T) {
+	o := newOutbox(t)
+	must(t, o.team.AddAdmit(store.Admit{Kind: store.AdmitEmail, Value: "ann@corp.example", Role: store.RoleMember}))
+	ann, err := o.team.Admit(store.Identity{Provider: "gitea", Issuer: "https://git.example", Subject: "1", Email: "ann@corp.example", EmailVerified: true}, "")
+	must(t, err)
+	o.device(store.LocalUser, "/push/phone")
+	o.coord.wait(store.LocalUser, "t_1", question)
+	o.n.Send(needs(5, question))
+	dev := o.device(ann.ID, "/push/phone")
+	o.clock.set(n0.Add(time.Minute))
+	o.drain()
+	if got := o.svc.taken(); len(got) != 0 {
+		t.Fatalf("to the browser someone else signed in on: %+v", got)
+	}
+
+	o.n.Send(needs(6, question))
+	due, _ := o.team.Due(n0.Add(time.Hour), 10)
+	if len(due) != 0 {
+		t.Fatalf("queued for ann's device: %+v", due)
+	}
+	back := o.device(store.LocalUser, "/push/phone")
+	o.n.Send(needs(7, question))
+	due, _ = o.team.Due(n0.Add(time.Hour), 10)
+	if len(due) != 1 || due[0].User != store.LocalUser {
+		t.Fatalf("%+v", due)
+	}
+	dev.ID = back.ID
+	o.n.deliver(context.Background(), due[0], dev)
+	if got := o.svc.taken(); len(got) != 0 {
+		t.Fatalf("a row taken before the browser changed hands: %+v", got)
+	}
+	if due, _ := o.team.Due(n0.Add(time.Hour), 10); len(due) != 0 {
+		t.Fatalf("still to go: %+v", due)
+	}
+}
+
 // A slow push service holds up only its own device.
 func TestASlowPushServiceHoldsUpOnlyItsOwnDevice(t *testing.T) {
 	o := newOutbox(t)

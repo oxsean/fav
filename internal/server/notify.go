@@ -284,6 +284,10 @@ func (n *Notifier) dispatch(ctx context.Context) int {
 // deliver tries d once, if what it is about still is, and records how it went.
 func (n *Notifier) deliver(ctx context.Context, d store.Delivery, dev store.PushDevice) {
 	o := n.o
+	if d.Device != "" && dev.User != d.User {
+		o.Team.Settle(d.ID, store.DeliveryCanceled, "another owner", d.Attempts, time.Time{})
+		return
+	}
 	var x noticeRow
 	if err := json.Unmarshal(d.Notice, &x); err != nil {
 		o.Team.Settle(d.ID, store.DeliveryFailed, "bad notice", d.Attempts, time.Time{})

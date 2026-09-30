@@ -86,18 +86,26 @@ type Delivery struct {
 }
 
 // KeepDevice registers d, or renews the device already registered under hash (a browser's endpoint): it moves to
-// d.User with d's target and name, renewed at now.
+// d.User with d's target and name, renewed at now. What was still to go to someone else on it is canceled.
 func (t *Team) KeepDevice(d PushDevice, hash string, now time.Time) (PushDevice, error) {
-	_, err := t.w.Exec(`INSERT INTO push_devices (id, user_id, kind, target, target_hash, name, created_at, renewed_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-		ON CONFLICT (target_hash) DO UPDATE SET user_id = excluded.user_id, kind = excluded.kind, target = excluded.target,
-			name = excluded.name, renewed_at = excluded.renewed_at`,
-		newID("d_"), d.User, d.Kind, d.Target, hash, d.Name, now.UnixNano(), now.UnixNano())
-	if err != nil {
-		return PushDevice{}, err
-	}
 	var id string
-	if err := t.w.QueryRow(`SELECT id FROM push_devices WHERE target_hash = ?`, hash).Scan(&id); err != nil {
+	err := inTx(t.w, func(tx *sql.Tx) error {
+		_, err := tx.Exec(`INSERT INTO push_devices (id, user_id, kind, target, target_hash, name, created_at, renewed_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+			ON CONFLICT (target_hash) DO UPDATE SET user_id = excluded.user_id, kind = excluded.kind, target = excluded.target,
+				name = excluded.name, renewed_at = excluded.renewed_at`,
+			newID("d_"), d.User, d.Kind, d.Target, hash, d.Name, now.UnixNano(), now.UnixNano())
+		if err != nil {
+			return err
+		}
+		if err := tx.QueryRow(`SELECT id FROM push_devices WHERE target_hash = ?`, hash).Scan(&id); err != nil {
+			return err
+		}
+		_, err = tx.Exec(`UPDATE deliveries SET status = ?, result = ? WHERE device_id = ? AND user_id != ? AND status = ?`,
+			DeliveryCanceled, "another owner", id, d.User, DeliveryPending)
+		return err
+	})
+	if err != nil {
 		return PushDevice{}, err
 	}
 	kept, _, err := t.device(t.w, id)
