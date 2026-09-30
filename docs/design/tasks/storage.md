@@ -38,6 +38,7 @@
 | 团队实体 | `users`（含内置 `local`）、`identities`（`(provider, issuer, subject)` 唯一）、`admits`、`invites`、`credentials`（`web / token / node`，只存 sha256，节点名在未吊销的凭据里唯一）、`audit`：迁移 `0002_team.sql` |
 | 团队实体 | `deliveries`（通知投递去重，0003）；`trackers`、`tracker_issues`、`tracker_deliveries`（工单绑定、每个 issue 的回写状态、webhook 去重，0004） |
 | 加列 | `tracker_issues.parent`、`pr`（子 issue 和 PR 链接，0005）；`invites.project`、`access`（邀请带项目，0006）；`tracker_issues.synced`（任务级同步状态，0007） |
+| server 自己的密钥 | `secrets`（`name` 主键、`value`、`at`，0008）：值是 `seal.go` 封存过的，密钥是 `server.key` 或 `TEND_SERVER_KEY`，不在库里；先写的赢（`KeepSecret`）。现在只有 Web Push 的密钥对 `vapid` |
 | 团队实体（未实现） | `comments, inbox_reads`；agent 定义、项目、成员和分享是事件，不另建表 |
 
 - tasks 和 runs 不做 SQL 投影，状态在内存里，`state.get` 从内存出。等内存或分页真成了问题，再加存 JSON 的投影表，另加少量索引列（`id, project, status, machine, updated_seq`）；投影随时可以丢掉、从事件重建。

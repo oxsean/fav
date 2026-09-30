@@ -13,7 +13,7 @@ import (
 	"github.com/oxsean/fav/internal/fileio"
 )
 
-// KeyFile is the server's key for the secrets it keeps (tracker tokens), beside the database but never in a backup.
+// KeyFile is the server's key for the secrets it keeps (tracker tokens, the Web Push key), beside the database but never in a backup.
 // TEND_SERVER_KEY, when set, is used instead.
 const KeyFile = "server.key"
 

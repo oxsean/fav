@@ -183,7 +183,7 @@
   不记任何秘密，只记 id 和来源 IP（`login`、`login_refused`、`denied`、`token`、`machine`、`revoke`、`rebind`、`admit`、`invite`、`user`、`link`，以及 `machine.share`、`project.member`、`run.answer` 这类命令）。管理员在网页的管理页或 `tend-server admin audit` 查看。
 - 事件里只写 user id，不写邮箱和姓名。
 - 会话索引归机器主人。项目 run 产生的会话按项目权限可见；机器上其余的原生会话只有主人能看，不出现在别人的界面里（见「权限：两层，外加三种归属」第 6、7 条）。
-- token、OAuth 凭据、工单凭据只存在 server 上，只存哈希或加密后的值，从不进事件表。加密密钥来自 `TEND_SERVER_KEY` 或者一个 0600 的文件，不放在数据库里。
+- token、OAuth 凭据、工单凭据、Web Push 的私钥只存在 server 上，只存哈希或加密后的值，从不进事件表。加密密钥来自 `TEND_SERVER_KEY` 或者一个 0600 的文件，不放在数据库里。
 
 ## 成员离开
 

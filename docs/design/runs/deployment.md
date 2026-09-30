@@ -21,6 +21,7 @@
 - 角色限制方法：node token 只能被调用 `run.*` 和会话读取、只能推 `node.changed`；client token 只能调客户端方法。
 - 同一节点 token 重复连接：后连的赢，旧连接关掉。
 - 节点身份：节点第一次用到时生成 `<home>/node/id`（`n_` + 16 位十六进制），握手时放在 `hello.node_id`。节点 token 第一次被带 id 的节点用时绑定这个 id（凭据记 `node_id`、`host`）；不带 id 的节点一律拒绝；之后别的 id 拿它连 → `unauthorized "node identity"`，server 在 stderr 记一行。换机器用 `tend-server token rebind <名>` 解绑，下一个连上的节点重新绑定；`token list` 多一列 MACHINE。
+- server 自己的密钥：Web Push（VAPID）的 P-256 密钥对在第一次启动时生成，私钥用 `seal.go` 封存进库的 `secrets` 表（[tasks/storage.md](../tasks/storage.md)「表」），以后启动读出来用；`GET /api/push/key`（登录后）回 `{key}`，是 base64url 的未压缩公钥，浏览器订阅推送时要它。库里的密钥用当前的 `server.key` 解不开时照原样留着、不重新生成（订阅都绑在原来的公钥上），server 在 stderr 记一行，没有推送地照常运行，`/api/push/key` 回 503 `push_key`。
 - 吊销：连接记下它用的凭据 id；server 每 3 s 从数据库重读有效凭据和用户，凭据已吊销、过期或用户已停用的连接关掉。
 
 ### 节点

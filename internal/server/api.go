@@ -76,6 +76,7 @@ func (s *Server) apiRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/invites", s.api(s.adminOnly(s.listInvites)))
 	mux.HandleFunc("DELETE /api/invites", s.api(s.adminOnly(s.revokeInvite)))
 	mux.HandleFunc("GET /api/tokens", s.api(s.listTokens))
+	mux.HandleFunc("GET /api/push/key", s.api(s.pushKey))
 	mux.HandleFunc("POST /api/tokens", s.api(s.addToken))
 	mux.HandleFunc("DELETE /api/tokens", s.api(s.revokeToken))
 	mux.HandleFunc("GET /api/machines", s.api(s.listMachines))

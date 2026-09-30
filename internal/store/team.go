@@ -667,3 +667,13 @@ func (t *Team) RetiredMachines() (map[string]string, error) {
 	}
 	return out, rows.Err()
 }
+
+// KeepSecret stores value under name unless one is there already, and answers the one kept: the first writer wins.
+func (t *Team) KeepSecret(name string, value []byte) ([]byte, error) {
+	if _, err := t.w.Exec(`INSERT OR IGNORE INTO secrets (name, value, at) VALUES (?, ?, ?)`, name, value, time.Now().UnixNano()); err != nil {
+		return nil, err
+	}
+	var kept []byte
+	err := t.w.QueryRow(`SELECT value FROM secrets WHERE name = ?`, name).Scan(&kept)
+	return kept, err
+}

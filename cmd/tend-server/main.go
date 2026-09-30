@@ -150,11 +150,15 @@ func cmdServe(args []string) error {
 	if err != nil {
 		return err
 	}
+	push, err := server.LoadPushKey(team, seal)
+	if err != nil {
+		fmt.Fprint(os.Stderr, i18n.F("cli.server.no_push", err))
+	}
 	syncer := server.NewSyncer(team, c, seal, notifier.Send)
 	go syncer.Run(ctx)
 	fmt.Fprint(os.Stderr, i18n.F("cli.server.started", c.ID(), *listen))
 	return server.New(server.Options{Home: home, Coord: c, Dir: dir, Config: sc, Listen: *listen, TLSCert: *cert, TLSKey: *key,
-		Syncer: syncer}).Serve(ctx)
+		Syncer: syncer, Push: push}).Serve(ctx)
 }
 
 func openTeam() (*store.Team, error) { return store.OpenTeam(dbPath(tend.Home())) }

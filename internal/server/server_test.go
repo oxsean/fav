@@ -103,7 +103,15 @@ func newRig(t *testing.T, logins ...tend.Login) *rig {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	go r.c.Run(ctx)
-	srv := New(Options{Home: r.home, Coord: r.c, Dir: dir, Config: tend.ServerConfig{Logins: logins}})
+	seal, err := LoadSealer(r.home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	push, err := LoadPushKey(r.team, seal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := New(Options{Home: r.home, Coord: r.c, Dir: dir, Config: tend.ServerConfig{Logins: logins}, Push: push})
 	srv.sweep()
 	r.srv = srv
 	hs := httptest.NewServer(srv.Handler())

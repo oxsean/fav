@@ -189,3 +189,63 @@ func TestANoticeIsDeliveredOncePerUser(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// A secret the server keeps is written once: whoever comes second gets the first one back, now and after reopening.
+func TestASecretIsKeptOnceAndTheFirstStays(t *testing.T) {
+	path := filepath.Join(t.TempDir(), File)
+	tm, err := OpenTeam(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, err := tm.KeepSecret("push", []byte("first")); err != nil || string(got) != "first" {
+		t.Fatalf("%q %v", got, err)
+	}
+	if got, err := tm.KeepSecret("push", []byte("second")); err != nil || string(got) != "first" {
+		t.Fatalf("a second secret replaced the first: %q %v", got, err)
+	}
+	if got, _ := tm.KeepSecret("other", []byte("x")); string(got) != "x" {
+		t.Fatalf("another name: %q", got)
+	}
+	tm.Close()
+	if tm, err = OpenTeam(path); err != nil {
+		t.Fatal(err)
+	}
+	defer tm.Close()
+	if got, err := tm.KeepSecret("push", []byte("third")); err != nil || string(got) != "first" {
+		t.Fatalf("after reopening: %q %v", got, err)
+	}
+}
+
+// A database from before the secrets table gains it, keeps its people, and is copied aside first.
+func TestUpgradingToTheSecretsTableKeepsTheTeam(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, File)
+	tm, err := OpenTeam(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tm.Admit(gitea("1", "ann@corp.example", true), ""); !errors.Is(err, ErrNotAdmitted) {
+		t.Fatal(err)
+	}
+	tm.AddAdmit(Admit{Kind: AdmitEmail, Value: "ann@corp.example", Role: RoleMember})
+	ann, err := tm.Admit(gitea("1", "ann@corp.example", true), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tm.Close()
+	exec(t, path, "DROP TABLE secrets")
+	setVersion(t, path, 7)
+	if tm, err = OpenTeam(path); err != nil {
+		t.Fatal(err)
+	}
+	defer tm.Close()
+	if u, ok, err := tm.User(ann.ID); err != nil || !ok || u.Email != "ann@corp.example" {
+		t.Fatalf("ann after the upgrade: %+v %v %v", u, ok, err)
+	}
+	if got, err := tm.KeepSecret("push", []byte("k")); err != nil || string(got) != "k" {
+		t.Fatalf("%q %v", got, err)
+	}
+	if baks, _ := filepath.Glob(filepath.Join(dir, File+".v7-*.bak")); len(baks) != 1 {
+		t.Fatalf("no copy of the v7 database: %v", baks)
+	}
+}

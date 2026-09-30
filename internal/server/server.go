@@ -73,7 +73,8 @@ type Options struct {
 	Listen  string
 	TLSCert string
 	TLSKey  string
-	Syncer  *Syncer // nil: no tracker sync
+	Syncer  *Syncer  // nil: no tracker sync
+	Push    *PushKey // nil: no Web Push
 }
 
 // Server serves the coordinator over HTTP.
