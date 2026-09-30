@@ -499,4 +499,22 @@ test('allowing another device signs it in as you', async () => {
   eq([decided, d.one('h1').textContent], [[['K7QX-M2PA', true]], words.t('device.allowedSession')], 'allowed');
 });
 
-await run();
+await // ⚠️ a heuristic, as TestEnglishCountsAgree in internal/i18n: a word after %d ending in s is taken for a plural noun
+test('an English count reads right for 1: every plural after %d carries its {one|other}', () => {
+  ok(['out.files', 'ans.left', 'shell.counts', 'mach.summary'].every(k => words.has(k)), 'the page registered every module');
+  const notPlural = new Set(['is', 'was', 'has', 'its', 'this', 'us', 'plus', 'ms', 'as', 'less', 'does']);
+  const countVerbs = new Set(['need', 'have', 'are', 'were']);
+  const wrong = [];
+  for (const key of words.keys()) {
+    const en = words.both(key)[1].replace(/\{[^{}|]*\|[^{}|]*\}/g, 'N');
+    for (const m of en.matchAll(/%d(?!%)/g)) {
+      const rest = en.slice(m.index + 2).split(/[%,;:·()[\]/.!?\n—–…+×]/)[0];
+      const bad = rest.split(/\s+/).filter(Boolean).slice(0, 3).map(w => w.replace(/^["']|["']$/g, '').toLowerCase())
+        .find((w, i) => (i === 0 && countVerbs.has(w)) || (w.length > 2 && w.endsWith('s') && !w.endsWith('ss') && !notPlural.has(w)));
+      if (bad) { wrong.push(`${key}: ${bad}`); break; }
+    }
+  }
+  eq(wrong, [], 'plurals without a form for 1');
+});
+
+run();

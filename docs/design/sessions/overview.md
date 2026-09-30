@@ -101,7 +101,7 @@ skills/tend/SKILL.md      /tend Skill 源，install-skill 软链进两边
 
 第三方依赖：Charm v2（`charm.land/` 下的 bubbletea / bubbles / lipgloss，另有 x/ansi / x/term）、`go-runewidth`、`atotto/clipboard`、`golang.org/x/sys`；无 CGO，单文件跨平台分发。选 Charm v2 是因为 v1 已停止发版、主流 TUI（gh、crush、glow、gum）都用 v2、v2 在 Windows 上的输入和拖选更好，代价是去符号的二进制大约多 16%（约 1MB，主要是字素表、ultraviolet 渲染器和 displaywidth），接受且不为体积再裁剪（发布已带 `-trimpath -s -w`，没有可砍的依赖）。版本只写在 `mise.toml`：`[tools]` 的 go 人人共用，`test-host` 任务的 `tools` 给测试机固定 claude / codex / fzf。
 
-文案国际化：用户可见的字符串一律 `i18n.T("<语义 key>")`（`i18n.F` 带格式化参数，`i18n.E` 出 error）；key 小写点分、按界面区域分命名空间（`help.*`、`settings.*`、`footer.*`、`cli.*`、`flash.*`…），文案放 `internal/i18n/locales/en.json` 和 `zh.json`（embed 进二进制，扁平 key → 文案）。查当前语言，缺了退回英文，再缺原样显示 key。整句带 `%s`/`%d` 占位符，不在代码里拼片段。`coverage_test` 保证每个用到的 key 两个文件都有、没有没人用的 key、两种语言占位符一致。语言在 `run()` 入口按 `config.lang` 解析一次，设置面板改了立刻生效。
+文案国际化：用户可见的字符串一律 `i18n.T("<语义 key>")`（`i18n.F` 带格式化参数，`i18n.E` 出 error）；key 小写点分、按界面区域分命名空间（`help.*`、`settings.*`、`footer.*`、`cli.*`、`flash.*`…），文案放 `internal/i18n/locales/en.json` 和 `zh.json`（embed 进二进制，扁平 key → 文案）。查当前语言，缺了退回英文，再缺原样显示 key。整句带 `%s`/`%d` 占位符，不在代码里拼片段。英文里跟在数目后面的名词或动词写成单复数两种形式 `%d {file|files}`：`i18n.F` / `E` 按紧挨在它前面的那个 `%d` 挑，是 1 用前一种，别的数用后一种；中文不写。`coverage_test` 保证每个用到的 key 两个文件都有、没有没人用的 key、两种语言占位符一致。语言在 `run()` 入口按 `config.lang` 解析一次，设置面板改了立刻生效。
 
 ### 各模块机制
 

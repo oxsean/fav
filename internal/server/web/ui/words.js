@@ -7,7 +7,7 @@ register('ui', {
   'nav.label': ['页面', 'Pages'], 'nav.collapse': ['收起菜单', 'Collapse the menu'], 'nav.expand': ['展开菜单', 'Expand the menu'],
   'shell.search': ['搜索任务、运行、机器，或输入命令', 'Search tasks, runs, machines, or type a command'],
   'shell.new': ['新建任务', 'New task'], 'shell.running': ['在跑', 'Running'], 'shell.queued': ['排队', 'Queued'],
-  'shell.offlineOne': ['%s 离线', '%s offline'], 'shell.offlineMany': ['%d 台机器离线', '%d machines offline'],
+  'shell.offlineOne': ['%s 离线', '%s offline'], 'shell.offlineMany': ['%d 台机器离线', '%d {machine|machines} offline'],
   'shell.servers': ['切换 server', 'Switch server'], 'shell.keys': ['按键', 'Keys'], 'shell.counts': ['在跑 %d · 排队 %d', '%d running · %d queued'],
   'shell.spent': ['今天 %s tok%s', 'Today %s tok%s'],
   'banner.offline': ['连接断开，正在重连…', 'Connection lost, reconnecting…'], 'banner.retry': ['立即重连', 'Reconnect now'],

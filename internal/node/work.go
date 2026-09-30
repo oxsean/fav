@@ -344,15 +344,26 @@ func (s *sup) commitLeft() {
 	}
 	g.env = identity(g, s.spec.env())
 	if _, err := g.run("add", "-A"); err != nil {
-		s.warn(fmt.Sprintf("%d files left uncommitted: %v", n, err))
+		s.warn(leftUncommitted(n, err))
 		return
 	}
 	msg := fmt.Sprintf("%s\n\ntend run %s", firstLine(s.spec.Title, "tend: task "+s.spec.Task), s.spec.Run)
 	if _, err := g.run("commit", "--quiet", "-m", msg); err != nil {
-		s.warn(fmt.Sprintf("%d files left uncommitted: %v", n, err))
+		s.warn(leftUncommitted(n, err))
+		return
+	}
+	if n == 1 {
+		s.warn("committed 1 file the agent left uncommitted")
 		return
 	}
 	s.warn(fmt.Sprintf("committed %d files the agent left uncommitted", n))
+}
+
+func leftUncommitted(n int, err error) string {
+	if n == 1 {
+		return fmt.Sprintf("1 file left uncommitted: %v", err)
+	}
+	return fmt.Sprintf("%d files left uncommitted: %v", n, err)
 }
 
 func firstLine(s, or string) string {

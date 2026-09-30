@@ -11,7 +11,7 @@ register('answer', {
   'ans.allow': ['允许', 'Allow'], 'ans.allowRun': ['这次运行里这条命令都允许', 'Allow this command for the rest of the run'],
   'ans.deny': ['拒绝', 'Deny'], 'ans.why': ['拒绝的理由（可不填）', 'Why not (optional)'],
   'ans.send': ['回答', 'Answer'], 'ans.skip': ['不回答', 'Don’t answer'], 'ans.own': ['或者自己写', 'Or write your own'],
-  'ans.multi': ['可多选', 'Pick any'], 'ans.left': ['还有 %d 个问题没答', '%d questions left to answer'],
+  'ans.multi': ['可多选', 'Pick any'], 'ans.left': ['还有 %d 个问题没答', '%d {question|questions} left to answer'],
   'ans.goneBy': ['已经被 %s 答了', '%s answered it already'], 'ans.gone': ['这个请求已经不在了', 'It is no longer asked'],
   'ans.open': ['作答…', 'Answer…'], 'ans.asks': ['要你批准：%s', 'Asks to run: %s'],
   'ans.onceHint': ['只这一次，下次还会问你', 'This once; it asks again next time'],

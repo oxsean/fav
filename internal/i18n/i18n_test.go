@@ -1,6 +1,9 @@
 package i18n
 
-import "testing"
+import (
+	"fmt"
+	"testing"
+)
 
 func TestTranslateAndDetect(t *testing.T) {
 	defer Set(ZH)
@@ -26,5 +29,25 @@ func TestTranslateAndDetect(t *testing.T) {
 	}
 	if Resolve(EN) != EN || Resolve(ZH) != ZH {
 		t.Fatal("显式设置优先")
+	}
+}
+
+func TestCountsPickTheirForm(t *testing.T) {
+	for _, c := range []struct {
+		s    string
+		a    []any
+		want string
+	}{
+		{"%d {file|files}", []any{1}, "1 file"},
+		{"%d {file|files}", []any{0}, "0 files"},
+		{"%d {file|files}", []any{int64(2)}, "2 files"},
+		{"%s: %d {task|tasks} {needs|need} you, %d {run|runs}", []any{"a", 1, 3}, "a: 1 task needs you, 3 runs"},
+		{"%d/%d {hit|hits}, %d%%", []any{2, 1, 50}, "2/1 hit, 50%"},
+		{"%.1f MB in %d {run|runs}", []any{1.0, uint(1)}, "1.0 MB in 1 run"},
+		{"%d 个文件", []any{1}, "1 个文件"},
+	} {
+		if got := fmt.Sprintf(counted(c.s, c.a), c.a...); got != c.want {
+			t.Errorf("%q %v → %q, want %q", c.s, c.a, got, c.want)
+		}
 	}
 }

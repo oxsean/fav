@@ -278,7 +278,7 @@ test('the timeline, the answer form and the composer draw in both forms and both
     '── check 开始 ──', 'u_b 允许了', 'Which parts go on the cover?', '可多选', '还有 2 个问题没答', 'Waiting for the page size', '没送到', '插进正在跑的这一轮'])
     ok(zh.includes(want), `zh: no ${want}`);
   const en = drawn(vnode, 'phone', 'en');
-  for (const want of ['Turn 1', 'Run 2 · continued · mba', 'read 2 files · searched 1 times', 'Plan 1/3', 'Not delivered', 'Follow', 'Pause'].slice(0, 5))
+  for (const want of ['Turn 1', 'Run 2 · continued · mba', 'read 2 files · searched 1 time', 'Plan 1/3', 'Not delivered', 'Follow', 'Pause'].slice(0, 5))
     ok(en.includes(want), `en: no ${want}`);
   ok(en.includes('class="out out-phone"') && en.includes('composer-phone'), 'the phone form');
   const forRun = asked, perm = {...asked, allow_run: false};

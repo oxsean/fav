@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"reflect"
+	"regexp"
 	"strings"
 	"sync/atomic"
 )
@@ -75,9 +77,48 @@ func Detect() string {
 	return detectPlatform()
 }
 
-func F(key string, a ...any) string { return fmt.Sprintf(T(key), a...) }
+func F(key string, a ...any) string { return fmt.Sprintf(counted(T(key), a), a...) }
 
-func E(key string, a ...any) error { return fmt.Errorf(T(key), a...) }
+func E(key string, a ...any) error { return fmt.Errorf(counted(T(key), a), a...) }
+
+var (
+	plural     = regexp.MustCompile(`\{([^{}|]*)\|([^{}|]*)\}`)
+	verbOrForm = regexp.MustCompile(`%[-+# 0-9.]*[a-zA-Z%]|\{[^{}|]*\|[^{}|]*\}`)
+)
+
+// counted writes each {one|other} of s as the form the %d before it asks for: one for 1, other for any other count.
+func counted(s string, a []any) string {
+	if !strings.Contains(s, "|") {
+		return s
+	}
+	arg, count := 0, int64(-1)
+	return verbOrForm.ReplaceAllStringFunc(s, func(m string) string {
+		if m[0] == '%' {
+			if m != "%%" {
+				if strings.HasSuffix(m, "d") && arg < len(a) {
+					count = intOf(a[arg])
+				}
+				arg++
+			}
+			return m
+		}
+		f := plural.FindStringSubmatch(m)
+		if count == 1 {
+			return f[1]
+		}
+		return f[2]
+	})
+}
+
+func intOf(v any) int64 {
+	switch r := reflect.ValueOf(v); r.Kind() {
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		return r.Int()
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
+		return int64(r.Uint())
+	}
+	return -1
+}
 
 // In is key in language l, falling back like T.
 func In(l, key string) string {

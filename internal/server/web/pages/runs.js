@@ -21,7 +21,7 @@ register('runs', {
   'runs.title': ['运行', 'Runs'], 'runs.help': ['每一次运行；选中一条看最近的输出。', 'Every run; pick one to see its latest output.'],
   'runs.filter': ['筛选运行', 'Filter the runs'], 'runs.f.all': ['全部', 'All'], 'runs.f.open': ['未结束', 'Not ended'], 'runs.f.failed': ['失败', 'Failed'],
   'runs.f.ended': ['已结束', 'Ended'], 'runs.machine': ['机器', 'Machine'], 'runs.anyMachine': ['全部机器', 'Every machine'],
-  'runs.none': ['没有符合的运行', 'No runs match'], 'runs.machines': ['%d 台在线 · %d 台离线', '%d machines up · %d down'],
+  'runs.none': ['没有符合的运行', 'No runs match'], 'runs.machines': ['%d 台在线 · %d 台离线', '%d {machine|machines} up · %d down'],
   'runs.c.state': ['状态', 'State'], 'runs.c.run': ['运行', 'Run'], 'runs.c.task': ['任务', 'Task'], 'runs.c.stage': ['阶段', 'Stage'],
   'runs.c.where': ['Agent @ 机器', 'Agent @ machine'], 'runs.c.began': ['开始', 'Began'], 'runs.c.took': ['耗时', 'Took'], 'runs.c.spent': ['用量', 'Spent'],
   'runs.open': ['打开运行', 'Open the run'], 'runs.inTask': ['在任务里打开', 'Open in its task'], 'runs.of': ['%s · %s', '%s · %s'],

@@ -173,6 +173,19 @@ test('words: one owner per key, both languages, the same verbs', async () => {
   eq([pick('zh-CN'), pick('en-GB'), pick('')], ['zh', 'en', 'en'], 'pick');
 });
 
+test('words: a {one|other} takes its form from the %d before it', () => {
+  const w = createWords();
+  w.register('home', {
+    files: ['改了 %d 个文件', 'changed %d {file|files}'],
+    two: ['%s：%d 个任务等你，%d 次运行', '%s: %d {task|tasks} {needs|need} you, %d {run|runs}'],
+  });
+  w.lang.value = 'en';
+  eq([w.f('files', 1), w.f('files', 0), w.f('files', 2), w.f('two', 'a', 1, 3), w.f('two', 'a', 2, 1)],
+    ['changed 1 file', 'changed 0 files', 'changed 2 files', 'a: 1 task needs you, 3 runs', 'a: 2 tasks need you, 1 run'], 'en');
+  w.lang.value = 'zh';
+  eq(w.f('files', 1), '改了 1 个文件', 'zh');
+});
+
 test('every event fold takes names the tables it changes', () => {
   const src = readFileSync(new URL('../web/core/fold.js', import.meta.url), 'utf8');
   const cases = [...src.matchAll(/^ {4}case '([a-z_]+)':/gm)].map(m => m[1]);

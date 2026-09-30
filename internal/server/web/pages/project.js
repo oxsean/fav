@@ -69,7 +69,7 @@ register('project', {
   'proj.hookNone': ['server 没有配 public_url，没有 webhook 地址，只靠轮询。', 'The server has no public_url, so there is no webhook address: it polls.'],
   'proj.state.ok': ['同步中', 'syncing'], 'proj.state.stopped': ['已停：token 被拒，换 token 后继续', 'stopped: the token was refused; replace it to go on'],
   'proj.state.paused': ['限流中，%s 继续', 'rate limited until %s'],
-  'proj.issues': ['%d 条需求', '%d requirements'], 'proj.failing': ['%d 条出错', '%d failing'],
+  'proj.issues': ['%d 条需求', '%d {requirement|requirements}'], 'proj.failing': ['%d 条出错', '%d failing'],
   'proj.lastOK': ['上次成功 %s', 'last success %s'], 'proj.polled': ['上次扫描 %s', 'last scan %s'], 'proj.never': ['还没有', 'never'],
   'proj.syncSettings': ['同步设置', 'Sync settings'], 'proj.syncSaved': ['同步设置已保存', 'The sync settings are saved'],
   'proj.replaceToken': ['换 token', 'Replace the token'], 'proj.tokenSaved': ['token 已换', 'The token is replaced'],

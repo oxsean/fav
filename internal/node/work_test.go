@@ -62,7 +62,7 @@ func TestATaskWorksOnItsBranchInItsOwnWorktree(t *testing.T) {
 		end.Work.Head != git(t, checkout, "rev-parse", "tend/t_1") || !samePlace(end.Work.Dir, wt) || end.Work.Diffstat == "" {
 		t.Fatalf("%+v %+v", end.State, end.Work)
 	}
-	if !slices.ContainsFunc(end.Work.Warnings, func(w string) bool { return strings.Contains(w, "committed 1 files") }) {
+	if !slices.ContainsFunc(end.Work.Warnings, func(w string) bool { return w == "committed 1 file the agent left uncommitted" }) {
 		t.Fatalf("what the agent left is committed: %q", end.Work.Warnings)
 	}
 	if where, _ := os.ReadFile(setup); !samePlace(string(where), wt) {

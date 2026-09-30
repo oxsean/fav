@@ -1,5 +1,6 @@
 // i18n holds the page's words. Each module registers its own table of key → [zh, en]; a key two modules define is an
-// error, never a silent override. Sentences are whole, with %s / %d filled in order, the same in both languages.
+// error, never a silent override. Sentences are whole, with %s / %d filled in order, the same in both languages; an English
+// noun or verb that follows a count is written in both forms, {one|other}.
 import {signal} from '../vendor/signals-core.mjs';
 
 const langs = ['zh', 'en'];
@@ -21,9 +22,15 @@ export function createWords() {
 
   const t = key => table.get(key)?.[lang.value] ?? key;
 
+  // Each {one|other} takes one for a 1 in the %d before it, other for any other count.
   function f(key, ...args) {
-    let i = 0;
-    return t(key).replace(/%[sd]/g, () => String(args[i++] ?? ''));
+    let i = 0, count;
+    return t(key).replace(/%[sd]|\{([^{}|]*)\|([^{}|]*)\}/g, (m, one, other) => {
+      if (m[0] === '{') return Number(count) === 1 ? one : other;
+      const arg = args[i++];
+      if (m === '%d') count = arg;
+      return String(arg ?? '');
+    });
   }
 
   // both is a key's text in every language, for searching by either.

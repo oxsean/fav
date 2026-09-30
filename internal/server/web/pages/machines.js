@@ -25,7 +25,7 @@ import {nowhere} from '../core/platform.js';
 
 register('machines', {
   'mach.title': ['机器', 'Machines'], 'mach.none': ['还没有机器接入', 'No machine has connected yet'],
-  'mach.summary': ['%d 台 · %d 台在线 · 运行位 %d/%d 在用 · %d 个排队', '%d machines · %d up · %d/%d slots in use · %d queued'],
+  'mach.summary': ['%d 台 · %d 台在线 · 运行位 %d/%d 在用 · %d 个排队', '%d {machine|machines} · %d up · %d/%d {slot|slots} in use · %d queued'],
   'mach.mine': ['我的机器', 'My machines'], 'mach.toMe': ['分享给我的', 'Shared with me'], 'mach.others': ['其他人的', 'Other people\'s'],
   'mach.state.connected': ['在线', 'online'], 'mach.state.connecting': ['连接中', 'connecting'], 'mach.state.offline': ['离线', 'offline'],
   'mach.offlineSince': ['离线 · %s 起', 'offline since %s'],
@@ -41,7 +41,7 @@ register('machines', {
   'mach.retryAt': ['%s，%s 重试', '%s; retries at %s'],
   'mach.clis': ['Agent CLI', 'Agent CLIs'], 'mach.noClis': ['还没有检查过', 'Not checked yet'],
   'mach.check': ['检查', 'Check'], 'mach.checkAll': ['全部检查', 'Check all'], 'mach.checkedAgo': ['%s 前检查', 'checked %s ago'],
-  'mach.checked': ['%s 已检查', '%s is checked'], 'mach.checkedN': ['检查了 %d 台', '%d machines checked'],
+  'mach.checked': ['%s 已检查', '%s is checked'], 'mach.checkedN': ['检查了 %d 台', '%d {machine|machines} checked'],
   'mach.checkFailed': ['%s 检查不了：%s', '%s cannot be checked: %s'],
   'mach.checkWhy.unsupported': ['它的 tend 太旧，没有这个检查', 'its tend is too old for this check'],
   'mach.checkWhy.offline': ['它不在线', 'it is offline'], 'mach.checkWhy.timeout': ['节点没有及时回答', 'its node did not answer in time'],
