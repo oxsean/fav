@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"slices"
 	"strings"
 	"testing"
@@ -350,5 +352,37 @@ func TestADeviceSessionIsNotGivenForSomeoneDisabled(t *testing.T) {
 	r.team.SetUser(bob.ID, nil, &yes)
 	if _, out, cookies := ask(t, r, phone, "/auth/device/token", map[string]string{"device_code": deviceCode}, nil); out["status"] != "denied" || len(cookies) > 0 {
 		t.Fatalf("%v %v", out, cookies)
+	}
+}
+
+// One address holds at most a few device codes at once, so it cannot take every place; the places are still bounded
+// for everyone together.
+func TestDeviceCodesAreBoundedPerAddress(t *testing.T) {
+	r := newRig(t)
+	start := func(ip string) int {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest("POST", "/auth/device", strings.NewReader(`{"name":"x"}`))
+		req.RemoteAddr = ip + ":40000"
+		r.srv.deviceStart(rec, req)
+		return rec.Code
+	}
+	for i := range maxDevicesPerIP {
+		if got := start("203.0.113.7"); got != http.StatusOK {
+			t.Fatalf("code %d: %d", i+1, got)
+		}
+	}
+	if got := start("203.0.113.7"); got != http.StatusTooManyRequests {
+		t.Fatalf("one more from the same address: %d", got)
+	}
+	if got := start("203.0.113.8"); got != http.StatusOK {
+		t.Fatalf("another address: %d", got)
+	}
+	for i := 0; len(r.srv.devices) < maxDevices; i++ {
+		if got := start(fmt.Sprintf("198.51.100.%d", i)); got != http.StatusOK {
+			t.Fatalf("filling up: %d", got)
+		}
+	}
+	if got := start("192.0.2.1"); got != http.StatusTooManyRequests {
+		t.Fatalf("beyond every address's places: %d", got)
 	}
 }

@@ -45,7 +45,7 @@
   - 网页的 cookie 里只存服务端会话 id（HttpOnly、SameSite=Strict、公网下 Secure），可以轮换，也可以单独吊销。用户能看到自己登录过的设备。
   - 浏览器会话本身就是一条凭据（`kind: web`，30 天），cookie `tend_session`。用 token 登录网页时，另建一条名为 `token:<id>` 的网页会话，随那个 token 一起失效。
   - TUI 和 CLI 用个人 token，在网页的「我」页生成，或 `tend login [地址]` 走浏览器授权拿到：
-    - `POST /auth/device`（限流，不需要会话）用客户端名字换一个 `device_code`（CLI 轮询用）、一个 `user_code`（人读的 `XXXX-XXXX`，字母表去掉 `0/O/1/I`）、`verify_url`（`<地址>/#device-<user_code>`）、轮询间隔和有效期；待确认的设备码只存在内存里，重启即丢，同时最多 100 个。
+    - `POST /auth/device`（限流，不需要会话）用客户端名字换一个 `device_code`（CLI 轮询用）、一个 `user_code`（人读的 `XXXX-XXXX`，字母表去掉 `0/O/1/I`）、`verify_url`（`<地址>/#device-<user_code>`）、轮询间隔和有效期；待确认的设备码只存在内存里，重启即丢，同时最多 100 个，同一个来源地址（`RemoteAddr`，和限流一样）最多 5 个，超出回 429 `busy`。
     - `POST /auth/device/token` 用 `device_code` 换状态：`pending`；`denied`（读一次即失效）；`expired`；或恰好一次的 `{status: ok, token, user}`，之后这个码就没了。
     - 网页的 `#device-<user_code>`（登录后）打开终端授权页：`GET /api/device?code=` 取码、客户端名字、来源地址、时间；`POST /api/device {code, allow}` 批准即铸一个个人 token（名字 `login:<客户端名字>`），拒绝只记录，两者都写审计（`device.allow` / `device.deny`）。
     - `tend login` 只用 `net/http`：打印 `verify_url` 和 `user_code`，按 `interval` 轮询，成功后把 token 写到 `<tend 数据目录>/coordinator.token`（0600）、把 `config.json` 的 `coordinator.url/token_file` 指过去；Ctrl+C 或过期都给出明确提示。

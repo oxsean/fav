@@ -18,8 +18,12 @@ const deviceAge = 10 * time.Minute
 // deviceInterval is how often a polling client should ask again.
 const deviceInterval = 3 * time.Second
 
-// maxDevices bounds how many device codes wait at once; requests beyond it are refused.
-const maxDevices = 100
+// maxDevices bounds how many device codes wait at once, and maxDevicesPerIP how many of them one address holds;
+// requests beyond either are refused.
+const (
+	maxDevices      = 100
+	maxDevicesPerIP = 5
+)
 
 // userCodeAlphabet excludes characters easy to confuse when copied by eye: 0/O, 1/I.
 const userCodeAlphabet = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ"
@@ -82,6 +86,17 @@ func (s *Server) expireDevices() {
 	s.expireDevicesLocked()
 }
 
+// devicesFromLocked counts the device codes waiting that ip asked for. Callers hold s.mu.
+func (s *Server) devicesFromLocked(ip string) int {
+	n := 0
+	for _, d := range s.devices {
+		if d.ip == ip && d.status == deviceStatusPending {
+			n++
+		}
+	}
+	return n
+}
+
 func (s *Server) findDeviceLocked(userCode string) *deviceAuth {
 	for _, d := range s.devices {
 		if d.userCode == userCode {
@@ -113,7 +128,7 @@ func (s *Server) deviceStart(w http.ResponseWriter, r *http.Request) {
 	ip, _, _ := net.SplitHostPort(r.RemoteAddr)
 	s.mu.Lock()
 	s.expireDevicesLocked()
-	if len(s.devices) >= maxDevices {
+	if len(s.devices) >= maxDevices || s.devicesFromLocked(ip) >= maxDevicesPerIP {
 		s.mu.Unlock()
 		apiError(w, http.StatusTooManyRequests, "busy")
 		return
