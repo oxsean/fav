@@ -386,3 +386,44 @@ func TestDeviceCodesAreBoundedPerAddress(t *testing.T) {
 		t.Fatalf("beyond every address's places: %d", got)
 	}
 }
+
+// Behind a proxy on this host (tailscale serve), every request comes from a loopback address: the address a request
+// came from is the last one the proxy put in X-Forwarded-For, and only a loopback peer is believed.
+func TestTheAddressBehindAProxyOnThisHostIsTheOneItForwarded(t *testing.T) {
+	for _, c := range []struct{ remote, xff, want string }{
+		{"127.0.0.1:5000", "100.64.0.9", "100.64.0.9"},
+		{"[::1]:5000", "100.64.0.9", "100.64.0.9"},
+		{"127.0.0.1:5000", "198.51.100.1, 100.64.0.9", "100.64.0.9"},
+		{"127.0.0.1:5000", "", "127.0.0.1"},
+		{"127.0.0.1:5000", "not an address", "127.0.0.1"},
+		{"203.0.113.7:5000", "100.64.0.9", "203.0.113.7"},
+		{"[2001:db8::1]:5000", "127.0.0.1", "2001:db8::1"},
+	} {
+		req := httptest.NewRequest("GET", "/", nil)
+		req.RemoteAddr = c.remote
+		if c.xff != "" {
+			req.Header.Set("X-Forwarded-For", c.xff)
+		}
+		if got := clientIP(req); got != c.want {
+			t.Errorf("%s with X-Forwarded-For %q: %q, want %q", c.remote, c.xff, got, c.want)
+		}
+	}
+
+	r := newRig(t)
+	start := func(ip string) int {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest("POST", "/auth/device", strings.NewReader(`{"name":"x"}`))
+		req.RemoteAddr = "127.0.0.1:40000"
+		req.Header.Set("X-Forwarded-For", ip)
+		r.srv.deviceStart(rec, req)
+		return rec.Code
+	}
+	for i := range maxDevicesPerIP {
+		if got := start("100.64.0.9"); got != http.StatusOK {
+			t.Fatalf("code %d: %d", i+1, got)
+		}
+	}
+	if got := start("100.64.0.10"); got != http.StatusOK {
+		t.Fatalf("another address behind the same proxy: %d", got)
+	}
+}

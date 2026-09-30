@@ -181,10 +181,29 @@ func (s *Server) untrack(c *wire.Conn) {
 
 const keepalive = dial.Keepalive
 
+// clientIP is the address r came from: a peer on a loopback address is a proxy on this host (tailscale serve), and the
+// last address it put in X-Forwarded-For is the one it took the request from; any other peer's header is ignored.
+func clientIP(r *http.Request) string {
+	host, _, _ := net.SplitHostPort(r.RemoteAddr)
+	peer, err := netip.ParseAddr(host)
+	if err != nil || !peer.IsLoopback() {
+		return host
+	}
+	hops := r.Header.Values("X-Forwarded-For")
+	if len(hops) == 0 {
+		return host
+	}
+	parts := strings.Split(hops[len(hops)-1], ",")
+	if a, err := netip.ParseAddr(strings.TrimSpace(parts[len(parts)-1])); err == nil {
+		return a.Unmap().String()
+	}
+	return host
+}
+
 func (s *Server) audit(r *http.Request, actor, kind, detail string) {
 	ip := ""
 	if r != nil {
-		ip, _, _ = net.SplitHostPort(r.RemoteAddr)
+		ip = clientIP(r)
 	}
 	s.team().Audit(store.AuditEntry{Actor: actor, Kind: kind, Detail: detail, IP: ip})
 }

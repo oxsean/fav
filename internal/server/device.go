@@ -4,7 +4,6 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"math/big"
-	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -125,7 +124,7 @@ func (s *Server) deviceStart(w http.ResponseWriter, r *http.Request) {
 		apiError(w, http.StatusForbidden, "csrf")
 		return
 	}
-	ip, _, _ := net.SplitHostPort(r.RemoteAddr)
+	ip := clientIP(r)
 	s.mu.Lock()
 	s.expireDevicesLocked()
 	if len(s.devices) >= maxDevices || s.devicesFromLocked(ip) >= maxDevicesPerIP {
