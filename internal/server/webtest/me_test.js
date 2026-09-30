@@ -172,6 +172,7 @@ test('the page draws in both forms and both languages, styled and worded', async
       eq(a.http.calls, [['GET /api/push/devices']], `${lang}: a phone reads only the devices`);
     } else {
       for (const k of ['me.look', 'me.notices', 'me.logins', 'me.tokens', 'me.sessions']) ok(text.includes(words.t(k)), `${lang}: ${k}`);
+      eq(a.el.find('.me-preview-row').map(r => r.find('.st')[0].className), ['st s-unknown', 'st s-running', 'st s-failed'], `${lang}: the look previewed in the status colours`);
       ok(text.includes('bo@example.com · ' + words.t('role.member') + ' · ' + words.f('me.joined', '8-03')), `${lang}: who, and since when`);
       ok(text.includes(words.f('me.viaToken', 'login:tend on mba')), `${lang}: a session a token signed in`);
       const trackers = a.el.find('.me-row').filter(r => r.textContent.endsWith('github.com') || r.textContent.endsWith('git.example.com'));

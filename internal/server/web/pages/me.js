@@ -27,6 +27,10 @@ register('me', {
   'me.accentBad': ['要写成 #rrggbb', 'Write it as #rrggbb'],
   'me.contrast': ['对比度', 'Contrast'], 'me.contrast.normal': ['标准', 'Standard'], 'me.contrast.high': ['高（文字 7:1）', 'High (text 7:1)'],
   'me.density': ['密度', 'Density'], 'me.rowHeight': ['行高 %d px', 'Rows %d px high'],
+  'me.preview': ['预览', 'Preview'],
+  'me.preview.ask': ['给商品页加缓存：用哪个数据库？', 'Cache the product page: which database?'], 'me.preview.askState': ['等你作答', 'Waits on you'],
+  'me.preview.run': ['修复结账页偶发失败的测试', 'Fix the flaky checkout test'], 'me.preview.runState': ['在跑 %s', 'Running %s'],
+  'me.preview.fail': ['迁移订单表索引', 'Migrate the orders index'], 'me.preview.failState': ['失败', 'Failed'],
   'me.lang': ['语言', 'Language'], 'me.lang.zh': ['中文', '中文'], 'me.lang.en': ['English', 'English'], 'me.lang.auto': ['跟随浏览器', 'The browser\'s'],
   'me.notices': ['通知', 'Notices'], 'me.noticesNote': ['有事等你时', 'When something needs you'],
   'me.browser': ['浏览器通知', 'Browser notices'], 'me.on': ['开', 'On'], 'me.off': ['关', 'Off'],
@@ -159,6 +163,12 @@ function Look({prefs, presets}) {
           <span class="t-muted mono">${f('me.rowHeight', rowHeights[density])}</span></span></div>
       <div class="me-set"><span class="me-k">${t('me.lang')}</span>
         <${Segmented} label=${t('me.lang')} value=${lang} onChange=${prefs.setLang} options=${['zh', 'en', 'auto'].map(v => ({value: v, label: t('me.lang.' + v)}))} /></div>
+      <div class="me-set me-set-top"><span class="me-k">${t('me.preview')}</span>
+        <div class="me-preview" aria-hidden="true">
+          ${[['?', 's-unknown', 'me.preview.ask', t('me.preview.askState')], ['●', 's-running', 'me.preview.run', f('me.preview.runState', '12m')],
+            ['!', 's-failed', 'me.preview.fail', t('me.preview.failState')]].map(([glyph, cls, k, state]) => html`<div class="me-preview-row" key=${k}>
+            <span class=${cx('st', cls)}>${glyph}</span><span class="ell">${t(k)}</span><span class=${cx(cls, 'me-preview-state')}>${state}</span></div>`)}
+        </div></div>
     </div>
   <//>`;
 }
