@@ -72,11 +72,11 @@ export function Home({store, commands, toasts, clock = () => Date.now(), fetchOu
   const send = (method, params, opts) => commands.send(method, params, opts).catch(e => { failed(e); throw e; });
 
   const markDone = v => {
-    const {task} = v, prev = task.status;
-    send('task.set_status', {id: task.id, status: 'done'}, {key: 'task:' + task.id, hide: task.id, until: store.inbox}).then(() => {
+    const {task} = v, id = commands.newID();
+    send('task.set_status', {id: task.id, status: 'done'}, {key: 'task:' + task.id, hide: task.id, until: store.inbox, id}).then(() => {
       toasts.show({text: f('home.doneToast', task.title), undo: () => {
         commands.show(task.id);
-        send('task.set_status', {id: task.id, status: prev}, {key: 'task:' + task.id}).catch(() => {});
+        send('task.undo', {id: task.id, command: id}, {key: 'task:' + task.id}).catch(() => {});
       }});
     }, () => {});
   };

@@ -53,5 +53,5 @@ status: backlog | todo | done | canceled      // 只存这四个；「运行中 
 
 - 协调器写的还有 `auto`、`start_seq`、`held`（见 [workflows.md](workflows.md)「处境与开始（实现）」）。`task.create` 不写 project 时沿用父任务的。
 - 各组字段的来处：workflow 一组见 [workflows.md](workflows.md)「实现」；分支一组见 [execution.md](execution.md)「实现」；`source`、`issue`、`pr` 见 [trackers.md](trackers.md)「导入与需求快照」；负责人和验收人见 [team.md](team.md)「人在任务里」。预算在 workflow 上（`flow.budget`），任务级 `budget` 未实现。
-- 事件：`task_moved`（改 parent、after）、`task_started`、`task_held`、`plan_drafted`、`plan_applied`、`task_staged`、`task_noted`、`task_sourced`、`task_source_acked`、`task_linked`；verdict 随 run 的观测回来，不单独成事件。
+- 事件：`task_moved`（改 parent、after）、`task_restored`（撤销，见 [workflows.md](workflows.md)「撤销」）、`task_started`、`task_held`、`plan_drafted`、`plan_applied`、`task_staged`、`task_noted`、`task_sourced`、`task_source_acked`、`task_linked`；verdict 随 run 的观测回来，不单独成事件。
 - 旧 journal 照样能折叠：新字段都是可选的，没有 `workflow` 的任务就是单 run 任务。

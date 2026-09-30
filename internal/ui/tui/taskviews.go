@@ -494,29 +494,29 @@ func (m *Model) toggleMarkedDone() tea.Cmd {
 			status = task.StatusDone
 		}
 	}
-	was := map[string]string{}
+	sent := map[string]string{} // the command that changed each task, by task
 	var cmds []tea.Cmd
 	for _, x := range xs {
 		if x.Status == status {
 			continue
 		}
-		was[x.ID] = x.Status
-		cmds = append(cmds, m.write(coord.MTaskStatus, task.TaskStatus{ID: x.ID, Status: status}, "", nil))
+		sent[x.ID] = commandID()
+		cmds = append(cmds, m.writeAs(sent[x.ID], coord.MTaskStatus, task.TaskStatus{ID: x.ID, Status: status}, "", nil))
 	}
 	if len(cmds) == 0 {
 		return nil
 	}
 	m.tasks.marked, m.tasks.anchor = nil, ""
-	note := i18n.F("tasks.done_n", len(was))
+	note := i18n.F("tasks.done_n", len(sent))
 	if status == task.StatusTodo {
-		note = i18n.F("tasks.reopened_n", len(was))
+		note = i18n.F("tasks.reopened_n", len(sent))
 	}
 	cmds = append(cmds, func() tea.Msg {
 		return taskDoneMsg{then: func(mm *Model) tea.Cmd {
 			mm.offerUndo(note, func(mm *Model) tea.Cmd {
 				var back []tea.Cmd
-				for id, s := range was {
-					back = append(back, mm.write(coord.MTaskStatus, task.TaskStatus{ID: id, Status: s}, "", nil))
+				for id, cmd := range sent {
+					back = append(back, mm.write(coord.MTaskUndo, coord.TaskUndo{ID: id, Command: cmd}, "", nil))
 				}
 				back = append(back, func() tea.Msg { return taskDoneMsg{note: i18n.F("undo.done", note)} })
 				return tea.Batch(back...)

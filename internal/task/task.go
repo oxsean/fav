@@ -158,6 +158,7 @@ const (
 	ETaskCreated  = "task_created"
 	ETaskEdited   = "task_edited"
 	ETaskStatus   = "task_status_set"
+	ETaskRestored = "task_restored" // TaskRestore: an undo
 	ERunQueued    = "run_queued"
 	ERunStarting  = "run_starting"
 	ERunObserved  = "run_observed"
@@ -211,6 +212,29 @@ type TaskEdit struct {
 type TaskStatus struct {
 	ID     string `json:"id"`
 	Status string `json:"status"`
+}
+
+// TaskRestore puts task ID's status, tries, stage and place back as they stood before an undone command, field for
+// field: an undo is not a reopening.
+type TaskRestore struct {
+	ID       string   `json:"id"`
+	Status   string   `json:"status"`
+	Auto     bool     `json:"auto,omitempty"`
+	StartSeq int64    `json:"start_seq,omitempty"`
+	Merged   bool     `json:"merged,omitempty"`
+	Stage    string   `json:"stage,omitempty"`
+	Loops    int      `json:"loops,omitempty"`
+	StageSeq int64    `json:"stage_seq,omitempty"`
+	Stages   []Staged `json:"stages,omitempty"`
+	Parent   string   `json:"parent,omitempty"`
+	After    []string `json:"after,omitempty"`
+	Held     string   `json:"held,omitempty"`
+}
+
+// RestoreOf is what t is now, as a TaskRestore would put it back.
+func RestoreOf(t *Task) TaskRestore {
+	return TaskRestore{ID: t.ID, Status: t.Status, Auto: t.Auto, StartSeq: t.StartSeq, Merged: t.Merged, Stage: t.Stage, Loops: t.Loops,
+		StageSeq: t.StageSeq, Stages: slices.Clone(t.Stages), Parent: t.Parent, After: slices.Clone(t.After), Held: t.Held}
 }
 
 type RunRef struct {
@@ -387,6 +411,20 @@ func (s *State) apply(e journal.Event, seq int64, at time.Time) error {
 			t.Auto, t.StartSeq, t.Merged = false, seq, false
 		}
 		t.Status, t.UpdatedAt = d.Status, at
+		t.Rev++
+	case ETaskRestored:
+		var d TaskRestore
+		if err := json.Unmarshal(e.Data, &d); err != nil {
+			return err
+		}
+		t := s.Tasks[d.ID]
+		if t == nil {
+			return fmt.Errorf("no task %s", d.ID)
+		}
+		t.Status, t.Auto, t.StartSeq, t.Merged = d.Status, d.Auto, d.StartSeq, d.Merged
+		t.Stage, t.Loops, t.StageSeq, t.Stages = d.Stage, d.Loops, d.StageSeq, d.Stages
+		t.Parent, t.After, t.Held = d.Parent, d.After, d.Held
+		t.UpdatedAt = at
 		t.Rev++
 	case ERunQueued:
 		var r Run

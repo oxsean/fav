@@ -192,6 +192,13 @@ func TestTasksViewCreatesRunsAndShowsATask(t *testing.T) {
 	key(m, "o") // the list keeps finished tasks; the home does not
 	key(m, "x")
 	waitFor(t, m, func() bool { return m.tasks.st.Tasks[x.ID].Status == task.StatusDone })
+	key(m, "u")
+	waitFor(t, m, func() bool { // an undo is not a reopening: its run still says how it stands
+		st := m.tasks.st
+		return st.Tasks[x.ID].Status == task.StatusTodo && st.Situation(st.Tasks[x.ID]).Reason == task.WhyEnded
+	})
+	key(m, "x")
+	waitFor(t, m, func() bool { return m.tasks.st.Tasks[x.ID].Status == task.StatusDone })
 	key(m, "x")
 	waitFor(t, m, func() bool { return m.tasks.st.Tasks[x.ID].Status == task.StatusTodo })
 

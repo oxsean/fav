@@ -358,6 +358,11 @@ func reasonText(err error) string {
 
 // write sends a command with a fresh id; note is flashed when it succeeds.
 func (m *Model) write(method string, params any, note string, then func(*Model) tea.Cmd) tea.Cmd {
+	return m.writeAs(commandID(), method, params, note, then)
+}
+
+// writeAs is write as command id, which task.undo names to take it back.
+func (m *Model) writeAs(id, method string, params any, note string, then func(*Model) tea.Cmd) tea.Cmd {
 	cl := m.tasks.cl
 	if cl == nil {
 		m.flash(i18n.T("tasks.unavailable"))
@@ -366,11 +371,15 @@ func (m *Model) write(method string, params any, note string, then func(*Model) 
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), tasksWait)
 		defer cancel()
-		var b [8]byte
-		rand.Read(b[:])
-		err := cl.CallCommand(ctx, method, "tui-"+hex.EncodeToString(b[:]), params, nil)
+		err := cl.CallCommand(ctx, method, id, params, nil)
 		return taskDoneMsg{note: note, err: err, then: then}
 	}
+}
+
+func commandID() string {
+	var b [8]byte
+	rand.Read(b[:])
+	return "tui-" + hex.EncodeToString(b[:])
 }
 
 // parseTaskFilter splits the search box into plain text and its project:<id>, stage:<name> and needs:you terms.
@@ -557,14 +566,14 @@ func (m *Model) toggleTaskDone() tea.Cmd {
 	if x == nil {
 		return nil
 	}
-	id, was := x.ID, x.Status
+	id, cmd := x.ID, commandID()
 	status, note := task.StatusDone, i18n.F("tasks.done", render.Truncate(x.Title, 40))
 	if x.Status != task.StatusTodo {
 		status, note = task.StatusTodo, i18n.F("tasks.reopened", render.Truncate(x.Title, 40))
 	}
-	return m.write(coord.MTaskStatus, task.TaskStatus{ID: id, Status: status}, "", func(mm *Model) tea.Cmd {
+	return m.writeAs(cmd, coord.MTaskStatus, task.TaskStatus{ID: id, Status: status}, "", func(mm *Model) tea.Cmd {
 		mm.offerUndo(note, func(mm *Model) tea.Cmd {
-			return mm.write(coord.MTaskStatus, task.TaskStatus{ID: id, Status: was}, i18n.F("undo.done", render.Truncate(x.Title, 40)), nil)
+			return mm.write(coord.MTaskUndo, coord.TaskUndo{ID: id, Command: cmd}, i18n.F("undo.done", render.Truncate(x.Title, 40)), nil)
 		})
 		return nil
 	})

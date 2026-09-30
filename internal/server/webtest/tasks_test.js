@@ -19,12 +19,12 @@ test('the board puts each task in the column its situation says, what waits firs
   eq(errors, [], 'errors');
 });
 
-test('a drop is one of four commands, with the write that takes it back; the rest are refused with a reason', async () => {
+test('a drop is one of four commands, marked when task.undo takes it back; the rest are refused with a reason', async () => {
   const {store} = await tasks();
   const st = store.state, d = (id, to) => tk.drop(st, st.tasks[id], to);
-  eq(d('q9', 'ended'), {method: 'task.set_status', params: {id: 'q9', status: 'done'}, undo: {method: 'task.set_status', params: {id: 'q9', status: 'todo'}}}, 'done');
-  eq(d('q2', 'waiting'), {method: 'task.set_status', params: {id: 'q2', status: 'todo'}, undo: {method: 'task.set_status', params: {id: 'q2', status: 'done'}}}, 'reopen');
-  eq(d('q2', 'backlog'), {method: 'task.set_status', params: {id: 'q2', status: 'backlog'}, undo: {method: 'task.set_status', params: {id: 'q2', status: 'done'}}}, 'not yet');
+  eq(d('q9', 'ended'), {method: 'task.set_status', params: {id: 'q9', status: 'done'}, undo: true}, 'done');
+  eq(d('q2', 'waiting'), {method: 'task.set_status', params: {id: 'q2', status: 'todo'}, undo: true}, 'reopen');
+  eq(d('q2', 'backlog'), {method: 'task.set_status', params: {id: 'q2', status: 'backlog'}, undo: true}, 'not yet');
   eq(d('q9', 'backlog').params.status, 'backlog', 'a todo task not running: not yet');
   eq(d('q5', 'queued'), {method: 'task.start', params: {id: 'q5'}}, 'start, nothing to undo');
   eq(d('q5', 'running'), {method: 'task.start', params: {id: 'q5'}}, 'start from running too');

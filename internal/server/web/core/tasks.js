@@ -108,28 +108,27 @@ export function tree(state, keep = () => true, collapsed = new Set()) {
   return out;
 }
 
-// drop is what dropping task on a board column does: {method, params, undo} (undo the write that takes it back, when
-// there is one), {why} when the board refuses it, or null when it is its own column. Only four moves are commands.
+// drop is what dropping task on a board column does: {method, params, undo} (undo when task.undo can take it back),
+// {why} when the board refuses it, or null when it is its own column. Only four moves are commands.
 export function drop(state, task, to) {
   const from = columnOf(situation(state, task));
   if (from === to) return null;
   const set = status => ({method: 'task.set_status', params: {id: task.id, status}});
-  const back = {...set(task.status).params};
   const open = !!openRun(state, task.id);
   if (to === 'ended') {
     if (task.flow) return {why: 'flow'};
     if (task.status !== 'todo' || open) return {why: open ? 'open' : 'rule'};
-    return {...set('done'), undo: {method: 'task.set_status', params: back}};
+    return {...set('done'), undo: true};
   }
   if (to === 'backlog') {
-    if ((task.status === 'todo' && !open) || finished(task.status)) return {...set('backlog'), undo: {method: 'task.set_status', params: back}};
+    if ((task.status === 'todo' && !open) || finished(task.status)) return {...set('backlog'), undo: true};
     return {why: open ? 'open' : 'rule'};
   }
   if (to === 'queued' || to === 'running') {
     if (task.status === 'backlog') return {method: 'task.start', params: {id: task.id}};
     return {why: 'rule'};
   }
-  if (to === 'waiting' && finished(task.status)) return {...set('todo'), undo: {method: 'task.set_status', params: back}};
+  if (to === 'waiting' && finished(task.status)) return {...set('todo'), undo: true};
   return {why: 'rule'};
 }
 

@@ -101,6 +101,7 @@ export const methods = Object.freeze([
   'task.create',
   'task.edit',
   'task.set_status',
+  'task.undo',
   'run.dispatch',
   'run.stop',
   'run.abandon',

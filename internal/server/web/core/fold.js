@@ -105,6 +105,12 @@ function applyEvent(s, e, at, seq) {
       t.status = d.status; t.updated_at = at; t.rev = (t.rev || 0) + 1;
       break;
     }
+    case 'task_restored': { // an undo: the task as it stood before the undone command, field for field
+      const t = need(s.tasks, d.id, 'task');
+      for (const k of ['status', 'auto', 'start_seq', 'merged', 'stage', 'loops', 'stage_seq', 'stages', 'parent', 'after', 'held']) t[k] = d[k];
+      t.updated_at = at; t.rev = (t.rev || 0) + 1;
+      break;
+    }
     case 'run_queued':
       s.runs[d.id] = {...d, state: 'queued', want: 'run', queued_at: at, seq};
       queuedWork(s, s.runs[d.id]);
@@ -226,7 +232,7 @@ function applyEvent(s, e, at, seq) {
 // nothing but the seq.
 const parts = {
   task_created: ['tasks'], task_edited: ['tasks'], task_staged: ['tasks'], task_noted: ['tasks'], task_sourced: ['tasks'],
-  task_linked: ['tasks'], task_source_acked: ['tasks'], task_status_set: ['tasks'], task_moved: ['tasks'], task_started: ['tasks'],
+  task_linked: ['tasks'], task_source_acked: ['tasks'], task_status_set: ['tasks'], task_restored: ['tasks'], task_moved: ['tasks'], task_started: ['tasks'],
   task_held: ['tasks'], plan_drafted: ['tasks'], plan_applied: ['tasks'],
   run_queued: ['runs', 'tasks'], run_observed: ['runs', 'tasks'], run_starting: ['runs'], run_stop_requested: ['runs'],
   run_canceled: ['runs'], run_abandoned: ['runs'], run_answered: ['runs'], run_sent: ['runs'], run_interrupt_requested: ['runs'],
@@ -364,7 +370,7 @@ function situation(s, t) {
   const why = sourceWaits(t);
   if (why) return {kind: 'waiting', reason: why};
   let last = null;
-  for (const r of runs) if (!last || (r.seq || 0) > (last.seq || 0) || (r.seq || 0) === (last.seq || 0) && r.queued_at > last.queued_at) last = r;
+  for (const r of runs) if (!(r.state === 'canceled' && r.reason === 'undone') && (!last || (r.seq || 0) > (last.seq || 0) || (r.seq || 0) === (last.seq || 0) && r.queued_at > last.queued_at)) last = r; // a run an undo canceled never counts
   if (last && last.stage === 'merge' && (last.seq || 0) > (t.start_seq || 0)) return mergeSituation(last);
   const kids = Object.values(s.tasks).filter(k => k.parent === t.id);
   if (kids.some(k => k.status !== 'canceled')) {

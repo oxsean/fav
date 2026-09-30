@@ -12,6 +12,7 @@ const StageMerge = "merge"
 const (
 	WhyMergeConflict = "merge_conflict" // waiting: merging its branch into its parent's stopped on conflicts
 	WhyStale         = "stale"          // queued: its stage's verdict is about an older commit; the stage runs again
+	WhyUndone        = "undone"         // run_canceled: an undo took back the done that queued it
 )
 
 // BranchOf is the branch task id works on.

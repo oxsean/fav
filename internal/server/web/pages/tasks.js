@@ -74,12 +74,15 @@ export function Tasks({store, commands, toasts, wire, router, session, clock = (
   const go = (task, {push = false} = {}) => router.go({page: 'tasks', view: route.view || 'list', ...(task ? {task} : {})}, {replace: !push});
 
   const failed = e => toasts.show({text: unsure.includes(e.code) ? f('app.unsure', e.code) : f('app.failed', e.code || String(e.message || e)), tone: 'danger'});
-  const send = (method, params, key) => commands.send(method, params, {key}).catch(e => { failed(e); throw e; });
+  const send = (method, params, key, id) => commands.send(method, params, {key, id}).catch(e => { failed(e); throw e; });
   const busy = task => !!task && (commands.state('task:' + task.id) === 'pending' || commands.state('new') === 'pending');
   const quiet = p => p.catch(() => {});
-  const reversible = (task, method, params, back, text) => quiet(send(method, params, 'task:' + task.id).then(() => toasts.show({text,
-    undo: () => quiet(send(back.method, back.params, 'task:' + task.id))})));
-  const setStatus = (task, status, text) => reversible(task, 'task.set_status', {id: task.id, status}, {method: 'task.set_status', params: {id: task.id, status: task.status}}, text);
+  const reversible = (task, method, params, text) => {
+    const id = commands.newID();
+    return quiet(send(method, params, 'task:' + task.id, id).then(() => toasts.show({text,
+      undo: () => quiet(send('task.undo', {id: task.id, command: id}, 'task:' + task.id))})));
+  };
+  const setStatus = (task, status, text) => reversible(task, 'task.set_status', {id: task.id, status}, text);
 
   const needAgents = () => {
     if (agents !== null) return;
@@ -190,7 +193,7 @@ export function Tasks({store, commands, toasts, wire, router, session, clock = (
       onDrop=${(id, c) => {
         const x = st.tasks[id], d = tk.drop(st, x, c);
         const text = f('toast.moved.board', x.title, t('col.' + c));
-        if (d.undo) reversible(x, d.method, d.params, d.undo, text);
+        if (d.undo) reversible(x, d.method, d.params, text);
         else quiet(send(d.method, d.params, 'task:' + id).then(() => toasts.show({text})));
       }}
       onRefused=${(id, c) => { const d = tk.drop(st, st.tasks[id], c); if (d?.why) toasts.show({text: t('board.no.' + d.why), tone: 'warning'}); }}
@@ -262,7 +265,7 @@ export function Tasks({store, commands, toasts, wire, router, session, clock = (
     move: () => html`<${Move} store=${store} task=${modal.task} busy=${busy(modal.task)} onClose=${close} onMove=${(parent, after) => {
       const x = modal.task;
       close();
-      reversible(x, 'task.move', {id: x.id, parent, after}, {method: 'task.move', params: {id: x.id, parent: x.parent || '', after: x.after || []}}, f('toast.moved', x.title));
+      reversible(x, 'task.move', {id: x.id, parent, after}, f('toast.moved', x.title));
     }} />`,
     plan: () => {
       const x = st.tasks[modal.task.id] || modal.task;

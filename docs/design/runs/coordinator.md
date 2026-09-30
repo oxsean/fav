@@ -61,7 +61,7 @@ run `state` 转移表（终态单调，重复事件无副作用）：
 
 ## 事件
 
-`task_created` `task_edited` `task_status_set` `run_queued` `run_starting` `run_observed{state, exit_code, reason, detail, attention, ask, note, last, usage, stream, requests, sends, caps, doing, turn, session, node_rev}` `run_stop_requested` `run_canceled` `run_abandoned` `run_answered{id, answer}` `run_sent{id, send}` `run_interrupt_requested{id, turn, ask, by}`。
+`task_created` `task_edited` `task_status_set` `task_restored{id, status, auto, start_seq, merged, stage, loops, stage_seq, stages, parent, after, held}`（撤销：逐项放回） `run_queued` `run_starting` `run_observed{state, exit_code, reason, detail, attention, ask, note, last, usage, stream, requests, sends, caps, doing, turn, session, node_rev}` `run_stop_requested` `run_canceled` `run_abandoned` `run_answered{id, answer}` `run_sent{id, send}` `run_interrupt_requested{id, turn, ask, by}`。
 
 - `run_observed` 带节点的 `requests` 整体覆盖；`sends` 按 id 合并（节点说的为准，协调器排着的保留）；`answers` 里请求已不在 `requests` 的删掉（节点取走了，或不再等）。run 结束时 `requests`、`answers` 清空，还是 queued 的消息改 failed，但有会话时 `after`、`interrupt` 方式的留着（见下面「续接」）。
 - `run_queued` 带 `takes` 时，父运行里这些消息改 sent。`run_answered` 替换同一请求之前的回答。`run_sent` 的 id 已有时只改它的 `state`（协调器宣布留着的消息失败）。`run_interrupt_requested` 只在 run 未结束时记进 `Run.interrupt`（最新的一次）。
@@ -71,6 +71,7 @@ run `state` 转移表（终态单调，重复事件无副作用）：
 - 写命令必带 `command_id`。信封里存收据：`{id, method, digest(params), result}`，`result` 是第一次的完整应答（事件应用之后的 task / run）。
 - 收据按（调用者, `command_id`）存，别人的同一个 id 不会拿到它。重放：method 和 digest 相同 → 调用者仍看得见结果就返回收据里的结果，看不见回 `not_found`；不同 → `conflict`。
 - 没有产生事件的成功命令（no-op）不写收据，直接回当前结果。
+- 撤销：`task.undo{id, command}` 撤回调用者自己的一条 `task.set_status`（改成 canceled 的除外）或 `task.move`。协调器折叠日志时（启动时重放也一样）在内存里按收据记下这类命令之前任务的样子和它之后任务的 `rev`；任务之后又被改过（`rev` 不同，撤销过一次也算）回 `conflict changed`，不是这个任务的命令回 `not_found`；完成排了合并 run 的，合并还在排队就取消（`reason: undone`），否则 `conflict merge started`。规则见 [../tasks/workflows.md](../tasks/workflows.md)「撤销」。
 - 超时不代表没执行：客户端重试用同一个 `command_id`（CLI 的写命令超时后同一个 id 最多再发两次）。
 
 ## 调度与对账

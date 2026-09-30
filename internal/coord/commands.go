@@ -118,7 +118,7 @@ var readMethods = []string{remote.MHello, remote.MList, remote.MMessages, remote
 	remote.MChecks, remote.MLive, remote.MEcho, node.MDirs}
 
 // Methods are the client methods.
-var Methods = []string{MStateGet, MTaskGet, MTaskCreate, MTaskEdit, MTaskStatus, MRunDispatch, MRunStop, MRunAbandon, MRunTail, MRunOutputPage, MRunOutputWatch,
+var Methods = []string{MStateGet, MTaskGet, MTaskCreate, MTaskEdit, MTaskStatus, MTaskUndo, MRunDispatch, MRunStop, MRunAbandon, MRunTail, MRunOutputPage, MRunOutputWatch,
 	MAgentList, MMachineList, MStateWatch, MNodeCall, MRunPreview, MRunContinue, MRunAnswer, MRunSend, MRunMessages,
 	MProjectCreate, MProjectEdit, MProjectMember, MMachineShare, MTaskStart, MTaskMove,
 	MAgentDefList, MAgentDefGet, MAgentDefSave, MAgentDefRemove, MAgentDefShare, MInboxList, MUserOffboard, MTaskSync, MTaskLink, MTaskSourceAck, MTaskGate, MTaskMerge, MTaskPlan, MTaskPlanSave, MTaskPlanApply, MTaskMessage, MTaskMessagePreview, MRunInterrupt, MMachinesWatch, MInboxWatch,
@@ -254,6 +254,8 @@ func (c *Coord) HandlerFor(p Principal) wire.Handler {
 			return c.command(p, r, c.taskEdit, taskView)
 		case MTaskStatus:
 			return c.command(p, r, c.taskStatus, taskView)
+		case MTaskUndo:
+			return c.command(p, r, c.taskUndo, taskView)
 		case MTaskStart:
 			return c.command(p, r, c.taskStart, taskView)
 		case MTaskMove:

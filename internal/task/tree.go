@@ -203,11 +203,11 @@ type Situation struct {
 	Run    string `json:"run,omitempty"` // the run it is about
 }
 
-// Latest is task id's newest run, nil when it has none.
+// Latest is task id's newest run, nil when it has none; a run an undo canceled before it started never counts.
 func (s *State) Latest(id string) *Run {
 	var out *Run
 	for _, r := range s.Runs {
-		if r.Task == id && (out == nil || r.Seq > out.Seq || r.Seq == out.Seq && r.QueuedAt.After(out.QueuedAt)) {
+		if r.Task == id && !(r.State == Canceled && r.Reason == WhyUndone) && (out == nil || r.Seq > out.Seq || r.Seq == out.Seq && r.QueuedAt.After(out.QueuedAt)) {
 			out = r
 		}
 	}

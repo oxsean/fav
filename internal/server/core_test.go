@@ -415,8 +415,9 @@ func TestPageAPIAnswersAreTheServersShapes(t *testing.T) {
 // shapes.
 func TestFrameWritesAndListsAreTheCoordinatorsShapes(t *testing.T) {
 	params := map[string]func() any{
-		coord.MTaskStatus: func() any { return new(task.TaskStatus) }, coord.MRunDispatch: func() any { return new(coord.Dispatch) },
-		coord.MRunStop: func() any { return new(task.RunRef) }, coord.MRunAnswer: func() any { return new(coord.Answer) },
+		coord.MTaskStatus: func() any { return new(task.TaskStatus) }, coord.MTaskUndo: func() any { return new(coord.TaskUndo) },
+		coord.MRunDispatch: func() any { return new(coord.Dispatch) },
+		coord.MRunStop:     func() any { return new(task.RunRef) }, coord.MRunAnswer: func() any { return new(coord.Answer) },
 		coord.MRunContinue: func() any { return new(coord.Continue) }, coord.MRunOutputPage: func() any { return new(coord.OutputPageParams) },
 		coord.MTaskCreate: func() any { return new(coord.TaskCreate) }, coord.MTaskStart: func() any { return new(coord.TaskRef) },
 		coord.MTaskMerge: func() any { return new(coord.TaskRef) }, coord.MTaskMove: func() any { return new(task.TaskMove) },
@@ -433,8 +434,9 @@ func TestFrameWritesAndListsAreTheCoordinatorsShapes(t *testing.T) {
 		coord.MAgentDefRemove: func() any { return new(task.AgentDefRef) },
 	}
 	results := map[string]func() any{
-		coord.MTaskStatus: func() any { return new(task.Task) }, coord.MRunDispatch: func() any { return new(task.Run) },
-		coord.MRunStop: func() any { return new(task.Run) }, coord.MRunAnswer: func() any { return new(task.Run) },
+		coord.MTaskStatus: func() any { return new(task.Task) }, coord.MTaskUndo: func() any { return new(task.Task) },
+		coord.MRunDispatch: func() any { return new(task.Run) },
+		coord.MRunStop:     func() any { return new(task.Run) }, coord.MRunAnswer: func() any { return new(task.Run) },
 		coord.MRunContinue: func() any { return new(task.Run) }, coord.MRunOutputPage: func() any { return new(coord.OutputPage) },
 		coord.MTaskCreate: func() any { return new(task.Task) }, coord.MTaskStart: func() any { return new(task.Task) },
 		coord.MTaskMerge: func() any { return new(task.Task) }, coord.MTaskMove: func() any { return new(task.Task) },

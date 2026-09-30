@@ -76,6 +76,7 @@ var methodAccess = map[string]access{
 	MTaskCreate:         writer,
 	MTaskEdit:           writer,
 	MTaskStatus:         writer,
+	MTaskUndo:           writer,
 	MTaskStart:          writer,
 	MTaskMove:           writer,
 	MAgentDefList:       reader,
@@ -305,7 +306,7 @@ func (c *Coord) sees(p Principal, e journal.Event) bool {
 	var s subject
 	json.Unmarshal(e.Data, &s)
 	switch e.Type {
-	case task.ETaskCreated, task.ETaskEdited, task.ETaskStatus:
+	case task.ETaskCreated, task.ETaskEdited, task.ETaskStatus, task.ETaskRestored:
 		return canRead(c.st, p, c.st.Tasks[s.ID])
 	case task.ERunQueued, task.ERunStarting, task.ERunObserved, task.ERunStopAsked, task.ERunCanceled, task.ERunAbandoned,
 		task.ERunAnswered, task.ERunSent, task.ERunInterrupt:

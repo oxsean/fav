@@ -143,6 +143,15 @@ func foldScenario() []journal.Envelope {
 		ev(task.ERunQueued, task.Run{ID: "rd1", Task: "td1", Machine: "mba", Agent: "fake", Dir: "/d"}),
 		ev(task.ERunQueued, task.Run{ID: "rd2", Task: "td2", Machine: "mba", Agent: "fake", Dir: "/d"}))
 	add(ev(task.ERunObserved, task.Observation{ID: "rd1", State: task.Running, NodeRev: 1}))
+	add(ev(task.ETaskCreated, task.Task{ID: "tu", Title: "undone", Dir: "/u", Status: task.StatusTodo}),
+		ev(task.ERunQueued, task.Run{ID: "ru1", Task: "tu", Machine: "mba", Agent: "fake", Dir: "/u"}))
+	add(ev(task.ERunObserved, task.Observation{ID: "ru1", State: task.Exited, NodeRev: 1, ExitCode: &exit0}))
+	add(ev(task.ERunQueued, task.Run{ID: "ru2", Task: "tu", Machine: "mba", Agent: "git", Dir: "/u", Stage: task.StageMerge}))
+	add(ev(task.ERunCanceled, task.RunRef{ID: "ru2", Reason: task.WhyUndone})) // its done undone: it waits to be accepted again
+	add(ev(task.ETaskCreated, task.Task{ID: "tr", Title: "restored", Dir: "/r", Status: task.StatusDone, Workflow: "feature", Flow: flow, Stage: "accept"}))
+	add(ev(task.ETaskStatus, task.TaskStatus{ID: "tr", Status: task.StatusTodo}), ev(task.ETaskStaged, task.TaskStage{ID: "tr", Stage: "review", Back: true}))
+	add(ev(task.ETaskRestored, task.TaskRestore{ID: "tr", Status: task.StatusTodo, Auto: true, StartSeq: 3, Stage: "accept", Loops: 1, StageSeq: 4,
+		Stages: []task.Staged{{At: started, Stage: "accept", Loops: 1}}, After: []string{"tu"}, Held: "bad_request: dir"}))
 	add(ev("some_future_event", map[string]string{"id": "t1"}))
 	return envs
 }
@@ -235,7 +244,7 @@ func sameFold(t *testing.T, out []byte, st *task.State) {
 	var goState any
 	gb, _ := json.Marshal(st)
 	json.Unmarshal(gb, &goState)
-	if runs, _ := page.(map[string]any)["runs"].(map[string]any); len(runs) != 16 || len(st.Runs) != 16 {
+	if runs, _ := page.(map[string]any)["runs"].(map[string]any); len(runs) != 18 || len(st.Runs) != 18 {
 		t.Fatalf("the page folded %d runs: %s", len(runs), out)
 	}
 	for id, x := range st.Tasks {

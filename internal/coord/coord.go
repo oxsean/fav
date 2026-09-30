@@ -33,6 +33,7 @@ const (
 	MTaskCreate         = "task.create"
 	MTaskEdit           = "task.edit"
 	MTaskStatus         = "task.set_status"
+	MTaskUndo           = "task.undo"
 	MRunDispatch        = "run.dispatch"
 	MRunStop            = "run.stop"
 	MRunAbandon         = "run.abandon"
@@ -146,6 +147,7 @@ type Coord struct {
 	mu       sync.Mutex
 	st       *task.State
 	receipts map[string]journal.Receipt
+	undos    map[string]*undoable // by receipt key: how each task.set_status or task.move is taken back
 	subs     map[*wire.Stream]*sub
 	ms       map[string]*machine
 	sent     map[string]time.Time // runs whose run.start went out, when
@@ -171,7 +173,7 @@ func Open(opt Options) (*Coord, error) {
 	if err != nil {
 		return nil, err
 	}
-	c := &Coord{opt: opt, unlock: unlock, st: task.New(), receipts: map[string]journal.Receipt{}, subs: map[*wire.Stream]*sub{},
+	c := &Coord{opt: opt, unlock: unlock, st: task.New(), receipts: map[string]journal.Receipt{}, undos: map[string]*undoable{}, subs: map[*wire.Stream]*sub{},
 		ms: map[string]*machine{}, sent: map[string]time.Time{}, acked: map[string][]string{}, ackDone: map[string]bool{}, missing: map[string]int{},
 		answered: map[string]map[string]agent.Answer{}, outs: map[string]*hub{}, topics: map[*wire.Stream]*topic{}, wake: make(chan struct{}, 1)}
 	if c.id, err = coordID(dir); err != nil {
@@ -187,7 +189,12 @@ func Open(opt Options) (*Coord, error) {
 			c.receipts[receiptKey(env.Who().ID, env.Command.ID)] = *env.Command
 		}
 		c.remember(env)
-		return c.st.Apply(env)
+		u := c.undoOf(env)
+		if err := c.st.Apply(env); err != nil {
+			return err
+		}
+		c.keepUndo(env, u)
+		return nil
 	})
 	if err != nil {
 		unlock()
@@ -289,9 +296,11 @@ func (c *Coord) commit(actor journal.Actor, cmd *journal.Receipt, events ...jour
 		ids = c.touched(events)
 		c.concerned(ids, concerned) // as they stood: someone the task stops waiting for is told too
 	}
+	u := c.undoOf(env)
 	if err := c.st.Apply(env); err != nil {
 		return err
 	}
+	c.keepUndo(env, u)
 	c.remember(env)
 	c.notify(before)
 	if sits != nil {

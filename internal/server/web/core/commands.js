@@ -59,11 +59,13 @@ export function createCommands({wire, newID = commandID}) {
 
   return {
     pending, hidden,
-    // send writes method(params); key (default: the method and params) names it for pending; hide is an id to leave
-    // out of the lists while it is out, and after it until the signal until changes.
-    send(method, params, {key = method + ' ' + JSON.stringify(params), hide: id = '', until = null} = {}) {
-      return attempt(key, {method, params, id: newID(), hide: id, until});
+    // send writes method(params) as command id (default: a new one, which an undo names); key (default: the method and
+    // params) names it for pending; hide is an id to leave out of the lists while it is out, and after it until the
+    // signal until changes.
+    send(method, params, {key = method + ' ' + JSON.stringify(params), hide: hideID = '', until = null, id = newID()} = {}) {
+      return attempt(key, {method, params, id, hide: hideID, until});
     },
+    newID,
     // show takes an id out of hidden at once (its write was undone).
     show: id => hide(id, false),
     // retry sends an unknown write again with its command id.
