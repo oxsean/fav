@@ -2,9 +2,11 @@ package server
 
 import (
 	"context"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
+	"net/url"
 	"slices"
 	"strings"
 	"sync/atomic"
@@ -151,7 +153,9 @@ func TestAFailureIsRecordedAsItsClassAlone(t *testing.T) {
 	if resultOf(derr) != "connect" {
 		t.Errorf("nothing listening: %q", resultOf(derr))
 	}
-	_, derr = (&Egress{allow: []netip.Prefix{netip.MustParsePrefix("0.0.0.0/0")}}).Client(time.Second).Get("http://no-such-host.invalid/x")
+	// ⚠️ A resolver that answers every name (a proxy's fake-IP DNS) never fails a real lookup, so the error is built.
+	derr = &url.Error{Op: "Get", URL: "http://no-such-host.invalid/x", Err: &net.OpError{Op: "dial", Net: "tcp",
+		Err: &net.DNSError{Err: "no such host", Name: "no-such-host.invalid", IsNotFound: true}}}
 	if resultOf(derr) != "dns" {
 		t.Errorf("no such host: %q", resultOf(derr))
 	}
