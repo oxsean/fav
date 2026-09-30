@@ -70,6 +70,7 @@ run 结束时节点记录 `{dir, branch, head, commits, diffstat, warnings, pr}`
   - 节点在父任务的工作树里 `git merge --no-ff`；冲突就 `merge --abort`，run 以 `merge_conflict` 结束、带冲突文件，任务进 `waiting: merge_conflict`。
   - 在父任务的工作树里自己合完提交后，`task.merge`（网页「重试合并」、`tend task merge`）再排一次，已合入就直接成功。
   - 合并成功后跑 `cleanup` hook、删掉子任务的工作树（分支保留），任务才写 done；依赖和父任务都以 done 为准，所以「先完成的已经合进集成分支」自然成立。
+  - 重开的任务清掉 `merged`，重开之前的合并 run 不再算数（见 [workflows.md](workflows.md)「重开」）；再完成时照样先合并，没有新提交就是一次空合并。
 - **并行**：协调器按「目录 + 分支」判断占用（只读副本各自独立），同一 checkout 下的兄弟任务并行；合进同一父分支的合并 run 互相串行。
 - **跨机器**：没有 remote 时，一棵树的分支都在最先建分支的机器上（`work_on`），之后的 run 自动派到那台；显式指定别的机器会被拒并说明。有 remote 时每个 run 开始前 fetch、结束后 push，别的机器可以接着做（节点测试覆盖了另一台机器评审同一提交）。
 - **交付物**：`tend run note --pr <url>` 报告 PR；`tend run show` 和网页详情显示分支、head、提交数、diffstat、丢弃数、警告。没有父任务的任务完成后显示「可合并」和分支名，合进 base 仍由人来。

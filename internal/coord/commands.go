@@ -577,7 +577,11 @@ func (c *Coord) taskStatus(who Principal, r *wire.Request) (string, []journal.Ev
 		}
 		return t.ID, c.finish(t), nil
 	}
-	return t.ID, []journal.Event{journal.NewEvent(task.ETaskStatus, p)}, nil
+	events := []journal.Event{journal.NewEvent(task.ETaskStatus, p)}
+	if task.Finished(t.Status) && t.Flow.StageOf(t.Stage) != nil {
+		events = append(events, journal.NewEvent(task.ETaskStaged, task.TaskStage{ID: t.ID, Stage: t.Flow.Back(t.Stage), Loops: t.Loops, Back: true}))
+	}
+	return t.ID, events, nil
 }
 
 func (c *Coord) runDispatch(who Principal, r *wire.Request) (string, []journal.Event, error) {

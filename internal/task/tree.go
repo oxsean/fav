@@ -238,7 +238,7 @@ func (s *State) Situation(t *Task) Situation {
 	if why := SourceWaits(t); why != "" {
 		return Situation{Kind: SitWaiting, Reason: why}
 	}
-	if last := s.Latest(t.ID); last != nil && last.Stage == StageMerge {
+	if last := s.Latest(t.ID); last != nil && last.Stage == StageMerge && last.Seq > t.StartSeq {
 		return mergeSituation(last)
 	}
 	if kids := s.Children(t.ID); slices.ContainsFunc(kids, func(k *Task) bool { return k.Status != StatusCanceled }) {
@@ -248,7 +248,7 @@ func (s *State) Situation(t *Task) Situation {
 		if t.Flow == nil {
 			return Situation{Kind: SitWaiting, Reason: WhyAccept}
 		}
-	} else if last := s.Latest(t.ID); last != nil && last.Stage == StagePlan && (!t.Auto || last.Seq > t.StartSeq) {
+	} else if last := s.Latest(t.ID); last != nil && last.Stage == StagePlan && last.Seq > t.StartSeq {
 		return planSituation(t, last)
 	}
 	if t.Flow != nil && t.Auto { // a workflow goes stage by stage once started
@@ -258,7 +258,7 @@ func (s *State) Situation(t *Task) Situation {
 		return s.stageSituation(t)
 	}
 	last := s.Latest(t.ID)
-	if last != nil && (!t.Auto || last.Seq > t.StartSeq) { // what came of its latest try
+	if last != nil && last.Seq > t.StartSeq { // what came of its latest try
 		switch {
 		case last.Waiting():
 			return Situation{Kind: SitWaiting, Reason: last.Attention, Run: last.ID}

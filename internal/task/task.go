@@ -70,7 +70,7 @@ type Task struct {
 	Tags      []string  `json:"tags,omitempty"`
 	Status    string    `json:"status"`
 	Auto      bool      `json:"auto,omitempty"`      // started: the coordinator dispatches it once what it comes after is done
-	StartSeq  int64     `json:"start_seq,omitempty"` // the seq of its last start; runs queued before it are earlier tries
+	StartSeq  int64     `json:"start_seq,omitempty"` // the seq of its last start or reopening; runs queued before it are earlier tries
 	Held      string    `json:"held,omitempty"`      // why the coordinator could not dispatch it; cleared by an edit or a start
 	Source    *Source   `json:"source,omitempty"`    // the issue a requirement comes from
 	Issue     string    `json:"issue,omitempty"`     // the sub-issue that mirrors it on its root's tracker
@@ -382,6 +382,9 @@ func (s *State) apply(e journal.Event, seq int64, at time.Time) error {
 		t := s.Tasks[d.ID]
 		if t == nil {
 			return fmt.Errorf("no task %s", d.ID)
+		}
+		if Finished(t.Status) && !Finished(d.Status) { // reopened: what came before no longer stands
+			t.Auto, t.StartSeq, t.Merged = false, seq, false
 		}
 		t.Status, t.UpdatedAt = d.Status, at
 		t.Rev++

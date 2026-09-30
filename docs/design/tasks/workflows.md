@@ -67,6 +67,7 @@ max_loops: 2
 - **开始**：`task.start` 把任务和它整棵子树里未完成的任务标为自动（`auto`，记下 `start_seq`），backlog 的变成 todo。之后由协调器的 `flow()` 在每次提交后推进：`ready` 的以任务主人的身份派发（照常走权限和可见性检查），失败就写 `task_held`；`completing` 的写成 done。没开始的任务照旧手动派发，`waiting: dispatch` 是它们的常态，不进收件箱也不发通知。
 - **依赖**：上游 `done` 才算满足；有分支的任务合进父任务的集成分支之后才写 done（见 [execution.md](execution.md)「实现」）。上游被取消，下游进 `waiting: after_canceled`，由人决定改依赖还是取消。
 - **重试** = 再次 `task.start`：`start_seq` 之前的 run 算作更早的尝试，不再决定现状；编辑任务或再次开始都会清掉 `held`。
+- **重开**：已结束（done 或 canceled）的任务改回 todo 或 backlog（`task.set_status`，重新打开、撤销完成、先不开始都是它）是一条尝试的分界线：任务不再是自动的（`auto` 清掉），`start_seq` 记成这次改状态的 seq，`merged` 清掉。之前的 run（包括合并 run）都算更早的尝试，不再决定现状，所以协调器不会把它再标完成；改回 todo 而没有新 run 时它是 `waiting: dispatch`。走 workflow 的任务在同一条命令里回到当前阶段的 `Flow.Back`（和打回一样，`loops` 不加）。要再跑就再开始或派发。
 - **父任务**在子任务完成前从不派 run。子任务全部完成后，没有 workflow 的父任务进 `waiting: accept`，由人标完成；有 workflow 的走自己的阶段。
 - 树最多三层；`task.move` 改 parent 和 after，拒绝成环、跨项目和超过深度。
 - 随机事件序列测试（`internal/task/tree_test.go`）在每一步检查不变式：每个未完成、非 backlog 的任务恰好落在 running / queued / waiting 之一，并带原因。

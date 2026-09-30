@@ -121,6 +121,7 @@ func foldScenario() []journal.Envelope {
 		ev(task.ERunObserved, task.Observation{ID: "r11", State: task.Exited, NodeRev: 1, ExitCode: &exit1, Reason: task.WhyMergeConflict,
 			Work: &agent.Work{Conflict: []string{"a.go"}}}))
 	add(ev(task.ETaskStatus, task.TaskStatus{ID: "t12", Status: task.StatusCanceled}), ev(task.ETaskStatus, task.TaskStatus{ID: "t11", Status: task.StatusDone}))
+	add(ev(task.ETaskStatus, task.TaskStatus{ID: "t11", Status: task.StatusTodo})) // reopened after its merge
 	add(ev(task.ETaskStaged, task.TaskStage{ID: "t10", Stage: "review"}))
 	add(ev(task.ETaskLinked, task.Linked{ID: "t11", Issue: "https://git.example/a/b/issues/9"}), ev(task.ETaskLinked, task.Linked{ID: "t10", PR: "https://git.example/a/b/pulls/10"}))
 	add(ev(task.ERunQueued, task.Run{ID: "r12", Task: "t10", Machine: "mba", Agent: "fake", Dir: "/src", Stage: "review", Judge: true,

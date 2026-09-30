@@ -101,6 +101,7 @@ function applyEvent(s, e, at, seq) {
     }
     case 'task_status_set': {
       const t = need(s.tasks, d.id, 'task');
+      if (finished(t.status) && !finished(d.status)) { t.auto = undefined; t.start_seq = seq; t.merged = undefined; } // reopened: what came before no longer stands
       t.status = d.status; t.updated_at = at; t.rev = (t.rev || 0) + 1;
       break;
     }
@@ -316,6 +317,7 @@ function planSituation(t, last) {
   if (last.reason && last.state !== 'exited') return {kind: 'waiting', reason: last.reason, run: last.id};
   return {kind: 'waiting', reason: 'no_plan', run: last.id};
 }
+const finished = status => status === 'done' || status === 'canceled';
 function mergeSituation(last) {
   if (last.worked && last.worked.merged) return {kind: 'queued', reason: 'completing', run: last.id};
   if (last.reason === 'merge_conflict') return {kind: 'waiting', reason: 'merge_conflict', run: last.id};
@@ -363,14 +365,14 @@ function situation(s, t) {
   if (why) return {kind: 'waiting', reason: why};
   let last = null;
   for (const r of runs) if (!last || (r.seq || 0) > (last.seq || 0) || (r.seq || 0) === (last.seq || 0) && r.queued_at > last.queued_at) last = r;
-  if (last && last.stage === 'merge') return mergeSituation(last);
+  if (last && last.stage === 'merge' && (last.seq || 0) > (t.start_seq || 0)) return mergeSituation(last);
   const kids = Object.values(s.tasks).filter(k => k.parent === t.id);
   if (kids.some(k => k.status !== 'canceled')) {
     if (kids.some(k => k.status !== 'done' && k.status !== 'canceled')) return {kind: 'queued', reason: 'children'};
     if (!t.flow) return {kind: 'waiting', reason: 'accept'};
-  } else if (last && last.stage === 'plan' && (!t.auto || (last.seq || 0) > (t.start_seq || 0))) return planSituation(t, last);
+  } else if (last && last.stage === 'plan' && (last.seq || 0) > (t.start_seq || 0)) return planSituation(t, last);
   if (t.flow && t.auto) return held(s, t) || stageSituation(s, t, last);
-  if (last && (!t.auto || (last.seq || 0) > (t.start_seq || 0))) {
+  if (last && (last.seq || 0) > (t.start_seq || 0)) {
     const waiting = !openStates.has(last.state) && (last.attention === 'asked' || last.attention === 'permission');
     if (waiting) return {kind: 'waiting', reason: last.attention, run: last.id};
     if (last.state === 'exited' && last.exit_code === 0 && !last.attention) {
