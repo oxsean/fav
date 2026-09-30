@@ -147,6 +147,7 @@ func (s *Syncer) binding(ctx context.Context, x store.Tracker) error {
 		if err := s.scan(ctx, x, tr, set); err != nil {
 			return err
 		}
+		s.team.TrackerResult(x.ID, s.now(), time.Time{}, "", "")
 	}
 	if err := s.links(ctx, x, tr, set); err != nil {
 		return err

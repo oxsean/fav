@@ -220,6 +220,22 @@ func TestALostAnswerLeavesOneCommentAndAClosedIssueWaits(t *testing.T) {
 	}
 }
 
+func TestAScanThatFindsNothingIsASuccess(t *testing.T) {
+	r := newSyncRig(t)
+	r.g.Open(2, "Unrelated", "no label")
+	r.pass(0)
+	if x := r.tracker(); !x.LastOK.Equal(r.clock) || x.LastError != "" {
+		t.Fatalf("the tracker answered: the binding is fine: %+v", x)
+	}
+	r.g.Down = true
+	r.pass(61 * time.Second)
+	r.g.Down = false
+	r.pass(61 * time.Second)
+	if x := r.tracker(); !x.LastOK.Equal(r.clock) || x.LastError != "" {
+		t.Fatalf("and fine again once it answers: %+v", x)
+	}
+}
+
 func TestAnAcceptedIssueGetsTheAcceptLabelEvenWhereTheRepositoryLacksIt(t *testing.T) {
 	r := newSyncRig(t)
 	set := DefaultSettings()
