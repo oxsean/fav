@@ -1,0 +1,17 @@
+#!/bin/sh
+# gofmt the staged Go files as they are staged. A file staged whole is formatted and staged again; one staged in part
+# is left alone and the commit fails, since staging it again would take in what was left out.
+# Enable once per clone: git config core.hooksPath .githooks
+files=$(git diff --cached --name-only --diff-filter=ACMR -- '*.go')
+[ -z "$files" ] && exit 0
+status=0
+for f in $files; do
+	[ -z "$(git show ":$f" | gofmt -l)" ] && continue
+	if git diff --quiet -- "$f"; then
+		gofmt -w "$f" && git add "$f"
+	else
+		printf 'pre-commit: %s is staged in part and its staged text is not gofmt-formatted; format it and stage it again\n' "$f" >&2
+		status=1
+	fi
+done
+exit $status
