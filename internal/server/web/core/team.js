@@ -132,3 +132,107 @@ export const auditRefused = e => auditGroups.refused.includes(e.kind);
 
 // ⚠️ How a sign-in rule matches (store.Admit*): a verified email, a verified email's domain, provider:username.
 export const admitKinds = ['domain', 'email', 'login'];
+
+// ⚠️ A project's hooks (task.Project.Hooks) and the roles its defaults name an agent for (workflow stages' roles).
+export const hookNames = ['setup', 'before_run', 'check', 'cleanup'];
+export const roleNames = ['implement', 'review', 'test', 'planner'];
+
+const argv = text => text.trim().split(/\s+/).filter(Boolean);
+
+// draftOf is project p as its settings form edits it: hooks as one line each, repositories as copies.
+export const draftOf = p => ({
+  name: p.name || '', owner: p.owner || '', context: p.context || '',
+  repos: (p.repos || []).map(r => ({name: r.name || '', remote: r.remote || '', base: r.base || '', worktrees: !!r.worktrees,
+    dirs: Object.entries(r.dirs || {}).map(([machine, path]) => ({machine, path}))})),
+  machine: p.defaults?.machine || '', workflow: p.defaults?.workflow || '',
+  roles: Object.fromEntries(roleNames.map(r => [r, p.defaults?.roles?.[r] || ''])),
+  hooks: Object.fromEntries(hookNames.map(h => [h, (p.hooks?.[h] || []).join(' ')])),
+});
+
+// reposOf are the draft's repositories as a project keeps them: fields trimmed, empty ones and rows without a name or
+// a path left out.
+export const reposOf = d => d.repos.filter(r => r.name.trim()).map(r => {
+  const out = {name: r.name.trim()};
+  if (r.remote.trim()) out.remote = r.remote.trim();
+  if (r.base.trim()) out.base = r.base.trim();
+  const dirs = r.dirs.filter(x => x.machine && x.path.trim());
+  if (dirs.length) out.dirs = Object.fromEntries(dirs.map(x => [x.machine, x.path.trim()]));
+  if (r.worktrees) out.worktrees = true;
+  return out;
+});
+
+const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+
+// projectEditOf is what project.edit sends for the draft: the project's id and only the fields that changed (the
+// defaults whole, keeping the agent it names outside the roles), or null when nothing did.
+export function projectEditOf(p, d) {
+  const e = {};
+  if (d.name.trim() && d.name.trim() !== p.name) e.name = d.name.trim();
+  if (d.owner && d.owner !== (p.owner || '')) e.owner = d.owner;
+  if (d.context !== (p.context || '')) e.context = d.context;
+  const repos = reposOf(d);
+  if (!same(repos, p.repos || [])) e.repos = repos;
+  const roles = Object.fromEntries(Object.entries(d.roles).filter(([, a]) => a));
+  const defaults = {...(p.defaults?.agent ? {agent: p.defaults.agent} : {}), ...(d.machine ? {machine: d.machine} : {}),
+    ...(Object.keys(roles).length ? {roles} : {}), ...(d.workflow ? {workflow: d.workflow} : {})};
+  const was = p.defaults || {};
+  if (!same([defaults.workflow, defaults.machine, defaults.agent, defaults.roles || {}], [was.workflow, was.machine, was.agent, was.roles || {}])) e.defaults = defaults;
+  const hooks = Object.fromEntries(hookNames.map(h => [h, argv(d.hooks[h])]).filter(([, a]) => a.length));
+  const wasHooks = Object.fromEntries(Object.entries(p.hooks || {}).filter(([, a]) => a?.length));
+  if (!same(Object.entries(hooks).sort(), Object.entries(wasHooks).sort())) e.hooks = hooks;
+  return Object.keys(e).length ? {id: p.id, ...e} : null;
+}
+
+// dirsToCheck are the draft's checkouts: each repository's machine and path.
+export const dirsToCheck = d => d.repos.flatMap(r => r.dirs.filter(x => x.machine && x.path.trim()).map(x => ({repo: r.name, machine: x.machine, path: x.path.trim()})));
+
+// parentOf and baseOf split a path on either separator: the directory it is in, and its last name.
+export const parentOf = path => path.replace(/[\\/]+$/, '').replace(/[\\/][^\\/]*$/, '') || path.slice(0, 1);
+export const baseOf = path => path.split(/[\\/]/).filter(Boolean).pop() || '';
+
+// dirVerdict is what project.dirs on the path's parent says of the path: git (a checkout), plain (there, not a
+// checkout), missing, or outside (the machine lets no run go there).
+export function dirVerdict(r, path) {
+  if (r?.outside) return 'outside';
+  if (!r?.exists) return 'missing';
+  const d = (r.dirs || []).find(x => x.name === baseOf(path));
+  return !d ? 'missing' : d.git ? 'git' : 'plain';
+}
+
+// flowName is the name a workflow definition gives itself in its front matter, or ''.
+export function flowName(text) {
+  const head = /^---\s*\n([\s\S]*?)^---\s*$/m.exec(text)?.[1] || '';
+  return (/^name:\s*["']?([A-Za-z0-9][\w.-]*)["']?\s*$/m.exec(head) || [])[1] || '';
+}
+
+// ⚠️ A new workflow's starting text, in the definition format (internal/workflow).
+export const flowTemplate = `---
+name: my-flow
+description: what it is for
+max_loops: 2
+stages:
+  - {name: implement, role: implement, check: true}
+  - {name: review, role: review, output: verdict, on_rework: implement}
+  - {name: accept, gate: human}
+---
+## implement
+
+{{task.brief}}
+
+{{#rework}}Round {{loops}}: fix this first:
+
+{{rework.notes}}
+{{/rework}}
+`;
+
+// ⚠️ The trackers a project binds to (tracker.Kind*) and where each lives unless it is self-hosted.
+export const trackerKinds = {github: 'https://github.com', gitea: '', gitlab: 'https://gitlab.com'};
+
+// trackerState is how a binding syncs: stopped (its token was refused), paused (rate limited) or ok.
+export const trackerState = x => (x.stopped ? 'stopped' : x.paused_until ? 'paused' : 'ok');
+
+// issueURL is issue n of binding x on its tracker.
+export const issueURL = (x, n) => `${x.base.replace(/\/$/, '')}/${x.repo}/${x.kind === 'gitlab' ? '-/' : ''}issues/${n}`;
+
+// ⚠️ A binding's settings as the server takes them (server.TrackerSettings.check): polled every 30 to 3600 seconds.
+export const pollRange = [30, 3600];

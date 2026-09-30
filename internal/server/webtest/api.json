@@ -32,5 +32,19 @@
     {"id": "n3", "kind": "node", "name": "old-box", "owner": "u_d", "created": "2026-09-10T09:00:00Z"}
   ],
   "POST /api/machines": {"id": "n4", "token": "tend_node_example_secret", "command": "tend node install-service --connect https://tend.example.com --token-file ~/.config/tend/node-token"},
-  "POST /api/invites": {"url": "https://tend.example.com/#invite-example", "expires": "2026-10-03T14:32:00Z"}
+  "POST /api/invites": {"url": "https://tend.example.com/#invite-example", "expires": "2026-10-03T14:32:00Z"},
+  "GET /api/trackers": [
+    {"id": "k1", "project": "p1", "kind": "github", "base": "https://github.com", "repo": "shop/shop", "bot": "tend-bot",
+      "settings": {"label": "tend", "comment": true, "on_accept": "close", "accept_label": "tend:accepted", "poll": 60, "pr": true},
+      "hook": "https://tend.example.com/hooks/k1", "polled": "2026-09-30T14:31:00Z", "last_ok": "2026-09-30T14:31:00Z", "issues": 3, "failing": 1}
+  ],
+  "POST /api/trackers": {"id": "k2", "project": "p2", "kind": "gitea", "base": "https://git.example.com", "repo": "docs/site", "bot": "tend-bot",
+    "settings": {"label": "tend", "comment": true, "on_accept": "close", "accept_label": "tend:accepted", "poll": 60},
+    "hook": "https://tend.example.com/hooks/k2", "hook_secret": "example_hook_secret", "issues": 0, "failing": 0},
+  "GET /api/trackers/issues": [
+    {"number": 42, "task": "t1", "written": "2026-09-30T14:00:00Z", "pr": "https://github.com/shop/shop/pull/7"},
+    {"number": 43, "task": "t4", "last_error": "422 Unprocessable Entity"},
+    {"number": 40, "closed": true, "dirty": true}
+  ],
+  "GET /api/trackers/preview": {"body": "**tend** is working on this: Refund emails\n\n- [x] Cart totals\n- [ ] Refund emails"}
 }

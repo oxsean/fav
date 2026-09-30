@@ -3,7 +3,8 @@
 // sharing changed by its owner, a machine added and its token shown once, a node token moved and revoked, Enter
 // opening the runs page on a machine, a phone showing a machine's facts without the controls. Team: a person's role,
 // disabling and handing over, an invitation and the sign-in rules, the log's filters, a project created and its
-// members changed by who may, and a phone that only shows.
+// members changed by who may, and a phone that only shows. A project's drawer: its settings saved as changed, its
+// checkouts checked and its workflows; its issue sync (state, log, comment preview, settings, token, unbinding, binding).
 process.env.TZ = 'UTC';
 import {readFileSync} from 'node:fs';
 import {render} from '../web/vendor/preact.mjs';
@@ -20,6 +21,7 @@ import {signal} from '../web/vendor/signals-core.mjs';
 import {html, KeysContext} from '../web/ui/base.js';
 import {App} from '../web/pages/app.js';
 import {RUNS_FILTER_KEY} from '../web/pages/runs.js';
+import * as tm from '../web/core/team.js';
 import {install} from './dom.js';
 import {settle} from './fake.js';
 import {NOW, team} from './rig.js';
@@ -28,7 +30,7 @@ import {test, eq, ok, run, until} from './check.js';
 const css = ['base.css', 'components.css', 'pages.css'].map(f => readFileSync(new URL(`../web/css/${f}`, import.meta.url), 'utf8')).join('\n');
 const cssClasses = new Set([...css.matchAll(/\.([a-zA-Z][\w-]*)/g)].map(m => m[1]));
 const classesOf = s => new Set([...s.matchAll(/class="([^"]*)"/g)].flatMap(m => m[1].split(/\s+/).filter(Boolean)));
-const wordsLeft = s => s.match(/\b(mach|team|secret|api|m|role|app|home|confirm|form|why|status|ui|picker)\.[a-zA-Z_]+\b/g);
+const wordsLeft = s => s.match(/\b(mach|team|proj|secret|api|m|role|app|home|confirm|form|why|status|ui|picker)\.[a-zA-Z_]+\b/g);
 const press = (key, more = {}) => ({key, target: globalThis.document?.body, preventDefault() {}, ...more});
 const api = JSON.parse(readFileSync(new URL('./api.json', import.meta.url), 'utf8'));
 
@@ -61,6 +63,14 @@ function fakeHTTP() {
     addMachine: name => ans('POST /api/machines', {name}),
     rebindMachine: id => ans('POST /api/machines/rebind', {id}),
     revokeMachine: id => ans('DELETE /api/machines', {id}),
+    trackers: () => ans('GET /api/trackers'),
+    bindTracker: p => ans('POST /api/trackers', p),
+    unbindTracker: id => ans('DELETE /api/trackers', {id}),
+    trackerSettings: (id, settings) => ans('POST /api/trackers/settings', {id, settings}),
+    trackerToken: (id, token) => ans('POST /api/trackers/credential', {id, token}),
+    rescanTracker: id => ans('POST /api/trackers/rescan', {id}),
+    trackerIssues: id => ans('GET /api/trackers/issues', {id}),
+    trackerPreview: (id, number) => ans('GET /api/trackers/preview', {id, number}),
   };
 }
 
@@ -113,6 +123,34 @@ const buttonOf = (root, label) => {
   return got[0];
 };
 const groupsOf = root => root.find('.mach-group').map(g => [g.one('h2').childNodes[0].textContent.trim(), g.find('.mach-card').map(c => c.one('b').textContent)]);
+
+test('project settings: only what changed is sent; paths, directory checks and workflow names read right', () => {
+  const p = {id: 'p1', name: 'Shop', owner: 'u_a', context: 'Be careful.', repos: [{name: 'shop', remote: 'git@x:shop.git', base: 'main', dirs: {mba: '/w/shop'}, worktrees: true}],
+    defaults: {workflow: 'fix', agent: 'claude', roles: {review: 'codex'}, machine: 'mba'}, hooks: {setup: ['make', 'deps']}};
+  const d = tm.draftOf(p);
+  eq(tm.projectEditOf(p, d), null, 'an untouched draft sends nothing');
+  eq(d.hooks, {setup: 'make deps', before_run: '', check: '', cleanup: ''}, 'hooks as lines');
+  eq(tm.projectEditOf(p, {...d, name: ' Shop ', context: 'Be careful.'}), null, 'a name only padded is the same');
+  eq(tm.projectEditOf(p, {...d, hooks: {...d.hooks, check: '  go   test ./... ', setup: ''}}), {id: 'p1', hooks: {check: ['go', 'test', './...']}}, 'hooks split on spaces, an emptied one dropped');
+  eq(tm.projectEditOf(p, {...d, roles: {...d.roles, review: '', planner: 'claude'}}).defaults, {agent: 'claude', machine: 'mba', roles: {planner: 'claude'}, workflow: 'fix'},
+    'the defaults whole, keeping the agent outside the roles');
+  const repos = structuredClone(d.repos);
+  repos[0].dirs.push({machine: 'linux', path: ' /srv/shop '}, {machine: '', path: '/x'});
+  repos.push({name: ' ', remote: '', base: '', worktrees: false, dirs: []});
+  eq(tm.projectEditOf(p, {...d, repos}).repos, [{name: 'shop', remote: 'git@x:shop.git', base: 'main', dirs: {mba: '/w/shop', linux: '/srv/shop'}, worktrees: true}],
+    'paths trimmed; a row without a machine or a repository without a name left out');
+  eq(tm.projectEditOf({id: 'p2', name: 'Docs'}, tm.draftOf({id: 'p2', name: 'Docs'})), null, 'a bare project');
+  eq(tm.dirsToCheck({...d, repos}), [{repo: 'shop', machine: 'mba', path: '/w/shop'}, {repo: 'shop', machine: 'linux', path: '/srv/shop'}], 'what to check');
+  eq([tm.parentOf('/w/shop'), tm.parentOf('/w/shop/'), tm.parentOf('C:\\w\\shop'), tm.parentOf('/shop')], ['/w', '/w', 'C:\\w', '/'], 'parents');
+  eq([tm.baseOf('/w/shop/'), tm.baseOf('C:\\w\\shop')], ['shop', 'shop'], 'names');
+  const listed = {exists: true, dirs: [{name: 'shop', path: '/w/shop', git: true}, {name: 'docs', path: '/w/docs'}]};
+  eq([tm.dirVerdict(listed, '/w/shop'), tm.dirVerdict(listed, '/w/docs'), tm.dirVerdict(listed, '/w/gone'), tm.dirVerdict({exists: false}, '/w/shop'),
+    tm.dirVerdict({outside: true}, '/w/shop'), tm.dirVerdict(null, '/w/shop')], ['git', 'plain', 'missing', 'missing', 'outside', 'missing'], 'verdicts');
+  eq([tm.flowName(tm.flowTemplate), tm.flowName('---\nname: "hot-fix"\n---\n'), tm.flowName('name: loose\n'), tm.flowName('---\ndescription: x\n---\nname: body\n')],
+    ['my-flow', 'hot-fix', '', ''], 'workflow names from the front matter only');
+  eq([tm.issueURL({base: 'https://github.com/', repo: 'shop/shop', kind: 'github'}, 7), tm.issueURL({base: 'https://gitlab.com', repo: 'g/sub/r', kind: 'gitlab'}, 7)],
+    ['https://github.com/shop/shop/issues/7', 'https://gitlab.com/g/sub/r/-/issues/7'], 'issue links');
+});
 
 test('machines: drawn in both forms and languages, grouped as each viewer sees them', async () => {
   const r = await team();
@@ -388,6 +426,128 @@ test('team: j and Enter open a project; a member manages the one they own and on
   await click(root.one('.drawer').find('button').find(b => b.getAttribute('aria-label') === words.t('ui.close')));
   await click(root.find('.team-project').find(b => b.textContent.includes('Docs')));
   ok(buttonOf(root.one('.drawer'), words.t('team.add')), 'Docs is Bo\'s');
+});
+
+const valueOf = el => el.value ?? el.getAttribute('value');
+const tabOf = (root, label) => root.one('.drawer').find('[role=tab]').find(b => b.textContent.trim() === label);
+const fieldOf = (root, label) => {
+  const f = root.find('.field').find(x => x.find('label')[0]?.textContent === label);
+  return f && [...f.find('input'), ...f.find('textarea')][0];
+};
+
+test('project settings: saved as changed, the checkouts checked, a workflow without a name refused and one removed', async () => {
+  const r = await team();
+  const a = app(r, {url: '/?page=team'});
+  const root = await mounted(a, 'desktop', 'zh', 'admin');
+  await r.srv.play('team-settings', {
+    async open() {
+      await click(root.find('.team-project').find(b => b.textContent.includes('Shop')));
+      await click(tabOf(root, words.t('proj.settings')));
+    },
+    async save() {
+      await settled();
+      eq(valueOf(fieldOf(root, words.t('proj.context'))), 'The shop service: Go, Postgres.', 'the project\'s context');
+      eq(valueOf(fieldOf(root, words.t('proj.hook.check'))), 'go test ./...', 'a hook as one line');
+      ok(root.one('.drawer').textContent.includes('gpt-6') || root.one('.drawer').textContent.includes('codex'), 'the agents listed');
+      await type(fieldOf(root, words.t('proj.context')), 'The shop service: Go, Postgres. Money is in cents.');
+      await type(fieldOf(root, words.t('proj.hook.check')), 'go test -race ./...');
+      await click(buttonOf(root.one('.drawer'), words.t('proj.save')));
+    },
+    async check() {
+      await settled();
+      ok(root.textContent.includes(words.f('proj.saved', 'Shop')), 'saved');
+      await click(buttonOf(root.one('.drawer'), words.t('proj.check')));
+    },
+    async flow() {
+      await settled();
+      eq(root.find('.proj-dir-said').map(x => x.textContent), [words.t('proj.dir.git'), words.t('proj.dir.outside')], 'what each checkout is');
+      await click(buttonOf(root.one('.drawer'), words.t('proj.newFlow')));
+      eq(valueOf(root.one('.modal').one('textarea')), tm.flowTemplate, 'a new one starts from the template');
+      await type(root.one('.modal').one('textarea'), '## implement\n');
+      await click(buttonOf(root.one('.modal-foot'), words.t('form.save')));
+      ok(root.one('.modal').textContent.includes(words.t('proj.flowNameless')), 'a definition without a name is refused');
+      await click(buttonOf(root.one('.modal-foot'), words.t('home.cancel')));
+      const row = root.one('.drawer').find('.team-row').find(x => x.textContent.includes('shop-fix'));
+      await click(buttonOf(row, words.t('proj.removeFlow')));
+      await click(buttonOf(root.one('.modal-foot'), words.t('proj.removeFlow')));
+    },
+    async done() { await settled(); ok(root.textContent.includes(words.f('proj.flowRemoved', 'shop-fix')), 'removed'); },
+  });
+  eq(r.errors, [], 'errors');
+});
+
+test('issue sync: a binding\'s state, log and comment preview; its settings, token, rescan and unbinding; a project bound', async () => {
+  const r = await team();
+  const a = app(r, {url: '/?page=team'});
+  const root = await mounted(a, 'desktop', 'zh', 'admin');
+  await until(() => root.find('.team-sync').length === 1, 'the binding on the list');
+  eq(root.one('.team-sync').textContent.trim(), words.f('team.sync', 'shop/shop', words.t('team.sync.ok')), 'Shop syncs');
+  await click(root.find('.team-project').find(b => b.textContent.includes('Shop')));
+  await click(tabOf(root, words.t('proj.sync')));
+  await until(() => root.find('.proj-issue').length === 3, 'the sync log');
+  const drawer = () => root.one('.drawer');
+  ok(drawer().textContent.includes(words.f('proj.failing', 1)), 'one failing');
+  eq(root.find('.proj-issue').map(x => x.find('a')[0].getAttribute('href')), [42, 43, 40].map(n => 'https://github.com/shop/shop/issues/' + n), 'links to the issues');
+  ok(root.find('.proj-issue')[1].textContent.includes('422 Unprocessable Entity'), 'an issue\'s error');
+  ok(root.find('.proj-issue')[2].textContent.includes(words.t('proj.noTask')) && root.find('.proj-issue')[2].textContent.includes(words.t('proj.dirty')), 'one without a task, to read again');
+  eq(drawer().find('button').filter(b => labelOf(b) === words.t('proj.bind')).length, 0, 'a project binds one repository');
+
+  await click(buttonOf(root.find('.proj-issue')[0], words.t('proj.preview')));
+  await until(() => root.find('.proj-preview').length === 1, 'the comment');
+  ok(root.one('.proj-preview').textContent.includes('Cart totals'), 'the comment as it would be written');
+  await click(buttonOf(root.one('.modal-foot'), words.t('team.done')));
+
+  await click(buttonOf(drawer(), words.t('proj.syncSettings')));
+  await click(root.one('.modal').find('[role=radio]').find(b => b.textContent === words.t('proj.accept.label')));
+  await type(fieldOf(root.one('.modal'), words.t('proj.acceptLabel')), '');
+  eq(buttonOf(root.one('.modal-foot'), words.t('form.save')).disabled, true, 'a label to add is needed');
+  await type(fieldOf(root.one('.modal'), words.t('proj.acceptLabel')), 'shipped');
+  await click(root.one('.modal').find('[role=checkbox]').find(b => b.textContent.includes(words.t('proj.assigned'))));
+  await click(buttonOf(root.one('.modal-foot'), words.t('form.save')));
+  await settled();
+  await click(buttonOf(drawer(), words.t('proj.replaceToken')));
+  await type(root.one('.modal').one('input'), 'example-token');
+  await click(buttonOf(root.one('.modal-foot'), words.t('form.save')));
+  await settled();
+  await click(buttonOf(drawer(), words.t('proj.rescan')));
+  await settled();
+  await click(buttonOf(drawer(), words.t('proj.unbind')));
+  await click(buttonOf(root.one('.modal-foot'), words.t('proj.unbind')));
+  await settled();
+  eq(writes(a.http), [
+    ['POST /api/trackers/settings', {id: 'k1', settings: {label: 'tend', comment: true, on_accept: 'label', accept_label: 'shipped', poll: 60, pr: true, assigned: true}}],
+    ['POST /api/trackers/credential', {id: 'k1', token: 'example-token'}], ['POST /api/trackers/rescan', {id: 'k1'}], ['DELETE /api/trackers', {id: 'k1'}],
+  ], 'what was sent');
+
+  await click(root.one('.drawer').find('button').find(b => b.getAttribute('aria-label') === words.t('ui.close')));
+  await click(root.find('.team-project').find(b => b.textContent.includes('Docs')));
+  await click(tabOf(root, words.t('proj.sync')));
+  await until(() => drawer().find('button').some(b => labelOf(b) === words.t('proj.bind')), 'Docs has none');
+  await click(buttonOf(drawer(), words.t('proj.bind')));
+  await click(root.one('.modal').find('[role=radio]').find(b => b.textContent === 'Gitea'));
+  eq(valueOf(fieldOf(root.one('.modal'), words.t('proj.trackerBase'))), '', 'Gitea has no public address');
+  await type(fieldOf(root.one('.modal'), words.t('proj.trackerBase')), 'https://git.example.com');
+  await type(fieldOf(root.one('.modal'), words.t('proj.trackerRepo')), 'docs/site');
+  eq(buttonOf(root.one('.modal-foot'), words.t('proj.bind')).disabled, true, 'a token is needed');
+  await type(fieldOf(root.one('.modal'), words.t('proj.token')), 'example-token');
+  await click(buttonOf(root.one('.modal-foot'), words.t('proj.bind')));
+  await settled();
+  eq(writes(a.http).at(-1), ['POST /api/trackers', {project: 'p2', kind: 'gitea', base: 'https://git.example.com', repo: 'docs/site', token: 'example-token',
+    settings: {label: 'tend', comment: true, on_accept: 'close', accept_label: 'tend:accepted', poll: 60}}], 'the binding');
+  ok(root.one('.modal').textContent.includes(words.t('proj.hook.gitea')), 'how to add the webhook');
+  eq(root.one('.modal').find('.secret').length, 2, 'the webhook address and its secret');
+  eq(r.errors, [], 'errors');
+});
+
+test('project drawer: a member of a project sees its members only; a phone shows no settings', async () => {
+  const r = await team();
+  const a = app(r, {url: '/?page=team', session: bo});
+  const root = await mounted(a, 'desktop', 'zh', 'member');
+  await click(root.find('.team-project').find(b => b.textContent.includes('Shop')));
+  eq(root.one('.drawer').find('[role=tab]').length, 0, 'Shop is Ann\'s: no tabs');
+  await click(root.one('.drawer').find('button').find(b => b.getAttribute('aria-label') === words.t('ui.close')));
+  await click(root.find('.team-project').find(b => b.textContent.includes('Docs')));
+  eq(root.one('.drawer').find('[role=tab]').map(b => b.textContent.trim()), [words.t('proj.members'), words.t('proj.settings'), words.t('proj.sync')], 'Docs is Bo\'s');
 });
 
 test('team: a phone lists the people and the projects, and changes nothing', async () => {

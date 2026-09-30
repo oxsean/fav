@@ -367,6 +367,13 @@ func TestPageAPIAnswersAreTheServersShapes(t *testing.T) {
 				Expires time.Time `json:"expires"`
 			})
 		},
+		"GET /api/trackers": func() any { return new([]TrackerView) }, "POST /api/trackers": func() any { return new(TrackerView) },
+		"GET /api/trackers/issues": func() any { return new([]TrackerIssueView) },
+		"GET /api/trackers/preview": func() any {
+			return new(struct {
+				Body string `json:"body"`
+			})
+		},
 	}
 	b, err := os.ReadFile(filepath.Join("webtest", "api.json"))
 	if err != nil {
@@ -402,7 +409,8 @@ func TestFrameWritesAndListsAreTheCoordinatorsShapes(t *testing.T) {
 		coord.MRunSend: func() any { return new(coord.SendMessage) }, coord.MRunInterrupt: func() any { return new(coord.Interrupt) },
 		coord.MRunChanges: func() any { return new(node.ChangesParams) }, coord.MRunDiff: func() any { return new(node.DiffParams) },
 		coord.MMachineShare: func() any { return new(task.Share) }, coord.MProjectCreate: func() any { return new(coord.ProjectCreate) },
-		coord.MProjectMember: func() any { return new(task.MemberSet) },
+		coord.MProjectMember: func() any { return new(task.MemberSet) }, coord.MProjectEdit: func() any { return new(task.ProjectEdit) },
+		coord.MProjectDirs: func() any { return new(coord.ProjectDirsParams) },
 	}
 	results := map[string]func() any{
 		coord.MTaskStatus: func() any { return new(task.Task) }, coord.MRunDispatch: func() any { return new(task.Run) },
@@ -417,7 +425,8 @@ func TestFrameWritesAndListsAreTheCoordinatorsShapes(t *testing.T) {
 		coord.MRunSend: func() any { return new(task.Run) }, coord.MRunInterrupt: func() any { return new(task.Run) },
 		coord.MRunChanges: func() any { return new(node.Changes) }, coord.MRunDiff: func() any { return new(node.Diff) },
 		coord.MMachineShare: func() any { return new(task.Share) }, coord.MProjectCreate: func() any { return new(task.Project) },
-		coord.MProjectMember: func() any { return new(task.Project) },
+		coord.MProjectMember: func() any { return new(task.Project) }, coord.MProjectEdit: func() any { return new(task.Project) },
+		coord.MProjectDirs: func() any { return new(coord.ProjectDirs) },
 	}
 	files, _ := filepath.Glob(filepath.Join("webtest", "frames", "*.jsonl"))
 	seen := map[string]int{}
@@ -461,7 +470,7 @@ func TestFrameWritesAndListsAreTheCoordinatorsShapes(t *testing.T) {
 	}
 	for _, m := range []string{coord.MTaskStatus, coord.MRunDispatch, coord.MRunStop, coord.MRunAnswer, coord.MRunOutputPage, coord.MTaskCreate,
 		coord.MTaskStart, coord.MTaskMerge, coord.MTaskMove, coord.MTaskPlanSave, coord.MTaskPlanApply, coord.MTaskGate, coord.MTaskSourceAck,
-		coord.MRunPreview, coord.MAgentList, coord.MTaskMessage, coord.MRunInterrupt, coord.MRunChanges, coord.MRunDiff, coord.MMachineShare, coord.MProjectCreate, coord.MProjectMember, "machines", "inbox", coord.PushAffordances, "affordances part"} {
+		coord.MRunPreview, coord.MAgentList, coord.MTaskMessage, coord.MRunInterrupt, coord.MRunChanges, coord.MRunDiff, coord.MMachineShare, coord.MProjectCreate, coord.MProjectMember, coord.MProjectEdit, coord.MProjectDirs, "machines", "inbox", coord.PushAffordances, "affordances part"} {
 		if seen[m] == 0 {
 			t.Errorf("no frame file has %s", m)
 		}

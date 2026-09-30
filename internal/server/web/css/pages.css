@@ -302,6 +302,17 @@
 .team-steps { margin: 0; padding-left: 20px; display: grid; gap: 6px; font-size: 13px; }
 .team-drawer { display: grid; gap: 16px; }
 .team-facts { margin: 0; font-size: 12px; }
+.team-sync { font-size: 11px; }
+.proj-settings, .proj-sync, .proj-sync-fields, .proj-repos { display: grid; gap: 12px; }
+.proj-grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); align-items: start; gap: 0 12px; }
+.proj-grid3 { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 0 10px; }
+.proj-repo { display: grid; gap: 8px; padding: 10px; border: 1px solid var(--border); border-radius: 8px; }
+.proj-dir { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 3fr) auto; align-items: end; gap: 0 8px; }
+.proj-dir-said { grid-column: 1 / -1; font-size: 11px; margin: -4px 0 4px; }
+.proj-state { font-size: 12px; font-weight: 400; }
+.proj-binding { display: grid; gap: 8px; }
+.proj-issue { align-items: flex-start; }
+.proj-preview { max-height: 50vh; overflow: auto; padding: 10px; border: 1px solid var(--border); border-radius: 8px; }
 .team-card { cursor: default; }
 .team-phone { gap: 10px; }
 @media (max-width: 1100px) { .team-body { grid-template-columns: minmax(0, 1fr); } }

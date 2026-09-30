@@ -21,6 +21,11 @@ kbd { border: 1px solid var(--border); border-bottom-width: 2px; border-radius: 
 .chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .count { color: var(--muted); font-size: 11px; }
 
+.check { display: flex; align-items: flex-start; gap: 8px; padding: 2px 0; border: 0; background: none; color: inherit; font: inherit; font-size: 12px; text-align: left; cursor: pointer; }
+.check-box { flex: none; width: 16px; height: 16px; margin-top: 1px; display: grid; place-items: center; border: 1px solid var(--border); border-radius: 4px; font-size: 11px; line-height: 1; }
+.check.on .check-box { background: var(--accent); border-color: var(--accent); color: var(--surface); }
+.check-text { display: grid; gap: 2px; }
+.check:disabled { opacity: .5; cursor: default; }
 .seg { display: inline-flex; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; flex: none; }
 .seg button { min-height: 26px; padding: 0 10px; white-space: nowrap; border: 0; background: var(--surface); font-size: 12px; }
 .seg button + button { border-left: 1px solid var(--border); }

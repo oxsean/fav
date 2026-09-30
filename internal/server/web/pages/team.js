@@ -1,11 +1,11 @@
 // team is the team page: who is on this server and what they take part in, the projects the viewer sees, and for an
 // admin the invitations not used yet, who may sign in without one, and the security log. An admin creates projects,
 // invites, changes a person's role, disables them or hands their work on; a project's owner or an admin changes its
-// members in the project's drawer. On a phone the page only shows.
+// members, settings and issue sync in the project's drawer (pages/project.js). On a phone the page only shows.
 import {useState, useEffect} from '../vendor/hooks.mjs';
 import {html, cx, usePhone, useWords, useSignalValue, useName} from '../ui/base.js';
 import {Panel} from '../ui/panel.js';
-import {Modal, Drawer} from '../ui/overlay.js';
+import {Modal} from '../ui/overlay.js';
 import {Button, Chip, Chips, Segmented} from '../ui/controls.js';
 import {TextInput} from '../ui/input.js';
 import {Picker} from '../ui/picker.js';
@@ -16,6 +16,7 @@ import {register} from '../core/i18n.js';
 import {clock, day, duration} from '../core/format.js';
 import * as tm from '../core/team.js';
 import {apiText} from './words.js';
+import {ProjectDrawer, AddMember} from './project.js';
 import './taskwords.js';
 
 register('team', {
@@ -42,7 +43,8 @@ register('team', {
   'team.offGo': ['交接并停用', 'Hand over and disable'], 'team.offDone': ['%s 的工作已交给 %s，账号已停用', 'The work of %s went to %s; they are disabled'],
   'team.projects': ['项目', 'Projects'], 'team.projectsNote': ['负责人管成员', 'Their owners manage the members'],
   'team.owner': ['负责人 %s', 'owner %s'], 'team.tasks': ['%d 个任务 · %d 未结束', '%d tasks · %d open'],
-  'team.people': ['%d 人参与 · %d 人只读', '%d take part · %d read'], 'team.noProjects': ['你还不在任何项目里', 'You are in no project yet'],
+  'team.people': ['%d 人参与 · %d 人只读', '%d take part · %d read'], 'team.sync': ['工单同步 %s · %s', 'Issue sync %s · %s'],
+  'team.sync.ok': ['同步中', 'syncing'], 'team.sync.stopped': ['已停', 'stopped'], 'team.sync.paused': ['限流中', 'rate limited'], 'team.noProjects': ['你还不在任何项目里', 'You are in no project yet'],
   'team.name': ['名称', 'Name'], 'team.projectOwner': ['负责人', 'Owner'], 'team.create': ['建立', 'Create'], 'team.created': ['项目 %s 已建立', 'Project %s is created'],
   'team.add': ['加成员', 'Add a member'], 'team.person': ['谁', 'Who'], 'team.role': ['角色', 'Role'],
   'team.added': ['%s 加进了 %s', '%s joined %s'], 'team.changed': ['%s 现在是%s', '%s is now a %s'],
@@ -149,52 +151,9 @@ function Offboard({user, people, me, plan, busy, onGo, onClose}) {
   <//>`;
 }
 
-function AddMember({project, people, busy, onAdd, onClose}) {
-  const {t} = useWords();
-  const [user, setUser] = useState('');
-  const [role, setRole] = useState('participant');
-  return html`<${Modal} title=${t('team.add') + ' · ' + project.name} onClose=${onClose}
-    actions=${[{label: t('home.cancel'), onClick: onClose}, {label: t('team.add'), kind: 'primary', keyName: 'Mod+Enter', disabled: !user || busy, onClick: () => onAdd(user, role)}]}>
-    <${Picker} label=${t('team.person')} value=${user} onChange=${setUser} options=${people} />
-    <div class="field"><span class="brief-label">${t('team.role')}</span>
-      <${Segmented} label=${t('team.role')} value=${role} onChange=${setRole} options=${tm.accessRoles.map(r => ({value: r, label: t('role.' + r)}))} /></div>
-  <//>`;
-}
-
-// Members is a project's owner and members; manages draws the controls that change them.
-function Members({project: p, manages, busy, onRole, onAdd, onRemove}) {
-  const {t} = useWords();
-  const name = useName();
-  const members = Object.entries(p.members || {}).map(([id, role]) => ({id, role, label: name(id)})).sort(byLabel);
-  return html`<section class="det-sec">
-    <h3 class="det-h mach-h">${t('team.members')}${manages && html`<${Button} kind="quiet" icon="plus" onClick=${onAdd}>${t('team.add')}<//>`}</h3>
-    <ul class="team-rows">
-      ${p.owner && html`<li class="team-row"><span class="team-main">${name(p.owner)} <span class="mono t-muted">${p.owner}</span></span><span class="t-muted">${t('role.owner')}</span></li>`}
-      ${members.map(m => html`<li class="team-row" key=${m.id}>
-        <span class="team-main">${m.label} <span class="mono t-muted">${m.id}</span></span>
-        ${manages ? html`<${Segmented} label=${t('team.role')} value=${m.role} onChange=${r => onRole(m, r)} options=${tm.accessRoles.map(r => ({value: r, label: t('role.' + r)}))} />
-          <${Button} kind="quiet danger" disabled=${busy} onClick=${() => onRemove(m)}>${t('team.remove')}<//>` : html`<span class="t-muted">${t('role.' + m.role)}</span>`}
-      </li>`)}
-    </ul>
-  </section>`;
-}
-
-// ProjectDrawer is one project: its counts and its members.
-function ProjectDrawer({project: p, st, manages, busy, onRole, onAdd, onRemove, onClose}) {
-  const {t, f} = useWords();
-  const name = useName();
-  const n = tm.projectFacts(st, p);
-  return html`<${Drawer} title=${p.name} onClose=${onClose}>
-    <div class="team-drawer">
-      <p class="t-muted team-facts">${[f('team.owner', name(p.owner)), f('team.tasks', n.tasks, n.open), f('team.people', n.participants, n.readers)].join(' · ')}</p>
-      <${Members} project=${p} manages=${manages} busy=${busy} onRole=${onRole} onAdd=${onAdd} onRemove=${onRemove} />
-    </div>
-  <//>`;
-}
-
 // Team: http reads and changes people, invitations, rules and the log (/api); session is who signed in (an admin sees
 // and does the rest); copy is the clipboard's (a test passes its own).
-export function Team({store, commands, toasts, session, http, clock: now = () => Date.now(), copy}) {
+export function Team({store, commands, toasts, session, http, wire, clock: now = () => Date.now(), copy}) {
   const w = useWords();
   const {t, f} = w;
   const phone = usePhone();
@@ -212,6 +171,7 @@ export function Team({store, commands, toasts, session, http, clock: now = () =>
   const [open, setOpen] = useState('');
   const [picked, setPicked] = useState('');
   const [busy, setBusy] = useState(false);
+  const [trackers, setTrackers] = useState([]);
   const st = store.state, at = now();
   const me = session?.id || '';
   const admin = tm.isAdmin(session);
@@ -225,6 +185,7 @@ export function Team({store, commands, toasts, session, http, clock: now = () =>
     http.audit().then(setAudit, quiet);
   };
   useEffect(() => { readUsers(); readAdmin(); }, [admin]);
+  useEffect(() => { if (!phone && !open) http?.trackers().then(setTrackers, quiet); }, [phone, open]);
 
   const close = () => setModal(null);
   const failed = e => toasts.show({text: apiText(w, e), tone: 'danger'});
@@ -283,7 +244,8 @@ export function Team({store, commands, toasts, session, http, clock: now = () =>
     },
   })[modal.kind]?.();
 
-  const drawer = drawerOf && html`<${ProjectDrawer} project=${drawerOf} st=${st} manages=${!phone && tm.mayManage(session, drawerOf)} busy=${pending(drawerOf)}
+  const drawer = drawerOf && html`<${ProjectDrawer} project=${drawerOf} st=${st} machines=${machines} people=${options} wire=${wire} http=${http}
+    commands=${commands} toasts=${toasts} copy=${copy} manages=${!phone && tm.mayManage(session, drawerOf)} busy=${pending(drawerOf)}
     onClose=${() => setOpen('')} onAdd=${() => setModal({kind: 'add', project: drawerOf.id})}
     onRemove=${m => setModal({kind: 'remove', project: drawerOf.id, user: m.id})}
     onRole=${(m, role) => member(drawerOf, m.id, role, f('team.changed', m.label, t('role.' + role)))} />`;
@@ -295,6 +257,8 @@ export function Team({store, commands, toasts, session, http, clock: now = () =>
     return html`<li key=${p.id}><button type="button" class=${cx('team-project', !phone && p.id === cur && 'sel')} onClick=${() => { setPicked(p.id); setOpen(p.id); }}>
       <span class="team-project-head"><b>${p.name}</b><span class="t-muted">${f('team.owner', name(p.owner))}</span><span class="mono t-muted team-project-n">${f('team.tasks', n.tasks, n.open)}</span></span>
       <span class="t-muted">${f('team.people', n.participants, n.readers)}</span>
+      ${trackers.filter(x => x.project === p.id).map(x => html`<span class=${cx('team-sync', tm.trackerState(x) === 'ok' ? 't-muted' : 't-failed')}>
+        ${f('team.sync', x.repo, t('team.sync.' + tm.trackerState(x)))}</span>`)}
     </button></li>`;
   })}</ul>`;
 

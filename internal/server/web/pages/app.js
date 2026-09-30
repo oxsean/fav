@@ -89,7 +89,7 @@ export function App({store, commands, toasts, wire, http, router, keys, nav, pre
       : route.page === 'runs'
         ? html`<${Runs} store=${store} commands=${commands} toasts=${toasts} router=${router} prefs=${prefs} copy=${copy} changes=${changes} storage=${storage} clock=${clock} />`
         : route.page === 'team'
-          ? html`<${Team} store=${store} commands=${commands} toasts=${toasts} session=${session} http=${http} clock=${clock} copy=${copy} />`
+          ? html`<${Team} store=${store} commands=${commands} toasts=${toasts} session=${session} http=${http} wire=${wire} clock=${clock} copy=${copy} />`
           : route.page === 'machines'
             ? html`<${Machines} store=${store} commands=${commands} toasts=${toasts} session=${session} http=${http} router=${router} storage=${storage}
               clock=${clock} copy=${copy} />`

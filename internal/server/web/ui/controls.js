@@ -57,6 +57,13 @@ export function Segmented({label, options, value, onChange}) {
   </div>`;
 }
 
+// Check is a checkbox with its label beside it; note says more under it.
+export function Check({label, on = false, onChange, note, disabled = false}) {
+  return html`<button type="button" role="checkbox" aria-checked=${on ? 'true' : 'false'} class=${cx('check', on && 'on')} disabled=${disabled} onClick=${() => onChange(!on)}>
+    <span class="check-box" aria-hidden="true">${on ? '✓' : ''}</span><span class="check-text"><span>${label}</span>${note && html`<span class="field-note">${note}</span>`}</span>
+  </button>`;
+}
+
 // Tabs switches the panes of one page ({id, label, count}); arrows move between tabs, the picked one is in the tab order.
 export function Tabs({label, tabs, value, onChange, idPrefix = 'tab'}) {
   const at = Math.max(0, tabs.findIndex(x => x.id === value));

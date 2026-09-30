@@ -1,6 +1,7 @@
 // http is the page's plain HTTP: the browser session (/session, /login, /logout), the sign-in methods and invitation
-// (/auth/*), a terminal's sign-in to allow (/api/device), the team's people, admission, invitations and audit log, and
-// the machines' node tokens (/api/*). Writes carry X-Tend, which the server asks of a browser.
+// (/auth/*), a terminal's sign-in to allow (/api/device), the team's people, admission, invitations and audit log, the
+// machines' node tokens and the projects' tracker bindings (/api/*). Writes carry X-Tend, which the server asks of a
+// browser.
 
 export class HTTPError extends Error {
   constructor(status, code) {
@@ -69,6 +70,17 @@ export function createHTTP({fetch = (...a) => globalThis.fetch(...a)} = {}) {
     addMachine: name => ask('POST', '/api/machines', {name}),
     revokeMachine: id => ask('DELETE', '/api/machines', {id}),
     rebindMachine: id => ask('POST', '/api/machines/rebind', {id}),
+    // trackers are the tracker bindings of the projects the caller manages; bindTracker binds one
+    // ({project, kind, base, repo, token, settings}) → the binding with its webhook secret, once.
+    trackers: async () => (await ask('GET', '/api/trackers')) || [],
+    bindTracker: p => ask('POST', '/api/trackers', p),
+    unbindTracker: id => ask('DELETE', '/api/trackers', {id}),
+    trackerSettings: (id, settings) => ask('POST', '/api/trackers/settings', {id, settings}),
+    trackerToken: (id, token) => ask('POST', '/api/trackers/credential', {id, token}),
+    rescanTracker: id => ask('POST', '/api/trackers/rescan', {id}),
+    // trackerIssues is a binding's sync log; trackerPreview the progress comment issue number would get now → {body}.
+    trackerIssues: async id => (await ask('GET', '/api/trackers/issues?id=' + encodeURIComponent(id))) || [],
+    trackerPreview: (id, number) => ask('GET', `/api/trackers/preview?id=${encodeURIComponent(id)}&number=${number}`),
   };
 }
 
