@@ -90,7 +90,7 @@ function stepOf(it, events, res, ctx) {
     tool: e.tool || '', title: e.title || e.tool || '', more: e.more || 0, call: e.call || '', input: e.input,
     output: out || '', lines: (r ? r.lines : e.lines) || lines(out).length, dur: (r ? r.dur_ms : e.dur_ms) || 0,
     exit: r ? r.exit : e.exit, failed: failedOf(e, r), truncated: (r || e).truncated,
-    diff: e.diff || '', files: e.files || [],
+    files: e.files || [], edits: r?.edits || e.edits || [], item: r?.edits ? r.id : e.id,
     state: done ? (failedOf(e, r) ? 'failed' : 'ok') : ctx.open ? 'running' : 'unknown',
   };
   if (step.kind === 'group') return {...step, members: [{id: e.id, family, title: step.title}], reads: family === 'read' ? 1 : 0, searches: family === 'search' ? 1 : 0};
@@ -171,7 +171,7 @@ export function summaryOf(steps) {
     sum.steps++;
     if (s.failed) sum.failed++;
     if (s.kind === 'shell') sum.shell++;
-    else if (s.kind === 'edit') { for (const f of s.files.length ? s.files : [s.title.replace(/ [+−-]\d+.*$/, '')]) files.add(f); }
+    else if (s.kind === 'edit') { for (const f of s.edits.length ? s.edits.map(e => e.path) : s.files.length ? s.files : [s.title.replace(/ [+−-]\d+.*$/, '')]) files.add(f); }
     else if (s.kind === 'group') { sum.reads += s.reads; sum.searches += s.searches; }
     else if (s.kind !== 'think' && s.kind !== 'plan') sum.other++;
   }
@@ -274,7 +274,7 @@ const fold = s => String(s || '').replace(/[A-Z]/g, c => c.toLowerCase());
 // textOf is what find searches in a step: what it said, its title, the head and tail of its output, a diff's preview,
 // a question. Cut middles and whole files moved to blobs are not in the events, so they are not searched.
 export function textOf(s) {
-  const parts = [s.text, s.title, s.output, s.diff, ...(s.questions || []), ...(s.members || []).map(m => m.title), ...(s.plan || []).map(p => p.text)];
+  const parts = [s.text, s.title, s.output, ...(s.edits || []).flatMap(e => e.preview || []), ...(s.questions || []), ...(s.members || []).map(m => m.title), ...(s.plan || []).map(p => p.text)];
   if (s.input?.command && typeof s.input.command === 'string') parts.push(s.input.command);
   return parts.filter(Boolean).join('\n');
 }
@@ -331,10 +331,31 @@ export function cut(text, n) {
   return {lines: ls.slice(0, n), more: Math.max(0, ls.length - n)};
 }
 
-// editLines is what an edit step shows open: its diff, or the old and new text of a claude edit, as diff lines.
+// editLines is what a claude edit call without the node's counts shows open: the old and new text of its input as diff
+// lines. A text slimming moved out of the log (a ref, not a string) is not among them: moved tells it.
 export function editLines(s) {
-  if (s.diff) return lines(s.diff);
   const i = s.input || {};
+  const text = v => (typeof v === 'string' ? v : '');
   const pairs = i.edits || [{old_string: i.old_string, new_string: i.new_string ?? i.content ?? i.new_source}];
-  return pairs.flatMap(p => [...lines(p.old_string).map(l => '-' + l), ...lines(p.new_string).map(l => '+' + l)]);
+  return pairs.flatMap(p => [...lines(text(p.old_string)).map(l => '-' + l), ...lines(text(p.new_string)).map(l => '+' + l)]);
+}
+
+const isRef = v => !!v && typeof v === 'object' && ('$blob' in v || '$omit' in v);
+
+// moved: slimming took some of an edit call's text out of the log.
+export function moved(input) {
+  const i = input || {};
+  return [i.old_string, i.new_string, i.content, i.new_source, ...(i.edits || []).flatMap(p => [p.old_string, p.new_string])].some(isRef);
+}
+
+// hunksLeft is how many hunks of an edit step's files its previews leave out.
+export const hunksLeft = edits => edits.reduce((n, e) => n + Math.max(0, e.hunks - (e.preview?.length ? 1 : 0)), 0);
+
+// wholeOf is what run.output.item gave for an edit step: its files with every hunk (lines), or a claude call's input
+// as diff lines; big when some of it was too big to put back.
+export function wholeOf(item, step) {
+  const e = item?.event || {};
+  const left = (item?.blobs || []).length > 0;
+  if (step.edits.length) return {edits: e.edits || step.edits, lines: [], big: left && !(e.edits || []).some(x => x.lines?.length)};
+  return {edits: [], lines: editLines({input: e.input}), big: left || moved(e.input)};
 }

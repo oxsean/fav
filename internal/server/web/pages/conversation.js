@@ -149,7 +149,7 @@ export function Conversation({store, commands, toasts, prefs, drafts, task, run 
   };
 
   return html`<div class="conv">
-    <${Output} key=${root} parts=${memoParts} density=${density} onDensity=${prefs.setOutput} onMore=${more} onFind=${findBack} renderAsk=${renderAsk} target=${target}
+    <${Output} key=${root} parts=${memoParts} density=${density} onDensity=${prefs.setOutput} onMore=${more} onFind=${findBack} onItem=${store.canItem() ? store.item : null} renderAsk=${renderAsk} target=${target}
       place=${place} onPlace=${p => keepPlace(session, root, p)} raw=${raw} onRaw=${toggleRaw} copy=${copy}
       onResend=${m => message({text: m.text, mode: ''})} linkOf=${s => address() + link(task.id, s.run, s.id)}>
       <${Composer} route=${route} acts=${acts} machine=${last.machine} busy=${busy} onSend=${onSend}

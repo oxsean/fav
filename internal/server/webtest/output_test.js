@@ -107,7 +107,8 @@ test('find: in folded turns and grouped steps, by filter, ASCII case folded; the
   const m = out.model(both());
   const hits = out.find(m, 'GOFPDF');
   eq(hits.map(h => out.textOf(m.runs[1].turns[0].steps.find(s => s.key === h.key)).split('\n')[0]),
-    ['Use gofpdf and keep it under 1 MiB.', 'Using gofpdf. First the test for the size.', 'internal/receipt/pdf.go'], 'hits in order, a grouped member\'s title among them');
+    ['Use gofpdf and keep it under 1 MiB.', 'Using gofpdf. First the test for the size.', 'internal/receipt/pdf.go', 'internal/receipt/pdf.go +12 −4'],
+    'hits in order, a grouped member\'s title among them, an edit by its preview');
   eq(out.find(m, 'gofpdf', {filter: 'talk'}).length, 2, 'within a filter');
   const early = out.find(m, 'pdf library');
   eq(early.map(h => [h.run, h.turn]), [['r1', 'r1:t1'], ['r1', 'r1:t1']], 'in a folded turn');
@@ -118,9 +119,34 @@ test('find: in folded turns and grouped steps, by filter, ASCII case folded; the
   const errs = out.errors(m);
   eq(errs.length, 1, 'one failure');
   eq(out.nextOf(errs, errs[0].key), errs[0], 'wraps round');
-  eq(out.nextOf(hits, hits[0].key, -1), hits[2], 'back from the first is the last');
+  eq(out.nextOf(hits, hits[0].key, -1), hits[3], 'back from the first is the last');
   eq(out.ends('1\n2\n3\n4\n5', 2), {head: ['1', '2'], cut: 1, tail: ['4', '5']}, 'head and tail');
   eq(out.editLines({input: {old_string: 'a', new_string: 'b\nc'}, diff: ''}), ['-a', '+b', '+c'], 'a claude edit as diff lines');
+});
+
+test('an edit step: the counts and first hunk the node wrote, the rest by run.output.item; a text moved out is no diff', () => {
+  const evs = [
+    {id: 'f:1:0:0', off: 0, kind: 'tool', tool: 'Edit', call: 't1', family: 'edit', title: '/w/a.go +1 −1', turn: 1,
+      input: {file_path: '/w/a.go', old_string: {$blob: 'ab', bytes: 5000, lines: 80}, new_string: 'b'}},
+    {id: 'f:1:90:0', off: 90, kind: 'tool_result', ref: 't1', output: 'ok', turn: 1,
+      edits: [{path: '/w/a.go', op: 'modify', add: 3, del: 1, hunks: 2, preview: ['@@ -1,1 +1,1 @@', '-a', '+b']}]},
+    {id: 'f:1:200:0', off: 200, kind: 'edit', tool: 'fileChange', call: 'f2', family: 'edit', title: '/w/n.txt +2 −0', files: ['/w/n.txt'], turn: 1,
+      edits: [{path: '/w/n.txt', op: 'add', add: 2, del: 0, hunks: 1, preview: ['@@ -0,0 +1,2 @@', '+x', '+y']}]},
+    {id: 'f:1:300:0', off: 300, kind: 'tool', tool: 'Write', call: 't3', family: 'edit', title: '/w/c.go +1 −0', turn: 1, input: {file_path: '/w/c.go', content: 'c'}},
+  ];
+  const m = out.model([{run: {id: 'r9', state: 'done'}, events: evs, head: {start: true}}]);
+  const steps = m.runs[0].turns[0].steps;
+  const [claude, codex, early] = steps.filter(s => s.kind === 'edit');
+  eq([claude.edits[0].hunks, claude.item, codex.item, early.item, early.edits], [2, 'f:1:90:0', 'f:1:200:0', 'f:1:300:0', []], 'the edits and the event holding them whole');
+  eq(out.editLines({input: claude.input}), ['+b'], 'a text moved out of the log is no line of the diff');
+  ok(out.moved(claude.input) && !out.moved(early.input), 'moved tells it');
+  eq([out.hunksLeft(claude.edits), out.hunksLeft(codex.edits)], [1, 0], 'hunks past the previews');
+  const all = ['@@ -1,1 +1,1 @@', '-a', '+b', '@@ -9 +9,2 @@', '+c', '+d'];
+  eq(out.wholeOf({event: {...evs[1], edits: [{...evs[1].edits[0], lines: all}]}}, claude), {edits: [{...evs[1].edits[0], lines: all}], lines: [], big: false}, 'every hunk');
+  eq(out.wholeOf({event: {...evs[0], input: {file_path: '/w/a.go', old_string: 'a\nz', new_string: 'b'}}}, early).lines, ['-a', '-z', '+b'], 'a call put back whole');
+  ok(out.wholeOf({event: evs[1], blobs: [{blob: 'ab', bytes: 2 << 20}]}, claude).big, 'too big to put back');
+  eq(out.summaryOf(steps).files, 3, 'files by their paths');
+  ok(out.textOf(codex).includes('+x'), 'find looks in the preview');
 });
 
 test('follow: sticks until the viewer moves up, then counts what is new and what waits, and follows again near the bottom', () => {
@@ -419,6 +445,32 @@ test('the timeline follows the bottom, leaves it when the viewer scrolls up, kee
   } finally { undo(); }
 });
 
+test('an edit step opens on the first hunk the node wrote and fetches the rest once asked', async () => {
+  const item = readFrames('output-item').find(l => l.s?.type === 'res').s.result;
+  const asked = [];
+  let answer = () => Promise.resolve(item);
+  const onItem = (run, id) => { asked.push([run, id]); return answer(); };
+  const clk = clock();
+  const root = await mount(html`<div />`);
+  const draw = () => act(() => render(html`<${Output} parts=${[{run: {...state.r2, sends: []}, events: [...r2Early, ...pushed], head: {start: true}}]}
+    timers=${clk} onItem=${onItem} />`, root));
+  await draw();
+  const row = () => root.one('[data-key=a2:3:600:0]');
+  ok(row().one('.out-title').textContent === 'internal/receipt/pdf.go' && row().textContent.includes('+12') && row().textContent.includes(words.f('out.hunks', 3)),
+    `the path, its counts and hunks: ${row().textContent}`);
+  await click(row().one('.out-line'));
+  eq(row().one('.out-diff').find('span').length, 10, 'open: the first hunk');
+  answer = () => Promise.reject(Object.assign(new Error('x'), {code: 'unavailable'}));
+  await click(buttonOf(row(), words.f('out.moreHunks', 2)));
+  await settled();
+  ok(row().textContent.includes(words.f('out.itemFailed', 'unavailable')), 'a failure is said, and it can be asked again');
+  answer = () => Promise.resolve(item);
+  await click(buttonOf(row(), words.f('out.moreHunks', 2)));
+  await settled();
+  eq([row().one('.out-diff').find('span').length, asked], [21, [['r2', 'a2:3:610:0'], ['r2', 'a2:3:610:0']]], 'every hunk, from the result that holds them');
+  ok(!row().textContent.includes(words.f('out.moreHunks', 2)), 'nothing more to ask');
+});
+
 test('the task page\'s conversation: watched, paged back into the run before, written to, then carried on', async () => {
   const r = await outputs();
   const a = app(r, {url: '/?page=tasks&task=t1'});
@@ -540,6 +592,16 @@ test('a deep link opens the conversation at its step, found in a group, away fro
     async done() { await settled(); },
   });
   eq(a.router.route.value.event, 'a2:3:520:0', 'the route holds the step');
+  const edit = () => root.one('[data-key=a2:3:600:0]');
+  await r.srv.play('output-item', {
+    async item() {
+      await click(edit().one('.out-line'));
+      await click(buttonOf(edit(), words.f('out.moreHunks', 2)));
+      await settled();
+    },
+  });
+  await settled();
+  ok(edit().textContent.includes('return nil'), 'the edit\'s every hunk, through the store');
   eq(r.errors, [], 'errors');
 });
 

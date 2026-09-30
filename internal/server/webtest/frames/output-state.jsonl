@@ -1,7 +1,7 @@
 {"note":"a task whose conversation is two runs, the second continuing the first's session and asking two questions at once; affordances give the task's route and what the run offers (T3.3); the inbox has it waiting; now is 2026-09-30T14:32Z"}
 {"connect":true}
 {"c":{"type":"req","id":1,"method":"hello","params":{"proto":2,"role":"client"}}}
-{"s":{"type":"res","id":1,"result":{"proto":2,"version":"test","role":"coordinator","methods":["hello","task.get","state.watch","machines.watch","inbox.watch","run.output.watch","run.output.page","task.message","run.answer","run.interrupt","run.continue","run.stop","agent.list","run.changes","run.diff"]}}}
+{"s":{"type":"res","id":1,"result":{"proto":2,"version":"test","role":"coordinator","methods":["hello","task.get","state.watch","machines.watch","inbox.watch","run.output.watch","run.output.page","task.message","run.answer","run.interrupt","run.continue","run.stop","agent.list","run.changes","run.diff","run.output.item"]}}}
 {"step":"start"}
 {"c":{"type":"req","id":2,"method":"state.watch","params":{}}}
 {"c":{"type":"req","id":3,"method":"machines.watch","params":{}}}

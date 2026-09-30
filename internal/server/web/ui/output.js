@@ -13,6 +13,7 @@ import * as out from '../core/output.js';
 import {density as dt, code} from '../core/proto.js';
 import * as fl from '../core/follow.js';
 import {duration, tokens, money, clock, usageTokens} from '../core/format.js';
+import {glyph as opGlyph} from '../core/changes.js';
 
 register('output', {
   'out.label': ['输出', 'Output'], 'out.filter': ['筛选', 'Filter'],
@@ -49,6 +50,10 @@ register('output', {
   'out.earlierMore': ['找过更早的 %d 页，没有找到。接着找？', 'Looked through %d earlier pages without a hit. Go on?'],
   'out.noEarlier': ['更早的内容里也没有', 'Not in earlier output either'], 'out.findFailed': ['没能在更早的内容里找（%s）', 'Could not look in earlier output (%s)'],
   'out.prevHit': ['上一处', 'Previous'], 'out.nextHit': ['下一处', 'Next'], 'out.close': ['关闭查找', 'Close find'],
+  'out.newFile': ['新文件 · %d 行', 'New file · %d lines'], 'out.hunks': ['%d 处', '%d hunks'],
+  'out.moreHunks': ['还有 %d 处', '%d more hunks'], 'out.wholeDiff': ['看全部', 'Show all of it'], 'out.fetching': ['正在取…', 'Fetching…'],
+  'out.itemFailed': ['没取到（%s）', 'Could not fetch it (%s)'], 'out.tooBig': ['太大，这里放不下，到「改动」页签里看', 'Too big to show here: see the Changes tab'],
+  'out.moved': ['这段改动很长，移出了日志', 'This change is long and was moved out of the log'],
   'out.empty': ['还没有输出', 'No output yet'], 'out.copyLink': ['复制这一步的链接', 'Copy a link to this step'],
 });
 
@@ -85,8 +90,42 @@ export function Diff({lines, max = 0}) {
   return html`<div class="out-pre-wrap"><pre class="out-pre out-diff">${shown.map(l => html`<span class=${diffCls(l)}>${l + '\n'}</span>`)}${max > 0 && lines.length > max && html`<span class="t-muted">${f('out.cut', lines.length - max)}</span>`}</pre></div>`;
 }
 
+const editName = e => (e.op === 'rename' && e.from ? `${e.from} → ${e.path}` : e.path);
+
+// EditBody is an open edit step: each file's first hunk as the node wrote it, the rest fetched whole on asking (onItem,
+// run.output.item); a claude call without the node's counts shows its old and new text.
+function EditBody({s, density, onItem}) {
+  const {t, f} = useWords();
+  const [got, setGot] = useState(null);
+  const fetch = () => {
+    setGot({busy: true});
+    onItem(s.run, s.item).then(x => setGot(out.wholeOf(x, s)), e => setGot({failed: e.code || 'error'}));
+  };
+  const done = got && !got.busy && !got.failed;
+  const max = density === 'detailed' && !done ? dt.diffCut : 0;
+  const files = done && got.edits.length ? got.edits : s.edits;
+  const left = out.hunksLeft(s.edits), cut = s.edits.some(e => e.cut);
+  const asks = !!onItem && !done && (s.edits.length ? left > 0 || cut : out.moved(s.input));
+  const lines = done && !s.edits.length ? got.lines : out.editLines(s);
+  return html`<div class="out-body">
+    ${files.length ? files.map(e => html`<div class="out-edit" key=${e.path}>
+      ${files.length > 1 && html`<div class="out-edit-file mono"><span class="t-muted">${opGlyph(e.op)}</span> ${editName(e)} <${Counts} e=${e} /></div>`}
+      ${(done && e.lines?.length ? e.lines : e.preview || []).length > 0 && html`<${Diff} lines=${done && e.lines?.length ? e.lines : e.preview} max=${max} />`}
+    </div>`) : lines.length > 0 && html`<${Diff} lines=${lines} max=${max} />`}
+    ${!s.edits.length && out.moved(s.input) && !done && html`<span class="t-muted out-note">${t('out.moved')}</span>`}
+    ${asks && html`<div class="out-edit-more">${got?.failed && html`<span class="t-failed">${f('out.itemFailed', got.failed)}</span>`}
+      <${Button} kind="quiet" disabled=${!!got?.busy} onClick=${fetch}>${got?.busy ? t('out.fetching') : left > 0 ? f('out.moreHunks', left) : t('out.wholeDiff')}<//></div>`}
+    ${done && got.big && html`<span class="t-muted out-note">${t('out.tooBig')}</span>`}
+  </div>`;
+}
+
+// Counts is an edit's lines added and removed.
+function Counts({e}) {
+  return html`<span class="out-counts mono"><span class="t-success">+${e.add}</span> <span class="t-failed">−${e.del}</span></span>`;
+}
+
 // body is what an open step shows below its line.
-function Body({row, density, copy}) {
+function Body({row, density, copy, onItem}) {
   const w = useWords();
   const {t, f} = w;
   const s = row.step;
@@ -107,11 +146,7 @@ function Body({row, density, copy}) {
         ${s.truncated?.output > 0 && html`<span class="t-muted out-note">${f('out.truncated', kib(o.length + s.truncated.output))}</span>`}
       </div>`;
     }
-    case 'edit': {
-      const ls = out.editLines(s);
-      return html`<div class="out-body">${s.files.length > 1 && html`<ul class="out-files mono">${s.files.map(x => html`<li>~ ${x}</li>`)}</ul>`}
-        ${ls.length > 0 && html`<${Diff} lines=${ls} max=${density === 'detailed' && !whole ? dt.diffCut : 0} />`}</div>`;
-    }
+    case 'edit': return html`<${EditBody} s=${s} density=${density} onItem=${onItem} />`;
     case 'group':
       return html`<ul class="out-members mono">${s.members.map(m => html`<li key=${m.id}><span class="t-muted">${m.family === 'search' ? '?' : '+'}</span> ${m.title}</li>`)}</ul>`;
     case 'think': return html`<div class="out-body out-think">${s.text}</div>`;
@@ -129,7 +164,10 @@ function stepLine(w, s, density) {
       const parts = [s.reads && f('out.sum.reads', s.reads), s.searches && f('out.sum.searches', s.searches)].filter(Boolean);
       return {glyph: '+', text: s.members.length === 1 ? s.members[0].title : parts.join(' · '), mono: s.members.length === 1};
     }
-    case 'edit': return {glyph: '~', text: s.title || s.files.join(', '), mono: true};
+    case 'edit': {
+      const e = s.edits[0];
+      return e ? {glyph: opGlyph(e.op), text: editName(e), mono: true} : {glyph: '~', text: s.title || s.files.join(', '), mono: true};
+    }
     case 'plan': return {glyph: '☐', text: f('out.plan', s.title), thin: true};
     case 'agent': return {glyph: '↳', text: f('out.agent', s.title, (s.kids || []).length)};
     case 'mcp': case 'web': case 'other': return {glyph: '·', text: s.title, mono: true};
@@ -144,6 +182,12 @@ function stepLine(w, s, density) {
 // StepMeta is the right end of a step's line: its state, how long it took and how many lines it wrote.
 function StepMeta({s}) {
   const {t, f} = useWords();
+  if (s.kind === 'edit' && s.edits.length) {
+    const sum = s.edits.reduce((a, e) => ({add: a.add + e.add, del: a.del + e.del, hunks: a.hunks + e.hunks}), {add: 0, del: 0, hunks: 0});
+    const added = s.edits.length === 1 && s.edits[0].op === 'add';
+    return html`<span class="out-meta mono">${added ? html`<span class="t-success">${f('out.newFile', sum.add)}</span>` : html`<${Counts} e=${sum} />`}
+      ${!added && sum.hunks > 1 && html`<span>${f('out.hunks', sum.hunks)}</span>`}</span>`;
+  }
   if (!['shell', 'mcp', 'web', 'other', 'agent'].includes(s.kind)) return null;
   return html`<span class="out-meta mono">
     <span class=${tone[s.state]}>${glyph[s.state]}${s.state === 'running' ? ' ' + t('out.running') : s.failed && s.exit ? ' ' + f('out.exit', s.exit) : ''}</span>
@@ -165,7 +209,7 @@ function decided(w, name, s) {
 }
 
 // Row draws one row of the timeline.
-function Row({row, density, onToggle, onMore, onResend, renderAsk, copy, target, selected}) {
+function Row({row, density, onToggle, onMore, onResend, renderAsk, copy, target, selected, onItem}) {
   const w = useWords();
   const {t, f} = w;
   const name = useName();
@@ -255,7 +299,7 @@ function Row({row, density, onToggle, onMore, onResend, renderAsk, copy, target,
       </button>
       ${s.kind === 'shell' && s.input?.command && html`<${Button} kind="quiet" onClick=${() => copy(String(s.input.command))}>${t('out.copyCmd')}<//>`}
     </div>
-    ${row.open && html`<${Body} row=${row} density=${density} copy=${copy} />`}
+    ${row.open && html`<${Body} row=${row} density=${density} copy=${copy} onItem=${onItem} />`}
   </div>`;
 }
 
@@ -349,10 +393,10 @@ function useFollow({scroller, keys, waits, ended, away, timers = globalThis}) {
 // setting; onMore fetches the page before (a promise); onFind(q) says whether q is shown before what is loaded (a
 // promise; none: earlier pages are fetched and looked through); renderAsk(step) draws the answer form of a pending question;
 // target is a step to go to (a deep link); place and onPlace keep where the view was left; raw and onRaw show the
-// lines as written; copy puts text on the clipboard; tools go at the top right (the page's own buttons); children
+// lines as written; onItem(run, id) fetches an event whole (an edit's every hunk); copy puts text on the clipboard; tools go at the top right (the page's own buttons); children
 // (the composer) go under the timeline; linkOf(step) is the address of a step, copied for the selected one. bare is a
 // preview: the timeline alone, without its tools and keys.
-export function Output({bare = false, parts, density = 'standard', onDensity, onMore, onFind = null, onResend, renderAsk, target = '', place = null, onPlace, linkOf,
+export function Output({bare = false, parts, density = 'standard', onDensity, onMore, onFind = null, onItem = null, onResend, renderAsk, target = '', place = null, onPlace, linkOf,
   raw = null, onRaw, copy = text => globalThis.navigator?.clipboard?.writeText?.(text), tools, children, timers = globalThis, active: activeProp}) {
   const w = useWords();
   const {t} = w;
@@ -564,7 +608,7 @@ export function Output({bare = false, parts, density = 'standard', onDensity, on
   const drawRow = r => [
     r.key === divider && html`<div class="out-newline" key="newline" role="separator"><span>${t('out.newLine')}</span></div>`,
     html`<${Row} key=${r.key} row=${r} density=${density} onToggle=${toggle} onMore=${onMore} onResend=${onResend} renderAsk=${renderAsk}
-      copy=${copy} target=${flash} selected=${selected} />`];
+      copy=${copy} target=${flash} selected=${selected} onItem=${onItem} />`];
 
   const chips = html`<${Chips} label=${t('out.filter')}>${out.filters.map(x => html`<${Chip} label=${t('out.f.' + x)} on=${filter === x} onClick=${() => setFilter(x)} />`)}<//>`;
   const densities = onDensity && html`<${Segmented} label=${t('out.density')} value=${density} onChange=${onDensity} options=${dt.names.map(d => ({value: d, label: t('out.d.' + d)}))} />`;

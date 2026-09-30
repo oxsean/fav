@@ -428,7 +428,8 @@ func TestFrameWritesAndListsAreTheCoordinatorsShapes(t *testing.T) {
 		coord.MTaskMessage: func() any { return new(coord.TaskMessage) }, coord.MTaskMessagePreview: func() any { return new(coord.MessagePreview) },
 		coord.MRunSend: func() any { return new(coord.SendMessage) }, coord.MRunInterrupt: func() any { return new(coord.Interrupt) },
 		coord.MRunChanges: func() any { return new(node.ChangesParams) }, coord.MRunDiff: func() any { return new(node.DiffParams) },
-		coord.MMachineShare: func() any { return new(task.Share) }, coord.MProjectCreate: func() any { return new(coord.ProjectCreate) },
+		coord.MRunOutputItem: func() any { return new(coord.OutputItemParams) },
+		coord.MMachineShare:  func() any { return new(task.Share) }, coord.MProjectCreate: func() any { return new(coord.ProjectCreate) },
 		coord.MProjectMember: func() any { return new(task.MemberSet) }, coord.MProjectEdit: func() any { return new(task.ProjectEdit) },
 		coord.MProjectDirs: func() any { return new(coord.ProjectDirsParams) }, coord.MAgentDefList: func() any { return new(struct{}) },
 		coord.MAgentDefSave: func() any { return new(coord.AgentDefSave) }, coord.MAgentDefShare: func() any { return new(task.AgentDefShare) },
@@ -448,7 +449,8 @@ func TestFrameWritesAndListsAreTheCoordinatorsShapes(t *testing.T) {
 		coord.MTaskMessage: func() any { return new(coord.MessageResult) }, coord.MTaskMessagePreview: func() any { return new(coord.MessageRoute) },
 		coord.MRunSend: func() any { return new(task.Run) }, coord.MRunInterrupt: func() any { return new(task.Run) },
 		coord.MRunChanges: func() any { return new(node.Changes) }, coord.MRunDiff: func() any { return new(node.Diff) },
-		coord.MMachineShare: func() any { return new(task.Share) }, coord.MProjectCreate: func() any { return new(task.Project) },
+		coord.MRunOutputItem: func() any { return new(coord.OutputItem) },
+		coord.MMachineShare:  func() any { return new(task.Share) }, coord.MProjectCreate: func() any { return new(task.Project) },
 		coord.MProjectMember: func() any { return new(task.Project) }, coord.MProjectEdit: func() any { return new(task.Project) },
 		coord.MProjectDirs: func() any { return new(coord.ProjectDirs) }, coord.MAgentDefList: func() any { return new(coord.AgentDefList) },
 		coord.MAgentDefSave: func() any { return new(coord.AgentDefView) }, coord.MAgentDefShare: func() any { return new(coord.AgentDefView) },
@@ -497,7 +499,7 @@ func TestFrameWritesAndListsAreTheCoordinatorsShapes(t *testing.T) {
 	}
 	for _, m := range []string{coord.MTaskStatus, coord.MRunDispatch, coord.MRunStop, coord.MRunAnswer, coord.MRunOutputPage, coord.MTaskCreate,
 		coord.MTaskStart, coord.MTaskMerge, coord.MTaskMove, coord.MTaskPlanSave, coord.MTaskPlanApply, coord.MTaskGate, coord.MTaskSourceAck,
-		coord.MRunPreview, coord.MAgentList, coord.MTaskMessage, coord.MRunInterrupt, coord.MRunChanges, coord.MRunDiff, coord.MMachineShare, coord.MProjectCreate, coord.MProjectMember, coord.MProjectEdit, coord.MProjectDirs,
+		coord.MRunPreview, coord.MAgentList, coord.MTaskMessage, coord.MRunInterrupt, coord.MRunChanges, coord.MRunDiff, coord.MRunOutputItem, coord.MMachineShare, coord.MProjectCreate, coord.MProjectMember, coord.MProjectEdit, coord.MProjectDirs,
 		coord.MAgentDefList, coord.MAgentDefSave, coord.MAgentDefShare, coord.MAgentDefRemove, coord.MMachineCheck, coord.MMachineDrain, coord.MAgentDefCheck, "machines", "inbox", coord.PushAffordances, "affordances part"} {
 		if seen[m] == 0 {
 			t.Errorf("no frame file has %s", m)

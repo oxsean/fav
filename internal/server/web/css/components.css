@@ -402,7 +402,11 @@ button.tl-seg:hover { filter: brightness(1.15); }
 .out-diff .del { color: var(--failed); }
 .out-diff .hunk { color: var(--muted); }
 .out-note { font-size: 11px; }
-.out-members, .out-files { list-style: none; margin: 2px 0 6px 22px; padding: 0; display: grid; gap: 1px; font-size: 11px; }
+.out-edit { display: grid; gap: 2px; min-width: 0; }
+.out-edit-file { display: flex; gap: 8px; align-items: baseline; font-size: 11px; min-width: 0; }
+.out-edit-more { display: flex; gap: 8px; align-items: center; font-size: 11px; }
+.out-counts { white-space: nowrap; }
+.out-members { list-style: none; margin: 2px 0 6px 22px; padding: 0; display: grid; gap: 1px; font-size: 11px; }
 .out-plan { list-style: none; margin: 2px 0 6px 22px; padding: 0; display: grid; gap: 2px; font-size: 12px; }
 .out-plan .done { color: var(--muted); text-decoration: line-through; }
 .out-plan .now { font-weight: 600; }

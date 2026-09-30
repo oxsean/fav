@@ -18,14 +18,14 @@ const lines = async name => (await (await fetch(`webtest/frames/${name}.jsonl`))
 // context).
 const sets = {home: ['home-state', 'output-page', 'home-commands', 'changes-gone'],
   tasks: ['tasks-state', 'tasks-create', 'tasks-dispatch', 'tasks-plan', 'tasks-acts', 'tasks-board', 'changes-list'],
-  output: ['output-state', 'output-conv', 'output-send', 'output-answer', 'changes-list'],
-  carry: ['output-state', 'output-conv', 'output-send', 'output-carry', 'changes-list'],
-  gone: ['output-state', 'output-conv', 'output-answer-gone', 'changes-list'],
+  output: ['output-state', 'output-conv', 'output-item', 'output-send', 'output-answer', 'changes-list'],
+  carry: ['output-state', 'output-conv', 'output-item', 'output-send', 'output-carry', 'changes-list'],
+  gone: ['output-state', 'output-conv', 'output-item', 'output-answer-gone', 'changes-list'],
   team: ['team-state', 'team-share', 'team-project', 'team-settings'],
   agents: ['agents-state', 'agents-edit', 'agents-share']};
 // joins are the files whose pushes on a stream an earlier file opened go on that stream, after what it pushed there.
 const joins = new Set(['output-send', 'output-carry']);
-const keyOf = (f, run = true) => [f.method, run && f.params?.run, f.params?.after, f.params?.path, ...['hunk', 'line', 'context', 'ignore_space'].map(k => f.params?.[k] && k + f.params[k])]
+const keyOf = (f, run = true) => [f.method, run && f.params?.run, f.params?.after, f.params?.path, f.params?.id, ...['hunk', 'line', 'context', 'ignore_space'].map(k => f.params?.[k] && k + f.params[k])]
   .filter(Boolean).join(' ');
 
 async function answers(names) {

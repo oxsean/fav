@@ -19,6 +19,8 @@ export const PAGE_EVENTS = 200;
 export const OUTPUT_BYTES = 32 << 20;
 // ⚠️ How many times a find goes on where the node stopped looking before it says there is nothing.
 export const FIND_ROUNDS = 8;
+// ⚠️ Whole events (run.output.item, each at most about 1 MiB) kept once fetched: a line never changes.
+export const ITEMS_KEPT = 16;
 
 // fileOf is the log an event id is in: the id is file:off:n and the file (dev:ino) has colons of its own.
 export const fileOf = id => String(id).split(':').slice(0, -2).join(':');
@@ -49,6 +51,7 @@ export function createStore({wire, frame = fn => globalThis.requestAnimationFram
   const session = signal(null), prefs = signal({});
   let staged = null, briefs = true, dirty = new Set(), scheduled = false, watches = [];
   const outputs = new Map();
+  const items = new Map();
 
   function touch(parts) {
     for (const p of parts) dirty.add(p);
@@ -288,6 +291,19 @@ export function createStore({wire, frame = fn => globalThis.requestAnimationFram
     state, rev, phase, machines, inbox, affordances, session, prefs, brief, briefOf, output,
     // find says whether q is shown anywhere in a run's output; canFind whether the server can look.
     find: (run, q) => find(run, q), canFind: () => !!wire.has?.('run.output.find'),
+    // item is one event of a run's output with nothing left out (run.output.item: {event, blobs?}); canItem whether the
+    // server can give it.
+    item(run, id) {
+      const k = run + '\n' + id;
+      if (!items.has(k)) {
+        const p = wire.call('run.output.item', {run, id});
+        items.set(k, p);
+        p.catch(() => items.delete(k));
+        if (items.size > ITEMS_KEPT) items.delete(items.keys().next().value);
+      }
+      return items.get(k);
+    },
+    canItem: () => !!wire.has?.('run.output.item'),
     // start opens the watches; noBriefs leaves the tasks' briefs out of the state (brief fetches one).
     start({noBriefs = false} = {}) {
       briefs = !noBriefs;
