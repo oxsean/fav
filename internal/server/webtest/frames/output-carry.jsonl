@@ -10,5 +10,5 @@
 {"c":{"type":"req","id":14,"method":"run.output.watch","params":{"run":"r3"}}}
 {"c":{"type":"cancel","id":5}}
 {"s":{"type":"push","id":14,"method":"open","params":{"cursor":{"file":"a3:1","off":0},"mode":"resume"}}}
-{"s":{"type":"push","id":14,"method":"run.output","params":{"events":[{"id":"a3:1:0:0","off":0,"kind":"user","text":"Then add a footer with the page number.","turn":1},{"id":"a3:1:120:0","off":120,"kind":"say","text":"Adding the footer now.","turn":1}]}}}
+{"s":{"type":"push","id":14,"method":"run.output","params":{"events":[{"id":"a3:1:0:0","off":0,"kind":"user","text":"Then add a footer with the page number.","turn":1},{"id":"a3:1:120:0","off":120,"kind":"say","text":"Adding the footer now.","turn":1}],"cursor":{"file":"a3:1","off":200}}}}
 {"step":"continued"}

@@ -4,7 +4,7 @@
 // both forms and both languages; and the task page's conversation and the home's waiting item played against the
 // output frames. Given a file of events by name, it also lays them out for the Go test that compares output.Items.
 process.env.TZ = 'UTC';
-import {readFileSync} from 'node:fs';
+import {readFileSync, readdirSync} from 'node:fs';
 import {render} from '../web/vendor/preact.mjs';
 import renderToString from './vendor/render-to-string.mjs';
 import {act} from './vendor/test-utils.mjs';
@@ -30,6 +30,7 @@ import {install, layout} from './dom.js';
 import {settle, readFrames, clock} from './fake.js';
 import {NOW, outputs} from './rig.js';
 import {test, eq, ok, run} from './check.js';
+import {answers, socket} from './preview/answer.js';
 
 const css = ['base.css', 'components.css', 'pages.css'].map(f => readFileSync(new URL(`../web/css/${f}`, import.meta.url), 'utf8')).join('\n');
 const cssClasses = new Set([...css.matchAll(/\.([a-zA-Z][\w-]*)/g)].map(m => m[1]));
@@ -685,4 +686,35 @@ test('the task page in both forms with its conversation, styled and worded', asy
   ok(over.includes('aria-selected="true"') && over.includes('>概览<') && !over.includes('det-out'), 'the overview when last chosen');
 });
 
+
+test('a stream push of whole events carries its cursor, as the coordinator sends it', () => {
+  const dir = new URL('./frames/', import.meta.url);
+  const bare = [];
+  for (const name of readdirSync(dir).filter(n => n.endsWith('.jsonl'))) {
+    readFileSync(new URL(name, dir), 'utf8').split('\n').forEach((l, i) => {
+      const f = l && JSON.parse(l).s;
+      if (f?.method === 'run.output' && !f.params.cursor && f.params.events.some(e => e.id)) bare.push(`${name}:${i + 1}`);
+    });
+  }
+  eq(bare, [], 'pushes of whole events without a cursor');
+});
+
+test('the preview resumes a watch from its cursor: only what came after it is pushed again', async () => {
+  const table = await answers(['output-state', 'output-conv'], name => readFileSync(new URL(`./frames/${name}.jsonl`, import.meta.url), 'utf8'));
+  const got = [];
+  const s = socket(table);
+  s.onmessage = m => got.push(...m.data.split('\n').filter(Boolean).map(l => JSON.parse(l)));
+  const watch = (id, params) => s.send(JSON.stringify({type: 'req', id, method: 'run.output.watch', params}));
+  watch(1, {run: 'r2'});
+  watch(2, {run: 'r2', from: {file: 'a2:3', off: 740}});
+  watch(3, {run: 'r2', from: {file: 'a2:3', off: 880}});
+  await new Promise(r => setTimeout(r, 100));
+  const evs = id => got.filter(f => f.id === id && f.method === 'run.output').flatMap(f => f.params.events);
+  const ids = id => evs(id).map(e => e.off);
+  const opened = id => got.find(f => f.id === id && f.method === 'open')?.params;
+  ok(ids(1).length > 2 && ids(1)[0] === 400, 'a new watch: every event');
+  eq(ids(2), ids(1).filter(off => off >= 740), 'from 740: the events at it and after');
+  eq(ids(3), [], 'from the end: nothing again');
+  eq(opened(3), {cursor: {file: 'a2:3', off: 880}, mode: 'resume'}, 'the stream opens where it was asked to');
+});
 run();

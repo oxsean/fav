@@ -6,72 +6,10 @@
 // ?frames=agents the agent page's (open ?page=agents).
 // /api/* answers come from webtest/api.json by method and path; a write it has no answer for succeeds empty.
 import {boot} from '../../web/pages/boot.js';
+import {sets, answers, socket} from './answer.js';
 
 // ⚠️ The moment the home frames are written for.
 const NOW = Date.parse('2026-09-30T14:32:00Z');
-
-const lines = async name => (await (await fetch(`webtest/frames/${name}.jsonl`)).text()).split('\n').filter(Boolean).map(l => JSON.parse(l));
-
-// answers maps each request method of the frame files to what the server sent for it: the result, then the pushes on
-// its stream, remapped to the ids the page uses; a method asked of a run is answered per run, and
-// a run the files do not ask of as the first one they do (with the same page or path, and a diff's same hunk, line and
-// context).
-const sets = {home: ['home-state', 'output-page', 'home-commands', 'changes-gone'],
-  tasks: ['tasks-state', 'tasks-create', 'tasks-dispatch', 'tasks-plan', 'tasks-acts', 'tasks-board', 'changes-list'],
-  output: ['output-state', 'output-conv', 'output-item', 'output-send', 'output-answer', 'changes-list'],
-  carry: ['output-state', 'output-conv', 'output-item', 'output-send', 'output-carry', 'changes-list'],
-  gone: ['output-state', 'output-conv', 'output-item', 'output-answer-gone', 'changes-list'],
-  team: ['team-state', 'team-share', 'team-project', 'team-settings'],
-  agents: ['agents-state', 'agents-edit', 'agents-share']};
-// joins are the files whose pushes on a stream an earlier file opened go on that stream, after what it pushed there.
-const joins = new Set(['output-send', 'output-carry']);
-const keyOf = (f, run = true) => [f.method, run && f.params?.run, f.params?.after, f.params?.path, f.params?.id, ...['hunk', 'line', 'context', 'ignore_space'].map(k => f.params?.[k] && k + f.params[k])]
-  .filter(Boolean).join(' ');
-
-async function answers(names) {
-  const out = {}, opened = {};
-  for (const name of names) {
-    const asked = {};
-    for (const l of await lines(name)) {
-      if (l.c?.type === 'req') {
-        const k = keyOf(l.c);
-        asked[l.c.id] = k;
-        out[k] ||= {res: null, pushes: []};
-        out[keyOf(l.c, false)] ||= out[k];
-        out[l.c.method] ||= out[k];
-      }
-      const f = l.s, m = f && asked[f.id];
-      if (!m && f?.type === 'push' && joins.has(name) && opened[f.id]) out[opened[f.id]].pushes.push(f);
-      if (!m || out[m].done) continue;
-      if (f.type === 'res') out[m].res = f;
-      else if (f.type === 'push') out[m].pushes.push(f);
-    }
-    for (const m of Object.values(out)) if (m.res || m.pushes.length) m.done = true;
-    Object.assign(opened, asked);
-  }
-  return out;
-}
-
-function socket(table) {
-  const s = {
-    send(data) {
-      for (const line of data.split('\n').filter(Boolean)) {
-        const f = JSON.parse(line);
-        if (f.type !== 'req') continue;
-        const a = table[keyOf(f)] || table[keyOf(f, false)];
-        setTimeout(() => {
-          if (!a) { s.reply({type: 'res', id: f.id, result: {}}); return; }
-          if (a.res) s.reply({...a.res, id: f.id});
-          for (const p of a.pushes) s.reply({...p, id: f.id});
-        }, 30);
-      }
-    },
-    reply: f => s.onmessage?.({data: JSON.stringify(f) + '\n'}),
-    close() { setTimeout(() => s.onclose?.({}), 0); },
-  };
-  setTimeout(() => s.onopen?.({}), 10);
-  return s;
-}
 
 const people = {member: {id: 'u_b', name: 'Bo Lin', email: 'bo@example.com', username: 'bo', role: 'member', session: 'web-1'},
   admin: {id: 'u_a', name: 'Ann Lee', email: 'ann@example.com', username: 'ann', role: 'admin', session: 'web-2'}};
@@ -96,7 +34,8 @@ function fakeFetch(me, api) {
 }
 
 const query = new URLSearchParams(location.search);
-const table = await answers(sets[query.get('frames')] || sets.home);
+const text = async name => (await fetch(`webtest/frames/${name}.jsonl`)).text();
+const table = await answers(sets[query.get('frames')] || sets.home, text);
 const api = await (await fetch('webtest/api.json')).json();
 const as = query.get('as');
 boot({open: () => socket(table), fetch: fakeFetch(as === 'signedout' ? null : people[as] || people.member, api), clock: () => NOW});
