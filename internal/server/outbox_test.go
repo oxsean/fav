@@ -218,6 +218,12 @@ func (o *outbox) notifier() *Notifier {
 // device subscribes a browser for user whose push service is at path.
 func (o *outbox) device(user, path string) store.PushDevice {
 	o.t.Helper()
+	return o.deviceVia(user, path, "")
+}
+
+// deviceVia is device, registered through the session cred.
+func (o *outbox) deviceVia(user, path, cred string) store.PushDevice {
+	o.t.Helper()
 	ua, _ := ecdh.P256().GenerateKey(rand.Reader)
 	auth := make([]byte, 16)
 	rand.Read(auth)
@@ -227,7 +233,7 @@ func (o *outbox) device(user, path string) store.PushDevice {
 	o.svc.mu.Lock()
 	o.svc.keys[path], o.svc.auths[path] = ua, auth
 	o.svc.mu.Unlock()
-	d, err := keepDevice(o.team, o.seal, user, "Phone", sub, o.clock.now())
+	d, err := keepDevice(o.team, o.seal, user, cred, "Phone", sub, o.clock.now())
 	if err != nil {
 		o.t.Fatal(err)
 	}
@@ -472,6 +478,35 @@ func TestAPushGoesOnlyToItsOwnersDevice(t *testing.T) {
 	o.n.deliver(context.Background(), due[0], dev)
 	if got := o.svc.taken(); len(got) != 0 {
 		t.Fatalf("a row taken before the browser changed hands: %+v", got)
+	}
+	if due, _ := o.team.Due(n0.Add(time.Hour), 10); len(due) != 0 {
+		t.Fatalf("still to go: %+v", due)
+	}
+}
+
+// A device whose session no longer lets anyone in is pushed nothing, whatever was queued for it.
+func TestNothingIsPushedThroughASessionThatEnded(t *testing.T) {
+	o := newOutbox(t)
+	_, _, err := o.team.NewCredential(store.KindToken, "t-local", store.LocalUser, 0)
+	must(t, err)
+	creds, _ := o.team.ActiveCredentials()
+	live := ""
+	for _, c := range creds {
+		if c.Name == "t-local" {
+			live = c.ID
+		}
+	}
+	dir, err := NewDirectory(o.team)
+	must(t, err)
+	o.n.o.Dir = dir
+	o.deviceVia(store.LocalUser, "/push/ended", "w_gone")
+	o.deviceVia(store.LocalUser, "/push/live", live)
+	o.coord.wait(store.LocalUser, "t_1", question)
+	o.n.Send(needs(5, question))
+	o.clock.set(n0.Add(time.Minute))
+	o.drain()
+	if got := o.svc.taken(); len(got) != 1 || got[0].path != "/push/live" {
+		t.Fatalf("pushed through a session that ended: %+v", got)
 	}
 	if due, _ := o.team.Due(n0.Add(time.Hour), 10); len(due) != 0 {
 		t.Fatalf("still to go: %+v", due)

@@ -69,9 +69,10 @@ func (s *Server) pushKey(w http.ResponseWriter, r *http.Request, c caller) {
 
 // keepDevice registers the browser that subscribed with sub for user, or renews it: a browser is found again by its
 // endpoint, whoever signs in there now.
-func keepDevice(team *store.Team, seal *Sealer, user, name string, sub webSubscription, now time.Time) (store.PushDevice, error) {
+func keepDevice(team *store.Team, seal *Sealer, user, cred, name string, sub webSubscription, now time.Time) (store.PushDevice, error) {
 	target, _ := json.Marshal(sub)
-	return team.KeepDevice(store.PushDevice{User: user, Kind: store.KindWebPush, Name: name, Target: seal.Seal(target)}, store.Sum(sub.Endpoint), now)
+	return team.KeepDevice(store.PushDevice{User: user, Kind: store.KindWebPush, Name: name, Target: seal.Seal(target), Credential: cred},
+		store.Sum(sub.Endpoint), now)
 }
 
 // pushDevice registers or renews this browser's push subscription: the page sends it each time it opens.
@@ -91,7 +92,7 @@ func (s *Server) pushDevice(w http.ResponseWriter, r *http.Request, c caller) {
 		apiError(w, http.StatusBadRequest, "bad_request")
 		return
 	}
-	d, err := keepDevice(s.opt.Dir.team, s.opt.Seal, c.user.ID, in.Name, in.Subscription, time.Now())
+	d, err := keepDevice(s.opt.Dir.team, s.opt.Seal, c.user.ID, c.cred.ID, in.Name, in.Subscription, time.Now())
 	if err != nil {
 		apiError(w, http.StatusInternalServerError, "internal")
 		return

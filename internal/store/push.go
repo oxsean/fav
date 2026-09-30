@@ -23,6 +23,8 @@ type PushDevice struct {
 	LastOK   time.Time   `json:"last_ok,omitzero"`
 	Failures int         `json:"failures,omitempty"`
 	Prefs    DevicePrefs `json:"prefs"`
+	// Credential is the session or token that registered or last renewed it: it pushes only while that is live.
+	Credential string `json:"-"`
 }
 
 // ⚠️ The events a device may take: what waits on its user (the default) and a task of theirs done.
@@ -90,11 +92,11 @@ type Delivery struct {
 func (t *Team) KeepDevice(d PushDevice, hash string, now time.Time) (PushDevice, error) {
 	var id string
 	err := inTx(t.w, func(tx *sql.Tx) error {
-		_, err := tx.Exec(`INSERT INTO push_devices (id, user_id, kind, target, target_hash, name, created_at, renewed_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		_, err := tx.Exec(`INSERT INTO push_devices (id, user_id, kind, target, target_hash, name, created_at, renewed_at, credential_id)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 			ON CONFLICT (target_hash) DO UPDATE SET user_id = excluded.user_id, kind = excluded.kind, target = excluded.target,
-				name = excluded.name, renewed_at = excluded.renewed_at`,
-			newID("d_"), d.User, d.Kind, d.Target, hash, d.Name, now.UnixNano(), now.UnixNano())
+				name = excluded.name, renewed_at = excluded.renewed_at, credential_id = excluded.credential_id`,
+			newID("d_"), d.User, d.Kind, d.Target, hash, d.Name, now.UnixNano(), now.UnixNano(), d.Credential)
 		if err != nil {
 			return err
 		}
@@ -112,13 +114,13 @@ func (t *Team) KeepDevice(d PushDevice, hash string, now time.Time) (PushDevice,
 	return kept, err
 }
 
-const deviceCols = `id, user_id, kind, target, name, created_at, renewed_at, last_ok_at, failures, prefs`
+const deviceCols = `id, user_id, kind, target, name, created_at, renewed_at, last_ok_at, failures, prefs, credential_id`
 
 func scanDevice(s interface{ Scan(...any) error }) (PushDevice, error) {
 	var d PushDevice
 	var created, renewed, ok int64
 	var prefs string
-	err := s.Scan(&d.ID, &d.User, &d.Kind, &d.Target, &d.Name, &created, &renewed, &ok, &d.Failures, &prefs)
+	err := s.Scan(&d.ID, &d.User, &d.Kind, &d.Target, &d.Name, &created, &renewed, &ok, &d.Failures, &prefs, &d.Credential)
 	d.Created, d.Renewed, d.LastOK = fromNanos(created), fromNanos(renewed), fromNanos(ok)
 	json.Unmarshal([]byte(prefs), &d.Prefs) // one it cannot read is the defaults
 	return d, err
@@ -173,6 +175,24 @@ func (t *Team) Devices(user string) ([]PushDevice, error) {
 			return nil, err
 		}
 		out = append(out, d)
+	}
+	return out, rows.Err()
+}
+
+// DeviceCredentials is each device's id and the credential it pushes through.
+func (t *Team) DeviceCredentials() (map[string]string, error) {
+	rows, err := t.r.Query(`SELECT id, credential_id FROM push_devices`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]string{}
+	for rows.Next() {
+		var id, cred string
+		if err := rows.Scan(&id, &cred); err != nil {
+			return nil, err
+		}
+		out[id] = cred
 	}
 	return out, rows.Err()
 }

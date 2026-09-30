@@ -6,12 +6,14 @@ import (
 	"crypto/rand"
 	"crypto/x509"
 	"encoding/base64"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/oxsean/fav/internal/store"
 )
@@ -167,5 +169,78 @@ func TestSomeoneSetsUpTheirOwnDevicesOnly(t *testing.T) {
 	}
 	if ds, _ := r.team.Devices(ann.ID); len(ds) != 0 {
 		t.Fatalf("still there: %+v", ds)
+	}
+}
+
+// A device pushes only while the session (or token) that registered it lets someone in: signing out, having it
+// revoked or letting it expire takes the device away with what was still to go to it.
+func TestADevicesPushesEndWithTheSessionThatRegisteredIt(t *testing.T) {
+	r := newRig(t)
+	ann, annC := r.member("Ann")
+	tok, _, err := r.team.NewCredential(store.KindToken, "t-ann2", ann.ID, 0)
+	must(t, err)
+	short, _, err := r.team.NewCredential(store.KindToken, "t-short", ann.ID, 300*time.Millisecond)
+	must(t, err)
+	r.srv.sweep()
+	annC2, annC3 := browser(t), browser(t)
+	login(t, annC2, r.url, tok)
+	login(t, annC3, r.url, tok)
+	r.srv.sweep()
+	sub := func(path string) map[string]any {
+		ua, _ := ecdh.P256().GenerateKey(rand.Reader)
+		return map[string]any{"endpoint": "https://push.example/" + path, "keys": map[string]string{
+			"p256dh": base64.RawURLEncoding.EncodeToString(ua.PublicKey().Bytes()), "auth": base64.RawURLEncoding.EncodeToString(make([]byte, 16))}}
+	}
+	var d1, d2, d3 struct{ ID string }
+	if got := r.api(annC, "PUT", "/api/push/device", map[string]any{"subscription": sub("a"), "name": "Mac"}, &d1); got != http.StatusOK {
+		t.Fatal(got)
+	}
+	if got := r.api(annC2, "PUT", "/api/push/device", map[string]any{"subscription": sub("b"), "name": "Android"}, &d2); got != http.StatusOK {
+		t.Fatal(got)
+	}
+	b, _ := json.Marshal(map[string]any{"subscription": sub("c"), "name": "iPhone"})
+	req, _ := http.NewRequest("PUT", r.url+"/api/push/device", bytes.NewReader(b))
+	req.Header.Set("Authorization", "Bearer "+short)
+	req.Header.Set("X-Tend", "1")
+	resp, err := http.DefaultClient.Do(req)
+	must(t, err)
+	json.NewDecoder(resp.Body).Decode(&d3)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK || d3.ID == "" {
+		t.Fatalf("with a token: %d", resp.StatusCode)
+	}
+	_, err = r.team.Enqueue([]store.Delivery{{Seq: 5, User: ann.ID, Event: store.EventWaiting, Device: d1.ID, Next: time.Now(), Notice: []byte(`{}`), At: time.Now()}})
+	must(t, err)
+	has := func(id string) bool { _, ok, _ := r.team.Device(id); return ok }
+
+	if got := r.api(annC, "POST", "/logout", nil, nil); got != http.StatusNoContent {
+		t.Fatal(got)
+	}
+	if has(d1.ID) || !has(d2.ID) || !has(d3.ID) {
+		t.Fatalf("signed out: %v %v %v", has(d1.ID), has(d2.ID), has(d3.ID))
+	}
+	if due, _ := r.team.Due(time.Now().Add(time.Hour), 10); len(due) != 0 {
+		t.Fatalf("still to go to the signed-out browser: %+v", due)
+	}
+
+	var creds []credView
+	r.api(annC2, "GET", "/api/tokens", nil, &creds)
+	var s2 string
+	for _, c := range creds {
+		if c.Current {
+			s2 = c.ID
+		}
+	}
+	if got := r.api(annC3, "DELETE", "/api/tokens", map[string]string{"id": s2}, nil); got != http.StatusNoContent || s2 == "" {
+		t.Fatalf("%q %d", s2, got)
+	}
+	if has(d2.ID) || !has(d3.ID) {
+		t.Fatalf("a session revoked: %v %v", has(d2.ID), has(d3.ID))
+	}
+
+	time.Sleep(400 * time.Millisecond)
+	r.srv.sweep()
+	if has(d3.ID) {
+		t.Fatal("a token expired")
 	}
 }

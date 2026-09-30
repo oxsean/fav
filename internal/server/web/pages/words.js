@@ -31,7 +31,7 @@ register('pages', {
   'denied.switch': ['换一个账号', 'Use another account'], 'denied.copy': ['复制账号信息', 'Copy the account details'], 'denied.copied': ['已复制', 'Copied'],
   'device.title': ['允许终端登录？', 'Allow this sign-in?'], 'device.help': ['核对终端上显示的设备码，一致再允许。', 'Check the code shown in the terminal, then allow it.'],
   'device.titleSession': ['允许这台设备登录网页？', 'Allow this device to sign in?'],
-  'device.helpSession': ['核对那台设备上显示的码，一致再允许。允许后它以你的身份登录 tend 网页，30 天有效，可以在「我」页的浏览器会话里让它退出。', 'Check the code the device shows, then allow it. It signs in to tend as you for 30 days; the me page\'s browser sessions can sign it out.'],
+  'device.helpSession': ['核对那台设备上显示的码，一致再允许。允许后它以你的身份登录 tend 网页，30 天有效；在「我」页的浏览器会话里让它退出，它的推送也一起停。', 'Check the code the device shows, then allow it. It signs in to tend as you for 30 days; signing it out from the me page\'s browser sessions stops its pushes too.'],
   'device.allowedSession': ['已允许，那台设备会自动登录。', 'Allowed. The device signs in by itself.'],
   'device.name': ['设备', 'Device'], 'device.ip': ['来源地址', 'Source address'], 'device.at': ['请求于', 'Requested'],
   'device.allow': ['允许', 'Allow'], 'device.deny': ['拒绝', 'Deny'], 'device.allowed': ['已允许，回到终端继续。', 'Allowed. Go back to the terminal.'],

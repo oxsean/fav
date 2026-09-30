@@ -292,6 +292,7 @@ test('a token made shows once; revoking one asks first', async () => {
   await click(buttonOf(a.el.one('.modal-foot'), words.t('me.revoke')));
   await settled();
   eq(a.http.calls.filter(c => c[0] === 'DELETE /api/tokens'), [['DELETE /api/tokens', {id: 'k2'}]], 'revoked');
+  eq(a.http.calls.filter(c => c[0] === 'GET /api/push/devices').length, 2, 'the devices read again: the sessions it signed in went');
   ok(a.el.textContent.includes(words.f('me.revoked', 'ci-bot')), 'said');
   await a.done();
 });
@@ -300,11 +301,14 @@ test('a session is signed out after asking; so are all the others, this one kept
   const a = await app();
   await until(() => a.el.textContent.includes(words.t('me.thisBrowser')), 'the sessions');
   const rows = () => a.el.find('.me-row').filter(r => r.textContent.includes(words.t('me.signedIn')));
+  const reads = () => a.http.calls.filter(c => c[0] === 'GET /api/push/devices').length;
+  await until(() => reads() > 0, 'the devices');
   eq(rows().length, 1, 'one signed in by a browser besides this one');
   await click(buttonOf(rows()[0], words.t('me.end')));
+  ok(a.el.one('.modal').textContent.includes(words.t('me.endNote')), 'its pushes stop too');
   await click(buttonOf(a.el.one('.modal-foot'), words.t('me.end')));
   await settled();
-  eq(a.http.calls.filter(c => c[0] === 'DELETE /api/tokens'), [['DELETE /api/tokens', {id: 'w3'}]], 'the one picked');
+  eq([a.http.calls.filter(c => c[0] === 'DELETE /api/tokens'), reads()], [[['DELETE /api/tokens', {id: 'w3'}]], 2], 'the one picked; the devices read again');
   await click(buttonOf(a.el, words.t('me.endOthers')));
   ok(a.el.one('.modal').textContent.includes(words.f('me.endOthersTitle', 3)), 'how many');
   await click(buttonOf(a.el.one('.modal-foot'), words.t('me.endOthers')));
@@ -312,6 +316,7 @@ test('a session is signed out after asking; so are all the others, this one kept
   eq(a.http.calls.filter(c => c[0] === 'DELETE /api/tokens').slice(1), [['DELETE /api/tokens', {id: 'w2'}], ['DELETE /api/tokens', {id: 'w3'}],
     ['DELETE /api/tokens', {id: 'w4'}]], 'every other, not this one');
   ok(a.el.textContent.includes(words.f('me.endedN', 3)), 'said');
+  eq(reads(), 3, 'the devices read again');
   await a.done();
 });
 

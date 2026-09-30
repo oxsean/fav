@@ -15,7 +15,7 @@ func webhookRow(seq int64, user, event string, next time.Time) Delivery {
 
 // before0011 takes a database back to before the devices' settings.
 func before0011(t *testing.T, path string) {
-	exec(t, path, `ALTER TABLE push_devices DROP COLUMN prefs`)
+	exec(t, path, `ALTER TABLE push_devices DROP COLUMN prefs; ALTER TABLE push_devices DROP COLUMN credential_id`)
 }
 
 // before0009 puts the tables 0009 changed back as they were before it.
@@ -120,13 +120,16 @@ func TestTheOutboxTakesADeliveryOnceAndAnswersWhatIsDue(t *testing.T) {
 // and a gone device takes its undelivered rows with it.
 func TestADeviceIsFoundAgainByItsEndpoint(t *testing.T) {
 	tm := openTeam(t)
-	a, err := tm.KeepDevice(PushDevice{User: LocalUser, Kind: KindWebPush, Name: "Mac", Target: []byte("sealed-1")}, "h1", t0)
-	if err != nil || a.ID == "" {
+	a, err := tm.KeepDevice(PushDevice{User: LocalUser, Kind: KindWebPush, Name: "Mac", Target: []byte("sealed-1"), Credential: "w_1"}, "h1", t0)
+	if err != nil || a.ID == "" || a.Credential != "w_1" {
 		t.Fatalf("%+v %v", a, err)
 	}
-	b, err := tm.KeepDevice(PushDevice{User: LocalUser, Kind: KindWebPush, Name: "Mac", Target: []byte("sealed-2")}, "h1", t0.Add(time.Hour))
-	if err != nil || b.ID != a.ID {
-		t.Fatalf("renewing made another device: %+v %v", b, err)
+	b, err := tm.KeepDevice(PushDevice{User: LocalUser, Kind: KindWebPush, Name: "Mac", Target: []byte("sealed-2"), Credential: "w_2"}, "h1", t0.Add(time.Hour))
+	if err != nil || b.ID != a.ID || b.Credential != "w_2" {
+		t.Fatalf("renewing made another device, or kept the old session: %+v %v", b, err)
+	}
+	if held, err := tm.DeviceCredentials(); err != nil || !reflect.DeepEqual(held, map[string]string{a.ID: "w_2"}) {
+		t.Fatalf("%v %v", held, err)
 	}
 	if d, ok, _ := tm.Device(a.ID); !ok || string(d.Target) != "sealed-2" || !d.Renewed.Equal(t0.Add(time.Hour)) || !d.Created.Equal(t0) {
 		t.Fatalf("after renewing: %+v", d)
@@ -227,7 +230,7 @@ func TestADevicesSettingsAreItsOwnersAndOutliveItsRenewals(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer tm.Close()
-	if d, ok, _ := tm.Device(old.ID); !ok || !d.Prefs.Wants("task.needs_you") || d.Prefs.Wants("task.done") || d.Prefs.Hide || d.Prefs.Wait != 0 {
+	if d, ok, _ := tm.Device(old.ID); !ok || !d.Prefs.Wants("task.needs_you") || d.Prefs.Wants("task.done") || d.Prefs.Hide || d.Prefs.Wait != 0 || d.Credential != "" {
 		t.Fatalf("a device from before the settings: %+v", d)
 	}
 

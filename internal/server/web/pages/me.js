@@ -71,14 +71,14 @@ register('me', {
   'me.done': ['完成', 'Done'], 'me.made': ['%s 已生成', '%s is made'],
   'me.madeAt': ['%s 建立', 'made %s'], 'me.usedAt': ['%s 用过', 'used %s'], 'me.unused': ['没用过', 'never used'], 'me.until': ['%s 到期', 'ends %s'],
   'me.revoke': ['吊销', 'Revoke'], 'me.revokeTitle': ['吊销 %s？', 'Revoke %s?'],
-  'me.revokeNote': ['用它的 CLI 和 TUI 立刻断开，用它登录的网页会话一起失效，不能恢复。', 'The CLI and TUI using it disconnect at once, and so do the browser sessions it signed in; this cannot be undone.'],
+  'me.revokeNote': ['用它的 CLI 和 TUI 立刻断开，用它登录的网页会话一起失效，它们的推送也停，不能恢复。', 'The CLI and TUI using it disconnect at once, and so do the browser sessions it signed in, whose pushes stop; this cannot be undone.'],
   'me.revoked': ['%s 已吊销', '%s is revoked'],
   'me.sessions': ['浏览器会话', 'Browser sessions'], 'me.sessionsNote': ['30 天有效', 'Each lasts 30 days'],
   'me.thisBrowser': ['这个浏览器', 'This browser'], 'me.signedIn': ['浏览器登录', 'Browser sign-in'], 'me.viaToken': ['用 token %s 登录', 'Signed in with the token %s'], 'me.viaDevice': ['%s，由另一台设备允许登录', '%s, signed in from another device'],
   'me.current': ['就是这个', 'This one'], 'me.end': ['退出', 'Sign out'], 'me.endOthers': ['退出其他全部', 'Sign out all others'],
-  'me.endTitle': ['让这个会话退出？', 'Sign this session out?'], 'me.endNote': ['那个浏览器下次打开 tend 时回到登录页。', 'That browser is back at the sign-in page the next time it opens tend.'],
+  'me.endTitle': ['让这个会话退出？', 'Sign this session out?'], 'me.endNote': ['那个浏览器的推送一起停，下次打开 tend 时回到登录页。', 'That browser\'s pushes stop too, and it is back at the sign-in page the next time it opens tend.'],
   'me.ended': ['会话已退出', 'The session is signed out'],
-  'me.endOthersTitle': ['退出其他 %d 个会话？', 'Sign out the %d other sessions?'], 'me.endOthersNote': ['只留下这个浏览器。', 'Only this browser stays signed in.'],
+  'me.endOthersTitle': ['退出其他 %d 个会话？', 'Sign out the %d other sessions?'], 'me.endOthersNote': ['只留下这个浏览器，其他浏览器的推送一起停。', 'Only this browser stays signed in; the others\' pushes stop too.'],
   'me.endedN': ['已退出 %d 个会话', '%d sessions signed out'],
   'me.team': ['团队', 'Team'], 'me.teamNote': ['成员和项目，在手机上只看', 'People and projects; a phone only shows them'],
   'me.agents': ['Agent', 'Agents'], 'me.agentsNote': ['定义和能跑的机器，在手机上只看', 'Definitions and where they run; a phone only shows them'],
@@ -183,8 +183,9 @@ function Switch({label, on, onChange}) {
 }
 
 // useDevices is the viewer's push devices and this browser's among them: read once, and again when push is turned
-// on or off here (state); a change of settings is shown at once and put back if the server refuses it.
-function useDevices({http, push, toasts, state}) {
+// on or off here (state) and after a session or token was ended (ended counts them: its devices went with it); a
+// change of settings is shown at once and put back if the server refuses it.
+function useDevices({http, push, toasts, state, ended = 0}) {
   const w = useWords();
   const [list, setList] = useState(null);
   const [mine, setMine] = useState('');
@@ -193,7 +194,7 @@ function useDevices({http, push, toasts, state}) {
     let live = true;
     Promise.all([http.devices(), push.device()]).then(([ds, id]) => { if (live) { setList(ds || []); setMine(id); } }, () => live && setList([]));
     return () => { live = false; };
-  }, [state]);
+  }, [state, ended]);
   const failed = e => toasts.show({text: apiText(w, e), tone: 'danger'});
   const setPrefs = (d, prefs) => {
     const before = list;
@@ -242,7 +243,7 @@ function Devices({devices, mine, onRemove}) {
   <//>`;
 }
 
-function Notices({prefs, notices, webhook, onWebhook, toasts, push, platform, http}) {
+function Notices({prefs, notices, webhook, onWebhook, toasts, push, platform, http, ended}) {
   const {t} = useWords();
   const on = useSignalValue(prefs.notify);
   const [permission, setPermission] = useState(() => permissionOf(notices));
@@ -260,7 +261,7 @@ function Notices({prefs, notices, webhook, onWebhook, toasts, push, platform, ht
   };
   const usable = permission === 'granted' || permission === 'default';
   const [pushed, setPushed] = useState(null);
-  const devs = useDevices({http, push, toasts, state: pushed});
+  const devs = useDevices({http, push, toasts, state: pushed, ended});
   return html`<${Panel} title=${t('me.notices')} actions=${html`<span class="t-muted">${t('me.noticesNote')}</span>`}>
     <div class="me-sets">
       <div class="me-set"><span class="me-k">${t('me.browser')}</span>
@@ -446,14 +447,16 @@ export function Me({session, http, prefs, toasts, router, notices, tab, platform
     http.addToken(name).then(v => { setModal({kind: 'new', made: {name, token: v.token}}); readCreds(); },
       e => setModal({kind: 'new', error: apiText(w, e)})).finally(() => setBusy(false));
   };
-  const revoke = (c, text) => http.revokeToken(c.id).then(() => { toasts.show({text}); readCreds(); }, failed);
+  const [ended, setEnded] = useState(0);
+  const signedOut = () => { readCreds(); setEnded(n => n + 1); };
+  const revoke = (c, text) => http.revokeToken(c.id).then(() => { toasts.show({text}); signedOut(); }, failed);
   const endOthers = async () => {
     let n = 0;
     try {
       for (const c of sessions.filter(x => !x.current)) { await http.revokeToken(c.id); n++; }
       toasts.show({text: f('me.endedN', n)});
     } catch (e) { failed(e); }
-    readCreds();
+    signedOut();
   };
   const saveHook = url => http.setWebhook(url).then(() => { setWebhook(url); toasts.show({text: t(url ? 'me.webhookSaved' : 'me.webhookGone')}); }, failed);
   const others = sessions.filter(c => !c.current).length;
@@ -473,7 +476,7 @@ export function Me({session, http, prefs, toasts, router, notices, tab, platform
     <div class="me-body">
       <div class="me-col">
         <${Look} prefs=${prefs} presets=${presets} />
-        <${Notices} prefs=${prefs} notices=${notices} webhook=${webhook} onWebhook=${saveHook} toasts=${toasts} push=${push} platform=${platform} http=${http} />
+        <${Notices} prefs=${prefs} notices=${notices} webhook=${webhook} onWebhook=${saveHook} toasts=${toasts} push=${push} platform=${platform} http=${http} ended=${ended} />
       </div>
       <div class="me-col">
         <${Logins} logins=${logins} identities=${identities} onLink=${() => linking(tab, now())} />

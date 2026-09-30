@@ -64,6 +64,7 @@ type NotifyOptions struct {
 	Push  *PushKey
 	Act   *ActKey
 	Base  string
+	Dir   *Directory // a device pushes only while its credential is live here
 }
 
 // Notifier delivers the coordinator's notices through the outbox (the deliveries table): each recipient's webhook at
@@ -286,6 +287,10 @@ func (n *Notifier) deliver(ctx context.Context, d store.Delivery, dev store.Push
 	o := n.o
 	if d.Device != "" && dev.User != d.User {
 		o.Team.Settle(d.ID, store.DeliveryCanceled, "another owner", d.Attempts, time.Time{})
+		return
+	}
+	if d.Device != "" && o.Dir != nil && !o.Dir.live(dev.Credential) {
+		o.Team.Settle(d.ID, store.DeliveryCanceled, "signed out", d.Attempts, time.Time{})
 		return
 	}
 	var x noticeRow

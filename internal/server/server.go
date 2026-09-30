@@ -117,6 +117,7 @@ func (s *Server) sweep() {
 		s.opt.Coord.Expect(name)
 	}
 	s.opt.Coord.Reaffirm() // who owns a machine, who is disabled
+	s.dropSignedOut()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for c, h := range s.conns {
@@ -126,6 +127,20 @@ func (s *Server) sweep() {
 			if u, ok := s.opt.Dir.owner(h.cred); !ok || principal(u) != h.as {
 				c.Close()
 			}
+		}
+	}
+}
+
+// dropSignedOut takes away the push devices whose session or token no longer lets anyone in: signed out, revoked,
+// expired, its token revoked or its holder disabled.
+func (s *Server) dropSignedOut() {
+	held, err := s.team().DeviceCredentials()
+	if err != nil {
+		return
+	}
+	for id, cred := range held {
+		if !s.opt.Dir.live(cred) {
+			s.team().RemoveDevice(id, "signed out")
 		}
 	}
 }

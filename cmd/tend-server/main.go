@@ -157,7 +157,7 @@ func cmdServe(args []string) error {
 	if err != nil {
 		fmt.Fprint(os.Stderr, i18n.F("cli.server.no_act", err))
 	}
-	notifier.Start(ctx, server.NotifyOptions{Team: team, Coord: c, Seal: seal, Push: push, Act: act, Base: sc.PublicURL})
+	notifier.Start(ctx, server.NotifyOptions{Team: team, Coord: c, Seal: seal, Push: push, Act: act, Base: sc.PublicURL, Dir: dir})
 	syncer := server.NewSyncer(team, c, seal, notifier.Send)
 	go syncer.Run(ctx)
 	fmt.Fprint(os.Stderr, i18n.F("cli.server.started", c.ID(), *listen))
