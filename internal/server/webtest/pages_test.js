@@ -19,7 +19,7 @@ import {AuthFrame, Login, Device} from '../web/pages/auth.js';
 import {Home} from '../web/pages/home.js';
 import {App} from '../web/pages/app.js';
 import {install} from './dom.js';
-import {settle} from './fake.js';
+import {settle, clock} from './fake.js';
 import {NOW, home} from './rig.js';
 import {test, eq, ok, run} from './check.js';
 
@@ -292,6 +292,89 @@ test('signing in with a token, a wrong token, and a terminal allowed or gone', a
   const g = await mount(html`<${Device} http=${gone} code="OLD" onBack=${() => {}} />`);
   await act(() => settle());
   eq(g.one('.auth-problem').textContent, words.t('device.gone'), 'a gone code');
+});
+
+// A phone with no easy way to sign in (a home-screen app keeps its own cookies) shows a code another device allows,
+// and is signed in once it is allowed; denied or expired, it can ask again. Installed, that way comes first; an
+// invitation, which needs the invitee's own account, does not offer it.
+test('signing in from another device', async () => {
+  const clk = clock();
+  const asked = [], polls = [];
+  let answers = [];
+  const signed = [];
+  const http = {logins: async () => [{name: 'gitea', display: 'Gitea'}], invite: async () => ({inviter: 'Ann', role: 'member'}),
+    session: async () => ({id: 'u_b', name: 'Bo'}),
+    askDevice: async name => { asked.push(name); return {device_code: 'dc' + asked.length, user_code: 'K7QX-M2PA', verify_url: 'https://tend.test/#device-K7QX-M2PA', interval: 3, expires_in: 600}; },
+    pollDevice: async code => { polls.push(code); return answers.shift() || {status: 'pending'}; }};
+  const android = {kind: 'browser', os: 'android', name: 'Android'};
+  const shared = [];
+  const root = await mount(html`<${Login} http=${http} platform=${android} timers=${clk} onSignedIn=${x => signed.push(x)}
+    share=${d => { shared.push(d); return Promise.resolve(); }} copy=${() => Promise.resolve()} />`);
+  await act(() => settle());
+  const other = root.find('button').find(b => b.textContent === words.t('auth.device'));
+  ok(other, 'a way to sign in from another device');
+  await act(() => other.dispatch('click'));
+  await act(() => settle());
+  eq(asked, ['Android'], 'asked for a code, named for the device');
+  eq(root.one('.device-code').textContent, 'K7QX-M2PA', 'the code');
+  ok(root.one('.auth-body').textContent.includes('https://tend.test/#device-K7QX-M2PA'), 'the link to open elsewhere');
+  await act(() => root.find('button').find(b => b.textContent === words.t('auth.deviceShare')).dispatch('click'));
+  eq(shared, [{title: 'tend', url: 'https://tend.test/#device-K7QX-M2PA'}], 'shared the link');
+
+  await act(() => clk.advance(2999));
+  eq(polls, [], 'asked before the interval');
+  await act(() => clk.advance(1));
+  await act(() => settle());
+  eq(polls, ['dc1'], 'polled');
+  answers = [{status: 'ok', user: 'Bo'}];
+  await act(() => clk.advance(3000));
+  await act(() => settle());
+  eq(signed, [{id: 'u_b', name: 'Bo'}], 'signed in once allowed');
+
+  for (const [status, text] of [['denied', 'auth.deviceDenied'], ['expired', 'auth.deviceExpired']]) {
+    asked.length = 0;
+    const r = await mount(html`<${Login} http=${http} platform=${android} timers=${clk} onSignedIn=${() => {}} />`);
+    await act(() => settle());
+    await act(() => r.find('button').find(b => b.textContent === words.t('auth.device')).dispatch('click'));
+    await act(() => settle());
+    answers = [{status}];
+    await act(() => clk.advance(3000));
+    await act(() => settle());
+    eq(r.one('.auth-problem').textContent, words.t(text), status);
+    await act(() => r.find('button').find(b => b.textContent === words.t('auth.deviceAgain')).dispatch('click'));
+    await act(() => settle());
+    eq(asked.length, 2, `${status}: asked again`);
+    await act(() => r.find('button').find(b => b.textContent === words.t('auth.deviceCancel')).dispatch('click'));
+  }
+
+  const cancelled = await mount(html`<${Login} http=${http} platform=${android} timers=${clk} onSignedIn=${() => {}} />`);
+  await act(() => settle());
+  await act(() => cancelled.find('button').find(b => b.textContent === words.t('auth.device')).dispatch('click'));
+  await act(() => settle());
+  const before = polls.length;
+  await act(() => cancelled.find('button').find(b => b.textContent === words.t('auth.deviceCancel')).dispatch('click'));
+  await act(() => clk.advance(10000));
+  eq([polls.length, cancelled.find('.device-code').length], [before, 0], 'cancelled: back, and no more polls');
+
+  const pwa = await mount(html`<${Login} http=${http} platform=${{...android, kind: 'pwa'}} timers=${clk} onSignedIn=${() => {}} />`);
+  await act(() => settle());
+  const first = pwa.find('.btn')[0];
+  eq([first.textContent, first.classList.contains('primary')], [words.t('auth.device'), true], 'installed: the first way');
+  const invited = await mount(html`<${Login} http=${http} platform=${android} auth=${{kind: 'invite', value: 'abc'}} timers=${clk} onSignedIn=${() => {}} />`);
+  await act(() => settle());
+  ok(!invited.find('button').some(b => b.textContent === words.t('auth.device')), 'not for an invitation');
+});
+
+test('allowing another device signs it in as you', async () => {
+  const decided = [];
+  const dev = {device: async code => ({code, name: 'Android', ip: '100.64.0.9', created: '2026-09-30T14:30:00Z', session: true}),
+    decideDevice: async (code, allow) => { decided.push([code, allow]); }};
+  const d = await mount(html`<${Device} http=${dev} code="K7QX-M2PA" onBack=${() => {}} />`);
+  await act(() => settle());
+  eq([d.one('h1').textContent, d.one('.t-muted').textContent], [words.t('device.titleSession'), words.t('device.helpSession')], 'says what allowing does');
+  await act(() => d.find('button')[0].dispatch('click'));
+  await act(() => settle());
+  eq([decided, d.one('h1').textContent], [[['K7QX-M2PA', true]], words.t('device.allowedSession')], 'allowed');
 });
 
 await run();

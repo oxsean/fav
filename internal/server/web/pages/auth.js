@@ -6,6 +6,7 @@ import {Button} from '../ui/controls.js';
 import {TextInput} from '../ui/input.js';
 import {startURL} from '../core/http.js';
 import {code as codes} from '../core/proto.js';
+import {nowhere} from '../core/platform.js';
 
 const when = (w, at) => new Date(at).toLocaleString(w.lang.value === 'zh' ? 'zh-CN' : 'en-GB', {dateStyle: 'medium', timeStyle: 'short'});
 import './words.js';
@@ -40,8 +41,62 @@ function Denied({auth, onSwitch, copy}) {
   </div>`;
 }
 
+const systemShare = globalThis.navigator?.share ? d => globalThis.navigator.share(d) : null;
+
+// AskDevice signs this browser in from another device: a code shown here, allowed there (the #device- page), polled
+// until it is; the server's answer sets this browser's session. timers are the clock's; share hands the link to
+// the system's share sheet, where there is one.
+function AskDevice({http, platform, timers, share, copy, onSignedIn, onCancel}) {
+  const {t, f} = useWords();
+  const [ask, setAsk] = useState(null);
+  const [problem, setProblem] = useState('');
+  const [round, setRound] = useState(0);
+  const [copied, setCopied] = useState(false);
+  useEffect(() => {
+    let live = true, timer = null;
+    setAsk(null);
+    setProblem('');
+    setCopied(false);
+    const failed = e => live && setProblem(f('auth.failed', e.code || String(e)));
+    const poll = a => {
+      timer = timers.setTimeout(async () => {
+        let r;
+        try { r = await http.pollDevice(a.device_code); } catch (e) {
+          if (e.status === 0 || e.status === 429) r = {status: 'pending'}; else return failed(e);
+        }
+        if (!live) return;
+        if (r.status === 'pending') return poll(a);
+        if (r.status === 'ok') return http.session().then(me => live && onSignedIn(me), failed);
+        setProblem(t(r.status === 'denied' ? 'auth.deviceDenied' : 'auth.deviceExpired'));
+      }, (a.interval || 3) * 1000);
+    };
+    http.askDevice(platform.name).then(a => { if (live) { setAsk(a); poll(a); } }, failed);
+    return () => { live = false; timers.clearTimeout(timer); };
+  }, [round]);
+  const link = ask?.verify_url;
+  return html`<div class="auth-body">
+    <h1>${t('auth.deviceTitle')}</h1>
+    <p class="t-muted">${t('auth.deviceHelp')}</p>
+    ${problem && html`<div class="auth-problem" role="alert">${problem}</div>`}
+    ${ask && !problem && html`<code class="device-code mono">${ask.user_code}</code>
+      <p class="device-link mono">${link}</p>
+      <div class="auth-actions">
+        ${share && html`<${Button} kind="primary" onClick=${() => share({title: 'tend', url: link}).catch(() => {})}>${t('auth.deviceShare')}<//>`}
+        <${Button} onClick=${async () => { await copy(link); setCopied(true); }}>${t(copied ? 'auth.deviceCopied' : 'auth.deviceCopy')}<//>
+      </div>
+      <p class="t-muted" role="status">${t('auth.deviceWaiting')}</p>`}
+    ${!ask && !problem && html`<p class="t-muted">${t('device.loading')}</p>`}
+    <div class="auth-actions">
+      ${problem && html`<${Button} kind="primary" onClick=${() => setRound(round + 1)}>${t('auth.deviceAgain')}<//>`}
+      <${Button} kind="quiet" onClick=${onCancel}>${t('auth.deviceCancel')}<//>
+    </div>
+  </div>`;
+}
+
 // Login: auth is the route's one-time fragment (an invitation, or a sign-in's result); onSignedIn(session) goes on.
-export function Login({http, auth, onSignedIn, onSwitch, copy = text => globalThis.navigator?.clipboard?.writeText(text)}) {
+// platform says where the page runs: installed on the home screen, signing in from another device comes first.
+export function Login({http, auth, onSignedIn, onSwitch, copy = text => globalThis.navigator?.clipboard?.writeText(text), platform = nowhere,
+  timers = globalThis, share = systemShare}) {
   const w = useWords();
   const {t, f, has} = w;
   const [logins, setLogins] = useState([]);
@@ -49,12 +104,19 @@ export function Login({http, auth, onSignedIn, onSwitch, copy = text => globalTh
   const [token, setToken] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const [other, setOther] = useState(false);
   const code = auth?.kind === 'invite' ? auth.value : '';
   useEffect(() => {
     http.logins().then(setLogins, () => setLogins([]));
     if (code) http.invite(code).then(setInvite, () => setInvite(false));
   }, [code]);
   if (auth?.kind === 'signin' && deniedCodes.includes(auth.value)) return html`<${Denied} auth=${auth} onSwitch=${onSwitch} copy=${copy} />`;
+  if (other) {
+    return html`<${AskDevice} http=${http} platform=${platform} timers=${timers} share=${share} copy=${copy} onSignedIn=${onSignedIn}
+      onCancel=${() => setOther(false)} />`;
+  }
+  const installed = platform.kind === 'pwa';
+  const elsewhere = !code && html`<${Button} kind=${installed ? 'primary' : ''} wide onClick=${() => setOther(true)}>${t('auth.device')}<//>`;
   const problem = auth?.kind === 'signin' && auth.value !== 'ok' ? t(has('signin.' + auth.value) ? 'signin.' + auth.value : 'signin.internal') : '';
   const submit = async e => {
     e.preventDefault();
@@ -80,9 +142,12 @@ export function Login({http, auth, onSignedIn, onSwitch, copy = text => globalTh
         ${invite.expires && html`<span class="t-muted">${f('auth.inviteExpires', when(w, invite.expires))}</span>`}
       </div>` : invite === false && html`<div class="auth-problem" role="alert">${t('auth.inviteGone')}</div>`)}
     ${!code && html`<p class="auth-note t-muted">${t('auth.inviteOnly')}</p>`}
+    ${installed && elsewhere}
     ${logins.length > 0 && html`<div class="auth-providers">
-      ${logins.map(l => html`<a class="btn primary wide" href=${startURL(l.name, code)}>${f(code ? 'auth.acceptWith' : 'auth.with', l.display || l.name)}</a>`)}
-    </div><div class="auth-or"><span>${t('auth.orToken')}</span></div>`}
+      ${logins.map(l => html`<a class=${installed ? 'btn wide' : 'btn primary wide'} href=${startURL(l.name, code)}>${f(code ? 'auth.acceptWith' : 'auth.with', l.display || l.name)}</a>`)}
+    </div>`}
+    ${!installed && elsewhere}
+    ${(logins.length > 0 || elsewhere) && html`<div class="auth-or"><span>${t('auth.orToken')}</span></div>`}
     <form class="auth-form" onSubmit=${submit}>
       <${TextInput} label=${t('auth.token')} type="password" name="token" value=${token} onInput=${setToken} mono
         placeholder=${t('auth.tokenPlaceholder')} note=${t('auth.tokenNote')} error=${error} autoFocus=${!logins.length} />
@@ -114,11 +179,12 @@ export function Device({http, code, onBack}) {
     }
   };
   const back = html`<${Button} onClick=${onBack}>${t('device.back')}<//>`;
-  if (result) return html`<div class="auth-body"><h1>${t('device.' + result)}</h1><div class="auth-actions">${back}</div></div>`;
+  const session = !!info?.session;
+  if (result) return html`<div class="auth-body"><h1>${t(result === 'denied' ? 'device.denied' : session ? 'device.allowedSession' : 'device.allowed')}</h1><div class="auth-actions">${back}</div></div>`;
   if (gone) return html`<div class="auth-body"><h1>${t('device.title')}</h1><div class="auth-problem" role="alert">${t('device.gone')}</div><div class="auth-actions">${back}</div></div>`;
   return html`<div class="auth-body">
-    <h1>${t('device.title')}</h1>
-    <p class="t-muted">${t('device.help')}</p>
+    <h1>${t(session ? 'device.titleSession' : 'device.title')}</h1>
+    <p class="t-muted">${t(session ? 'device.helpSession' : 'device.help')}</p>
     ${error && html`<div class="auth-problem" role="alert">${error}</div>`}
     ${info ? html`<code class="device-code mono">${info.code}</code>
       <dl class="facts">

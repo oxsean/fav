@@ -48,7 +48,7 @@ register('me', {
   'me.revokeNote': ['用它的 CLI 和 TUI 立刻断开，用它登录的网页会话一起失效，不能恢复。', 'The CLI and TUI using it disconnect at once, and so do the browser sessions it signed in; this cannot be undone.'],
   'me.revoked': ['%s 已吊销', '%s is revoked'],
   'me.sessions': ['浏览器会话', 'Browser sessions'], 'me.sessionsNote': ['30 天有效', 'Each lasts 30 days'],
-  'me.thisBrowser': ['这个浏览器', 'This browser'], 'me.signedIn': ['浏览器登录', 'Browser sign-in'], 'me.viaToken': ['用 token %s 登录', 'Signed in with the token %s'],
+  'me.thisBrowser': ['这个浏览器', 'This browser'], 'me.signedIn': ['浏览器登录', 'Browser sign-in'], 'me.viaToken': ['用 token %s 登录', 'Signed in with the token %s'], 'me.viaDevice': ['%s，由另一台设备允许登录', '%s, signed in from another device'],
   'me.current': ['就是这个', 'This one'], 'me.end': ['退出', 'Sign out'], 'me.endOthers': ['退出其他全部', 'Sign out all others'],
   'me.endTitle': ['让这个会话退出？', 'Sign this session out?'], 'me.endNote': ['那个浏览器下次打开 tend 时回到登录页。', 'That browser is back at the sign-in page the next time it opens tend.'],
   'me.ended': ['会话已退出', 'The session is signed out'],
@@ -186,6 +186,7 @@ function Sessions({sessions, tokens, onEnd, onEndOthers}) {
   const {t, f} = w;
   const title = c => {
     if (c.current) return t('me.thisBrowser');
+    if (c.name?.startsWith('device:')) return f('me.viaDevice', c.name.slice(7));
     const parent = c.name?.startsWith('token:') ? c.name.slice(6) : '';
     return parent ? f('me.viaToken', tokens.find(x => x.id === parent)?.name || parent) : t('me.signedIn');
   };

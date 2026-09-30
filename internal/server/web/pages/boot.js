@@ -62,7 +62,7 @@ export function Root({http, router, keys, nav, prefs, first, open, location, his
   }, [session?.id]);
   const lang = () => prefs.toggleLang();
   if (!session) {
-    return html`<${AuthFrame} onLang=${lang}><${Login} http=${http} auth=${auth?.kind === 'device' ? null : auth}
+    return html`<${AuthFrame} onLang=${lang}><${Login} http=${http} platform=${platform} auth=${auth?.kind === 'device' ? null : auth}
       onSignedIn=${setSession} onSwitch=${() => { dropAuth(); setSession(null); }} /><//>`;
   }
   if (auth?.kind === 'device') {

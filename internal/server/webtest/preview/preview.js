@@ -86,6 +86,8 @@ function fakeFetch(me, api) {
     if (p === '/logout') return json(200, {});
     if (p === '/auth/logins') return json(200, [{name: 'github', display: 'GitHub'}, {name: 'oidc', display: 'Company SSO'}]);
     if (p === '/auth/invite') return json(200, {inviter: 'Al', role: 'member', project: 'Shop', access: 'participant', expires: '2026-10-07T00:00:00Z'});
+    if (p === '/auth/device') return json(200, {device_code: 'dc', user_code: 'K7QX-M2PD', verify_url: location.origin + '/#device-K7QX-M2PD', interval: 3, expires_in: 600});
+    if (p === '/auth/device/token') return json(200, {status: 'pending'});
     if (p === '/api/device') return post ? json(200, {}) : json(200, {code: 'K7QX-M2PD', name: 'tend on mba', ip: '100.64.0.2', created: '2026-09-30T14:30:00Z'});
     const method = init.method || 'GET';
     if (p.startsWith('/api/')) return method + ' ' + p in api ? json(200, api[method + ' ' + p]) : method === 'GET' ? json(404, {error: 'not_found'}) : json(200, {});

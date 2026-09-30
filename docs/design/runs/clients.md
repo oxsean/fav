@@ -53,7 +53,7 @@ tend journal verify [--json] | repair [-y]
 页面的合并和改名见 [ui.md](../tasks/ui.md)「页面结构与用词」。
 
 - 文件：`internal/server/web/`，`go:embed` 进二进制。Preact + htm + signals，浏览器原生的 ES 模块，没有构建步骤。`index.html` 引入 `css/` 的三份样式、皮肤样式表（`theme/<皮肤>.css`，`id="skin"`，由 `pages/boot.js` 换成这位访客的皮肤）和入口 `main.js`，并预载 `vendor/` 的四个文件。界面文字在各模块自己的 `zh` / `en` 词表里（`core/i18n.js`，不走 Go 的 i18n）。
-- 认证：登录页列出 `/auth/logins` 给的登录方式（GitHub、OIDC），另有 token 表单。`POST /login`（表单 `token`）建一条网页会话，写 cookie `tend_session`（HttpOnly、SameSite=Strict、TLS 下 Secure、30 天）；`GET /session` 回 `{id, name, email, username, role, session}` 或 401；`POST /logout` 吊销这条会话。地址里的 `#invite-<secret>` 让登录按钮带上邀请，`#signin-<结果>` 显示登录失败的原因。`/client` 接受 header 里的 token 或这个 cookie；WebSocket 握手校验 Origin（同源）。会话被吊销或用户被停用，连接立即断开，页面回到登录页。
+- 认证：登录页列出 `/auth/logins` 给的登录方式（GitHub、OIDC），另有 token 表单。`POST /login`（表单 `token`）建一条网页会话，写 cookie `tend_session`（HttpOnly、SameSite=Strict、TLS 下 Secure、30 天）；`GET /session` 回 `{id, name, email, username, role, session}` 或 401；`POST /logout` 吊销这条会话。地址里的 `#invite-<secret>` 让登录按钮带上邀请，`#signin-<结果>` 显示登录失败的原因。另有「在另一台设备上登录」（没有邀请时才给；装到主屏幕以后它排第一、是主按钮，登录方式退成次要）：`POST /auth/device {name: platform.name, session: true}`，页面显示码和 `verify_url`，可以分享（系统的分享面板）或复制链接，在已登录的设备上打开 `#device-<码>` 允许；页面按 `interval` 轮询 `/auth/device/token`，允许后回来的是这个浏览器自己的会话 cookie（[tasks/team.md](../tasks/team.md)「身份与加入」），读 `/session` 进应用；拒绝、过期可以重来，断网和限流时接着等。终端授权页对 `session` 的码写「允许这台设备登录网页」，说明它以你的身份登录 30 天；「我」页的浏览器会话把这种会话写成「<设备名>，由另一台设备允许登录」。iOS 主屏幕 PWA 的 cookie 和 Safari 分开，会话能不能落进 PWA 要等验证 ⑩（设计稿 §10 第 12 项）在真机上确认。`/client` 接受 header 里的 token 或这个 cookie；WebSocket 握手校验 Origin（同源）。会话被吊销或用户被停用，连接立即断开，页面回到登录页。
 - 响应头：CSP `default-src 'self'`（不允许内联脚本和 `style` 属性，宽度等动态样式经 CSSOM 设置；另写明 `manifest-src 'self'`、`worker-src 'self'`）、`frame-ancestors 'none'`、`nosniff`、`no-referrer`、`Cache-Control: no-cache`。
 - 装到主屏幕（PWA）：
   - `/manifest.webmanifest`：`name` tend，`display: standalone`，`start_url: /?source=pwa`，`scope: /`，`theme_color` 和 `background_color` 取默认皮肤（`tend`）浅色的底色（访客自己的皮肤只在他的浏览器里，server 不知道）；图标 `icon-192.png`、`icon-512.png` 和 maskable 的 `icon-maskable-512.png`，另有 iOS 用的 `icon-180.png`（`apple-touch-icon`）。图标由 `pwa.go` 按默认皮肤的强调色画出页头的 `>_`，第一次请求时生成，仓库里没有图片文件；maskable 的记号在中心 40% 半径的安全区里。`<meta name="theme-color">` 由 `pages/boot.js` 跟着这位访客的皮肤和主题取 `--bg`。
@@ -61,7 +61,7 @@ tend journal verify [--json] | repair [-y]
   - `/`：`index.html` 里的 `<meta name="tend-build">` 由 server 填上构建号，页面据此和 hello 的比（`wire.js`）。
   - `core/platform.js`：页面跑在哪，一个接口：`kind` 是 `browser` 或 `pwa`（`display-mode: standalone` 或 iOS 的 `navigator.standalone`），`os`（`ios` / `android` / `other`，iPad 装成 Mac 的也认），`name`（给设备码登录的设备名：iPhone、iPad、Android、Mac、Windows、Linux），`secure`（`isSecureContext`）；`start()` 只在安全上下文、并且有构建号时注册 service worker；`refresh()` 载入新构建：有等着的新 service worker 就让它接管（`skip`），接管后（`controllerchange`）再重载，没有就先 `update()`，仍没有才直接重载，因为只重载的话拿到的还是旧缓存。`outdated` 横幅的「刷新」走它，不自动刷新（没发出去的字只在内存里）。
 
-- 没有轮询：页面上的一切随 `state.watch`、`machines.watch`、`inbox.watch` 和 `run.output.watch` 的推送变化，首页的数每次重画时取当前时间。页面不调用 `setInterval`（`TestThePageRunsNoInterval`）；剩下的计时器都只响一次：防抖、重连的退避、调用超时、提示的停留、`g` 开头的两键序列。
+- 没有轮询：页面上的一切随 `state.watch`、`machines.watch`、`inbox.watch` 和 `run.output.watch` 的推送变化，首页的数每次重画时取当前时间。页面不调用 `setInterval`（`TestThePageRunsNoInterval`）；剩下的计时器都只响一次：防抖、重连的退避、调用超时、提示的停留、`g` 开头的两键序列、设备码登录的下一次轮询。
 - 页面：首页、任务（列表、看板、树、详情、对话、改动）、运行、机器、Agent、团队、我，以及登录、终端授权、邀请。替别人登记一台机器用 `tend-server token add --node <机器> --owner <用户>`。
 
 ### 结构
@@ -106,7 +106,7 @@ tend journal verify [--json] | repair [-y]
     - 组件不直接写键：用 `useActions(层级, {id: {run, when?, label?}})` 绑定自己能做的操作，键从表里来；`label` 让页面换一个更贴切的说法（首页的数字叫「作答」，`d` 叫「重试」）。哪些绑定生效（`when`）随页面变了，作用域就重新推入，键栏跟着变。
     - 命令面板列出此刻生效的操作（`runnable(keys.active())`），按中文名、英文名、id、键都能搜到，开头匹配的排前面；快捷键页按分组列出整张表。
   - `commands.js`：页面的写操作。发出时按 key 记为 pending；可撤销的写（标记完成）在列表里先藏起来，应答之后等那张列表下一次变化再放出来，免得闪回；没收到应答（`unsure`：`timeout` / `offline` / `closed`，页面的出错提示也用它）记为 `unknown`，`retry` 用同一个 command id 重发，coordinator 的回执保证不做两次。可撤销的写由调用方先用 `newID` 取好 command id，撤销发 `task.undo{id, command}` 点名它。状态本身只来自 journal 的折叠。
-  - `http.js`：普通 HTTP：`/session`（未登录是 null）、`/login`（表单提交 token）、`/logout`、`/auth/logins`、`/auth/invite`、`/api/device`、`/api/users`（页面上的人按名字显示，项目成员变了重读；`local` 显示为服务器管理员），以及各页用的 `/api/*` 和皮肤的预设 `/theme/presets.json`。写请求带 `X-Tend`，网络不通报 `offline`。
+  - `http.js`：普通 HTTP：`/session`（未登录是 null）、`/login`（表单提交 token）、`/logout`、`/auth/logins`、`/auth/invite`、`/auth/device`（这个浏览器从另一台设备登录）、`/api/device`、`/api/users`（页面上的人按名字显示，项目成员变了重读；`local` 显示为服务器管理员），以及各页用的 `/api/*` 和皮肤的预设 `/theme/presets.json`。写请求带 `X-Tend`，网络不通报 `offline`。
   - `prefs.js`：语言（中文 / English / 跟随浏览器，跟随时不存）、主题（跟随系统 / 浅色 / 深色）、密度（紧凑 / 标准 / 宽松）和皮肤（预设、自己的强调色、高对比度，合成样式表的名字 `skin`，换了 `boot.js` 立刻换样式表），存在 `tend-lang`、`tend-theme`、`tend-look`；浏览器通知开不开记在 `tend-notify`（默认开，还要浏览器允许）；输出的密度（简洁 / 标准 / 详细，默认标准）记在 `tend-output-density`；改动的 diff 合在一栏还是并排（默认合在一栏）记在 `tend-diff-view`；存储不可用时用默认值。
   - `notices.js`：页面在后台时要弹的浏览器通知：inbox 里等的东西（每个待处理项按 id 和版本，没有就是任务和原因）有了新的那几条。store 的 inbox 在第一次推送之前是 `noInbox`，第一次推送只记下、不弹，已经在等的不算新。
   - `format.js`：数字的写法（`312k` tok、`$3.18`、`1h 04m`、`14:32`）。token 数是 input + cache_write + output，不含读缓存。

@@ -153,6 +153,7 @@ test('the page draws in both forms and both languages, styled and worded', async
       for (const k of ['me.look', 'me.notices', 'me.logins', 'me.tokens', 'me.sessions']) ok(text.includes(words.t(k)), `${lang}: ${k}`);
       ok(text.includes('bo@example.com · ' + words.t('role.member')), `${lang}: who`);
       ok(text.includes(words.f('me.viaToken', 'login:tend on mba')), `${lang}: a session a token signed in`);
+      ok(text.includes(words.f('me.viaDevice', 'Android')), `${lang}: a session another device allowed`);
       eq(rowOf(a.el, words.t('me.thisBrowser')).find('button').length, 0, `${lang}: this browser signs out at the top`);
       eq(a.el.find('.me-link').map(l => [l.textContent, l.getAttribute('href')]), [[words.t('me.link'), '/auth/github/start?link=1']], `${lang}: only what is not linked links`);
     }
@@ -287,11 +288,12 @@ test('a session is signed out after asking; so are all the others, this one kept
   await settled();
   eq(a.http.calls.filter(c => c[0] === 'DELETE /api/tokens'), [['DELETE /api/tokens', {id: 'w3'}]], 'the one picked');
   await click(buttonOf(a.el, words.t('me.endOthers')));
-  ok(a.el.one('.modal').textContent.includes(words.f('me.endOthersTitle', 2)), 'how many');
+  ok(a.el.one('.modal').textContent.includes(words.f('me.endOthersTitle', 3)), 'how many');
   await click(buttonOf(a.el.one('.modal-foot'), words.t('me.endOthers')));
   await settled();
-  eq(a.http.calls.filter(c => c[0] === 'DELETE /api/tokens').slice(1), [['DELETE /api/tokens', {id: 'w2'}], ['DELETE /api/tokens', {id: 'w3'}]], 'every other, not this one');
-  ok(a.el.textContent.includes(words.f('me.endedN', 2)), 'said');
+  eq(a.http.calls.filter(c => c[0] === 'DELETE /api/tokens').slice(1), [['DELETE /api/tokens', {id: 'w2'}], ['DELETE /api/tokens', {id: 'w3'}],
+    ['DELETE /api/tokens', {id: 'w4'}]], 'every other, not this one');
+  ok(a.el.textContent.includes(words.f('me.endedN', 3)), 'said');
   await a.done();
 });
 

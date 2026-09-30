@@ -52,7 +52,8 @@
     {"id": "k2", "kind": "token", "name": "ci-bot", "owner": "u_b", "created": "2026-09-10T09:00:00Z"},
     {"id": "w1", "kind": "web", "owner": "u_b", "created": "2026-09-29T08:55:00Z", "last_used": "2026-09-30T14:31:00Z", "expires": "2026-10-29T08:55:00Z", "current": true},
     {"id": "w2", "kind": "web", "name": "token:k1", "owner": "u_b", "created": "2026-09-28T21:40:00Z", "last_used": "2026-09-29T21:40:00Z", "expires": "2026-10-28T21:40:00Z"},
-    {"id": "w3", "kind": "web", "owner": "u_b", "created": "2026-09-12T10:00:00Z", "last_used": "2026-09-20T10:00:00Z", "expires": "2026-10-12T10:00:00Z"}
+    {"id": "w3", "kind": "web", "owner": "u_b", "created": "2026-09-12T10:00:00Z", "last_used": "2026-09-20T10:00:00Z", "expires": "2026-10-12T10:00:00Z"},
+    {"id": "w4", "kind": "web", "name": "device:Android", "owner": "u_b", "created": "2026-09-14T08:00:00Z", "last_used": "2026-09-15T08:00:00Z", "expires": "2026-10-14T08:00:00Z"}
   ],
   "POST /api/tokens": {"id": "k3", "token": "tend_c_preview0000000000"},
   "GET /api/identities": [
