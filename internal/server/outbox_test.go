@@ -573,8 +573,13 @@ func TestADevicesSettingsShapeItsPushes(t *testing.T) {
 	o.drain()
 	got = o.svc.taken()
 	paths := map[string]PushMessage{}
+	topics := map[string]string{}
 	for _, p := range got {
 		paths[p.path] = p.msg
+		topics[p.path] = p.headers.Get("Topic")
+	}
+	if topics["/push/hidden"] != "tend-done" || topics["/push/late"] != "t_2" {
+		t.Fatalf("a hidden task done takes the place of no count of waiting things: %v", topics)
 	}
 	if len(got) != 2 || !reflect.DeepEqual(paths["/push/late"], PushMessage{V: 1, Server: "c_test", Seq: 6, Event: coord.NotifyTaskDone, Task: "t_2", Title: "ship it",
 		Project: "infra", Link: "#task-t_2", At: done.At}) || paths["/push/hidden"].Title != "" || paths["/push/hidden"].Event != coord.NotifyTaskDone {

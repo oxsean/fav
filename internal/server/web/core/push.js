@@ -48,11 +48,12 @@ export function createPush({http, platform}) {
       }
       await http.putDevice(sub.toJSON(), platform.name);
     },
-    // clear closes the notices about things that no longer wait on the viewer, by the inbox's pending items.
+    // clear closes the notices about things that no longer wait on the viewer, by the inbox's pending items: one
+    // about an item, and the count of a hidden push once nothing waits. Others (a task done, how a deny went) stay.
     clear(inbox) {
       if (!p || inbox === noInbox) return;
       const keep = new Set(inbox.flatMap(x => (x.pending || []).map(q => q.id)));
-      p.clear(n => keep.has(n.data?.item)).catch(() => {});
+      p.clear(n => (n.data?.item ? keep.has(n.data.item) : !n.data?.count || inbox.length > 0)).catch(() => {});
     },
   };
 }

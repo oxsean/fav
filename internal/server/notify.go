@@ -562,9 +562,12 @@ func (n *Notifier) webpush(ctx context.Context, user string, dev store.PushDevic
 		urgency = "high"
 	}
 	req.Header.Set("Urgency", urgency)
-	if m.Task == "" {
+	switch {
+	case m.Task == "" && m.Event == coord.NotifyTaskDone:
+		req.Header.Set("Topic", "tend-done")
+	case m.Task == "":
 		req.Header.Set("Topic", "tend") // one count takes the last one's place
-	} else if topic.MatchString(m.Task) {
+	case topic.MatchString(m.Task):
 		req.Header.Set("Topic", m.Task)
 	}
 	res, err := n.client.Do(req)

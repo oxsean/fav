@@ -172,8 +172,9 @@ test('a newer build loads through the worker waiting for it', async () => {
 const plain = v => JSON.parse(JSON.stringify(v));
 
 // pusher runs sw.js with what its push handling touches: the notices it shows, the windows of the page open (url,
-// posted, focused), the windows it opens, the subscriptions it makes and the requests it sends.
-function pusher({lang = 'zh-CN', wins = []} = {}) {
+// posted, focused), the windows it opens, the subscriptions it makes and the requests it sends, which answer (a
+// function of the request: a status and a body, or a throw for no network).
+function pusher({lang = 'zh-CN', wins = [], answer = () => [200, {}]} = {}) {
   const on = {}, shown = [], opened = [], sent = [], subscribed = [];
   const self = {
     location: {origin: 'https://tend.test'}, navigator: {language: lang},
@@ -182,7 +183,11 @@ function pusher({lang = 'zh-CN', wins = []} = {}) {
       pushManager: {subscribe: async opt => { subscribed.push({userVisibleOnly: opt.userVisibleOnly, applicationServerKey: opt.applicationServerKey}); return {toJSON: () => ({endpoint: 'https://push.example/new', keys: {}})}; }}},
     clients: {matchAll: async () => wins, openWindow: async url => { opened.push(url); }},
   };
-  vm.runInContext(script, vm.createContext({self, URL, Promise, JSON, String, caches: {}, fetch: async (url, opt) => { sent.push({url, ...opt}); return {}; }}));
+  vm.runInContext(script, vm.createContext({self, URL, Promise, JSON, String, caches: {}, fetch: async (url, opt) => {
+    sent.push({url, ...opt});
+    const [status, body] = answer(url, opt);
+    return {status, json: async () => body};
+  }}));
   const fire = async (type, data) => {
     let wait = null;
     on[type]({...data, waitUntil: p => { wait = p; }});
@@ -194,19 +199,46 @@ function pusher({lang = 'zh-CN', wins = []} = {}) {
 
 const win = url => { const w = {url, posted: [], focused: 0}; w.postMessage = m => w.posted.push(plain(m)); w.focus = async () => { w.focused++; }; return w; };
 const msg = (over = {}) => ({v: 1, server: 'c1', seq: 812, event: 'task.needs_you', task: 't-3f2', item: 'r-1/q1', kind: 'permission',
-  title: '迁移脚本要删表', what: "psql -c 'DROP TABLE orders_old'", n: 1, link: '#task-t-3f2/r-r-1', at: '2026-09-30T12:00:00Z', ...over});
+  title: '迁移脚本要删表', what: "psql -c 'DROP TABLE orders_old'", n: 1, link: '#wait-t-3f2', at: '2026-09-30T12:00:00Z', ...over});
 
 test('a push shows one notice per task, saying what waits', async () => {
   const w = pusher();
   await w.push(msg());
   await w.push(msg({kind: 'question', item: 'r-1/q2', what: undefined, n: 2}));
   eq(w.shown.map(n => [n.title, n.body, n.tag, n.renotify, n.data]), [
-    ['迁移脚本要删表', "要你允许：psql -c 'DROP TABLE orders_old'", 't-3f2', true, {task: 't-3f2', item: 'r-1/q1', link: '#task-t-3f2/r-r-1'}],
-    ['迁移脚本要删表 · 2 项等你', 'agent 有问题问你', 't-3f2', true, {task: 't-3f2', item: 'r-1/q2', link: '#task-t-3f2/r-r-1'}],
+    ['迁移脚本要删表', "要你允许：psql -c 'DROP TABLE orders_old'", 't-3f2', true, {task: 't-3f2', item: 'r-1/q1', link: '#wait-t-3f2'}],
+    ['迁移脚本要删表 · 2 项等你', 'agent 有问题问你', 't-3f2', true, {task: 't-3f2', item: 'r-1/q2', link: '#wait-t-3f2'}],
   ], 'notices');
+  eq(w.shown.map(n => n.actions), [[{action: 'view', title: '查看'}], [{action: 'view', title: '查看'}]], 'without a token, only the view button');
   const en = pusher({lang: 'en-US'});
   await en.push(msg({what: ''}));
   eq([en.shown[0].title, en.shown[0].body], ['迁移脚本要删表', 'Asks to use a tool'], 'in English, without what it would run');
+});
+
+test('a permission the viewer may deny gets a deny button beside the view one, its token kept on the notice', async () => {
+  for (const [lang, view, reject] of [['zh-CN', '查看', '拒绝'], ['en', 'View', 'Deny']]) {
+    const w = pusher({lang});
+    await w.push(msg({actions: [{action: 'reject', token: 'a1.x.y'}, {action: 'later', token: 'a1.z.z'}]}));
+    eq(w.shown[0].actions, [{action: 'view', title: view}, {action: 'reject', title: reject}], `${lang}: buttons`);
+    eq(w.shown[0].data.act, 'a1.x.y', `${lang}: the token`);
+  }
+});
+
+test('a push with its content hidden says only how many wait, and a task done says it is done', async () => {
+  const w = pusher();
+  await w.push({v: 1, server: 'c1', seq: 9, event: 'task.needs_you', n: 3});
+  await w.push({v: 1, server: 'c1', seq: 10, event: 'task.needs_you', n: 0});
+  await w.push({v: 1, server: 'c1', seq: 11, event: 'task.done', n: 0});
+  await w.push({v: 1, server: 'c1', seq: 12, event: 'task.done', task: 't-9', title: '发版', link: '#task-t-9', n: 0});
+  eq(w.shown.map(n => [n.title, n.body, n.tag, n.actions, n.data]), [
+    ['tend', '3 项等你', 'tend', undefined, {count: true, link: ''}],
+    ['tend', '1 项等你', 'tend', undefined, {count: true, link: ''}],
+    ['tend', '任务完成了', 'tend-done', undefined, {link: ''}],
+    ['发版', '任务完成了', 't-9', undefined, {task: 't-9', link: '#task-t-9'}],
+  ], 'notices');
+  const en = pusher({lang: 'en'});
+  await en.push({v: 1, server: 'c1', seq: 9, event: 'task.needs_you', n: 2});
+  eq(en.shown[0].body, '2 waiting on you', 'in English');
 });
 
 test('a push the worker cannot read still shows a notice', async () => {
@@ -229,15 +261,49 @@ test('the worker words every kind of pending item in both languages', async () =
   ok(bodies['zh-CN'].every((b, i) => b !== bodies.en[i]), 'a kind worded the same in both languages');
 });
 
-test('clicking a notice brings a window of the page to what it is about', async () => {
-  const open = win('https://tend.test/?page=tasks'), other = win('https://else.example/');
-  const w = pusher({wins: [other, open]});
-  const n = {data: {link: '#task-t-3f2/r-r-1'}, closed: 0, close() { this.closed++; }};
-  await w.fire('notificationclick', {notification: n});
-  eq([n.closed, open.posted, open.focused, other.posted, w.opened], [1, [{open: '#task-t-3f2/r-r-1'}], 1, [], []], 'the open window');
+const notice = (data, over = {}) => ({title: '迁移脚本要删表', tag: 't-3f2', data, closed: 0, close() { this.closed++; }, ...over});
+
+test('clicking a notice or its view button brings a window of the page to what it is about', async () => {
+  for (const action of ['', 'view']) {
+    const open = win('https://tend.test/?page=tasks'), other = win('https://else.example/');
+    const w = pusher({wins: [other, open]});
+    const n = notice({link: '#wait-t-3f2', act: 'a1.x.y'});
+    await w.fire('notificationclick', {notification: n, action});
+    eq([n.closed, open.posted, open.focused, other.posted, w.opened, w.sent], [1, [{open: '#wait-t-3f2'}], 1, [], [], []], `${action || 'the body'}: the open window`);
+  }
   const none = pusher();
-  await none.fire('notificationclick', {notification: {data: {link: '#task-t-1'}, close() {}}});
-  eq(none.opened, ['/#task-t-1'], 'a new window');
+  await none.fire('notificationclick', {notification: notice({link: '#wait-t-1'}), action: 'view'});
+  eq(none.opened, ['/#wait-t-1'], 'a new window');
+  const hidden = pusher();
+  await hidden.fire('notificationclick', {notification: notice({count: true, link: ''})});
+  eq(hidden.opened, ['/'], 'a hidden push opens the page');
+});
+
+test('the deny button sends its token with the page cookie and shows how that went, opening nothing', async () => {
+  const cases = [
+    ['done', () => [204, null], '已拒绝'],
+    ['someone else first', () => [409, {error: 'request_gone', by: 'Bob'}], '已被 Bob 处理'],
+    ['no longer asked', () => [409, {error: 'request_gone'}], '已经不等你了'],
+    ['signed out', () => [401, {error: 'unauthorized'}], '请打开 tend 重新登录后处理'],
+    ['expired', () => [410, {error: 'expired'}], '没能拒绝，打开 tend 处理'],
+    ['refused', () => [403, {error: 'token'}], '没能拒绝，打开 tend 处理'],
+    ['no network', () => { throw new Error('offline'); }, '没能拒绝，打开 tend 处理'],
+  ];
+  for (const [name, answer, body] of cases) {
+    const open = win('https://tend.test/');
+    const w = pusher({wins: [open], answer});
+    const n = notice({task: 't-3f2', item: 'r-1/q1', link: '#wait-t-3f2', act: 'a1.x.y'});
+    await w.fire('notificationclick', {notification: n, action: 'reject'});
+    eq(w.sent.map(r => [r.url, r.method, r.credentials, r.headers['X-Tend'], JSON.parse(r.body)]), [['/api/act', 'POST', 'same-origin', '1', {token: 'a1.x.y'}]], `${name}: sent`);
+    eq(w.shown.map(x => [x.title, x.body, x.tag, x.actions, x.data]), [['迁移脚本要删表', body, 't-3f2', undefined, {task: 't-3f2', link: '#wait-t-3f2'}]], `${name}: shown`);
+    eq([n.closed, open.posted, w.opened], [1, [], []], `${name}: opened nothing`);
+  }
+  const en = pusher({lang: 'en', answer: () => [409, {error: 'request_gone', by: 'Bob'}]});
+  await en.fire('notificationclick', {notification: notice({link: '', act: 'a1.x.y'}), action: 'reject'});
+  eq(en.shown[0].body, 'Already handled by Bob', 'in English');
+  const bare = pusher();
+  await bare.fire('notificationclick', {notification: notice({link: '#wait-t-3f2'}), action: 'reject'});
+  eq([bare.sent, bare.opened], [[], ['/#wait-t-3f2']], 'a deny without a token opens the page');
 });
 
 test('a subscription the browser renews is made again with the same key and registered', async () => {
@@ -329,14 +395,18 @@ test('the page renews its subscription, made again when the server key changed',
 test('the notices of what no longer waits close, and a clicked one opens its link in the page', async () => {
   const note = item => ({data: {item}, closed: false, close() { this.closed = true; }});
   const gone = note('r-1/q1'), still = note('r-1/q2'), other = {closed: false, close() { this.closed = true; }};
-  const {p, sw} = pushPlatform({notices: [gone, still, other]});
+  const count = {data: {count: true}, closed: false, close() { this.closed = true; }};
+  const {p, sw} = pushPlatform({notices: [gone, still, other, count]});
   const push = createPush({http: pushHTTP(), platform: p});
   push.clear(noInbox);
   await new Promise(r => setTimeout(r, 0));
   ok(!gone.closed, 'closed before the inbox came');
   push.clear([{task: 't1', pending: [{id: 'r-1/q2'}]}, {task: 't2', reason: 'draft'}]);
   await new Promise(r => setTimeout(r, 0));
-  eq([gone.closed, still.closed, other.closed], [true, false, true], 'closed');
+  eq([gone.closed, still.closed, other.closed, count.closed], [true, false, false, false], 'closed');
+  push.clear([]);
+  await new Promise(r => setTimeout(r, 0));
+  eq([still.closed, other.closed, count.closed], [true, false, true], 'nothing waits');
   const links = [];
   p.onOpen(l => links.push(l));
   sw.on({data: {open: '#task-t1'}});
