@@ -449,6 +449,47 @@ func TestAMachineThatCannotBeReachedKeepsItsRunsQueued(t *testing.T) {
 	}
 }
 
+// An offline machine says when it was last connected, as far as this coordinator knows: one it has not had since it
+// started says nothing, one that dropped says when, one back online again says nothing.
+func TestAnOfflineMachineSaysWhenItWasLastConnected(t *testing.T) {
+	f := newFar(t)
+	e := newEnv(t, tend.Config{})
+	e.start()
+	e.c.Expect("n1")
+	e.c.Expect("n2")
+	machine := func(name string) Machine {
+		var ms Machines
+		e.must(MMachineList, MachinesParams{}, &ms)
+		return ms.Machines[slices.IndexFunc(ms.Machines, func(m Machine) bool { return m.Name == name })]
+	}
+	if m := machine("n2"); m.State != MachineOffline || m.LastSeen != nil {
+		t.Fatalf("never connected: %+v", m)
+	}
+	conn, _ := f.dial(tend.Host{Name: "n1"}, e.c.NodeOptions())
+	if err := e.c.Attach("n1", conn, nil); err != nil {
+		t.Fatal(err)
+	}
+	if m := machine("n1"); m.State != MachineConnected || m.LastSeen != nil {
+		t.Fatalf("connected: %+v", m)
+	}
+	before := time.Now()
+	f.cut()
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		e.c.Pass(context.Background())
+		if m := machine("n1"); m.State == MachineOffline {
+			if m.LastSeen == nil || m.LastSeen.Before(before) || m.LastSeen.After(time.Now()) {
+				t.Fatalf("dropped: %+v", m)
+			}
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("still connected")
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+}
+
 // A node that dialed in and dropped comes back by itself: nobody here retries it, so no retry time is given.
 func TestADroppedNodeThatDialedInHasNoRetryTime(t *testing.T) {
 	f := newFar(t)

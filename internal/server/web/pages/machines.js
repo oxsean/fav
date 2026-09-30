@@ -28,6 +28,7 @@ register('machines', {
   'mach.summary': ['%d 台 · %d 台在线 · 运行位 %d/%d 在用 · %d 个排队', '%d machines · %d up · %d/%d slots in use · %d queued'],
   'mach.mine': ['我的机器', 'My machines'], 'mach.toMe': ['分享给我的', 'Shared with me'], 'mach.others': ['其他人的', 'Other people\'s'],
   'mach.state.connected': ['在线', 'online'], 'mach.state.connecting': ['连接中', 'connecting'], 'mach.state.offline': ['离线', 'offline'],
+  'mach.offlineSince': ['离线 · %s 起', 'offline since %s'],
   'mach.state.idle': ['空闲断开', 'idle'], 'mach.retired': ['已退役', 'retired'],
   'mach.via.local': ['本机', 'this machine'], 'mach.via.ssh': ['ssh', 'ssh'], 'mach.via.dial': ['连入服务器', 'dialed in'],
   'mach.slots': ['运行位', 'Slots'], 'mach.slotsOf': ['%d / %d', '%d / %d'], 'mach.queuedN': ['排队 %d', '%d queued'],
@@ -82,7 +83,11 @@ register('machines', {
 });
 
 // ⚠️ Where the page tells a machine's owner to keep its node token (the command the server gives reads it there).
-const stateWord = (w, m) => (m.retired ? w.t('mach.retired') : w.has('mach.state.' + m.state) ? w.t('mach.state.' + m.state) : m.state);
+// stateWord says how m stands; an offline one since when this coordinator last had it (today's by the clock, earlier
+// ones with the day).
+const stateWord = (w, m, now) => (m.retired ? w.t('mach.retired')
+  : m.state === 'offline' && m.last_seen ? w.f('mach.offlineSince', (day(m.last_seen) === day(now) ? '' : day(m.last_seen) + ' ') + clock(m.last_seen))
+  : w.has('mach.state.' + m.state) ? w.t('mach.state.' + m.state) : m.state);
 const viaWord = (w, m) => (m.via ? (w.has('mach.via.' + m.via) ? w.t('mach.via.' + m.via) : m.via) : '');
 
 function noteText(w, n, name) {
@@ -103,14 +108,14 @@ function SlotBar({m}) {
   return html`<span class="mach-bar" aria-hidden="true">${Array.from({length: n}, (_, i) => html`<span class=${cx(i < (m.active || 0) && 'used')}></span>`)}</span>`;
 }
 
-function Card({m, drain, picked, onPick}) {
+function Card({m, drain, picked, now, onPick}) {
   const w = useWords();
   const {t, f} = w;
   const name = useName();
   const clis = tm.agentChecks(m).filter(c => c.state !== 'missing').map(c => c.name);
   const notes = tm.machineNotes(m, drain);
   return html`<button type="button" class=${cx('mach-card', picked && 'sel', m.retired && 'retired')} aria-pressed=${picked ? 'true' : 'false'} onClick=${onPick}>
-    <span class="mach-card-head"><${Status} state=${tm.machineState(m)} /><b class="mono ell">${m.name}</b><span class="t-muted">${stateWord(w, m)}</span>
+    <span class="mach-card-head"><${Status} state=${tm.machineState(m)} /><b class="mono ell">${m.name}</b><span class="t-muted">${stateWord(w, m, now)}</span>
       ${m.via && html`<span class="chip">${viaWord(w, m)}</span>`}</span>
     <span class="mach-card-slots"><span class="t-muted">${t('mach.slots')}</span><span class="mono">${f('mach.slotsOf', m.active || 0, m.slots || 0)}${m.queued ? ' · ' + f('mach.queuedN', m.queued) : ''}</span><${SlotBar} m=${m} /></span>
     <span class="mach-card-meta mono t-muted">${[m.os, m.version && 'tend ' + m.version, clis.join(' ')].filter(Boolean).join(' · ')}</span>
@@ -301,13 +306,13 @@ export function Machines({store, commands, toasts, session, http, wire, router, 
         <ul class="cards">${xs.map(m => html`<li key=${m.name}><button type="button" class="card-row" onClick=${() => setPicked(m.name)}>
           <span class="card-lead"><${Status} state=${tm.machineState(m)} /></span>
           <span class="card-main"><span class="card-primary mono">${m.name}</span>
-            <span class="card-secondary">${[stateWord(w, m), viaWord(w, m), f('m.inUse', m.active || 0, m.slots || 0)].filter(Boolean).join(' · ')}</span>
+            <span class="card-secondary">${[stateWord(w, m, at), viaWord(w, m), f('m.inUse', m.active || 0, m.slots || 0)].filter(Boolean).join(' · ')}</span>
             ${tm.machineNotes(m, st.drains?.[m.name]).slice(0, 1).map(n => html`<span class=${cx('card-secondary', 't-' + noteTone(n))}>${noteText(w, n, name)}</span>`)}</span>
         </button></li>`)}</ul>
       <//>`)}
       <${OnDesktop} platform=${platform} toasts=${toasts} page="machines" note=${t('mach.desktop')} />
       ${open && html`<${Drawer} title=${open.name} onClose=${() => setPicked('')}>
-        <div class="mach-phone-head"><${Status} state=${tm.machineState(open)} word label=${stateWord(w, open)} /></div>
+        <div class="mach-phone-head"><${Status} state=${tm.machineState(open)} word label=${stateWord(w, open, at)} /></div>
         <${Facts} m=${open} st=${st} creds=${[]} now=${at} />
       <//>`}
     </div>`;
@@ -327,7 +332,7 @@ export function Machines({store, commands, toasts, session, http, wire, router, 
         ${!machines.length && html`<${Panel} title=${t('mach.title')} count=${0}><p class="empty">${t('mach.none')}</p><//>`}
         ${groups.map(([g, xs]) => html`<section class="mach-group" key=${g}>
           <h2 class="sect-h">${t('mach.' + g)} <span class="mono count">${xs.length}</span></h2>
-          <div class="mach-cards">${xs.map(m => html`<${Card} key=${m.name} m=${m} drain=${st.drains?.[m.name]} picked=${m.name === cur?.name} onPick=${() => setPicked(m.name)} />`)}</div>
+          <div class="mach-cards">${xs.map(m => html`<${Card} key=${m.name} m=${m} drain=${st.drains?.[m.name]} picked=${m.name === cur?.name} now=${at} onPick=${() => setPicked(m.name)} />`)}</div>
         </section>`)}
         ${lane && html`<${Panel} title=${f('mach.today', cur.name)} actions=${html`<span class="t-muted">${t('mach.todayNote')}</span>`}>
           <div class="panel-body"><${Timeline} from=${lane.from} to=${lane.to} label=${f('mach.today', cur.name)} lanes=${[{
@@ -339,7 +344,7 @@ export function Machines({store, commands, toasts, session, http, wire, router, 
           ${unmatched.map(c => html`<${Cred} key=${c.id} c=${c} onRevoke=${x => setModal({kind: 'revoke', cred: x})} />`)}</div><//>`}
       </div>
       ${cur && html`<aside class="mach-aside panel" aria-label=${cur.name}>
-        <header class="mach-aside-head"><${Status} state=${tm.machineState(cur)} /><b class="mono">${cur.name}</b><span class="t-muted">${stateWord(w, cur)}</span></header>
+        <header class="mach-aside-head"><${Status} state=${tm.machineState(cur)} /><b class="mono">${cur.name}</b><span class="t-muted">${stateWord(w, cur, at)}</span></header>
         <${Facts} m=${cur} st=${st} creds=${credsOf(cur)} now=${at} onRuns=${() => toRuns(cur.name)}
           draining=${commands.state('drain:' + cur.name) === 'pending'} onDrain=${mine(cur) ? () => drain(cur) : null}
           checking=${!!checking} onCheck=${checks && cur.state === 'connected' && !cur.retired ? () => check(cur.name) : null}

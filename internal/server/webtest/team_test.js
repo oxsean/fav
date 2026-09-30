@@ -216,6 +216,8 @@ test('machines: one is checked again and says when; every connected one is, and 
   await click(root.find('.mach-card').find(c => c.one('b').textContent === 'win'));
   eq(root.one('.mach-aside').find('button').filter(b => labelOf(b) === t('mach.check')).length, 0, 'an offline machine is not checked');
   ok(root.one('.mach-aside').textContent.includes(t('mach.redials')), 'an offline node dials in again by itself');
+  ok(root.one('.mach-aside').textContent.includes(words.f('mach.offlineSince', '11:02')), 'offline since when it was last connected');
+  ok(root.find('.mach-card').find(c => c.one('b').textContent === 'old-box').textContent.includes(t('mach.retired')), 'a retired one says so, not since when');
   await click(root.find('.mach-card').find(c => c.one('b').textContent === 'old-box'));
   ok(!root.one('.mach-aside').textContent.includes(t('mach.redials')), 'a retired one does not');
   await click(root.find('.mach-card').find(c => c.one('b').textContent === 'mba'));

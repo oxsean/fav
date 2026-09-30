@@ -51,6 +51,7 @@ type machine struct {
 	dialing   bool
 	attached  bool // mode 2: the node dialed in; never dialed from here
 	busyAt    time.Time
+	seenAt    time.Time              // when this coordinator last let go of a connection to it; zero: not since it started
 	checks    map[string]agent.Check // node.agents, when it last answered
 	checkedAt time.Time              // when node.agents last probed afresh
 	probing   *probe                 // a fresh node.agents under way
@@ -185,6 +186,7 @@ func (c *Coord) Attach(name string, conn Conn, check func(remote.Hello) error) e
 	}
 	if m.conn != nil {
 		m.conn.Close()
+		m.seenAt = time.Now()
 	}
 	m.attached, m.conn, m.hello, m.err = true, conn, h, nil
 	c.machinesMoved()
@@ -231,7 +233,7 @@ func (c *Coord) lost(m *machine, conn Conn, err error) {
 	defer c.mu.Unlock()
 	if m.conn == conn {
 		conn.Close()
-		m.conn = nil
+		m.conn, m.seenAt = nil, time.Now()
 		c.failed(m, err)
 	}
 }
@@ -318,7 +320,7 @@ func (c *Coord) Pass(ctx context.Context) {
 			select {
 			case <-m.conn.Done():
 				err := error(m.conn.Err())
-				m.conn = nil
+				m.conn, m.seenAt = nil, time.Now()
 				c.failed(m, err)
 			default:
 			}
@@ -332,7 +334,7 @@ func (c *Coord) Pass(ctx context.Context) {
 			}
 		case m.conn != nil && m.host != nil && now.Sub(m.busyAt) > idleClose:
 			m.conn.Close()
-			m.conn = nil
+			m.conn, m.seenAt = nil, now
 			c.machinesMoved()
 		}
 	}

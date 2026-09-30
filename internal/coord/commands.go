@@ -82,6 +82,7 @@ type Machine struct {
 	Error     string                 `json:"error,omitempty"`
 	Detail    string                 `json:"detail,omitempty"`
 	RetryAt   *time.Time             `json:"retry_at,omitzero"`
+	LastSeen  *time.Time             `json:"last_seen,omitzero"` // offline: when this coordinator last had it connected; absent when not since it started
 	Slots     int                    `json:"slots"`
 	Active    int                    `json:"active"` // starting, running or unknown runs
 	Queued    int                    `json:"queued"`
@@ -855,6 +856,10 @@ func (c *Coord) machineView(m *machine) Machine {
 		if !m.retryAt.IsZero() && !m.attached {
 			at := m.retryAt
 			x.RetryAt = &at
+		}
+		if !m.seenAt.IsZero() {
+			at := m.seenAt
+			x.LastSeen = &at
 		}
 	default:
 		x.State = MachineIdle
