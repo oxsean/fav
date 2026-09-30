@@ -772,6 +772,10 @@ func cmdAgent(args []string) error {
 		return cmdAgentRemove(args[1:])
 	case "share":
 		return cmdAgentShare(args[1:])
+	case "leave":
+		return cmdAgentLeave(args[1:])
+	case "transfer":
+		return cmdAgentTransfer(args[1:])
 	case "defs":
 		return cmdAgentDefs(args[1:])
 	}

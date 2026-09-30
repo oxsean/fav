@@ -19,7 +19,7 @@ tend run note --pr <url>            # 只在 run 里用：报告成果所在的 
 tend run plan <file|->              # 只在拆解 run 里用：校验并提交计划
 tend run answer <run> [--request id] --allow | --deny [--message m] | --answer [问题=]回答…
 tend run send <run> <text> [--file f]
-tend agent list | defs | import <file> [--project p] | export <name> [-o f] | check <file> | rm <name> | share <name> [--users u,…] [--projects p,…] [--all] [--view]
+tend agent list | defs | import <file> [--project p] | export <name> [-o f] | check <file> | rm <name> | share <name> [--users u,…] [--projects p,…] [--all] [--view] | leave <name> | transfer <name> --project p
 tend machine list
 tend service | tend node --stdio | --connect URL --token-file f | node install-service --connect URL --token-file f [--print] | uninstall-service
 tend-server [--listen addr] | token add --node n | --client n [--owner u] | token rm n | token rebind n | token list

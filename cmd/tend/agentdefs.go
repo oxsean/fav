@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -133,6 +134,40 @@ func cmdAgentShare(args []string) error {
 			return err
 		}
 		fmt.Print(i18n.F("cli.agent.shared", pos[0]))
+		return nil
+	})
+}
+
+func cmdAgentLeave(args []string) error {
+	fs := newFlags("agent")
+	pos, err := parseWithArgs(fs, args, 1)
+	if err != nil {
+		return err
+	}
+	return withCoord(wire.Options{}, func(cl *coord.Client) error {
+		if err := write(cl, coord.MAgentDefLeave, task.AgentDefRef{Name: pos[0]}, nil); err != nil {
+			return err
+		}
+		fmt.Print(i18n.F("cli.agent.left", pos[0]))
+		return nil
+	})
+}
+
+func cmdAgentTransfer(args []string) error {
+	fs := newFlags("agent")
+	project := fs.String("project", "", i18n.T("cli.agent.flag_transfer_project"))
+	pos, err := parseWithArgs(fs, args, 1)
+	if err != nil {
+		return err
+	}
+	if *project == "" {
+		return errors.New(i18n.T("cli.agent.need_project"))
+	}
+	return withCoord(wire.Options{}, func(cl *coord.Client) error {
+		if err := write(cl, coord.MAgentDefTransfer, task.AgentDefTransfer{Name: pos[0], Owner: task.ProjectOwner + *project}, nil); err != nil {
+			return err
+		}
+		fmt.Print(i18n.F("cli.agent.transferred", pos[0], *project))
 		return nil
 	})
 }

@@ -422,7 +422,8 @@ Read everything twice. Run the tests before you stop.
 it is used by name like a profile: its effort and denied tools go to the agent's command line, its text goes ahead of the
 brief. `tend agent defs | export | check | rm | share` manage them. Without a server they are files in
 `~/.agent/tend/defs/agents/`; on a server a definition is its owner's (or a project's) until it is shared with people,
-projects or everyone (`--view` lets them read it too). For claude, `hooks` go into the run's settings (the node needs
+projects or everyone (`--view` lets them read it too). `tend agent leave <name>` stops using one shared with you by
+name, and `tend agent transfer <name> --project <id>` gives yours to a project you own. For claude, `hooks` go into the run's settings (the node needs
 `node.allow_hooks`), `mcp` names servers from the node's own `node.mcp` (their values never leave that machine) and
 `skills` must be installed there; `output` and `budget` are kept but not applied yet.
 

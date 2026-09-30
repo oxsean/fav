@@ -408,7 +408,7 @@ machines: {prefer: [mba]}
 
 `tend agent import careful.md` 保存它（里面写 `import: ~/.claude/agents/foo.md` 可以复用 Claude Code 的 subagent），之后按名字像档案一样用：
 effort 和禁用的工具进 agent 的命令行，正文放在任务书前面。`tend agent defs | export | check | rm | share` 管理它们。没有 server 时它们是
-`~/.agent/tend/defs/agents/` 里的文件；有 server 时定义归主人（或某个项目），分享给人、项目或所有人之后别人才能用（`--view` 让他们也能看正文）。
+`~/.agent/tend/defs/agents/` 里的文件；有 server 时定义归主人（或某个项目），分享给人、项目或所有人之后别人才能用（`--view` 让他们也能看正文）。`tend agent leave <名>` 不再使用点名分享给你的定义，`tend agent transfer <名> --project <id>` 把你的定义转给你负责的项目。
 对 claude：`hooks` 写进这次运行的设置（节点要打开 `node.allow_hooks`），`mcp` 按名字引用节点自己 `node.mcp` 里的服务器（值不离开那台机器），`skills` 要求那台机器已装好；`output`、`budget` 会保存但还不生效。
 
 **工作流。** 任务可以分阶段走，而不是只跑一个 run：`tend task add … --workflow feature`（或者用项目的默认工作流）。内置
