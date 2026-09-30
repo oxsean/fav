@@ -33,7 +33,10 @@ export function sitWord(w, sit) {
 export const who = x => [x?.agent, x?.machine].filter(Boolean).join(' @ ');
 
 // actLabel is what an action's button says for this task.
-export const actLabel = (w, id, sit) => w.t(id === 'keep' && (sit.reason === 'source_closed' || sit.reason === 'source_reopened') ? 'do.keepGoing' : 'do.' + id);
+const goesOn = sit => sit.reason === 'source_closed' || sit.reason === 'source_reopened';
+export const actLabel = (w, id, sit) => w.t(id === 'keep' && goesOn(sit) ? 'do.keepGoing' : 'do.' + id);
+// keptWord is the toast's key once keep is done.
+export const keptWord = sit => (goesOn(sit) ? 'toast.goesOn' : 'toast.kept');
 
 function Section({title, count, children}) {
   return html`<section class="det-sec"><h3 class="det-h">${title}${count !== undefined && html` <span class="mono count">${count}</span>`}</h3>${children}</section>`;

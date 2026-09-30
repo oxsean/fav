@@ -16,7 +16,8 @@ import {views} from '../core/router.js';
 import {clock as hhmm, day, money} from '../core/format.js';
 import {dayStart} from '../core/select.js';
 import {unsure} from '../core/commands.js';
-import {Task, sitState, sitWord, who} from './task.js';
+import {situation} from '../core/fold.js';
+import {Task, sitState, sitWord, who, keptWord} from './task.js';
 import {TaskForm, Dispatch, Move, PlanReview, Gate, DRAFT_KEY} from './taskforms.js';
 import {Conversation} from './conversation.js';
 import {RunChanges} from './changes.js';
@@ -114,7 +115,7 @@ export function Tasks({store, commands, toasts, wire, router, session, clock = (
       case 'rework': return open({kind: 'gate', task});
       case 'sendBack': return open({kind: 'gate', task, reply: last?.id});
       case 'ack': return quiet(send('task.source_ack', {id: task.id, accept: true}, 'task:' + task.id).then(() => toasts.show({text: t('toast.acked')})));
-      case 'keep': return quiet(send('task.source_ack', {id: task.id}, 'task:' + task.id).then(() => toasts.show({text: t('toast.kept')})));
+      case 'keep': return quiet(send('task.source_ack', {id: task.id}, 'task:' + task.id).then(() => toasts.show({text: t(keptWord(situation(st, task)))})));
       case 'merge': return quiet(send('task.merge', {id: task.id}, 'task:' + task.id).then(() => toasts.show({text: f('toast.merging', task.title)})));
       case 'done': return setStatus(task, 'done', f('toast.done', task.title));
       case 'reopen': return setStatus(task, 'todo', f('toast.reopened', task.title));

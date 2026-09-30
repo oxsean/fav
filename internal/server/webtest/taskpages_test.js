@@ -18,6 +18,7 @@ import {html, KeysContext} from '../web/ui/base.js';
 import {App} from '../web/pages/app.js';
 import {DRAFT_KEY, TaskForm, Dispatch, Move, PlanReview, Gate} from '../web/pages/taskforms.js';
 import {FILTER_KEY, PANE_KEY} from '../web/pages/tasks.js';
+import {keptWord} from '../web/pages/task.js';
 import {install} from './dom.js';
 import {settle} from './fake.js';
 import {NOW, tasks} from './rig.js';
@@ -364,4 +365,9 @@ test('on a phone a task is its own page, with the previous and next of the list;
   } finally { form.value = 'desktop'; }
 });
 
-await run();
+await test('keeping on says what was kept: the scope against a changed issue, the task itself against one closed or reopened', () => {
+  eq(['source_changed', 'source_closed', 'source_reopened'].map(reason => keptWord({kind: 'waiting', reason})),
+    ['toast.kept', 'toast.goesOn', 'toast.goesOn'], 'words');
+});
+
+run();

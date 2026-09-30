@@ -688,6 +688,8 @@ func statusLine(sit task.Situation) string {
 		return "the issue changed; waiting for a decision"
 	case task.WhySourceClosed:
 		return "the issue was closed; waiting for a decision"
+	case task.WhySourceReopened:
+		return "the issue was reopened; waiting for a decision"
 	case task.WhyDispatch:
 		return "not started"
 	}

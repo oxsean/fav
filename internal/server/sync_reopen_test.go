@@ -2,6 +2,7 @@ package server
 
 import (
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -56,6 +57,11 @@ func reopenedAfterTendClosed(t *testing.T, r *syncRig) {
 	r.pass(61 * time.Second)
 	if r.g.Get(1).Closed || r.task(1).Status != task.StatusTodo {
 		t.Fatalf("and it stays that way: %+v %s", r.g.Get(1), r.task(1).Status)
+	}
+	if cs := r.g.CommentsOf(1); !slices.ContainsFunc(cs, func(c trackertest.Comment) bool {
+		return c.Author == "tend-bot" && strings.Contains(c.Body, "the issue was reopened; waiting for a decision")
+	}) {
+		t.Fatalf("its progress comment says why it waits: %+v", cs)
 	}
 
 	r.call(coord.Owner, coord.MTaskSourceAck, task.SourceAck{ID: x.ID}, nil)

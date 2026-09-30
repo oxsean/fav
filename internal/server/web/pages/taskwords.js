@@ -28,7 +28,7 @@ register('tasks', {
   'toast.applied': ['按草稿建出了 %d 个任务', '%d {task|tasks} made from the plan'], 'toast.discarded': ['草稿已丢弃', 'The plan is dropped'],
   'toast.draftSaved': ['草稿已保存', 'The plan is saved'], 'toast.passed': ['「%s」验收通过', '%s passed'],
   'toast.sentBack': ['「%s」已退回', '%s is sent back'], 'toast.acked': ['已采用 issue 的新版本', 'The issue\'s new version is taken'],
-  'toast.kept': ['维持当前范围', 'The scope stays'], 'toast.merging': ['正在重新合并「%s」', 'Merging %s again'],
+  'toast.kept': ['维持当前范围', 'The scope stays'], 'toast.goesOn': ['任务照常继续', 'The task goes on'], 'toast.merging': ['正在重新合并「%s」', 'Merging %s again'],
   'toast.replied': ['已发给 %s', 'Sent to %s'], 'toast.moved.board': ['「%s」→「%s」', '%s → %s'],
   'confirm.cancel': ['取消这个任务？', 'Cancel this task?'], 'confirm.cancelNote': ['「%s」和它下面没完成的子任务都会取消。', '%s and its unfinished subtasks are canceled.'],
   'confirm.keep': ['留着', 'Keep it'],
