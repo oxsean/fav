@@ -48,11 +48,13 @@
   ],
   "GET /api/trackers/preview": {"body": "<!-- tend:progress c_7d61b8b99c1b9aa9 t_7b8d61e21e46 -->\n**tend** is working on this: Refund emails\n\n- [x] Cart totals\n- [ ] Refund emails"},
   "GET /api/tokens": [
-    {"id": "k1", "kind": "token", "name": "login:tend on mba", "owner": "u_b", "created": "2026-09-24T09:00:00Z", "last_used": "2026-09-30T14:20:00Z"},
+    {"id": "k1", "kind": "token", "name": "login:tend on mba", "owner": "u_b", "created": "2026-09-24T09:00:00Z", "last_used": "2026-09-30T14:20:00Z", "last_ip": "100.64.0.5"},
     {"id": "k2", "kind": "token", "name": "ci-bot", "owner": "u_b", "created": "2026-09-10T09:00:00Z"},
-    {"id": "w1", "kind": "web", "owner": "u_b", "created": "2026-09-29T08:55:00Z", "last_used": "2026-09-30T14:31:00Z", "expires": "2026-10-29T08:55:00Z", "current": true},
+    {"id": "w1", "kind": "web", "owner": "u_b", "created": "2026-09-29T08:55:00Z", "last_used": "2026-09-30T14:31:00Z", "expires": "2026-10-29T08:55:00Z", "current": true,
+      "agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36", "last_ip": "100.64.0.2"},
     {"id": "w2", "kind": "web", "name": "token:k1", "owner": "u_b", "created": "2026-09-28T21:40:00Z", "last_used": "2026-09-29T21:40:00Z", "expires": "2026-10-28T21:40:00Z"},
-    {"id": "w3", "kind": "web", "owner": "u_b", "created": "2026-09-12T10:00:00Z", "last_used": "2026-09-20T10:00:00Z", "expires": "2026-10-12T10:00:00Z"},
+    {"id": "w3", "kind": "web", "owner": "u_b", "created": "2026-09-12T10:00:00Z", "last_used": "2026-09-20T10:00:00Z", "expires": "2026-10-12T10:00:00Z",
+      "agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1", "last_ip": "100.64.0.9"},
     {"id": "w4", "kind": "web", "name": "device:Android", "owner": "u_b", "created": "2026-09-14T08:00:00Z", "last_used": "2026-09-15T08:00:00Z", "expires": "2026-10-14T08:00:00Z"}
   ],
   "POST /api/tokens": {"id": "k3", "token": "tend_c_preview0000000000"},

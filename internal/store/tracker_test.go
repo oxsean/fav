@@ -88,6 +88,7 @@ func TestUpgradingTheWriteBacksClaimsNoneOfThemAsTends(t *testing.T) {
 		Token: []byte("sealed"), HookSecret: []byte("sealed2"), Settings: "{}", CreatedBy: LocalUser})
 	must(t, err)
 	tm.Close()
+	before0012(t, path)
 	before0011(t, path)
 	before0010(t, path)
 	exec(t, path, `INSERT INTO tracker_issues (tracker, number, task, closed, dirty) VALUES ('`+x.ID+`', 3, 't_1', 1, 0)`)

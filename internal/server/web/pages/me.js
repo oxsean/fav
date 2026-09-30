@@ -15,7 +15,7 @@ import {DeskLinks} from '../ui/desk.js';
 import {register, t as say, f as fill} from '../core/i18n.js';
 import {linkURL} from '../core/http.js';
 import {themes, densities} from '../core/prefs.js';
-import {clock, day} from '../core/format.js';
+import {clock, day, browserOf} from '../core/format.js';
 import {nowhere} from '../core/platform.js';
 import {noPush} from '../core/push.js';
 import {apiText} from './words.js';
@@ -69,7 +69,7 @@ register('me', {
   'me.make': ['生成', 'Make it'], 'me.tokenValue': ['token（只显示这一次）', 'The token (shown only this once)'],
   'me.tokenHow': ['存进一个只有你能读的文件，在 tend 的 config.json 里把 coordinator.token_file 指过去；关掉后不再显示。', 'Save it to a file only you can read and point coordinator.token_file in tend\'s config.json at it; once closed it is not shown again.'],
   'me.done': ['完成', 'Done'], 'me.made': ['%s 已生成', '%s is made'],
-  'me.madeAt': ['%s 建立', 'made %s'], 'me.usedAt': ['%s 用过', 'used %s'], 'me.unused': ['没用过', 'never used'], 'me.until': ['%s 到期', 'ends %s'],
+  'me.madeAt': ['%s 建立', 'made %s'], 'me.usedAt': ['%s 用过', 'used %s'], 'me.usedFrom': ['%s 从 %s 用过', 'used %s from %s'], 'me.unused': ['没用过', 'never used'], 'me.until': ['%s 到期', 'ends %s'],
   'me.revoke': ['吊销', 'Revoke'], 'me.revokeTitle': ['吊销 %s？', 'Revoke %s?'],
   'me.revokeNote': ['用它的 CLI 和 TUI 立刻断开，用它登录的网页会话一起失效，它们的推送也停，不能恢复。', 'The CLI and TUI using it disconnect at once, and so do the browser sessions it signed in, whose pushes stop; this cannot be undone.'],
   'me.revoked': ['%s 已吊销', '%s is revoked'],
@@ -308,7 +308,10 @@ function Logins({logins, identities, onLink}) {
   <//>`;
 }
 
-const facts = (w, c) => [w.f('me.madeAt', when(c.created)), c.last_used ? w.f('me.usedAt', when(c.last_used)) : w.t('me.unused'),
+// facts are what the page knows of a credential's use: the browser it signed in with (a session), when it was made,
+// when and from where it was last used, when it ends.
+const facts = (w, c) => [browserOf(c.agent), w.f('me.madeAt', when(c.created)),
+  !c.last_used ? w.t('me.unused') : c.last_ip ? w.f('me.usedFrom', when(c.last_used), c.last_ip) : w.f('me.usedAt', when(c.last_used)),
   c.expires && w.f('me.until', when(c.expires))].filter(Boolean).join(' · ');
 
 function Tokens({tokens, onNew, onRevoke}) {

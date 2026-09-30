@@ -45,6 +45,7 @@
 - **会话**：
   - 网页的 cookie 里只存服务端会话 id（HttpOnly、SameSite=Strict、公网下 Secure），可以轮换，也可以单独吊销。用户能看到自己登录过的设备。
   - 浏览器会话本身就是一条凭据（`kind: web`，30 天），cookie `tend_session`。用 token 登录网页时，另建一条名为 `token:<id>` 的网页会话，随那个 token 一起失效。
+  - 每条凭据记下最近一次使用的时间和来源地址（`last_used`、`last_ip`，0012；`/client`、`/node` 连上时写），浏览器会话另记登录时的 User-Agent（`agent`，最多 256 字节），「我」页凭它写出是哪个浏览器、哪台设备。
   - TUI 和 CLI 用个人 token，在网页的「我」页生成，或 `tend login [地址]` 走浏览器授权拿到：
     - `POST /auth/device`（限流，不需要会话）用客户端名字换一个 `device_code`（CLI 轮询用）、一个 `user_code`（人读的 `XXXX-XXXX`，字母表去掉 `0/O/1/I`）、`verify_url`（`<地址>/#device-<user_code>`）、轮询间隔和有效期；待确认的设备码只存在内存里，重启即丢，同时最多 100 个，同一个来源地址（和限流一样，见上面「来源地址」）最多 5 个，超出回 429 `busy`。
     - `POST /auth/device/token` 用 `device_code` 换状态：`pending`；`denied`（读一次即失效）；`expired`；或恰好一次的 `{status: ok, token, user}`，之后这个码就没了。

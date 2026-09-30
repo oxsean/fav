@@ -304,6 +304,8 @@ test('a session is signed out after asking; so are all the others, this one kept
   const reads = () => a.http.calls.filter(c => c[0] === 'GET /api/push/devices').length;
   await until(() => reads() > 0, 'the devices');
   eq(rows().length, 1, 'one signed in by a browser besides this one');
+  ok(rows()[0].textContent.includes('Safari · iPhone') && rows()[0].textContent.includes('100.64.0.9'), 'its browser and where it was last used from');
+  ok(a.el.find('.me-row').some(r => r.textContent.includes('login:tend on mba') && r.textContent.includes('100.64.0.5')), 'a token\'s last address');
   await click(buttonOf(rows()[0], words.t('me.end')));
   ok(a.el.one('.modal').textContent.includes(words.t('me.endNote')), 'its pushes stop too');
   await click(buttonOf(a.el.one('.modal-foot'), words.t('me.end')));

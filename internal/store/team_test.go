@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 )
 
 func openTeam(t *testing.T) *Team {
@@ -215,6 +216,7 @@ func TestUpgradingToTheSecretsTableKeepsTheTeam(t *testing.T) {
 		t.Fatal(err)
 	}
 	tm.Close()
+	before0012(t, path)
 	before0011(t, path)
 	before0010(t, path)
 	before0009(t, path)
@@ -232,5 +234,52 @@ func TestUpgradingToTheSecretsTableKeepsTheTeam(t *testing.T) {
 	}
 	if baks, _ := filepath.Glob(filepath.Join(dir, File+".v7-*.bak")); len(baks) != 1 {
 		t.Fatalf("no copy of the v7 database: %v", baks)
+	}
+}
+
+// before0012 takes the credentials back to before they said where they are used from.
+func before0012(t *testing.T, path string) {
+	exec(t, path, `ALTER TABLE credentials DROP COLUMN agent; ALTER TABLE credentials DROP COLUMN last_ip`)
+}
+
+// A session keeps the browser it signed in with, clipped; every credential the address it was last used from. One
+// from before 0012 has neither.
+func TestACredentialSaysWhereItIsUsedFrom(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, File)
+	tm, err := OpenTeam(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, old, _ := tm.NewCredential(KindToken, "cli", LocalUser, 0)
+	must(t, tm.Touch(old.ID, "100.64.0.2"))
+	tm.Close()
+	before0012(t, path)
+	setVersion(t, path, 11)
+	if tm, err = OpenTeam(path); err != nil {
+		t.Fatal(err)
+	}
+	defer tm.Close()
+	byID := func(id string) Credential {
+		cs, _ := tm.ActiveCredentials()
+		for _, c := range cs {
+			if c.ID == id {
+				return c
+			}
+		}
+		t.Fatalf("%s is gone", id)
+		return Credential{}
+	}
+	if c := byID(old.ID); c.Agent != "" || c.LastIP != "" || c.LastUsed.IsZero() {
+		t.Fatalf("a token from before: %+v", c)
+	}
+	_, web, err := tm.NewSession("", LocalUser, strings.Repeat("é", 200), time.Hour)
+	must(t, err)
+	if c := byID(web.ID); len(c.Agent) > maxAgent || !utf8.ValidString(c.Agent) || c.LastIP != "" {
+		t.Fatalf("a new session: %q %q", c.Agent, c.LastIP)
+	}
+	must(t, tm.Touch(web.ID, "2001:db8::1"))
+	if c := byID(web.ID); c.LastIP != "2001:db8::1" || c.LastUsed.IsZero() {
+		t.Fatalf("used: %+v", c)
 	}
 }

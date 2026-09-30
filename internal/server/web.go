@@ -107,7 +107,7 @@ func sameOrigin(r *http.Request) bool {
 
 // startSession signs the browser in as u with a new session credential; name ties it to a parent token.
 func (s *Server) startSession(w http.ResponseWriter, r *http.Request, u store.User, name string) error {
-	secret, c, err := s.team().NewCredential(store.KindWeb, name, u.ID, sessionAge)
+	secret, c, err := s.team().NewSession(name, u.ID, r.UserAgent(), sessionAge)
 	if err != nil {
 		return err
 	}

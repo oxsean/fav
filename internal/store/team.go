@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 // Roles of a user in the instance.
@@ -83,6 +84,8 @@ type Credential struct {
 	Created  time.Time `json:"created,omitzero"`
 	LastUsed time.Time `json:"last_used,omitzero"`
 	Expires  time.Time `json:"expires,omitzero"`
+	Agent    string    `json:"agent,omitempty"`   // a session's browser, as its User-Agent said at sign-in
+	LastIP   string    `json:"last_ip,omitempty"` // the address it last connected from
 }
 
 type AuditEntry struct {
@@ -490,6 +493,25 @@ func (t *Team) NewCredential(kind, name, owner string, ttl time.Duration) (strin
 	return secret, c, err
 }
 
+// NewSession makes a browser session's secret for owner, signed in from the browser agent (its User-Agent).
+func (t *Team) NewSession(name, owner, agent string, ttl time.Duration) (string, Credential, error) {
+	secret := newSecret()
+	c, err := t.ImportCredential(Credential{Kind: KindWeb, Name: name, Owner: owner, Sum: Sum(secret), Agent: clipAgent(agent)}, ttl)
+	return secret, c, err
+}
+
+// ⚠️ The most of a User-Agent kept: enough to tell the browser and the system.
+const maxAgent = 256
+
+func clipAgent(s string) string {
+	s = strings.ToValidUTF8(s, "")
+	for len(s) > maxAgent {
+		_, n := utf8.DecodeLastRuneInString(s)
+		s = s[:len(s)-n]
+	}
+	return s
+}
+
 // ImportCredential keeps a credential whose hash is known (tokens.json of an older server).
 func (t *Team) ImportCredential(c Credential, ttl time.Duration) (Credential, error) {
 	if c.Kind != KindWeb && c.Kind != KindToken && c.Kind != KindNode {
@@ -502,27 +524,27 @@ func (t *Team) ImportCredential(c Credential, ttl time.Duration) (Credential, er
 	if ttl != 0 {
 		c.Expires = time.Now().Add(ttl).UTC()
 	}
-	_, err := t.w.Exec(`INSERT INTO credentials (id, kind, name, owner, sum, node_id, host, created, expires) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		c.ID, c.Kind, c.Name, c.Owner, c.Sum, c.NodeID, c.Host, nanos(c.Created), nanos(c.Expires))
+	_, err := t.w.Exec(`INSERT INTO credentials (id, kind, name, owner, sum, node_id, host, created, expires, agent) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		c.ID, c.Kind, c.Name, c.Owner, c.Sum, c.NodeID, c.Host, nanos(c.Created), nanos(c.Expires), c.Agent)
 	if err != nil && strings.Contains(err.Error(), "UNIQUE") {
 		return Credential{}, ErrExists
 	}
 	return c, err
 }
 
-const credCols = `id, kind, name, owner, sum, node_id, host, created, last_used, expires`
+const credCols = `id, kind, name, owner, sum, node_id, host, created, last_used, expires, agent, last_ip`
 
 func scanCred(s scanner) (Credential, error) {
 	var c Credential
 	var created, used, expires int64
-	err := s.Scan(&c.ID, &c.Kind, &c.Name, &c.Owner, &c.Sum, &c.NodeID, &c.Host, &created, &used, &expires)
+	err := s.Scan(&c.ID, &c.Kind, &c.Name, &c.Owner, &c.Sum, &c.NodeID, &c.Host, &created, &used, &expires, &c.Agent, &c.LastIP)
 	c.Created, c.LastUsed, c.Expires = fromNanos(created), fromNanos(used), fromNanos(expires)
 	return c, err
 }
 
 // ActiveCredentials are those neither revoked nor expired, whose owners are not disabled.
 func (t *Team) ActiveCredentials() ([]Credential, error) {
-	rows, err := t.r.Query(`SELECT c.id, c.kind, c.name, c.owner, c.sum, c.node_id, c.host, c.created, c.last_used, c.expires
+	rows, err := t.r.Query(`SELECT c.id, c.kind, c.name, c.owner, c.sum, c.node_id, c.host, c.created, c.last_used, c.expires, c.agent, c.last_ip
 		FROM credentials c JOIN users u ON u.id = c.owner
 		WHERE c.revoked = 0 AND (c.expires = 0 OR c.expires > ?) AND u.disabled = 0 ORDER BY c.created`, time.Now().UnixNano())
 	if err != nil {
@@ -577,9 +599,9 @@ func (t *Team) Rebind(id string) error {
 	return affected(t.w.Exec(`UPDATE credentials SET node_id = '', host = '' WHERE id = ?`, id))
 }
 
-// Touch records that a credential was used now.
-func (t *Team) Touch(id string) error {
-	_, err := t.w.Exec(`UPDATE credentials SET last_used = ? WHERE id = ?`, time.Now().UnixNano(), id)
+// Touch records that a credential was used now, from the address ip.
+func (t *Team) Touch(id, ip string) error {
+	_, err := t.w.Exec(`UPDATE credentials SET last_used = ?, last_ip = ? WHERE id = ?`, time.Now().UnixNano(), ip, id)
 	return err
 }
 

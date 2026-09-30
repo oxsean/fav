@@ -16,6 +16,7 @@ import (
 	"github.com/coder/websocket"
 
 	"github.com/oxsean/fav/internal/coord"
+	"github.com/oxsean/fav/internal/dial"
 	"github.com/oxsean/fav/internal/skin"
 	"github.com/oxsean/fav/internal/store"
 	"github.com/oxsean/fav/internal/task"
@@ -180,5 +181,43 @@ func TestARevokedTokenEndsTheBrowserSession(t *testing.T) {
 	r.srv.sweep()
 	if resp, _ := c.Get(r.url + "/session"); resp.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("%d", resp.StatusCode)
+	}
+}
+
+// A browser session keeps the browser it signed in with; a token the address it last connected from.
+func TestTheTokensSayTheBrowserAndTheAddressTheyWereUsedFrom(t *testing.T) {
+	r := newRig(t)
+	c, err := dial.Dial(context.Background(), r.url, RoleClient, r.client, wire.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.Close()
+	b := browser(t)
+	req, _ := http.NewRequest("POST", r.url+"/login", strings.NewReader(url.Values{"token": {r.client}}.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("User-Agent", "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) Safari/604.1")
+	resp, err := b.Do(req)
+	if err != nil || resp.StatusCode != http.StatusNoContent {
+		t.Fatal(resp, err)
+	}
+	resp.Body.Close()
+	var got []credView
+	if code := r.api(b, "GET", "/api/tokens", nil, &got); code != http.StatusOK {
+		t.Fatal(code)
+	}
+	var token, session credView
+	for _, x := range got {
+		switch x.Kind {
+		case store.KindToken:
+			token = x
+		case store.KindWeb:
+			session = x
+		}
+	}
+	if token.LastIP != "127.0.0.1" || token.LastUsed.IsZero() || token.Agent != "" {
+		t.Fatalf("the token: %+v", token)
+	}
+	if !strings.HasPrefix(session.Agent, "Mozilla/5.0 (iPhone;") || !session.Current {
+		t.Fatalf("the session: %+v", session)
 	}
 }

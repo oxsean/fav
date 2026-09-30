@@ -225,7 +225,7 @@ func (s *Server) handleNode(w http.ResponseWriter, r *http.Request) {
 	c := wire.New(websocket.NetConn(r.Context(), ws, websocket.MessageText), opt)
 	s.track(c, held{cred: cred.ID})
 	defer s.untrack(c)
-	s.team().Touch(cred.ID)
+	s.team().Touch(cred.ID, clientIP(r))
 	err = s.opt.Coord.Attach(cred.Name, c, func(h remote.Hello) error {
 		if h.NodeID == "" {
 			return &wire.Error{Code: wire.CodeUnauthorized, Detail: "node identity"}
@@ -254,7 +254,7 @@ func (s *Server) handleClient(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ws.SetReadLimit(wire.MaxFrame + 1)
-	s.team().Touch(cred.ID)
+	s.team().Touch(cred.ID, clientIP(r))
 	c := wire.New(websocket.NetConn(r.Context(), ws, websocket.MessageText), wire.Options{Handler: s.audited(r, u, s.opt.Coord.HandlerFor(principal(u))), Bulk: coord.Bulk, Keepalive: keepalive})
 	s.track(c, held{cred: cred.ID, client: true, as: principal(u)})
 	defer s.untrack(c)

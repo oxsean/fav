@@ -42,3 +42,15 @@ export const day = at => {
 
 // usageTokens is what a run's usage counts as tokens: sent (not from the cache), written to the cache, and output.
 export const usageTokens = u => (u ? (u.input || 0) + (u.cache_write || 0) + (u.output || 0) : 0);
+
+// browserOf names a browser session by what its User-Agent says: the browser and the system ('Chrome · macOS'), as
+// much of it as it tells, '' for none. The order matters: Edge, Opera and Samsung's browser say Chrome too, and every
+// browser on an iPhone says Safari.
+export function browserOf(ua) {
+  ua = ua || '';
+  const os = /iPad/.test(ua) ? 'iPad' : /iPhone|iPod/.test(ua) ? 'iPhone' : /Android/.test(ua) ? 'Android' : /CrOS/.test(ua) ? 'ChromeOS'
+    : /Mac OS X|Macintosh/.test(ua) ? 'macOS' : /Windows/.test(ua) ? 'Windows' : /Linux|X11/.test(ua) ? 'Linux' : '';
+  const browser = /Edg(e|A|iOS)?\//.test(ua) ? 'Edge' : /OPR\/|Opera/.test(ua) ? 'Opera' : /SamsungBrowser\//.test(ua) ? 'Samsung Internet'
+    : /Firefox\/|FxiOS\//.test(ua) ? 'Firefox' : /Chrome\/|CriOS\//.test(ua) ? 'Chrome' : /Safari\//.test(ua) && /Version\//.test(ua) ? 'Safari' : '';
+  return [browser, os].filter(Boolean).join(' · ');
+}

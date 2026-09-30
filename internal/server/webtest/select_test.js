@@ -2,7 +2,7 @@
 // HTTP calls, the action table against the design's key table, the writes (pending, hidden, unknown and retried) and
 // the viewer's preferences.
 process.env.TZ = 'UTC';
-import {tokens, money, duration, clock as hhmm, day, usageTokens} from '../web/core/format.js';
+import {tokens, money, duration, clock as hhmm, day, usageTokens, browserOf} from '../web/core/format.js';
 import * as sel from '../web/core/select.js';
 import {createHTTP, HTTPError, startURL} from '../web/core/http.js';
 import {actions, groups, bindingsFor, runnable, rank} from '../web/core/actions.js';
@@ -22,6 +22,28 @@ test('numbers, lengths and times are spelled one way', () => {
   eq([45e3, 12 * M, 64 * M, 51 * H].map(duration), ['45s', '12m', '1h 04m', '2d 3h'], 'duration');
   eq([hhmm(at('09:05')), day(at('09:05'))], ['09:05', '9-30'], 'clock and day');
   eq([usageTokens({input: 1, cache_read: 100, cache_write: 10, output: 5}), usageTokens(null)], [16, 0], 'usage leaves cache reads out');
+});
+
+test('a browser session is named by the browser and the system its User-Agent says', () => {
+  const cases = [
+    ['Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36', 'Chrome · macOS'],
+    ['Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15', 'Safari · macOS'],
+    ['Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1', 'Safari · iPhone'],
+    ['Mozilla/5.0 (iPad; CPU OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1', 'Safari · iPad'],
+    ['Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/129.0 Mobile/15E148 Safari/604.1', 'Chrome · iPhone'],
+    ['Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) FxiOS/131.0 Mobile/15E148 Safari/605.1.15', 'Firefox · iPhone'],
+    ['Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Mobile Safari/537.36', 'Chrome · Android'],
+    ['Mozilla/5.0 (Linux; Android 14; SM-S918B) AppleWebKit/537.36 (KHTML, like Gecko) SamsungBrowser/26.0 Chrome/122.0.0.0 Mobile Safari/537.36', 'Samsung Internet · Android'],
+    ['Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36 Edg/129.0.0.0', 'Edge · Windows'],
+    ['Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36 OPR/114.0.0.0', 'Opera · Windows'],
+    ['Mozilla/5.0 (X11; Linux x86_64; rv:131.0) Gecko/20100101 Firefox/131.0', 'Firefox · Linux'],
+    ['Mozilla/5.0 (X11; CrOS x86_64 14541.0.0) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36', 'Chrome · ChromeOS'],
+    ['Mozilla/5.0 (Linux; Android 12; sdk_gphone64_x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/95.0.4638.74 Mobile Safari/537.36', 'Chrome · Android'],
+    ['curl/8.7.1', ''],
+    ['', ''],
+  ];
+  for (const [ua, want] of cases) eq(browserOf(ua), want, ua || 'no User-Agent');
+  eq(browserOf(undefined), '', 'none at all');
 });
 
 test('the home figures are what the frames hold', async () => {
