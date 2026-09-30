@@ -83,7 +83,7 @@ func (s *Server) apiRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/push/devices", s.api(s.pushDevices))
 	mux.HandleFunc("POST /api/push/prefs", s.api(s.setPushPrefs))
 	mux.HandleFunc("DELETE /api/push/devices", s.api(s.removePushDevice))
-	mux.HandleFunc("POST /api/act", s.api(s.act))
+	mux.HandleFunc("POST /api/act", s.limitedBy(s.acting, s.api(s.act)))
 	mux.HandleFunc("POST /api/tokens", s.api(s.addToken))
 	mux.HandleFunc("DELETE /api/tokens", s.api(s.revokeToken))
 	mux.HandleFunc("GET /api/machines", s.api(s.listMachines))
@@ -97,8 +97,8 @@ func (s *Server) apiRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/me/webhook", s.api(s.setWebhook))
 	mux.HandleFunc("POST /api/me/webhook/test", s.limited(s.api(s.testWebhook)))
 	mux.HandleFunc("POST /api/users/offboard", s.api(s.adminOnly(s.offboard)))
-	mux.HandleFunc("GET /api/device", s.api(s.deviceLookup))
-	mux.HandleFunc("POST /api/device", s.api(s.deviceDecide))
+	mux.HandleFunc("GET /api/device", s.limitedBy(s.acting, s.api(s.deviceLookup)))
+	mux.HandleFunc("POST /api/device", s.limitedBy(s.acting, s.api(s.deviceDecide)))
 }
 
 // PublicUser is a user as other members see them.

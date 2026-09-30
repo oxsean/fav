@@ -369,6 +369,17 @@ func (t *Team) deliveries(query string, args ...any) ([]Delivery, error) {
 	return out, rows.Err()
 }
 
+// PruneDeliveries removes the deliveries that ended (settled or canceled) of notices before before, and answers how
+// many went.
+func (t *Team) PruneDeliveries(before time.Time) (int, error) {
+	res, err := t.w.Exec(`DELETE FROM deliveries WHERE status NOT IN (?, ?) AND at < ?`, DeliveryPending, DeliverySending, before.UnixNano())
+	if err != nil {
+		return 0, err
+	}
+	n, _ := res.RowsAffected()
+	return int(n), nil
+}
+
 // NextDue is when the soonest pending delivery is due; false when none is pending.
 func (t *Team) NextDue() (time.Time, bool, error) {
 	var next sql.NullInt64

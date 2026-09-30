@@ -89,7 +89,8 @@ type Server struct {
 	conns   map[*wire.Conn]held // live connections
 	flows   map[string]flow     // sign-ins in progress, by state
 	devices map[string]*deviceAuth
-	limit   *limiter
+	limit   *limiter // sign-ins
+	acting  *limiter // decisions from a notice or the authorization page
 	proxies []netip.Prefix
 	syncer  *Syncer
 	acts    actor
@@ -97,7 +98,7 @@ type Server struct {
 
 func New(opt Options) *Server {
 	s := &Server{opt: opt, logins: map[string]*auth.Provider{}, conns: map[*wire.Conn]held{}, flows: map[string]flow{},
-		devices: map[string]*deviceAuth{}, limit: newLimiter(), proxies: trustedProxies(opt.Config.TrustedProxies), syncer: opt.Syncer, acts: opt.Coord}
+		devices: map[string]*deviceAuth{}, limit: newLimiter(), acting: newLimiter(), proxies: trustedProxies(opt.Config.TrustedProxies), syncer: opt.Syncer, acts: opt.Coord}
 	for _, l := range opt.Config.Logins {
 		p, err := auth.New(l)
 		if err != nil {
@@ -164,7 +165,7 @@ func (s *Server) credential(r *http.Request, role string) (store.Credential, sto
 	if bearer, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer "); ok {
 		return s.opt.Dir.find(strings.TrimSpace(bearer), kinds...)
 	}
-	if c, err := r.Cookie(sessionCookie); err == nil && role == RoleClient {
+	if c, err := r.Cookie(s.cookieName(r)); err == nil && role == RoleClient {
 		return s.opt.Dir.find(c.Value, store.KindWeb)
 	}
 	return store.Credential{}, store.User{}, false

@@ -38,6 +38,7 @@ const (
 	firstRetry     = 30 * time.Second
 	longestRetry   = time.Hour
 	deviceLifetime = 90 * 24 * time.Hour
+	deliveryKeep   = 30 * 24 * time.Hour
 	pushTTL        = 24 * time.Hour
 	projectURL     = "https://github.com/oxsean/fav"
 )
@@ -218,6 +219,9 @@ func (n *Notifier) loop(ctx context.Context) {
 		if now.Sub(swept) >= time.Hour {
 			if _, err := n.o.Team.ExpireDevices(now.Add(-deviceLifetime)); err != nil {
 				fmt.Fprintln(os.Stderr, "tend-server: push devices:", err)
+			}
+			if _, err := n.o.Team.PruneDeliveries(now.Add(-deliveryKeep)); err != nil {
+				fmt.Fprintln(os.Stderr, "tend-server: outbox:", err)
 			}
 			swept = now
 		}

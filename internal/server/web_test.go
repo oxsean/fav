@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"net/http"
 	"net/http/cookiejar"
+	"net/http/httptest"
 	"net/url"
 	"os/exec"
 	"regexp"
@@ -219,5 +220,72 @@ func TestTheTokensSayTheBrowserAndTheAddressTheyWereUsedFrom(t *testing.T) {
 	}
 	if !strings.HasPrefix(session.Agent, "Mozilla/5.0 (iPhone;") || !session.Current {
 		t.Fatalf("the session: %+v", session)
+	}
+}
+
+// A request a browser marks as sent by another site (Sec-Fetch-Site) is refused like one from another origin, even
+// when its Origin says nothing.
+func TestAChangeFromAnotherSiteIsRefusedByItsFetchMetadata(t *testing.T) {
+	r := newRig(t)
+	b := browser(t)
+	login(t, b, r.url, r.client)
+	for site, want := range map[string]int{"cross-site": http.StatusForbidden, "same-site": http.StatusForbidden, "same-origin": http.StatusOK, "none": http.StatusOK} {
+		req, _ := http.NewRequest("POST", r.url+"/api/tokens", strings.NewReader(`{"name":"t-`+site+`"}`))
+		req.Header.Set("X-Tend", "1")
+		req.Header.Set("Sec-Fetch-Site", site)
+		res, err := b.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		res.Body.Close()
+		if res.StatusCode != want {
+			t.Errorf("%s: %d", site, res.StatusCode)
+		}
+	}
+	req, _ := http.NewRequest("POST", r.url+"/login", strings.NewReader("token="+r.client))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Sec-Fetch-Site", "cross-site")
+	if res, err := http.DefaultClient.Do(req); err != nil || res.StatusCode == http.StatusNoContent {
+		t.Fatalf("a sign-in from another site: %v %v", res, err)
+	}
+}
+
+// Over https the session cookie is __Host-: no subdomain nor path of the site can set one in its place; the name
+// without the prefix is not taken there.
+func TestASecureSessionCookieIsHostOnly(t *testing.T) {
+	r := newRig(t)
+	r.srv.opt.Config.PublicURL = "https://tend.example"
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("POST", "/login", strings.NewReader("token="+r.client))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	r.srv.login(rec, req)
+	cs := rec.Result().Cookies()
+	if len(cs) != 1 || cs[0].Name != "__Host-tend_session" || !cs[0].Secure || cs[0].Path != "/" || cs[0].Domain != "" {
+		t.Fatalf("%+v", cs)
+	}
+	for name, ok := range map[string]bool{"__Host-tend_session": true, "tend_session": false} {
+		req := httptest.NewRequest("GET", "/session", nil)
+		req.AddCookie(&http.Cookie{Name: name, Value: cs[0].Value})
+		if _, _, got := r.srv.credential(req, RoleClient); got != ok {
+			t.Errorf("%s: %t", name, got)
+		}
+	}
+}
+
+// Deciding from a notice or a sign-in page is bounded per address like signing in.
+func TestActingAndDeviceDecisionsAreRateLimited(t *testing.T) {
+	r := newRig(t)
+	b := browser(t)
+	login(t, b, r.url, r.client)
+	for _, route := range []struct{ method, path string }{{"GET", "/api/device?code=NOPE-NOPE"}, {"POST", "/api/device"}, {"POST", "/api/act"}} {
+		limited := false
+		for range limitBurst + 1 {
+			if r.api(b, route.method, route.path, map[string]any{"code": "NOPE-NOPE", "token": "a1.x.y"}, nil) == http.StatusTooManyRequests {
+				limited = true
+			}
+		}
+		if !limited {
+			t.Errorf("%s %s is not limited", route.method, route.path)
+		}
 	}
 }

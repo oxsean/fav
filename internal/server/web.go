@@ -25,8 +25,20 @@ import (
 var webFiles embed.FS
 
 // sessionCookie holds a browser's session: HttpOnly so the page's scripts never see it, SameSite=Strict so no other
-// site's page sends it. It is a secret of its own, never a personal token.
-const sessionCookie = "tend_session"
+// site's page sends it. It is a secret of its own, never a personal token. Over https it is secureCookie: a
+// __Host- cookie only this host sets, for all its paths.
+const (
+	sessionCookie = "tend_session"
+	secureCookie  = "__Host-" + sessionCookie
+)
+
+// cookieName is the session cookie's name for r.
+func (s *Server) cookieName(r *http.Request) string {
+	if s.secure(r) {
+		return secureCookie
+	}
+	return sessionCookie
+}
 
 // flowCookie binds a sign-in's callback to the browser that started it. Lax: the provider's redirect back is a
 // navigation from another site.
@@ -95,8 +107,12 @@ func (s *Server) secure(r *http.Request) bool {
 	return r.TLS != nil || strings.HasPrefix(s.opt.Config.PublicURL, "https://")
 }
 
-// sameOrigin: a state-changing request comes from this server's own page (a missing Origin is a non-browser client).
+// sameOrigin: a state-changing request comes from this server's own page (a missing Origin is a non-browser client);
+// one a browser says another site sent (Sec-Fetch-Site) never does.
 func sameOrigin(r *http.Request) bool {
+	if site := r.Header.Get("Sec-Fetch-Site"); site != "" && site != "same-origin" && site != "none" {
+		return false
+	}
 	o := r.Header.Get("Origin")
 	if o == "" {
 		return true
@@ -112,7 +128,7 @@ func (s *Server) startSession(w http.ResponseWriter, r *http.Request, u store.Us
 		return err
 	}
 	s.opt.Dir.Reload()
-	http.SetCookie(w, &http.Cookie{Name: sessionCookie, Value: secret, Path: "/", MaxAge: int(sessionAge.Seconds()),
+	http.SetCookie(w, &http.Cookie{Name: s.cookieName(r), Value: secret, Path: "/", MaxAge: int(sessionAge.Seconds()),
 		HttpOnly: true, Secure: s.secure(r), SameSite: http.SameSiteStrictMode})
 	s.audit(r, u.ID, "login", c.ID)
 	return nil
@@ -147,7 +163,7 @@ func (s *Server) logout(w http.ResponseWriter, r *http.Request) {
 		s.team().Revoke(c.ID)
 		s.sweep()
 	}
-	http.SetCookie(w, &http.Cookie{Name: sessionCookie, Value: "", Path: "/", MaxAge: -1, HttpOnly: true,
+	http.SetCookie(w, &http.Cookie{Name: s.cookieName(r), Value: "", Path: "/", MaxAge: -1, HttpOnly: true,
 		Secure: s.secure(r), SameSite: http.SameSiteStrictMode})
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -420,10 +436,13 @@ func (l *limiter) allow(addr string) bool {
 	return true
 }
 
-func (s *Server) limited(h http.HandlerFunc) http.HandlerFunc {
+func (s *Server) limited(h http.HandlerFunc) http.HandlerFunc { return s.limitedBy(s.limit, h) }
+
+// limitedBy bounds h per address in l's buckets.
+func (s *Server) limitedBy(l *limiter, h http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ip := s.clientIP(r)
-		if !s.limit.allow(ip) {
+		if !l.allow(ip) {
 			w.Header().Set("Retry-After", "60")
 			http.Error(w, "", http.StatusTooManyRequests)
 			return

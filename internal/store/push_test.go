@@ -531,3 +531,35 @@ func TestUpgradingKeepsOnlyTheClassOfWhatFailed(t *testing.T) {
 		}
 	}
 }
+
+// Deliveries that ended are kept 30 days, then go; those still to go stay whatever their age.
+func TestEndedDeliveriesGoAfterAWhile(t *testing.T) {
+	tm := openTeam(t)
+	old := webhookRow(1, LocalUser, "task.done", t0)
+	old.At = t0.Add(-31 * 24 * time.Hour)
+	pending := webhookRow(2, LocalUser, "task.done", t0)
+	pending.At = old.At
+	recent := webhookRow(3, LocalUser, "task.done", t0)
+	_, err := tm.Enqueue([]Delivery{old, pending, recent})
+	must(t, err)
+	due, _ := tm.Due(t0, 10)
+	for _, d := range due {
+		if d.Seq != 2 {
+			must(t, tm.Settle(d.ID, DeliveryOK, "ok", 1, time.Time{}))
+		}
+	}
+	if n, err := tm.PruneDeliveries(t0.Add(-30 * 24 * time.Hour)); err != nil || n != 1 {
+		t.Fatalf("%d %v", n, err)
+	}
+	var seqs []int64
+	rows, _ := tm.r.Query(`SELECT seq FROM deliveries ORDER BY seq`)
+	for rows.Next() {
+		var s int64
+		rows.Scan(&s)
+		seqs = append(seqs, s)
+	}
+	rows.Close()
+	if !reflect.DeepEqual(seqs, []int64{2, 3}) {
+		t.Fatalf("%v", seqs)
+	}
+}
