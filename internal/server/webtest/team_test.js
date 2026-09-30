@@ -477,6 +477,32 @@ test('project settings: saved as changed, the checkouts checked, a workflow with
   eq(r.errors, [], 'errors');
 });
 
+test('issue sync in label mode says it labels, in its help, its log and the bind form', async () => {
+  const r = await team();
+  const http = fakeHTTP();
+  const bound = api['GET /api/trackers'][0];
+  http.trackers = () => Promise.resolve([{...bound, settings: {...bound.settings, on_accept: 'label', accept_label: 'shipped'}}]);
+  const a = app(r, {url: '/?page=team', http});
+  const root = await mounted(a, 'desktop', 'zh', 'admin');
+  await until(() => root.find('.team-project').length > 0, 'the projects');
+  await click(root.find('.team-project').find(b => b.textContent.includes('Shop')));
+  await click(tabOf(root, words.t('proj.sync')));
+  await until(() => root.find('.proj-issue').length === 3, 'the sync log');
+  const pane = root.one('.proj-sync').textContent;
+  ok(pane.includes(words.f('proj.syncHelp.label', 'shipped')) && !pane.includes(words.t('proj.syncHelp')), `the help says it labels: ${pane}`);
+  ok(root.find('.proj-issue')[2].textContent.includes(words.f('proj.labelled', 'shipped')) && !root.find('.proj-issue')[2].textContent.includes(words.t('proj.closed')),
+    'the log says labelled, not closed');
+  await click(root.one('.drawer').find('button').find(b => b.getAttribute('aria-label') === words.t('ui.close')));
+  await click(root.find('.team-project').find(b => b.textContent.includes('Docs')));
+  await click(tabOf(root, words.t('proj.sync')));
+  await until(() => root.one('.drawer').find('button').some(b => labelOf(b) === words.t('proj.bind')), 'Docs has none');
+  await click(buttonOf(root.one('.drawer'), words.t('proj.bind')));
+  ok(root.one('.modal').textContent.includes(words.t('proj.syncHelp')), 'the form starts closing issues');
+  await click(root.one('.modal').find('[role=radio]').find(b => b.textContent === words.t('proj.accept.label')));
+  ok(root.one('.modal').textContent.includes(words.f('proj.syncHelp.label', 'tend:accepted')), 'and follows the choice');
+  eq(r.errors, [], 'errors');
+});
+
 test('issue sync: a binding\'s state, log and comment preview; its settings, token, rescan and unbinding; a project bound', async () => {
   const r = await team();
   const a = app(r, {url: '/?page=team'});

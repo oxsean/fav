@@ -46,6 +46,7 @@ register('project', {
   'proj.flowRemoveTitle': ['删除工作流 %s？', 'Remove workflow %s?'],
   'proj.flowRemoveNote': ['用着它的任务在下一个阶段开始时会失败。', 'Tasks using it fail when their next stage starts.'], 'proj.flowRemoved': ['工作流 %s 已删除', 'Workflow %s is removed'],
   'proj.syncHelp': ['打了标签的 issue 自动成为这个项目的需求；tend 在 issue 上维护一条进度评论，需求完成后关单。', 'Issues with the label become requirements of this project; tend keeps one progress comment on each and closes it once the requirement is done.'],
+  'proj.syncHelp.label': ['打了标签的 issue 自动成为这个项目的需求；tend 在 issue 上维护一条进度评论，需求完成后给 issue 打上 %s 标签。', 'Issues with the label become requirements of this project; tend keeps one progress comment on each and labels it %s once the requirement is done.'],
   'proj.bind': ['绑定仓库', 'Bind a repository'], 'proj.kind': ['工单系统', 'Tracker'], 'proj.trackerBase': ['地址', 'Address'],
   'proj.trackerRepo': ['仓库（owner/name，GitLab 可带子组）', 'Repository (owner/name; GitLab subgroups too)'], 'proj.token': ['机器人账号的 token', 'The bot account\'s token'],
   'proj.tokenNote': ['只存在 server 上，加密保存；需要读写 issue 的权限。', 'Kept on the server only, encrypted; it needs read and write access to issues.'],
@@ -72,7 +73,7 @@ register('project', {
   'proj.unbind': ['解绑', 'Unbind'], 'proj.unbindTitle': ['解绑 %s？', 'Unbind %s?'],
   'proj.unbindNote': ['之后不再导入 issue、不再写评论；已经建的任务留着。', 'No more issues come in and no comment is written; the tasks made so far stay.'], 'proj.unbound': ['%s 已解绑', '%s is unbound'],
   'proj.log': ['同步记录', 'Sync log'], 'proj.noLog': ['还没有跟着的 issue', 'No issue followed yet'], 'proj.noTask': ['没有对应任务', 'No task'],
-  'proj.written': ['评论写于 %s', 'comment written %s'], 'proj.noComment': ['还没写评论', 'no comment yet'], 'proj.closed': ['已关闭', 'closed'],
+  'proj.written': ['评论写于 %s', 'comment written %s'], 'proj.noComment': ['还没写评论', 'no comment yet'], 'proj.closed': ['已关闭', 'closed'], 'proj.labelled': ['已打标签 %s', 'labelled %s'],
   'proj.dirty': ['待重读', 'to read again'], 'proj.subOf': ['#%d 的子工单', 'sub-issue of #%d'],
   'proj.preview': ['预览评论', 'Preview the comment'], 'proj.previewTitle': ['#%d 的进度评论（现在写会是这样）', 'The progress comment on #%d, as it would be written now'],
 });
@@ -254,12 +255,16 @@ function SyncFields({value: s, onChange}) {
   </div>`;
 }
 
+// syncHelp says what a binding with settings s does, closing or labelling a done requirement's issue.
+const syncHelp = ({t, f}, s) => (s?.on_accept === 'label' ? f('proj.syncHelp.label', s.accept_label) : t('proj.syncHelp'));
+
 // ⚠️ What a new binding syncs with unless changed (server.DefaultSettings).
 const defaultSync = {label: 'tend', comment: true, on_accept: 'close', accept_label: 'tend:accepted', poll: 60};
 const syncOK = s => s.poll >= tm.pollRange[0] && s.poll <= tm.pollRange[1] && (s.on_accept !== 'label' || !!s.accept_label?.trim());
 
 function Bind({project, busy, error, onBind, onClose}) {
-  const {t} = useWords();
+  const w = useWords();
+  const {t} = w;
   const [kind, setKind] = useState('github');
   const [base, setBase] = useState(tm.trackerKinds.github);
   const [repo, setRepo] = useState('');
@@ -270,7 +275,7 @@ function Bind({project, busy, error, onBind, onClose}) {
   return html`<${Modal} full title=${t('proj.bind') + ' · ' + project.name} onClose=${onClose}
     actions=${[{label: t('home.cancel'), onClick: onClose}, {label: t('proj.bind'), kind: 'primary', keyName: 'Mod+Enter', disabled: !ok,
       onClick: () => onBind({project: project.id, kind, base: base.trim(), repo: repo.trim(), token, settings: {...s, label: s.label.trim()}})}]}>
-    <p class="field-note">${t('proj.syncHelp')}</p>
+    <p class="field-note">${syncHelp(w, s)}</p>
     <div class="field"><span class="brief-label">${t('proj.kind')}</span>
       <${Segmented} label=${t('proj.kind')} value=${kind} onChange=${pick} options=${Object.keys(tm.trackerKinds).map(k => ({value: k, label: kindLabel[k]}))} /></div>
     <div class="proj-grid2">
@@ -355,7 +360,7 @@ function Sync({project: p, st, http, toasts, copy}) {
   };
   if (xs === null) return html`<p class="t-muted mach-p">${t('proj.dir.checking')}</p>`;
   return html`<div class="proj-sync">
-    <p class="field-note">${t('proj.syncHelp')}</p>
+    <p class="field-note">${syncHelp(w, xs[0]?.settings)}</p>
     ${xs.map(x => html`<section class="det-sec proj-binding" key=${x.id}>
       <h3 class="det-h mach-h"><span><b class="mono">${x.repo}</b> <span class="t-muted">${kindLabel[x.kind] || x.kind} · @${x.bot}</span></span>${state(x)}</h3>
       <p class="mach-p t-muted">${[f('proj.issues', x.issues), x.failing && f('proj.failing', x.failing), f('proj.lastOK', when(x.last_ok) || t('proj.never')),
@@ -372,7 +377,7 @@ function Sync({project: p, st, http, toasts, copy}) {
       ${(logs[x.id] || []).length ? html`<ul class="team-rows">${logs[x.id].map(i => html`<li class="team-row proj-issue" key=${i.number}>
         <a class="mono" href=${tm.issueURL(x, i.number)} target="_blank" rel="noreferrer">#${i.number}</a>
         <span class="team-main"><span class="ell">${i.task ? st.tasks[i.task]?.title || i.task : html`<span class="t-muted">${t('proj.noTask')}</span>`}</span>
-          <span class="team-sub">${[i.written ? f('proj.written', when(i.written)) : t('proj.noComment'), i.closed && t('proj.closed'), i.dirty && t('proj.dirty'),
+          <span class="team-sub">${[i.written ? f('proj.written', when(i.written)) : t('proj.noComment'), i.closed && (x.settings?.on_accept === 'label' ? f('proj.labelled', x.settings.accept_label) : t('proj.closed')), i.dirty && t('proj.dirty'),
             i.parent && f('proj.subOf', i.parent)].filter(Boolean).join(' · ')}${i.pr && html` · <a href=${i.pr} target="_blank" rel="noreferrer">PR</a>`}</span>
           ${i.last_error && html`<span class="team-sub t-failed mono">${i.last_error}</span>`}</span>
         ${i.task && html`<${Button} kind="quiet" onClick=${() => preview(x, i.number)}>${t('proj.preview')}<//>`}
