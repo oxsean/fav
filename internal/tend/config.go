@@ -50,6 +50,9 @@ type ServerConfig struct {
 	// makes cookies Secure behind a proxy that ends TLS.
 	PublicURL string  `json:"public_url,omitempty"`
 	Logins    []Login `json:"logins,omitempty"`
+	// EgressAllow are the address prefixes (CIDR) beyond the public ones that webhooks, push services and trackers may
+	// be at: a team's own ntfy or Gitea on the LAN.
+	EgressAllow []string `json:"egress_allow,omitempty"`
 }
 
 // Login is one way to sign in: a GitHub OAuth App, or any OpenID Connect provider (GitLab, Gitea, Keycloak…).

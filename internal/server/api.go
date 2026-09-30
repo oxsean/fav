@@ -493,7 +493,7 @@ func (s *Server) testWebhook(w http.ResponseWriter, r *http.Request, c caller) {
 		return
 	}
 	now := time.Now().UTC()
-	err = postWebhook(r.Context(), &http.Client{Timeout: sendTimeout}, hook, WebhookPayload{Event: "test", Title: "tend", At: now,
+	err = postWebhook(r.Context(), s.egress().Client(sendTimeout), hook, WebhookPayload{Event: "test", Title: "tend", At: now,
 		Text: "tend: a test from " + displayName(c.user) + "'s Me page"})
 	s.audit(r, c.user.ID, "webhook.test", resultOf(err))
 	out := map[string]any{"ok": err == nil}

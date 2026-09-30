@@ -59,13 +59,14 @@ type notifyCoord interface {
 // (nil: no Web Push), Act signs the tokens of a push's buttons (nil: none), Base is the web page's address ("" leaves
 // links out of webhooks) and names the server to push services when it is https.
 type NotifyOptions struct {
-	Team  *store.Team
-	Coord notifyCoord
-	Seal  *Sealer
-	Push  *PushKey
-	Act   *ActKey
-	Base  string
-	Dir   *Directory // a device pushes only while its credential is live here
+	Team   *store.Team
+	Coord  notifyCoord
+	Seal   *Sealer
+	Push   *PushKey
+	Act    *ActKey
+	Base   string
+	Dir    *Directory // a device pushes only while its credential is live here
+	Egress *Egress    // nil: public addresses only
 }
 
 // Notifier delivers the coordinator's notices through the outbox (the deliveries table): each recipient's webhook at
@@ -84,8 +85,7 @@ type Notifier struct {
 }
 
 func NewNotifier() *Notifier {
-	n := &Notifier{flying: map[string]bool{}, slots: map[string]chan struct{}{}, wake: make(chan struct{}, 1), now: time.Now,
-		client: &http.Client{Timeout: sendTimeout}}
+	n := &Notifier{flying: map[string]bool{}, slots: map[string]chan struct{}{}, wake: make(chan struct{}, 1), now: time.Now}
 	for ch, k := range channelSlots {
 		n.slots[ch] = make(chan struct{}, k)
 	}
@@ -188,6 +188,13 @@ func (n *Notifier) Start(ctx context.Context, o NotifyOptions) {
 func (n *Notifier) attach(o NotifyOptions) {
 	n.mu.Lock()
 	n.o = &o
+	if n.client == nil {
+		e := o.Egress
+		if e == nil {
+			e = &Egress{}
+		}
+		n.client = e.Client(sendTimeout)
+	}
 	early := n.early
 	n.early = nil
 	n.mu.Unlock()
@@ -359,7 +366,7 @@ func (n *Notifier) settle(d store.Delivery, dev store.PushDevice, gone bool, err
 			team.DeviceFailed(dev.ID)
 		}
 		var se *sendError
-		final := errors.As(err, &se) && se.final()
+		final := errors.As(err, &se) && se.final() || errors.Is(err, errEgress)
 		if final || tries > retries {
 			team.Settle(d.ID, store.DeliveryFailed, result, tries, time.Time{})
 			return
@@ -380,9 +387,9 @@ type sendError struct {
 
 func (e *sendError) Error() string { return strconv.Itoa(e.status) }
 
-// final: trying again gets the same answer.
+// final: trying again gets the same answer; a redirect not followed is one.
 func (e *sendError) final() bool {
-	return e.status >= 400 && e.status < 500 && e.status != http.StatusRequestTimeout && e.status != http.StatusTooManyRequests
+	return e.status >= 300 && e.status < 500 && e.status != http.StatusRequestTimeout && e.status != http.StatusTooManyRequests
 }
 
 func resultOf(err error) string {

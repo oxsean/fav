@@ -151,8 +151,8 @@ func (s *Server) listTrackers(w http.ResponseWriter, r *http.Request, c caller) 
 }
 
 // checkTracker opens the repository with token and says whom the token acts as.
-func checkTracker(ctx context.Context, kind, base, repo, token string) (tracker.Repo, string, error) {
-	tr, err := tracker.New(tracker.Config{Kind: kind, Base: base, Repo: repo, Token: token})
+func checkTracker(ctx context.Context, client *http.Client, kind, base, repo, token string) (tracker.Repo, string, error) {
+	tr, err := tracker.New(tracker.Config{Kind: kind, Base: base, Repo: repo, Token: token, Client: client})
 	if err != nil {
 		return tracker.Repo{}, "", err
 	}
@@ -205,7 +205,7 @@ func (s *Server) addTracker(w http.ResponseWriter, r *http.Request, c caller) {
 		apiError(w, http.StatusBadRequest, "bad_request")
 		return
 	}
-	rp, me, err := checkTracker(r.Context(), p.Kind, p.Base, strings.TrimSpace(p.Repo), p.Token)
+	rp, me, err := checkTracker(r.Context(), s.egress().Client(TrackerTimeout), p.Kind, p.Base, strings.TrimSpace(p.Repo), p.Token)
 	if err != nil {
 		trackerError(w, err)
 		return
@@ -290,7 +290,7 @@ func (s *Server) trackerCredential(w http.ResponseWriter, r *http.Request, c cal
 		apiError(w, http.StatusConflict, "no_sync")
 		return
 	}
-	rp, me, err := checkTracker(r.Context(), x.Kind, x.Base, x.Repo, p.Token)
+	rp, me, err := checkTracker(r.Context(), s.egress().Client(TrackerTimeout), x.Kind, x.Base, x.Repo, p.Token)
 	if err != nil {
 		trackerError(w, err)
 		return
@@ -433,4 +433,12 @@ func (s *Server) trackerHook(w http.ResponseWriter, r *http.Request) {
 		s.syncer.Wake()
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// UseClient has the sync reach trackers through c.
+func (s *Syncer) UseClient(c *http.Client) {
+	s.open = func(cfg tracker.Config) (tracker.Tracker, error) {
+		cfg.Client = c
+		return tracker.New(cfg)
+	}
 }

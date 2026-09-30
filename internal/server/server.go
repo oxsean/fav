@@ -77,6 +77,7 @@ type Options struct {
 	Push    *PushKey // nil: no Web Push
 	Seal    *Sealer  // opens and seals what the database keeps sealed (push devices)
 	Act     *ActKey  // nil: pushes carry no buttons that act
+	Egress  *Egress  // nil: public addresses only
 }
 
 // Server serves the coordinator over HTTP.

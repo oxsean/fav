@@ -9,6 +9,7 @@
 - **凭据**：机器人账号的 token（Gitea、GitLab）；GitHub 用机器人账号的 PAT，GitHub App 未实现。
   - token 用 AES-256-GCM 加密后存库，密钥来自 `TEND_SERVER_KEY` 或 `<home>/server.key`（0600，首次启动生成，不进备份）。
   - 绑定和换凭据时先用 token 读一次用户和仓库，记下机器人登录名和仓库 id。
+- 对工单系统的请求走 server 的出网规则（[team.md](team.md)「人在任务里」的实现，「出网」）：内网里的 Gitea、GitLab 要把它的网段写进 `server.egress_allow`。
   - 凭据快过期时提前进管理员的「等你」：未实现。
 - 项目负责人和管理员在项目页的「工单同步」里绑定、改设置、换凭据、重新同步、解绑。设置有：
   - 导入条件：导入标签（默认 `tend`），是否也导入指派给项目成员的 issue；
