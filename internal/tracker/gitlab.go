@@ -118,6 +118,32 @@ func (g *gitlab) Issue(ctx context.Context, number int64) (Issue, error) {
 	return i.issue(), err
 }
 
+// StateEvents reads GitLab's resource state events.
+func (g *gitlab) StateEvents(ctx context.Context, number int64, since time.Time) ([]StateEvent, error) {
+	var out []StateEvent
+	for page := 1; ; page++ {
+		var batch []struct {
+			State     string    `json:"state"`
+			CreatedAt time.Time `json:"created_at"`
+		}
+		q := url.Values{"per_page": {strconv.Itoa(gitlabPage)}, "page": {strconv.Itoa(page)}}
+		if _, err := g.do(ctx, http.MethodGet, g.issuePath(number, "/resource_state_events?"+q.Encode()), nil, nil, &batch); err != nil {
+			return nil, err
+		}
+		for _, e := range batch {
+			switch e.State {
+			case "closed":
+				out = append(out, StateEvent{Closed: true, At: e.CreatedAt})
+			case "reopened":
+				out = append(out, StateEvent{At: e.CreatedAt})
+			}
+		}
+		if len(batch) < gitlabPage {
+			return after(out, since), nil
+		}
+	}
+}
+
 func (g *gitlab) Comments(ctx context.Context, number int64) ([]Comment, error) {
 	var out []Comment
 	for page := 1; ; page++ {

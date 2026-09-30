@@ -216,6 +216,7 @@ func TestUpgradingToTheSecretsTableKeepsTheTeam(t *testing.T) {
 		t.Fatal(err)
 	}
 	tm.Close()
+	before0015(t, path)
 	before0014(t, path)
 	before0013(t, path)
 	before0012(t, path)
@@ -256,6 +257,7 @@ func TestACredentialSaysWhereItIsUsedFrom(t *testing.T) {
 	_, old, _ := tm.NewCredential(KindToken, "cli", LocalUser, 0)
 	must(t, tm.Touch(old.ID, "100.64.0.2"))
 	tm.Close()
+	before0015(t, path)
 	before0014(t, path)
 	before0013(t, path)
 	before0012(t, path)
@@ -288,6 +290,11 @@ func TestACredentialSaysWhereItIsUsedFrom(t *testing.T) {
 	}
 }
 
+// before0015 takes the write-backs back to before they kept when their tasks were last found finished.
+func before0015(t *testing.T, path string) {
+	exec(t, path, `ALTER TABLE tracker_issues DROP COLUMN ended_seen`)
+}
+
 // before0014 takes the machines back to before their last connection was kept.
 func before0014(t *testing.T, path string) {
 	exec(t, path, `DROP TABLE machine_seen`)
@@ -311,6 +318,7 @@ func TestASignInAccountSaysWhenItSignedInAndIsUnlinkedButNotTheLast(t *testing.T
 	ann, err := tm.Admit(gitea("1", "ann@corp.example", true), "")
 	must(t, err)
 	tm.Close()
+	before0015(t, path)
 	before0014(t, path)
 	before0013(t, path)
 	setVersion(t, path, 12)

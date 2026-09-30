@@ -88,6 +88,7 @@ func TestUpgradingTheWriteBacksClaimsNoneOfThemAsTends(t *testing.T) {
 		Token: []byte("sealed"), HookSecret: []byte("sealed2"), Settings: "{}", CreatedBy: LocalUser})
 	must(t, err)
 	tm.Close()
+	before0015(t, path)
 	before0014(t, path)
 	before0013(t, path)
 	before0012(t, path)
@@ -104,5 +105,21 @@ func TestUpgradingTheWriteBacksClaimsNoneOfThemAsTends(t *testing.T) {
 	}
 	if baks, _ := filepath.Glob(filepath.Join(dir, File+".v9-*.bak")); len(baks) != 1 {
 		t.Fatalf("no copy of the v9 database: %v", baks)
+	}
+}
+
+func TestAWriteBackKeepsWhenItsTaskWasLastFoundFinished(t *testing.T) {
+	tm := openTeam(t)
+	x, err := tm.AddTracker(Tracker{Project: "p1", Kind: "gitea", Base: "http://git", Repo: "o/r", RepoID: 9, Bot: "bot",
+		Token: []byte("sealed"), HookSecret: []byte("sealed2"), Settings: "{}", CreatedBy: LocalUser})
+	must(t, err)
+	at := time.Date(2026, 9, 30, 8, 0, 1, 0, time.UTC)
+	must(t, tm.PutTrackerIssue(TrackerIssue{Tracker: x.ID, Number: 3, Task: "t_1", EndedSeen: at}))
+	if i, err := tm.TrackerIssue(x.ID, 3); err != nil || !i.EndedSeen.Equal(at) {
+		t.Fatalf("%+v %v", i, err)
+	}
+	must(t, tm.PutTrackerIssue(TrackerIssue{Tracker: x.ID, Number: 3, Task: "t_1"}))
+	if i, _ := tm.TrackerIssue(x.ID, 3); !i.EndedSeen.IsZero() {
+		t.Fatalf("%+v", i)
 	}
 }

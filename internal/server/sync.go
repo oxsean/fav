@@ -357,9 +357,17 @@ func (s *Syncer) issue(ctx context.Context, x store.Tracker, tr tracker.Tracker,
 			theirs = append(theirs, c)
 		}
 	}
-	reopened := row.Applied == appliedClose && !i.Closed
+	undone := row.Applied == appliedClose && !i.Closed
 	label, labelled := strings.CutPrefix(row.Applied, appliedLabel)
-	gone := reopened || labelled && !slices.Contains(i.Labels, label)
+	gone := undone || labelled && !slices.Contains(i.Labels, label)
+	reopened := undone
+	if !reopened && !i.Closed && row.Task != "" && !row.EndedSeen.IsZero() && i.UpdatedAt.After(row.EndedSeen) {
+		evs, err := tr.StateEvents(ctx, i.Number, row.EndedSeen)
+		if err != nil {
+			return err
+		}
+		reopened = slices.ContainsFunc(evs, func(e tracker.StateEvent) bool { return !e.Closed })
+	}
 	if row.Parent == 0 {
 		if row.Task == "" && !s.wanted(x, set, i) {
 			row.Dirty = false
@@ -400,6 +408,10 @@ func (s *Syncer) issue(ctx context.Context, x store.Tracker, tr tracker.Tracker,
 	}
 	if err != nil {
 		return err
+	}
+	row.EndedSeen = time.Time{}
+	if task.Finished(status) {
+		row.EndedSeen = i.UpdatedAt
 	}
 	row.Dirty, row.LastError, row.Synced = false, "", s.now()
 	return s.team.PutTrackerIssue(row)
@@ -511,7 +523,8 @@ func (s *Syncer) TaskStates(project string) ([]TaskSyncState, error) {
 }
 
 // requirement records issue i, with the comments of people, as its task in the journal; "" when it makes none. closed:
-// the issue is closed, and not by tend's own write-back; reopened: it is open again after tend closed it.
+// the issue is closed, and not by tend's own write-back; reopened: it is open again after tend closed it, or it was
+// closed and opened again since a read found its task finished.
 func (s *Syncer) requirement(ctx context.Context, x store.Tracker, i tracker.Issue, theirs []tracker.Comment, closed, reopened bool) (string, error) {
 	title, text, digest := snapshot(i, theirs)
 	owner := s.assignee(x, i)

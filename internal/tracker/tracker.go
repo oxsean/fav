@@ -40,6 +40,19 @@ type Issue struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
+// StateEvent is an issue closed, or opened again (Closed false), at a time.
+type StateEvent struct {
+	Closed bool      `json:"closed"`
+	At     time.Time `json:"at"`
+}
+
+// after keeps the events later than since, oldest first.
+func after(evs []StateEvent, since time.Time) []StateEvent {
+	evs = slices.DeleteFunc(evs, func(e StateEvent) bool { return !e.At.After(since) })
+	slices.SortStableFunc(evs, func(a, b StateEvent) int { return a.At.Compare(b.At) })
+	return evs
+}
+
 type Comment struct {
 	ID        int64     `json:"id"`
 	Body      string    `json:"body"`
@@ -67,6 +80,8 @@ type Tracker interface {
 	// Issues are the issues (not pull requests) updated at or after since, with label when it is not empty.
 	Issues(ctx context.Context, since time.Time, label, etag string) (Page, error)
 	Issue(ctx context.Context, number int64) (Issue, error)
+	// StateEvents are the times issue number was closed or opened again after since (zero: ever), oldest first.
+	StateEvents(ctx context.Context, number int64, since time.Time) ([]StateEvent, error)
 	Comments(ctx context.Context, number int64) ([]Comment, error)
 	CreateComment(ctx context.Context, number int64, body string) (Comment, error)
 	EditComment(ctx context.Context, number, id int64, body string) error // ErrNotFound when it was deleted

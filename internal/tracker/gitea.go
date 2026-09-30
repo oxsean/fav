@@ -147,6 +147,40 @@ func (g *gitea) Issue(ctx context.Context, number int64) (Issue, error) {
 	return i.issue(), err
 }
 
+// StateEvents reads Gitea's timeline (close, reopen) or GitHub's issue events (closed, reopened).
+func (g *gitea) StateEvents(ctx context.Context, number int64, since time.Time) ([]StateEvent, error) {
+	path, closed, reopened := "/events", "closed", "reopened"
+	if !g.subIssues {
+		path, closed, reopened = "/timeline", "close", "reopen"
+	}
+	var out []StateEvent
+	for page := 1; ; page++ {
+		q := url.Values{g.pageParam: {strconv.Itoa(g.page)}, "page": {strconv.Itoa(page)}}
+		if !g.subIssues && !since.IsZero() {
+			q.Set("since", since.UTC().Format(time.RFC3339))
+		}
+		var batch []struct {
+			Type      string    `json:"type"`  // Gitea's
+			Event     string    `json:"event"` // GitHub's
+			CreatedAt time.Time `json:"created_at"`
+		}
+		if _, err := g.do(ctx, http.MethodGet, g.repoPath("/issues/"+strconv.FormatInt(number, 10)+path+"?"+q.Encode()), nil, nil, &batch); err != nil {
+			return nil, err
+		}
+		for _, e := range batch {
+			switch e.Type + e.Event {
+			case closed:
+				out = append(out, StateEvent{Closed: true, At: e.CreatedAt})
+			case reopened:
+				out = append(out, StateEvent{At: e.CreatedAt})
+			}
+		}
+		if len(batch) < g.page {
+			return after(out, since), nil
+		}
+	}
+}
+
 func (g *gitea) Comments(ctx context.Context, number int64) ([]Comment, error) {
 	var out []Comment
 	for page := 1; ; page++ {

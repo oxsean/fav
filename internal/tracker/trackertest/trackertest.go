@@ -27,6 +27,13 @@ type Issue struct {
 	PR        bool // a pull request, which Gitea's and GitHub's issue lists hold too
 }
 
+// stateEvent is an issue closed or opened again, at its updated time then.
+type stateEvent struct {
+	Issue  int64
+	Closed bool
+	At     time.Time
+}
+
 // Pull is a pull request (a merge request on GitLab) from branch Head into Base.
 type Pull struct {
 	Number      int64
@@ -57,6 +64,7 @@ type Server struct {
 	subs     map[int64][]int64
 	labels   map[string]int64 // the repository's labels by name, with their ids
 	comments []*Comment
+	states   []stateEvent
 	next     int64
 	clock    time.Time
 	// Faults: RateLimit answers the next n requests 429 with Retry-After 30; Refuse answers every request 401; Down every
@@ -163,12 +171,39 @@ func (s *Server) repoLabel(name string) int64 {
 	return s.next
 }
 
-// Change edits issue number: f changes it; its updated time moves.
+// Change edits issue number: f changes it; its updated time moves, and a close or reopen is an event of its.
 func (s *Server) Change(number int64, f func(*Issue)) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	f(s.issues[number])
-	s.issues[number].Updated = s.tick()
+	i := s.issues[number]
+	was := i.Closed
+	f(i)
+	i.Updated = s.tick()
+	s.stated(i, was)
+}
+
+// stated records i closed or opened again, when that is what changed since it was closed (was).
+func (s *Server) stated(i *Issue, was bool) {
+	if i.Closed != was {
+		s.states = append(s.states, stateEvent{Issue: i.Number, Closed: i.Closed, At: i.Updated})
+	}
+}
+
+// statesPage is a page of issue n's closes and reopens after since, oldest first.
+func (s *Server) statesPage(r *http.Request, n int64, since time.Time, sizeParam string, render func(stateEvent) map[string]any) []map[string]any {
+	page, _ := strconv.Atoi(r.URL.Query().Get("page"))
+	size, _ := strconv.Atoi(r.URL.Query().Get(sizeParam))
+	out := []map[string]any{}
+	k := 0
+	for _, e := range s.states {
+		if e.Issue == n && !e.At.Before(since) {
+			if k >= (page-1)*size && k < page*size {
+				out = append(out, render(e))
+			}
+			k++
+		}
+	}
+	return out
 }
 
 // Say adds a comment by author to issue number.
@@ -367,8 +402,19 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 		case len(parts) == 1 && r.Method == http.MethodPatch:
 			var p struct{ State string }
 			json.NewDecoder(r.Body).Decode(&p)
+			was := i.Closed
 			i.Closed, i.Updated = p.State == "closed", s.tick()
+			s.stated(i, was)
 			writeJSON(w, issue(i))
+		case parts[1] == "timeline" && r.Method == http.MethodGet && s.Kind == "gitea":
+			since, _ := time.Parse(time.RFC3339, r.URL.Query().Get("since"))
+			writeJSON(w, s.statesPage(r, n, since, pageSize, func(e stateEvent) map[string]any {
+				return map[string]any{"type": map[bool]string{true: "close", false: "reopen"}[e.Closed], "created_at": e.At, "user": user("ann")}
+			}))
+		case parts[1] == "events" && r.Method == http.MethodGet && s.Kind == "github":
+			writeJSON(w, s.statesPage(r, n, time.Time{}, pageSize, func(e stateEvent) map[string]any {
+				return map[string]any{"event": map[bool]string{true: "closed", false: "reopened"}[e.Closed], "created_at": e.At, "actor": user("ann")}
+			}))
 		case parts[1] == "comments" && r.Method == http.MethodGet:
 			writeJSON(w, s.commentsPage(r, n, pageSize, comment))
 		case parts[1] == "comments" && r.Method == http.MethodPost:
@@ -511,6 +557,7 @@ func (s *Server) gitlab(w http.ResponseWriter, r *http.Request) {
 				RemoveLabels string `json:"remove_labels"`
 			}
 			json.NewDecoder(r.Body).Decode(&p)
+			was := i.Closed
 			switch p.StateEvent {
 			case "close":
 				i.Closed, i.Updated = true, s.tick()
@@ -519,6 +566,7 @@ func (s *Server) gitlab(w http.ResponseWriter, r *http.Request) {
 				i.Closed, i.Updated = false, s.tick()
 				s.system(n, "reopened")
 			}
+			s.stated(i, was)
 			if p.AddLabels != "" {
 				s.label(i, strings.Split(p.AddLabels, ",")...)
 				s.system(n, "added ~"+p.AddLabels+" label")
@@ -529,6 +577,10 @@ func (s *Server) gitlab(w http.ResponseWriter, r *http.Request) {
 				s.system(n, "removed ~"+p.RemoveLabels+" label")
 			}
 			writeJSON(w, issue(i))
+		case len(parts) == 2 && parts[1] == "resource_state_events" && r.Method == http.MethodGet:
+			writeJSON(w, s.statesPage(r, n, time.Time{}, "per_page", func(e stateEvent) map[string]any {
+				return map[string]any{"state": map[bool]string{true: "closed", false: "reopened"}[e.Closed], "created_at": e.At, "user": user("ann")}
+			}))
 		case len(parts) == 2 && parts[1] == "notes" && r.Method == http.MethodGet:
 			writeJSON(w, s.commentsPage(r, n, "per_page", note))
 		case len(parts) == 2 && parts[1] == "notes" && r.Method == http.MethodPost:

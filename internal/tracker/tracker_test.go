@@ -265,3 +265,52 @@ func TestEachTrackerTakesBackAClosedIssueAndAnAddedLabel(t *testing.T) {
 		})
 	}
 }
+
+// Each tracker lists when an issue was closed and opened again, oldest first and across pages, after a time; its other
+// events are left out.
+func TestEachTrackerListsWhenAnIssueClosedAndOpened(t *testing.T) {
+	for _, kind := range []string{tracker.KindGitea, tracker.KindGitHub, tracker.KindGitLab} {
+		t.Run(kind, func(t *testing.T) {
+			g := trackertest.New(kind, "acme/app", "tend-bot", "tok")
+			defer g.Close()
+			tr, err := tracker.New(tracker.Config{Kind: kind, Base: g.URL + "/", Repo: "acme/app", Token: "tok"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			ctx := context.Background()
+			g.Open(1, "one", "body", "tend")
+			g.Open(2, "two", "body", "tend")
+			if evs, err := tr.StateEvents(ctx, 1, time.Time{}); err != nil || len(evs) != 0 {
+				t.Fatalf("none yet: %+v %v", evs, err)
+			}
+			g.Say(1, "ann", "please")
+			if err := tr.Close(ctx, 1); err != nil {
+				t.Fatal(err)
+			}
+			closed := g.Get(1).Updated
+			g.Change(1, func(i *trackertest.Issue) { i.Closed = false })
+			g.Change(1, func(i *trackertest.Issue) { i.Labels = append(i.Labels, "later") })
+			for range 60 {
+				g.Change(1, func(i *trackertest.Issue) { i.Closed = true })
+				g.Change(1, func(i *trackertest.Issue) { i.Closed = false })
+			}
+			g.Change(2, func(i *trackertest.Issue) { i.Closed = true })
+			evs, err := tr.StateEvents(ctx, 1, time.Time{})
+			if err != nil || len(evs) != 122 {
+				t.Fatalf("every close and reopen, across pages: %d %v", len(evs), err)
+			}
+			for k, e := range evs {
+				if e.Closed != (k%2 == 0) || k > 0 && !e.At.After(evs[k-1].At) {
+					t.Fatalf("event %d: %+v after %+v", k, e, evs[max(k-1, 0)])
+				}
+			}
+			if !evs[0].At.Equal(closed) {
+				t.Fatalf("the close tend made: %+v, at %v", evs[0], closed)
+			}
+			after, err := tr.StateEvents(ctx, 1, closed)
+			if err != nil || len(after) != 121 || after[0].Closed {
+				t.Fatalf("after a time, those later only: %d %+v %v", len(after), after[:min(1, len(after))], err)
+			}
+		})
+	}
+}

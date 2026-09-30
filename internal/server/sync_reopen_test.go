@@ -152,3 +152,84 @@ func TestOnlyAClosedIssueReopenedReopensATask(t *testing.T) {
 		t.Fatalf("an unfinished task only stops waiting on its issue closed: %+v %+v", s, u.task(1).Source)
 	}
 }
+
+// An issue closed and opened again between two reads is seen in its events: a finished task reopens as it would had a
+// read found the issue closed. Not when the task was unfinished at the last read, nor when the issue is closed again.
+func TestAnIssueClosedAndOpenedBetweenTwoReadsReopensItsFinishedTask(t *testing.T) {
+	for _, kind := range []string{tracker.KindGitea, tracker.KindGitHub, tracker.KindGitLab} {
+		t.Run(kind+"/labelled", func(t *testing.T) { closedAndOpenedAfterLabelled(t, newSyncRigOf(t, kind)) })
+		t.Run(kind+"/canceled", func(t *testing.T) { closedAndOpenedAfterCanceled(t, newSyncRigOf(t, kind)) })
+		t.Run(kind+"/unfinished then", func(t *testing.T) { closedAndOpenedWhileUnfinished(t, newSyncRigOf(t, kind)) })
+		t.Run(kind+"/closed again", func(t *testing.T) { openedAndClosedAfterTendClosed(t, newSyncRigOf(t, kind)) })
+	}
+}
+
+// closeAndOpen closes issue n and opens it again, as someone would between two reads.
+func (r *syncRig) closeAndOpen(n int64) {
+	r.g.Change(n, func(i *trackertest.Issue) { i.Closed = true })
+	r.g.Change(n, func(i *trackertest.Issue) { i.Closed = false })
+}
+
+func closedAndOpenedAfterLabelled(t *testing.T, r *syncRig) {
+	r.settings(func(s *TrackerSettings) { s.OnAccept = "label" })
+	r.g.Open(1, "Export CSV", "rows as CSV", "tend")
+	r.pass(0)
+	x := r.task(1)
+	r.status(x.ID, task.StatusDone)
+	r.pass(31 * time.Second)
+	r.pass(61 * time.Second)
+	if !slices.Contains(r.g.Get(1).Labels, "tend:accepted") || r.situation(x.ID).Kind != task.SitDone {
+		t.Fatalf("labelled and done: %+v", r.g.Get(1))
+	}
+	r.closeAndOpen(1)
+	r.pass(61 * time.Second)
+	r.waitsOnReopen(x.ID, "closed and opened again after it was labelled")
+	r.pass(31 * time.Second)
+	if i := r.g.Get(1); i.Closed || slices.Contains(i.Labels, "tend:accepted") {
+		t.Fatalf("no longer done: tend's label goes, the issue stays open: %+v", i)
+	}
+	r.pass(61 * time.Second)
+	if r.task(1).Status != task.StatusTodo {
+		t.Fatalf("told once: %s", r.task(1).Status)
+	}
+}
+
+func closedAndOpenedAfterCanceled(t *testing.T, r *syncRig) {
+	r.g.Open(1, "Export CSV", "rows as CSV", "tend")
+	r.pass(0)
+	x := r.task(1)
+	r.status(x.ID, task.StatusCanceled)
+	r.pass(61 * time.Second)
+	r.closeAndOpen(1)
+	r.pass(61 * time.Second)
+	r.waitsOnReopen(x.ID, "closed and opened again after its task was canceled")
+}
+
+func closedAndOpenedWhileUnfinished(t *testing.T, r *syncRig) {
+	r.g.Open(1, "Export CSV", "rows as CSV", "tend")
+	r.pass(0)
+	x := r.task(1)
+	r.closeAndOpen(1)
+	r.status(x.ID, task.StatusDone)
+	r.pass(61 * time.Second)
+	r.pass(61 * time.Second)
+	if s := r.situation(x.ID); s.Kind != task.SitDone || !r.g.Get(1).Closed {
+		t.Fatalf("closed and opened before its task was done: no reopen, and tend closes it: %+v %+v", s, r.g.Get(1))
+	}
+}
+
+func openedAndClosedAfterTendClosed(t *testing.T, r *syncRig) {
+	r.g.Open(1, "Export CSV", "rows as CSV", "tend")
+	r.pass(0)
+	x := r.task(1)
+	r.status(x.ID, task.StatusDone)
+	r.pass(31 * time.Second)
+	r.pass(61 * time.Second)
+	r.g.Change(1, func(i *trackertest.Issue) { i.Closed = false })
+	r.g.Change(1, func(i *trackertest.Issue) { i.Closed = true })
+	r.pass(61 * time.Second)
+	r.pass(61 * time.Second)
+	if s := r.situation(x.ID); s.Kind != task.SitDone || !r.g.Get(1).Closed {
+		t.Fatalf("opened and closed again, it stays done: %+v %+v", s, r.g.Get(1))
+	}
+}

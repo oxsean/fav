@@ -80,7 +80,7 @@ A hung TUI: on macOS `sample <pid>` prints its stacks; SIGQUIT prints them to th
 | `internal/remote` | other machines' sessions over `wire`: methods and types (`proto.go`), answering side (`local.go`), ssh `Client`, `Hosts` cache, `Source` |
 | `internal/agent` | provider adapters (claude, codex, fake, command): launch, resume, fork, capabilities |
 | `internal/output` | a run's `output.log` read into events: the one reader of claude, codex and plain text, tool families and titles, turns, the timeline's grouping; `agent.OwnReport` tells the run's own reports |
-| `internal/tracker` | issue trackers behind one `Tracker` interface: Gitea and GitHub (`gitea.go`), GitLab, a shared REST layer; issues, comments, close, label; webhook checks per kind (`hook.go`); `trackertest` is a fake speaking all three with faults for tests; tend-server only |
+| `internal/tracker` | issue trackers behind one `Tracker` interface: Gitea and GitHub (`gitea.go`), GitLab, a shared REST layer; issues, comments, close, label, when an issue closed and opened (`StateEvents`); webhook checks per kind (`hook.go`); `trackertest` is a fake speaking all three with faults for tests; tend-server only |
 | `internal/defs` | agent definitions: Markdown with a YAML front matter (`Parse`, `Format`, `Check`, `Import` on the client only, `Compile` into a profile) |
 | `internal/workflow` | workflows: Markdown definitions (`Parse`, `Check`, the embedded built-ins, `Resolve`), a stage's brief from its template, the task's workpad; the stage rules themselves are `task` (`flow.go`) and `coord` (`workflow.go`) |
 | `internal/node` | runs on this machine: run directories, the `_run` supervisor, snapshots, `run.*` methods |

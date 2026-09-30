@@ -32,8 +32,8 @@ type TaskSync struct {
 	Text    string `json:"text"`
 	Digest  string `json:"digest"`
 	Closed  bool   `json:"closed,omitempty"`
-	// Reopened: open again after tend closed it for the task's completion. An issue closed outside tend and open again
-	// says so by Closed alone.
+	// Reopened: open again after tend closed it for the task's completion, or closed and opened again since a read found
+	// the task finished. An issue a read found closed outside tend and open again says so by Closed alone.
 	Reopened bool   `json:"reopened,omitempty"`
 	Owner    string `json:"owner,omitempty"` // the member the issue is assigned to, "" when none maps
 	Unmapped bool   `json:"unmapped,omitempty"`

@@ -43,7 +43,7 @@
 - issue 的正文或评论变了，就记一个新版本（`pending`），任务进 `waiting: source_changed`（「需求有变化」），由人「采用新版本」（标题和任务书换成新版本）或「维持本轮范围」（这个版本不再提起）；有未决变化时不能标完成。
 - issue 在外面被关掉了，需求不自动取消，而是进 `waiting: source_closed`，原因「issue 已关闭」，由人「继续做」或取消任务。tend 自己关的不算：同步 worker 报给协调器的 `closed` 不含 tend 自己那次还在的关单（见下文「回写」），所以 `Source.closed` 只表示在外面关的。
 - issue 在外面被重新打开，而任务已经结束（完成或取消），任务就重新打开（和人点「重新打开」是同一组事件：回到 todo，走 workflow 的退回一个阶段），进 `waiting: source_reopened`，原因「issue 在外面重新打开了」（`Source.reopened`），负责人的「等你」里有它。人选「继续做」（`task.source_ack`，之后照常派发），或直接标完成（维持原判，照 `on_accept` 再回写）。不自动派发：工单上的动作只让任务进等人定的状态，从不启动运行，所以能改 issue 的人动不了项目的机器。
-  - 算重开的只有「关着的 issue 又开了」：tend 验收时关的（`applied` 是 `close`），由同步 worker 读到它开着时报给协调器（`task.sync` 的 `reopened`）；在外面关的，由协调器看到 `Source.closed` 从关变开。扫描和 webhook 读的都是 issue 现在的状态，两次读之间关了又开看不出来，也不必管。
+  - 算重开的只有「关着的 issue 又开了」：tend 验收时关的（`applied` 是 `close`），由同步 worker 读到它开着时报给协调器（`task.sync` 的 `reopened`）；在外面关的，由协调器看到 `Source.closed` 从关变开。两次读取之间关了又开（读到时都开着）从 issue 自己的关开记录看：`Tracker.StateEvents`（Gitea 的 `/issues/{n}/timeline`，`type` 是 `close` / `reopen`，带 `since`；GitHub 的 `/issues/{n}/events`，`closed` / `reopened`；GitLab 的 `/issues/{iid}/resource_state_events`，`closed` / `reopened`；都分页，按时间排、只留 `since` 之后的）。`tracker_issues.ended_seen` 记最近一次读到任务已结束时 issue 的 `updated_at`（工单系统自己的时钟，不和 server 的时间比），没结束时清零；issue 这次读到开着、`updated_at` 晚于它，才去读关开记录，其中有一次重新打开就报 `reopened`。只看任务结束之后的那段，所以任务没结束时关了又开、之后才完成的不算；关了又开、再关上的，读到时是关着的，也不算（照 `source_closed` 走）。
   - 不算：摘掉 tend 打的标签（只清 `applied`）、改标题正文（那是 `source_changed`）、任务没结束时在外面关了又开（`source_closed` 自己解除）。
   - `reopened` 在确认、再次结束或 issue 又被关上时清掉。
 - 事件：`task_created`（带 source）、`task_sourced`、`task_source_acked`。
