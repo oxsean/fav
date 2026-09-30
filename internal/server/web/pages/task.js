@@ -33,7 +33,7 @@ export function sitWord(w, sit) {
 export const who = x => [x?.agent, x?.machine].filter(Boolean).join(' @ ');
 
 // actLabel is what an action's button says for this task.
-export const actLabel = (w, id, sit) => w.t(id === 'keep' && sit.reason === 'source_closed' ? 'do.keepGoing' : 'do.' + id);
+export const actLabel = (w, id, sit) => w.t(id === 'keep' && (sit.reason === 'source_closed' || sit.reason === 'source_reopened') ? 'do.keepGoing' : 'do.' + id);
 
 function Section({title, count, children}) {
   return html`<section class="det-sec"><h3 class="det-h">${title}${count !== undefined && html` <span class="mono count">${count}</span>`}</h3>${children}</section>`;
@@ -124,6 +124,7 @@ export function Task({store, task, now, busy = false, offline = false, onAct, on
     ${top}
     ${task.source?.pending && html`<div class="det-note"><b>${f('det.sourceNew', task.source.pending.rev)}</b><${Markdown} text=${task.source.pending.text} /></div>`}
     ${task.source?.closed && !task.source.closed_acked && html`<div class="det-note">${t('det.sourceClosed')}</div>`}
+    ${task.source?.reopened && html`<div class="det-note">${t('det.sourceReopened')}</div>`}
     ${task.draft && html`<div class="det-note">${f('det.draft', task.draft.plan?.tasks?.length || 0)}</div>`}
     <dl class="facts det-facts">
       ${task.owner && html`<dt>${t('det.owner')}</dt><dd>${name(task.owner)}</dd>`}

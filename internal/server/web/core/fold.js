@@ -77,6 +77,7 @@ function applyEvent(s, e, at, seq) {
         src.pending = d.digest === src.digest ? undefined : {rev: src.seen_rev, digest: d.digest, title: d.title || '', text: d.text || ''};
       }
       if (!!d.closed !== !!src.closed) { src.closed = !!d.closed; src.closed_acked = false; }
+      src.reopened = !d.closed && (!!d.reopened || !!src.reopened) || undefined;
       if (d.repo) src.repo = d.repo;
       if (d.url) src.url = d.url;
       src.fetched_at = at; t.rev = (t.rev || 0) + 1; t.updated_at = at;
@@ -95,13 +96,15 @@ function applyEvent(s, e, at, seq) {
       if (src.pending) {
         if (d.accept) { t.title = src.pending.title; t.brief = src.pending.text; src.rev = src.pending.rev; src.digest = src.pending.digest; }
         src.pending = undefined;
-      } else src.closed_acked = true;
+      } else if (src.closed) src.closed_acked = true;
+      else src.reopened = undefined;
       t.rev = (t.rev || 0) + 1; t.updated_at = at;
       break;
     }
     case 'task_status_set': {
       const t = need(s.tasks, d.id, 'task');
       if (finished(t.status) && !finished(d.status)) { t.auto = undefined; t.start_seq = seq; t.merged = undefined; } // reopened: what came before no longer stands
+      if (finished(d.status) && t.source) t.source.reopened = undefined;
       t.status = d.status; t.updated_at = at; t.rev = (t.rev || 0) + 1;
       break;
     }
@@ -358,6 +361,7 @@ function sourceWaits(t) {
   if (!src) return '';
   if (src.pending) return 'source_changed';
   if (src.closed && !src.closed_acked) return 'source_closed';
+  if (src.reopened) return 'source_reopened';
   return '';
 }
 

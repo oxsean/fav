@@ -44,6 +44,7 @@ register('tasks', {
   'det.spent': ['全部运行', 'All runs'], 'det.spentN': ['%d 次 · %s tok%s', '×%d · %s tok%s'], 'det.branch': ['分支', 'Branch'],
   'det.loading': ['读取中…', 'Loading…'], 'det.gone': ['这个任务不在了，或者你看不到它。', 'This task is gone, or not yours to see.'],
   'det.sourceNew': ['issue 有了第 %d 版：', 'The issue has a version %d:'], 'det.sourceClosed': ['issue 已在外面关闭。', 'The issue was closed outside tend.'],
+  'det.sourceReopened': ['任务结束以后，issue 在外面被重新打开了：继续做，或者再标完成。', 'The issue was reopened outside tend after the task ended: keep going, or mark it done again.'],
   'det.issue': ['来源 issue', 'Issue'], 'det.requirement': ['需求', 'Requirement'], 'det.draft': ['拆解草稿：%d 条', 'A plan of %d tasks'], 'det.stages': ['阶段', 'Stages'],
   'det.verdict': ['结论：%s', 'Verdict: %s'], 'det.took': ['用了 %s', 'took %s'],
   'form.new': ['新建任务', 'New task'], 'form.edit': ['编辑「%s」', 'Edit %s'], 'form.child': ['新建「%s」的子任务', 'A subtask of %s'],

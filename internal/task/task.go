@@ -417,6 +417,9 @@ func (s *State) apply(e journal.Event, seq int64, at time.Time) error {
 		if Finished(t.Status) && !Finished(d.Status) { // reopened: what came before no longer stands
 			t.Auto, t.StartSeq, t.Merged = false, seq, false
 		}
+		if Finished(d.Status) && t.Source != nil {
+			t.Source.Reopened = false
+		}
 		t.Status, t.UpdatedAt = d.Status, at
 		t.Rev++
 	case ETaskRestored:

@@ -1348,6 +1348,7 @@
   "sit.exited": "it exited with an error",
   "sit.source_changed": "its issue changed",
   "sit.source_closed": "its issue was closed outside tend",
+  "sit.source_reopened": "its issue was reopened outside tend",
   "sit.draft": "a plan waits for you",
   "sit.no_plan": "its planner handed in no plan",
   "sit.advance": "moves to its next stage",

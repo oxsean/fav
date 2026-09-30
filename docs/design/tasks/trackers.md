@@ -37,11 +37,15 @@
 ## 导入与需求快照
 
 - 命中条件的 issue 自动变成需求任务：`kind: requirement`，带 `source`。
-- `Task.Source{kind, tracker, base, repo, repo_id, number, url, rev, digest, seen, seen_rev, pending, closed, closed_acked}`，唯一键 `(base, repo_id, number)`。
+- `Task.Source{kind, tracker, base, repo, repo_id, number, url, rev, digest, seen, seen_rev, pending, closed, closed_acked, reopened}`，唯一键 `(base, repo_id, number)`。
 - 快照 = 标题 + 正文 + 人的评论（排除 tend 自己的进度评论），摘要是它们的 sha256。每次取到的内容有一个不可变的版本；导入时任务书就是快照。
 - 拆解、任务树确认、验收都记录自己依据的版本（草稿的 `source_rev`，见 [planning.md](planning.md)「实现」）。
 - issue 的正文或评论变了，就记一个新版本（`pending`），任务进 `waiting: source_changed`（「需求有变化」），由人「采用新版本」（标题和任务书换成新版本）或「维持本轮范围」（这个版本不再提起）；有未决变化时不能标完成。
 - issue 在外面被关掉了，需求不自动取消，而是进 `waiting: source_closed`，原因「issue 已关闭」，由人「继续做」或取消任务。tend 自己关的不算：同步 worker 报给协调器的 `closed` 不含 tend 自己那次还在的关单（见下文「回写」），所以 `Source.closed` 只表示在外面关的。
+- issue 在外面被重新打开，而任务已经结束（完成或取消），任务就重新打开（和人点「重新打开」是同一组事件：回到 todo，走 workflow 的退回一个阶段），进 `waiting: source_reopened`，原因「issue 在外面重新打开了」（`Source.reopened`），负责人的「等你」里有它。人选「继续做」（`task.source_ack`，之后照常派发），或直接标完成（维持原判，照 `on_accept` 再回写）。不自动派发：工单上的动作只让任务进等人定的状态，从不启动运行，所以能改 issue 的人动不了项目的机器。
+  - 算重开的只有「关着的 issue 又开了」：tend 验收时关的（`applied` 是 `close`），由同步 worker 读到它开着时报给协调器（`task.sync` 的 `reopened`）；在外面关的，由协调器看到 `Source.closed` 从关变开。扫描和 webhook 读的都是 issue 现在的状态，两次读之间关了又开看不出来，也不必管。
+  - 不算：摘掉 tend 打的标签（只清 `applied`）、改标题正文（那是 `source_changed`）、任务没结束时在外面关了又开（`source_closed` 自己解除）。
+  - `reopened` 在确认、再次结束或 issue 又被关上时清掉。
 - 事件：`task_created`（带 source）、`task_sourced`、`task_source_acked`。
 - **指派人对应**：issue 的指派人按「在这个 tracker 的地址上登录过的账号」对应到成员（`identities.issuer` 与绑定的地址一致、用户名相同、只有一个；GitHub 登录的 issuer 是 `https://github.com`，GitLab、Gitea 走 OIDC，issuer 就是它们的地址）；对应不上时归项目负责人并打 `unmapped_assignee`，之后对应上了再改回（见 [team.md](team.md)「人在任务里」）。`tracker_accounts` 显式对应表未实现。每个人在「我」页的「工单账号」里看到自己所在项目的工单系统和按这条规则对上的用户名（`GET /api/me/trackers`，按地址去重）。
 
@@ -54,7 +58,7 @@
 - **评论内容**：英文，一行状态、叶子子任务进度、@ 负责人和验收人（按上面的指派人对应）；项目打开「列子任务」才列明细；走 workflow 的任务多一行 `Stages: …`。
 - 验收通过后关单或打标签。这次关单由 tend 发出，回来时只确认同步成功，不会被当成「在外面被关掉」。
   - `closed` 记这次完成的回写已做完（关了、打了标签，或者 issue 本来就是那样）；`applied` 记其中 tend 自己做的：`close`，或 `label:<标签名>`（issue 原来没有这个标签）。issue 本来就关着、标签是别人打的，`applied` 为空。
-  - 之后读到 tend 做的已经不在了（有人在外面重开了 issue、摘了标签），`applied` 清空：这次关单归别人了，之后再在外面关就算「在外面被关掉」。
+  - 之后读到 tend 做的已经不在了（有人在外面重开了 issue、摘了标签），`applied` 清空：这次关单归别人了，之后再在外面关就算「在外面被关掉」。重开的情况要在协调器收下 `reopened` 之后才清，这一步失败下次还会再报。
 - **撤回自己的回写**：任务又变回未结束（重开，或 `task.undo` 撤销了完成，见 [workflows.md](workflows.md)「重开」「撤销」），而这次完成已经回写过，worker 撤回 tend 自己做的：`applied` 是 `close` 就重开 issue，是 `label:…` 就摘掉那个标签（issue 上已经没有它就算摘了），然后清掉 `closed` 和 `applied`，下次完成再照 `on_accept` 回写。
   - 别人关的、别人打的标签不动（`applied` 为空）：在外面关掉的 issue 仍按 `source_closed` 处理。
   - 完成后改成取消仍是结束，回写留着；从取消再重开才撤回。

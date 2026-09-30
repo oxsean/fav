@@ -607,11 +607,19 @@ func (c *Coord) taskStatus(who Principal, r *wire.Request) (string, []journal.Ev
 		}
 		return t.ID, c.finish(t), nil
 	}
-	events := []journal.Event{journal.NewEvent(task.ETaskStatus, p)}
-	if task.Finished(t.Status) && t.Flow.StageOf(t.Stage) != nil {
+	if task.Finished(t.Status) {
+		return t.ID, reopening(t, p.Status), nil
+	}
+	return t.ID, []journal.Event{journal.NewEvent(task.ETaskStatus, p)}, nil
+}
+
+// reopening is what puts finished task t back to status (todo or backlog): a workflow's task goes back a stage.
+func reopening(t *task.Task, status string) []journal.Event {
+	events := []journal.Event{journal.NewEvent(task.ETaskStatus, task.TaskStatus{ID: t.ID, Status: status})}
+	if t.Flow.StageOf(t.Stage) != nil {
 		events = append(events, journal.NewEvent(task.ETaskStaged, task.TaskStage{ID: t.ID, Stage: t.Flow.Back(t.Stage), Loops: t.Loops, Back: true}))
 	}
-	return t.ID, events, nil
+	return events
 }
 
 func (c *Coord) runDispatch(who Principal, r *wire.Request) (string, []journal.Event, error) {

@@ -88,6 +88,13 @@ func foldScenario() []journal.Envelope {
 	add(ev(task.ETaskCreated, task.Task{ID: "t7", Title: "closed", Project: "p1", Kind: task.KindRequirement, Status: task.StatusTodo,
 		Source: &task.Source{Kind: "gitea", Number: 9, Rev: 1, Digest: "a", Seen: "a", SeenRev: 1}}))
 	add(ev(task.ETaskSourced, task.SourceUpdate{ID: "t7", Digest: "a", Closed: true}))
+	add(ev(task.ETaskStatus, task.TaskStatus{ID: "t7", Status: task.StatusCanceled}))
+	add(ev(task.ETaskSourced, task.SourceUpdate{ID: "t7", Digest: "a", Reopened: true}), ev(task.ETaskStatus, task.TaskStatus{ID: "t7", Status: task.StatusTodo}))
+	add(ev(task.ETaskSourceAcked, task.SourceAck{ID: "t7"}))
+	add(ev(task.ETaskCreated, task.Task{ID: "t9", Title: "reopened", Project: "p1", Kind: task.KindRequirement, Status: task.StatusDone,
+		Source: &task.Source{Kind: "github", Number: 10, Rev: 1, Digest: "a", Seen: "a", SeenRev: 1}}))
+	add(ev(task.ETaskSourced, task.SourceUpdate{ID: "t9", Digest: "a", Reopened: true}), ev(task.ETaskStatus, task.TaskStatus{ID: "t9", Status: task.StatusTodo}))
+	add(ev(task.ETaskStatus, task.TaskStatus{ID: "t9", Status: task.StatusDone}))
 	flow := &task.Flow{Name: "feature", MaxLoops: 1, Budget: &task.Budget{Minutes: 600}, Stages: []task.Stage{{Name: "implement", Role: "implement", Check: true},
 		{Name: "review", Role: "review", Output: task.OutputVerdict, OnRework: "implement"}, {Name: "accept", Gate: task.GateHuman}}}
 	add(ev(task.ETaskCreated, task.Task{ID: "t8", Title: "flow", Dir: "/w", Status: task.StatusTodo, Workflow: "feature", Flow: flow, Stage: "implement"}))

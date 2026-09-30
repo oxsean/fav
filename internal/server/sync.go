@@ -357,21 +357,24 @@ func (s *Syncer) issue(ctx context.Context, x store.Tracker, tr tracker.Tracker,
 			theirs = append(theirs, c)
 		}
 	}
-	if label, ok := strings.CutPrefix(row.Applied, appliedLabel); row.Applied == appliedClose && !i.Closed || ok && !slices.Contains(i.Labels, label) {
-		row.Applied = ""
-	}
+	reopened := row.Applied == appliedClose && !i.Closed
+	label, labelled := strings.CutPrefix(row.Applied, appliedLabel)
+	gone := reopened || labelled && !slices.Contains(i.Labels, label)
 	if row.Parent == 0 {
 		if row.Task == "" && !s.wanted(x, set, i) {
 			row.Dirty = false
 			return s.team.PutTrackerIssue(row)
 		}
-		id, err := s.requirement(ctx, x, i, theirs, i.Closed && row.Applied != appliedClose)
+		id, err := s.requirement(ctx, x, i, theirs, i.Closed && row.Applied != appliedClose, reopened)
 		if err != nil {
 			return err
 		}
 		if id != "" {
 			row.Task = id
 		}
+	}
+	if gone { // after the coordinator heard of it: a reopen it missed is told again
+		row.Applied = ""
 	}
 	s.mu.Lock()
 	s.updated[x.ID+"#"+fmt.Sprint(i.Number)] = i.UpdatedAt
@@ -508,12 +511,12 @@ func (s *Syncer) TaskStates(project string) ([]TaskSyncState, error) {
 }
 
 // requirement records issue i, with the comments of people, as its task in the journal; "" when it makes none. closed:
-// the issue is closed, and not by tend's own write-back.
-func (s *Syncer) requirement(ctx context.Context, x store.Tracker, i tracker.Issue, theirs []tracker.Comment, closed bool) (string, error) {
+// the issue is closed, and not by tend's own write-back; reopened: it is open again after tend closed it.
+func (s *Syncer) requirement(ctx context.Context, x store.Tracker, i tracker.Issue, theirs []tracker.Comment, closed, reopened bool) (string, error) {
 	title, text, digest := snapshot(i, theirs)
 	owner := s.assignee(x, i)
 	p := coord.TaskSync{Project: x.Project, Kind: x.Kind, Tracker: x.ID, Base: x.Base, Repo: x.Repo, RepoID: x.RepoID, Number: i.Number,
-		URL: i.URL, Title: title, Text: text, Digest: digest, Closed: closed, Owner: owner, Unmapped: owner == "" && len(i.Assignees) > 0}
+		URL: i.URL, Title: title, Text: text, Digest: digest, Closed: closed, Reopened: reopened, Owner: owner, Unmapped: owner == "" && len(i.Assignees) > 0}
 	b, _ := json.Marshal(p)
 	res, err := s.do(ctx, &wire.Request{Method: coord.MTaskSync, CommandID: "sync-" + journal.Digest(b), Params: b})
 	if err != nil {

@@ -320,7 +320,7 @@ export function actionsOf(state, aff, task) {
     [sit.reason === 'draft', 'review'],
     [!!task.flow && sit.reason === 'accept', 'pass'],
     [sit.reason === 'source_changed', 'ack'],
-    [sit.reason === 'source_closed', 'keep'],
+    [sit.reason === 'source_closed' || sit.reason === 'source_reopened', 'keep'],
     [sit.reason === 'merge_conflict', 'merge'],
     [!task.flow && (sit.reason === 'ended' || sit.reason === 'accept'), 'done'],
     [!!task.flow && !task.auto, 'start'],

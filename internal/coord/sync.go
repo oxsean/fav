@@ -20,18 +20,21 @@ const TagUnmapped = "unmapped_assignee"
 // TaskSync is task.sync: an issue as the sync worker read it. A new issue becomes a requirement of Project (unless it
 // is closed); a known one records what changed.
 type TaskSync struct {
-	Project  string `json:"project"`
-	Kind     string `json:"kind"`
-	Tracker  string `json:"tracker"`
-	Base     string `json:"base"`
-	Repo     string `json:"repo"`
-	RepoID   int64  `json:"repo_id"`
-	Number   int64  `json:"number"`
-	URL      string `json:"url,omitempty"`
-	Title    string `json:"title"`
-	Text     string `json:"text"`
-	Digest   string `json:"digest"`
-	Closed   bool   `json:"closed,omitempty"`
+	Project string `json:"project"`
+	Kind    string `json:"kind"`
+	Tracker string `json:"tracker"`
+	Base    string `json:"base"`
+	Repo    string `json:"repo"`
+	RepoID  int64  `json:"repo_id"`
+	Number  int64  `json:"number"`
+	URL     string `json:"url,omitempty"`
+	Title   string `json:"title"`
+	Text    string `json:"text"`
+	Digest  string `json:"digest"`
+	Closed  bool   `json:"closed,omitempty"`
+	// Reopened: open again after tend closed it for the task's completion. An issue closed outside tend and open again
+	// says so by Closed alone.
+	Reopened bool   `json:"reopened,omitempty"`
 	Owner    string `json:"owner,omitempty"` // the member the issue is assigned to, "" when none maps
 	Unmapped bool   `json:"unmapped,omitempty"`
 }
@@ -99,9 +102,13 @@ func (c *Coord) taskSync(who Principal, r *wire.Request) (string, []journal.Even
 	}
 	var events []journal.Event
 	src := t.Source
-	if p.Digest != src.Seen || p.Closed != src.Closed || p.Repo != src.Repo || p.URL != src.URL {
+	reopened := !p.Closed && task.Finished(t.Status) && (p.Reopened || src.Closed)
+	if p.Digest != src.Seen || p.Closed != src.Closed || p.Repo != src.Repo || p.URL != src.URL || reopened {
 		events = append(events, journal.NewEvent(task.ETaskSourced, task.SourceUpdate{ID: t.ID, Digest: p.Digest, Title: title,
-			Text: text, Closed: p.Closed, Repo: p.Repo, URL: p.URL}))
+			Text: text, Closed: p.Closed, Reopened: reopened, Repo: p.Repo, URL: p.URL}))
+	}
+	if reopened {
+		events = append(events, reopening(t, task.StatusTodo)...)
 	}
 	if pr := c.st.Projects[t.Project]; slices.Contains(t.Tags, TagUnmapped) && !task.Finished(t.Status) && p.Owner != "" &&
 		pr != nil && pr.Role(p.Owner) == task.RoleParticipant {

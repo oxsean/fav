@@ -110,6 +110,7 @@ register('pages', {
   'why.stopped': ['已停止', 'Stopped'], 'why.canceled': ['已取消', 'Canceled'], 'why.abandoned': ['已放弃', 'Abandoned'],
   'why.access_revoked': ['派发人已无权使用这台机器', 'Its dispatcher lost access to the machine'],
   'why.source_changed': ['需求有变化', 'Its issue changed'], 'why.source_closed': ['issue 已在外面关闭', 'Its issue was closed outside tend'],
+  'why.source_reopened': ['issue 在外面重新打开了', 'Its issue was reopened outside tend'],
   'why.advance': ['本阶段完成，即将进入下一阶段', 'Its stage is done; it moves on next'], 'why.rework': ['被退回，即将返工', 'Sent back; it goes back next'],
   'why.max_loops': ['退回次数到上限', 'Sent back as often as its workflow allows'], 'why.blocked': ['本阶段没有给出结论', 'Its stage reached no verdict'],
   'why.budget': ['用完了预算', 'Its budget is spent'], 'why.merge_conflict': ['合进父任务时冲突', 'Merging into its parent conflicted'],

@@ -150,7 +150,7 @@ tend journal verify [--json] | repair [-y]
   - `tasks.js`（列表、看板、树和每个写操作）、`task.js`（一个任务的详情）、`taskforms.js`（新建 / 子任务 / 复制 / 编辑、派发、调整位置、审拆解、验收）、`taskwords.js`（它们的词表）：任务页，见下。
 - **首页**：
   - 上面四个数：
-    - 等你：inbox 的条数，按「要回答（asked、permission）/ 出错 / 待验收（accept、ended、draft）/ 其他（dispatch、source_changed、source_closed）」分组计数；最久一条等了多久。
+    - 等你：inbox 的条数，按「要回答（asked、permission）/ 出错 / 待验收（accept、ended、draft）/ 其他（dispatch、source_changed、source_closed、source_reopened）」分组计数；最久一条等了多久。
     - 在跑 / 排队：状态是 starting、running、unknown 的运行数 / queued 的运行数；已连接机器的 `active` / `slots` 之和；今天从第一个整点起每小时最多同时几个运行（小折线）和全天的峰值。
     - 今天结束：今天 0 点以后结束的运行数，按结束状态分，平均时长（开始到结束）。
     - 今天花费：今天用量的 `cost_usd` 之和（只有 claude 给估算）和 token 数，小折线是近 7 天每天的值。用量按结束时间归日，没结束的按开始时间，再没有就按排队时间。

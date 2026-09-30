@@ -135,6 +135,9 @@ test('what can be done with each task: only what the affordances give, the prima
   eq(tk.actionsOf(st, {runs: {}, tasks: {}}, st.tasks.q9), {primary: '', more: ['copy']}, 'no affordances: only what the page does itself');
   eq(tk.actionsOf(st, {runs: {}, tasks: {q9: {actions: ['edit', 'done']}}}, st.tasks.q9), {primary: '', more: ['done', 'edit', 'copy']},
     'the one its situation asks for is not given: no primary, nothing in its place');
+  const reopened = {...st, tasks: {...st.tasks, q9: {...st.tasks.q9, kind: 'requirement', source: {kind: 'gitea', number: 8, reopened: true}}}};
+  eq(tk.actionsOf(reopened, {runs: {}, tasks: {q9: {actions: ['keep', 'done', 'edit']}}}, reopened.tasks.q9), {primary: 'keep', more: ['done', 'edit', 'copy']},
+    'its issue reopened outside tend: keep going, or mark it done again');
   const open = tk.openRun(st, 'q3'), given = {...aff, runs: {...aff.runs, [open.id]: ['stop', 'abandon']}};
   eq(tk.actionsOf(st, given, st.tasks.q3).more.includes('abandon'), false, 'a running run is stopped, not abandoned');
   const lost = {...st, runs: {...st.runs, [open.id]: {...open, state: 'unknown'}}};

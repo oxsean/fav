@@ -27,8 +27,9 @@ const KindRequirement = "requirement"
 
 // Why a task with a source waits.
 const (
-	WhySourceChanged = "source_changed" // waiting: its issue changed; take the new revision or keep this one
-	WhySourceClosed  = "source_closed"  // waiting: its issue was closed outside tend
+	WhySourceChanged  = "source_changed"  // waiting: its issue changed; take the new revision or keep this one
+	WhySourceClosed   = "source_closed"   // waiting: its issue was closed outside tend
+	WhySourceReopened = "source_reopened" // waiting: its issue was reopened outside tend after the task ended
 )
 
 // Source is the issue a requirement comes from, and which revision of it the task's scope is.
@@ -48,6 +49,7 @@ type Source struct {
 	Pending     *SourceRevision `json:"pending,omitempty"` // a newer revision nobody took or declined yet
 	Closed      bool            `json:"closed,omitempty"`
 	ClosedAcked bool            `json:"closed_acked,omitempty"` // someone saw it closed and kept the task going
+	Reopened    bool            `json:"reopened,omitempty"`     // it was reopened outside tend after the task ended
 	FetchedAt   time.Time       `json:"fetched_at,omitzero"`
 }
 
@@ -66,8 +68,10 @@ type SourceUpdate struct {
 	Title  string `json:"title"`
 	Text   string `json:"text"`
 	Closed bool   `json:"closed,omitempty"`
-	Repo   string `json:"repo,omitempty"`
-	URL    string `json:"url,omitempty"`
+	// Reopened: the issue was reopened after it closed with the task finished; the task is reopened with it.
+	Reopened bool   `json:"reopened,omitempty"`
+	Repo     string `json:"repo,omitempty"`
+	URL      string `json:"url,omitempty"`
 }
 
 // SourceAck takes (Accept) or declines a task's pending revision; with none pending it keeps the task going although
@@ -99,6 +103,8 @@ func SourceWaits(t *Task) string {
 		return WhySourceChanged
 	case src.Closed && !src.ClosedAcked:
 		return WhySourceClosed
+	case src.Reopened:
+		return WhySourceReopened
 	}
 	return ""
 }
@@ -126,6 +132,7 @@ func (s *State) applySource(e journal.Event, at time.Time) (bool, error) {
 		if d.Closed != src.Closed {
 			src.Closed, src.ClosedAcked = d.Closed, false
 		}
+		src.Reopened = !d.Closed && (d.Reopened || src.Reopened)
 		if d.Repo != "" {
 			src.Repo = d.Repo
 		}
@@ -168,8 +175,10 @@ func (s *State) applySource(e journal.Event, at time.Time) (bool, error) {
 				src.Rev, src.Digest = p.Rev, p.Digest
 			}
 			src.Pending = nil
-		} else {
+		} else if src.Closed {
 			src.ClosedAcked = true
+		} else {
+			src.Reopened = false
 		}
 		t.Rev++
 		t.UpdatedAt = at

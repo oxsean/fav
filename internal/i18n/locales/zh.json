@@ -1348,6 +1348,7 @@
   "sit.exited": "非零退出",
   "sit.source_changed": "需求有变化",
   "sit.source_closed": "issue 已在外面关闭",
+  "sit.source_reopened": "issue 在外面重新打开了",
   "sit.draft": "拆解草稿等你确认",
   "sit.no_plan": "拆解没有给出计划",
   "sit.advance": "即将进入下一阶段",

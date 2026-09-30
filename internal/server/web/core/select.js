@@ -138,7 +138,7 @@ export function week(state, now) {
 // reason or end state).
 const answerReasons = ['asked', 'permission'];
 const acceptReasons = ['accept', 'ended', 'draft'];
-const otherReasons = ['dispatch', 'source_changed', 'source_closed'];
+const otherReasons = ['dispatch', 'source_changed', 'source_closed', 'source_reopened'];
 export const waitGroups = ['answer', 'error', 'accept', 'other'];
 
 export const waitGroup = reason => (answerReasons.includes(reason) ? 'answer' : acceptReasons.includes(reason) ? 'accept'

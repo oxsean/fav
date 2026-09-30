@@ -201,7 +201,7 @@ var sitReasons = map[string]string{
 	task.WhyAfterCanceled: "sit.after_canceled", task.WhyHeld: "sit.held", task.WhyEnded: "sit.ended",
 	task.AttentionAsked: "sit.asked", task.AttentionPermission: "sit.permission", task.Unknown: "sit.unknown",
 	task.Failed: "sit.failed", task.Exited: "sit.exited", task.WhySourceChanged: "sit.source_changed",
-	task.WhySourceClosed: "sit.source_closed", task.WhyDraft: "sit.draft", task.WhyNoPlan: "sit.no_plan",
+	task.WhySourceClosed: "sit.source_closed", task.WhySourceReopened: "sit.source_reopened", task.WhyDraft: "sit.draft", task.WhyNoPlan: "sit.no_plan",
 	task.WhyAdvance: "sit.advance", task.WhyRework: "sit.rework", task.WhyMaxLoops: "sit.max_loops",
 	task.WhyBlocked: "sit.blocked", task.WhyBudget: "sit.budget", task.WhyMergeConflict: "sit.merge_conflict",
 	task.WhyStale: "sit.stale",
