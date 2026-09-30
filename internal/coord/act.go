@@ -69,7 +69,7 @@ func (c *Coord) Act(user string, on ActOn) error {
 			return "", nil, err
 		}
 		return c.runAnswer(p, r)
-	}, runView)
+	}, c.runViewFor(p))
 	return err
 }
 

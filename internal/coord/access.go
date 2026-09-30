@@ -295,6 +295,9 @@ func (c *Coord) visibleState(p Principal, st *task.State) *task.State {
 			delete(st.AgentDefs, name)
 		}
 	}
+	for _, r := range st.Runs {
+		c.cutDef(p, r)
+	}
 	c.mu.Unlock()
 	return st
 }
@@ -351,7 +354,7 @@ func (c *Coord) visibleEnv(p Principal, env journal.Envelope) journal.Envelope {
 	var events []journal.Event
 	for _, e := range env.Events {
 		if c.sees(p, e) {
-			events = append(events, e)
+			events = append(events, c.eventFor(p, e))
 		}
 	}
 	if env.Command != nil {

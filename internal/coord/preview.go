@@ -121,6 +121,11 @@ func (c *Coord) PreviewFor(ctx context.Context, who Principal, p Dispatch) (Prev
 	}
 	pv := c.preview(ctx, run)
 	pv.Profile = run.Profile
+	c.mu.Lock()
+	if c.hidesDef(who, &run) {
+		pv.Profile = publicProfile(run.Profile)
+	}
+	c.mu.Unlock()
 	if len(pending) > 0 {
 		pv.Notes = append(pv.Notes, Why{WhyDefPending, strings.Join(pending, ", ")})
 	}

@@ -100,6 +100,12 @@ func (t *Task) Accepter() string {
 	return t.Owner
 }
 
+// Span is a part of a text by byte offsets, To excluded.
+type Span struct {
+	From int `json:"from"`
+	To   int `json:"to"`
+}
+
 type Run struct {
 	ID         string             `json:"id"`
 	Task       string             `json:"task"`
@@ -109,6 +115,7 @@ type Run struct {
 	Dir        string             `json:"dir"`
 	From       string             `json:"from,omitempty"`  // the machine Dir was written for; "": the run's own
 	Brief      string             `json:"brief,omitempty"` // frozen at dispatch
+	Def        *Span              `json:"def,omitempty"`   // where Brief holds its agent definition's instructions
 	Title      string             `json:"title,omitempty"`
 	Runner     string             `json:"runner,omitempty"`     // "": the node picks
 	Resume     string             `json:"resume,omitempty"`     // the session this run continues (Brief is the reply)

@@ -23,7 +23,7 @@
 
 ```
 Task { id t_…, title, brief, dir, machine, agent, status backlog|todo|done|canceled, rev, created_at, updated_at }
-Run  { id r_…, task, machine, agent, profile(冻结), brief_sum, dir(映射后),
+Run  { id r_…, task, machine, agent, profile(冻结), brief_sum, def(定义正文在 brief 里的起止), dir(映射后),
        resume(续的会话), parent(回复的 run),
        want run|stop, state, exit_code, reason, detail, attention asked|permission|stalled, ask, note, last, usage,
        stream, requests[], answers[]（已给、节点还没取走）, sends[]{id, text, state queued|sent|seen|failed},
@@ -99,7 +99,7 @@ run `state` 转移表（终态单调，重复事件无副作用）：
 
 ## 订阅
 
-- `state.get` 返回整份状态 `{seq, tasks, runs, projects, shares, drains, agent_defs}`，给一次性读取（CLI）；`no_briefs` 去掉任务书，任务书按需 `task.get`；编辑一律先 `task.get`。
+- `state.get` 返回整份状态 `{seq, tasks, runs, projects, shares, drains, agent_defs}`，给一次性读取（CLI）；读不到某个 agent 定义的人看到的 run 按 [tasks/team.md](../tasks/team.md)「共享」裁掉定义正文和档案细节，快照、事件和 run 命令的回答同样；`no_briefs` 去掉任务书，任务书按需 `task.get`；编辑一律先 `task.get`。
 - `state.watch{after_seq?, no_briefs?}` 是一个流（[wire.md](wire.md)「流」），跟随状态的客户端（TUI、Web UI、CLI 的 `--wait`）都用它，流在 `ClassState` 一级：
   - 锁内登记实时通道并记下日志的尾 seq H；锁外决定怎么开始，再接上实时通道，丢掉 seq ≤ 已发出部分的。
   - 能续传就续传：带 `after_seq`、它不超过 H、`(after_seq, H]` 不多于 `maxReplay`（10000）条、其中没有 `reshapes` 的事件。推 `open{mode: resume}`，回放这一段，再接实时信封。

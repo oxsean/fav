@@ -180,7 +180,7 @@ func (c *Coord) HandlerFor(p Principal) wire.Handler {
 			}
 			return nil, notFound(rp.ID)
 		case MAgentList:
-			return Agents{Agents: c.usableProfiles(p)}, nil
+			return Agents{Agents: c.agentsFor(p)}, nil
 		case MAgentDefList:
 			return c.agentDefList(p), nil
 		case MInboxList:
@@ -307,9 +307,9 @@ func (c *Coord) HandlerFor(p Principal) wire.Handler {
 		case MTaskMessagePreview:
 			return c.messagePreview(p, r)
 		case MRunDispatch:
-			return c.command(p, r, c.runDispatch, runView)
+			return c.command(p, r, c.runDispatch, c.runViewFor(p))
 		case MRunContinue:
-			return c.command(p, r, c.runContinue, runView)
+			return c.command(p, r, c.runContinue, c.runViewFor(p))
 		case MRunPreview:
 			var dp Dispatch
 			if err := r.Decode(&dp); err != nil {
@@ -317,15 +317,15 @@ func (c *Coord) HandlerFor(p Principal) wire.Handler {
 			}
 			return c.PreviewFor(ctx, p, dp)
 		case MRunStop:
-			return c.command(p, r, c.runStop, runView)
+			return c.command(p, r, c.runStop, c.runViewFor(p))
 		case MRunAbandon:
-			return c.command(p, r, c.runAbandon, runView)
+			return c.command(p, r, c.runAbandon, c.runViewFor(p))
 		case MRunAnswer:
-			return c.command(p, r, c.runAnswer, runView)
+			return c.command(p, r, c.runAnswer, c.runViewFor(p))
 		case MRunSend:
-			return c.command(p, r, c.runSend, runView)
+			return c.command(p, r, c.runSend, c.runViewFor(p))
 		case MRunInterrupt:
-			return c.command(p, r, c.runInterrupt, runView)
+			return c.command(p, r, c.runInterrupt, c.runViewFor(p))
 		case MProjectCreate:
 			return c.command(p, r, c.projectCreate, projectView)
 		case MProjectEdit:
@@ -695,11 +695,17 @@ func (c *Coord) plan(who Principal, p Dispatch) (task.Run, error) {
 	if note := strings.TrimSpace(p.Note); note != "" {
 		brief += "\n\n---\n\n" + note
 	}
+	var span *task.Span
 	if def != nil && strings.TrimSpace(def.Body) != "" {
-		brief = def.Body + "\n\n---\n\n" + brief
+		part := def.Body + "\n\n---\n\n"
+		brief, span = part+brief, &task.Span{To: len(part)}
 	}
 	if pr != nil && strings.TrimSpace(pr.Context) != "" {
-		brief = "# " + pr.Name + "\n\n" + pr.Context + "\n\n---\n\n" + brief
+		head := "# " + pr.Name + "\n\n" + pr.Context + "\n\n---\n\n"
+		brief = head + brief
+		if span != nil {
+			span.From, span.To = span.From+len(head), span.To+len(head)
+		}
 	}
 	dir, from := t.Dir, t.Machine
 	if from == "" && !c.opt.Remote {
@@ -720,7 +726,7 @@ func (c *Coord) plan(who Principal, p Dispatch) (task.Run, error) {
 		}
 	}
 	return task.Run{ID: node.NewRunID(), Task: t.ID, Machine: machine, Agent: name, Profile: prof, Dir: dir, From: from,
-		Brief: brief, Title: t.Title, Runner: p.Runner, Project: t.Project, Dispatcher: who.User, Work: work}, nil
+		Brief: brief, Def: span, Title: t.Title, Runner: p.Runner, Project: t.Project, Dispatcher: who.User, Work: work}, nil
 }
 
 // writableTask is task id when who may change it: not found when they may not even see it. The caller holds mu.
