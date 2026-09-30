@@ -174,7 +174,7 @@ const plain = v => JSON.parse(JSON.stringify(v));
 // pusher runs sw.js with what its push handling touches: the notices it shows, the windows of the page open (url,
 // posted, focused), the windows it opens, the subscriptions it makes and the requests it sends, which answer (a
 // function of the request: a status and a body, or a throw for no network).
-function pusher({lang = 'zh-CN', wins = [], answer = () => [200, {}]} = {}) {
+function pusher({lang = 'zh-CN', wins = [], answer = url => (url === '/session' ? [200, {id: 'u-ann'}] : [200, {}])} = {}) {
   const on = {}, shown = [], opened = [], sent = [], subscribed = [];
   const self = {
     location: {origin: 'https://tend.test'}, navigator: {language: lang},
@@ -186,7 +186,7 @@ function pusher({lang = 'zh-CN', wins = [], answer = () => [200, {}]} = {}) {
   vm.runInContext(script, vm.createContext({self, URL, Promise, JSON, String, caches: {}, fetch: async (url, opt) => {
     sent.push({url, ...opt});
     const [status, body] = answer(url, opt);
-    return {status, json: async () => body};
+    return {status, ok: status >= 200 && status < 300, json: async () => body};
   }}));
   const fire = async (type, data) => {
     let wait = null;
@@ -198,7 +198,7 @@ function pusher({lang = 'zh-CN', wins = [], answer = () => [200, {}]} = {}) {
 }
 
 const win = url => { const w = {url, posted: [], focused: 0}; w.postMessage = m => w.posted.push(plain(m)); w.focus = async () => { w.focused++; }; return w; };
-const msg = (over = {}) => ({v: 1, server: 'c1', seq: 812, event: 'task.needs_you', task: 't-3f2', item: 'r-1/q1', kind: 'permission',
+const msg = (over = {}) => ({v: 1, server: 'c1', seq: 812, to: 'u-ann', event: 'task.needs_you', task: 't-3f2', item: 'r-1/q1', kind: 'permission',
   title: '迁移脚本要删表', what: "psql -c 'DROP TABLE orders_old'", n: 1, link: '#wait-t-3f2', at: '2026-09-30T12:00:00Z', ...over});
 
 test('a push shows one notice per task, saying what waits', async () => {
@@ -226,10 +226,10 @@ test('a permission the viewer may deny gets a deny button beside the view one, i
 
 test('a push with its content hidden says only how many wait, and a task done says it is done', async () => {
   const w = pusher();
-  await w.push({v: 1, server: 'c1', seq: 9, event: 'task.needs_you', n: 3});
-  await w.push({v: 1, server: 'c1', seq: 10, event: 'task.needs_you', n: 0});
-  await w.push({v: 1, server: 'c1', seq: 11, event: 'task.done', n: 0});
-  await w.push({v: 1, server: 'c1', seq: 12, event: 'task.done', task: 't-9', title: '发版', link: '#task-t-9', n: 0});
+  await w.push({v: 1, server: 'c1', seq: 9, to: 'u-ann', event: 'task.needs_you', n: 3});
+  await w.push({v: 1, server: 'c1', seq: 10, to: 'u-ann', event: 'task.needs_you', n: 0});
+  await w.push({v: 1, server: 'c1', seq: 11, to: 'u-ann', event: 'task.done', n: 0});
+  await w.push({v: 1, server: 'c1', seq: 12, to: 'u-ann', event: 'task.done', task: 't-9', title: '发版', link: '#task-t-9', n: 0});
   eq(w.shown.map(n => [n.title, n.body, n.tag, n.actions, n.data]), [
     ['tend', '3 项等你', 'tend', undefined, {count: true, link: ''}],
     ['tend', '1 项等你', 'tend', undefined, {count: true, link: ''}],
@@ -237,8 +237,32 @@ test('a push with its content hidden says only how many wait, and a task done sa
     ['发版', '任务完成了', 't-9', undefined, {task: 't-9', link: '#task-t-9'}],
   ], 'notices');
   const en = pusher({lang: 'en'});
-  await en.push({v: 1, server: 'c1', seq: 9, event: 'task.needs_you', n: 2});
+  await en.push({v: 1, server: 'c1', seq: 9, to: 'u-ann', event: 'task.needs_you', n: 2});
   eq(en.shown[0].body, '2 waiting on you', 'in English');
+});
+
+// What the push service still held when the viewer signed out, or someone else signed in here, shows nothing of its
+// task: the worker asks the page's session first and shows its content only to whom it was for.
+test('a push shows what it says only to the person signed in here that it is for', async () => {
+  for (const [why, answer] of [
+    ['signed out', url => (url === '/session' ? [401, {error: 'unauthorized'}] : [200, {}])],
+    ['someone else', url => (url === '/session' ? [200, {id: 'u-bob'}] : [200, {}])],
+    ['no network', () => { throw new Error('offline'); }],
+  ]) {
+    const w = pusher({answer});
+    await w.push(msg({actions: [{action: 'reject', token: 'a1.x.y'}]}));
+    await w.push({v: 1, server: 'c1', seq: 9, to: 'u-ann', event: 'task.needs_you', n: 3});
+    eq(w.shown.map(n => [n.title, n.body, n.tag, n.actions, n.data]), [
+      ['tend', '打开 tend 查看', 'tend', undefined, {count: true, link: ''}], ['tend', '打开 tend 查看', 'tend', undefined, {count: true, link: ''}],
+    ], `${why}: a plain notice`);
+    eq(w.sent.map(r => r.url), ['/session', '/session'], `${why}: asked`);
+  }
+  const w = pusher();
+  await w.push(msg({to: undefined}));
+  eq(w.shown[0].title, 'tend', 'a push that names nobody');
+  const en = pusher({lang: 'en', answer: () => [401, {}]});
+  await en.push(msg());
+  eq(en.shown[0].body, 'Open tend to see it', 'in English');
 });
 
 test('a push the worker cannot read still shows a notice', async () => {

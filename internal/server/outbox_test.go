@@ -308,7 +308,7 @@ func TestAnUndeliveredOutboxGoesOutAfterARestart(t *testing.T) {
 		t.Fatalf("the push after the restart: %+v", got)
 	}
 	m, h := got[0].msg, got[0].headers
-	want := PushMessage{V: 1, Server: "c_test", Seq: 812, Event: coord.NotifyTaskWaiting, Task: "t_1", Item: "r_1/q1", Kind: task.PendPermission,
+	want := PushMessage{V: 1, Server: "c_test", Seq: 812, To: store.LocalUser, Event: coord.NotifyTaskWaiting, Task: "t_1", Item: "r_1/q1", Kind: task.PendPermission,
 		Title: "drop the old table", What: "psql -c 'DROP TABLE orders_old'", Project: "infra", N: 1, Link: "#wait-t_1", At: n0}
 	if !reflect.DeepEqual(m, want) {
 		t.Fatalf("the message\n got %+v\nwant %+v", m, want)
@@ -647,7 +647,7 @@ func TestADevicesSettingsShapeItsPushes(t *testing.T) {
 	o.n.Send(needs(5, permission))
 	o.drain()
 	got := o.svc.taken()
-	want := PushMessage{V: 1, Server: "c_test", Seq: 5, Event: coord.NotifyTaskWaiting, N: 3}
+	want := PushMessage{V: 1, Server: "c_test", Seq: 5, To: store.LocalUser, Event: coord.NotifyTaskWaiting, N: 3}
 	if len(got) != 1 || got[0].path != "/push/hidden" || !reflect.DeepEqual(got[0].msg, want) || got[0].headers.Get("Topic") != "tend" {
 		t.Fatalf("at once, saying only how many: %+v", got)
 	}
@@ -680,7 +680,7 @@ func TestADevicesSettingsShapeItsPushes(t *testing.T) {
 	if topics["/push/hidden"] != "tend-done" || topics["/push/late"] != "t_2" {
 		t.Fatalf("a hidden task done takes the place of no count of waiting things: %v", topics)
 	}
-	if len(got) != 2 || !reflect.DeepEqual(paths["/push/late"], PushMessage{V: 1, Server: "c_test", Seq: 6, Event: coord.NotifyTaskDone, Task: "t_2", Title: "ship it",
+	if len(got) != 2 || !reflect.DeepEqual(paths["/push/late"], PushMessage{V: 1, Server: "c_test", Seq: 6, To: store.LocalUser, Event: coord.NotifyTaskDone, Task: "t_2", Title: "ship it",
 		Project: "infra", Link: "#task-t_2", At: done.At}) || paths["/push/hidden"].Title != "" || paths["/push/hidden"].Event != coord.NotifyTaskDone {
 		t.Fatalf("a task done, at once, to the devices that take it: %+v", got)
 	}

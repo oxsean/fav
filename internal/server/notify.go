@@ -495,6 +495,7 @@ type PushMessage struct {
 	V       int          `json:"v"`
 	Server  string       `json:"server"`
 	Seq     int64        `json:"seq"`
+	To      string       `json:"to"` // whom it is for: the worker shows the rest only while they are signed in there
 	Event   string       `json:"event"`
 	Task    string       `json:"task,omitempty"`
 	Item    string       `json:"item,omitempty"`
@@ -521,17 +522,17 @@ const pushReject = "reject"
 // permission they may deny gets a button for it.
 func (n *Notifier) message(user string, dev store.PushDevice, x noticeRow, item coord.InboxItem) PushMessage {
 	if dev.Prefs.Hide {
-		m := PushMessage{V: 1, Server: n.o.Coord.ID(), Seq: x.Seq, Event: x.Event}
+		m := PushMessage{V: 1, Server: n.o.Coord.ID(), Seq: x.Seq, To: user, Event: x.Event}
 		if x.Event == coord.NotifyTaskWaiting {
 			m.N = n.o.Coord.WaitingCount(user)
 		}
 		return m
 	}
 	if x.Event == coord.NotifyTaskDone {
-		return PushMessage{V: 1, Server: n.o.Coord.ID(), Seq: x.Seq, Event: x.Event, Task: x.Task, Title: clipRunes(x.Title, 200), Project: x.Project,
+		return PushMessage{V: 1, Server: n.o.Coord.ID(), Seq: x.Seq, To: user, Event: x.Event, Task: x.Task, Title: clipRunes(x.Title, 200), Project: x.Project,
 			Link: "#task-" + x.Task, At: x.At}
 	}
-	m := PushMessage{V: 1, Server: n.o.Coord.ID(), Seq: x.Seq, Event: x.Event, Task: x.Task, Title: clipRunes(item.Title, 200),
+	m := PushMessage{V: 1, Server: n.o.Coord.ID(), Seq: x.Seq, To: user, Event: x.Event, Task: x.Task, Title: clipRunes(item.Title, 200),
 		Project: item.Project, N: len(item.Pending), Link: "#wait-" + x.Task, At: x.At}
 	for _, p := range x.Items {
 		i := slices.IndexFunc(item.Pending, func(q task.Pending) bool { return q.ID == p.ID && q.Version == p.Version })

@@ -36,19 +36,21 @@ self.addEventListener('fetch', e => {
 
 // A push is what waits on the viewer about a task (tend-server's PushMessage): it always shows a notice (a browser
 // takes the permission back from a worker that shows none), one per task, the newer taking the older's place. A push
-// with its content hidden says only how many things wait, all under one notice. The words follow the browser's
+// with its content hidden says only how many things wait, all under one notice. What it says shows only once the
+// page's session here is the person it is for (to): one the push service kept since they signed out, or since someone
+// else signed in here, shows a plain notice. The words follow the browser's
 // language: the worker cannot read the page's choice.
 const WORDS = {
   zh: {
     permission: '要你允许：%s', permissionAny: '要你允许它用一个工具', question: 'agent 有问题问你', continue: '运行停在一个问题上，等你回复后接着跑',
     gate: '等你验收', ended: '跑完了，等你标完成', failed: '运行没成功，等你处理', waiting: '等你处理', more: '%s · %d 项等你',
-    hidden: '%d 项等你', done: '任务完成了', view: '查看', reject: '拒绝',
+    hidden: '%d 项等你', done: '任务完成了', plain: '打开 tend 查看', view: '查看', reject: '拒绝',
     rejected: '已拒绝', handledBy: '已被 %s 处理', gone: '已经不等你了', signIn: '请打开 tend 重新登录后处理', failedAct: '没能拒绝，打开 tend 处理',
   },
   en: {
     permission: 'Asks to run: %s', permissionAny: 'Asks to use a tool', question: 'The agent has a question for you', continue: 'Its run stopped on a question; reply to go on',
     gate: 'Waiting for you to accept it', ended: 'Its run ended; mark it done', failed: 'Its run did not succeed', waiting: 'Waiting for you', more: '%s · %d waiting on you',
-    hidden: '%d waiting on you', done: 'The task is done', view: 'View', reject: 'Deny',
+    hidden: '%d waiting on you', done: 'The task is done', plain: 'Open tend to see it', view: 'View', reject: 'Deny',
     rejected: 'Denied', handledBy: 'Already handled by %s', gone: 'No longer waits on you', signIn: 'Open tend and sign in again to handle it', failedAct: 'Could not deny it; open tend to handle it',
   },
 };
@@ -75,11 +77,25 @@ function noticeOf(m) {
   return [title, {body, tag: m.task, renotify: true, icon, actions, data: {task: m.task, item: m.item, link: m.link, ...(deny ? {act: deny.token} : {})}}];
 }
 
+// forViewer: m is for whoever is signed in here now; false when that cannot be told.
+async function forViewer(m) {
+  if (!m.to) return false;
+  try {
+    const res = await fetch('/session', {credentials: 'same-origin'});
+    return res.ok && (await res.json()).id === m.to;
+  } catch {
+    return false;
+  }
+}
+
 self.addEventListener('push', e => {
   let m = null;
   try { m = e.data?.json(); } catch {}
-  const [title, opts] = m?.v === 1 ? noticeOf(m) : ['tend', {body: words().waiting, tag: 'tend', icon, data: {count: true, link: ''}}];
-  e.waitUntil(self.registration.showNotification(title, opts));
+  e.waitUntil((async () => {
+    const [title, opts] = m?.v !== 1 ? ['tend', {body: words().waiting, tag: 'tend', icon, data: {count: true, link: ''}}]
+      : await forViewer(m) ? noticeOf(m) : ['tend', {body: words().plain, tag: 'tend', icon, data: {count: true, link: ''}}];
+    await self.registration.showNotification(title, opts);
+  })());
 });
 
 // open brings up a window of the page on link: one already open goes there, else a new one opens there.
