@@ -132,6 +132,18 @@ test('each form draws in both forms and both languages, styled and worded', asyn
   }
 });
 
+test('a task with no directory dispatches into its project\'s checkout on the machine, and the dialog says which', async () => {
+  const r = await tasks();
+  const none = () => {};
+  const keys = createKeys();
+  const task = {...r.store.state.tasks.q9, dir: ''};
+  const root = await mount(html`<${KeysContext.Provider} value=${keys}><${Dispatch} store=${r.store} task=${task}
+    agents=${[{name: 'codex', provider: 'codex'}]} machines=${r.store.machines.value} onDispatch=${none} onClose=${none} /><//>`);
+  const go = root.find('button').find(b => b.textContent.includes(words.t('disp.go')));
+  ok(go && !go.disabled, 'the dispatch is allowed');
+  ok(root.textContent.includes(words.f('disp.dir', '/srv/shop')), `the dialog names the directory: ${root.textContent}`);
+});
+
 test('the workflow picker offers the built-in workflows beside the project default and none', async () => {
   const r = await tasks();
   const none = () => {};

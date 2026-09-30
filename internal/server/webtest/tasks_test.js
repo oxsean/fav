@@ -80,7 +80,20 @@ test('what a dispatch meets: blocks the preview would, notes on how it goes', as
   eq(a('q11', m.mba, claude), {block: 'open', detail: 'r23'}, 'a run is open');
   eq(a('q7', m.mba, claude), {block: 'status', detail: 'backlog'}, 'not started');
   eq(a({id: 'y', status: 'todo'}, m.mba, claude), {block: 'dir'}, 'no directory');
+  eq(a({id: 'y', status: 'todo', project: 'p1'}, m.linux, codex), {}, 'no directory of its own: its project\'s checkout on linux');
+  eq(a({id: 'y', status: 'todo', project: 'p1'}, m.mba, claude), {note: 'busy', detail: '1/2'}, 'the checkout on mba, where a run works');
+  eq(a({id: 'y', status: 'todo', project: 'p1'}, m.win, claude), {block: 'dir'}, 'no directory and no checkout on win');
   eq(a('q9', null, claude), {block: 'pick'}, 'nothing picked');
+});
+
+test('where a run works: the task\'s directory, else its project\'s checkout on that machine, as the coordinator picks', async () => {
+  const {store} = await tasks();
+  const st = store.state;
+  eq(tk.runDir(st, {dir: '/w/other', project: 'p1'}, 'mba'), {dir: '/w/other', project: false}, 'its own');
+  eq(tk.runDir(st, {project: 'p1'}, 'linux'), {dir: '/srv/shop', project: true}, 'the checkout on linux');
+  eq(tk.runDir(st, {project: 'p1'}, 'win'), null, 'none on win');
+  eq(tk.runDir(st, {project: 'p1'}, ''), null, 'no machine');
+  eq(tk.runDir(st, {}, 'mba'), null, 'no project');
 });
 
 test('a plan draft: its rows, adding, removing, renaming, and what the coordinator would refuse', async () => {

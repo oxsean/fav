@@ -196,6 +196,7 @@ export function Dispatch({store, wire, task, agents = [], machines = [], busy = 
   const [pv, setPv] = useState(null);
   const m = machines.find(x => x.name === machine), a = agents.find(x => x.name === agent);
   const adv = tk.advice(store.state, task, m, a);
+  const dir = tk.runDir(store.state, task, machine);
   useEffect(() => {
     setPv(null);
     if (adv.block || !wire?.has?.('run.preview')) return;
@@ -221,6 +222,7 @@ export function Dispatch({store, wire, task, agents = [], machines = [], busy = 
     ${pick}
     <div class="advice" aria-live="polite">
       ${adv.block && html`<p class="notice notice-bad">${f('adv.' + adv.block, adv.detail || '')}</p>`}
+      ${!adv.block && dir?.project && html`<p class="t-muted">${f('disp.dir', dir.dir)}</p>`}
       ${adv.note && html`<p class="notice">${f('adv.' + adv.note, adv.detail || '')}</p>`}
       ${pv?.loading && html`<p class="t-muted">${t('disp.checking')}</p>`}
       ${pv?.error && html`<p class="notice notice-bad">${f('form.failed', pv.error)}</p>`}

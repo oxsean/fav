@@ -168,6 +168,14 @@ export function defaults(state, task) {
     fromProject: {machine: !task?.machine && !!d.machine, agent: !task?.agent && !!(d.agent || d.roles?.implement)}};
 }
 
+// runDir is where a run of task on machine works, as the coordinator picks it (task.Run's dir): the task's own
+// directory, else its project's first checkout on that machine (project); null when there is neither.
+export function runDir(state, task, machine) {
+  if (task?.dir) return {dir: task.dir, project: false};
+  const repo = (state.projects[task?.project]?.repos || []).find(r => machine && r.dirs?.[machine]);
+  return repo ? {dir: repo.dirs[machine], project: true} : null;
+}
+
 // advice is what a dispatch of task meets on machine with profile, before the coordinator is asked: block (a code the
 // dispatch cannot pass) or note (how it will go), each with its detail. Same rules as the coordinator's preview where
 // the page knows enough; the preview answers the rest.
@@ -175,14 +183,15 @@ export function advice(state, task, machine, profile) {
   const run = openRun(state, task.id);
   if (run) return {block: 'open', detail: run.id};
   if (task.status !== 'todo') return {block: 'status', detail: task.status};
-  if (!task.dir) return {block: 'dir'};
   if (!machine || !profile) return {block: 'pick'};
+  const dir = runDir(state, task, machine.name)?.dir;
+  if (!dir) return {block: 'dir'};
   if (profile.machine && profile.machine !== machine.name) return {block: 'pinned', detail: profile.machine};
   const check = machine.agents?.[profile.provider];
   if (check && !check.installed) return {block: 'cli', detail: profile.provider};
   if (check?.auth === 'missing') return {block: 'auth', detail: profile.provider};
   if (machine.state !== 'connected') return {note: 'offline', detail: machine.name};
-  const busy = Object.values(state.runs).some(r => r.machine === machine.name && r.dir === task.dir && openStates.includes(r.state));
+  const busy = Object.values(state.runs).some(r => r.machine === machine.name && r.dir === dir && openStates.includes(r.state));
   if (busy || (machine.slots && machine.active >= machine.slots)) return {note: 'busy', detail: `${machine.active || 0}/${machine.slots || 0}`};
   return {};
 }
