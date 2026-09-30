@@ -127,7 +127,7 @@ func (n *Notifier) keep(o *NotifyOptions, x coord.Notice) {
 			if !d.Prefs.Wants(x.Event) {
 				continue
 			}
-			row.Device, row.Next = d.ID, x.At
+			row.Device, row.DeviceVersion, row.Next = d.ID, d.Version, x.At
 			if x.Event == coord.NotifyTaskWaiting {
 				row.Next = x.At.Add(waitFor(d.Prefs, x.Items))
 			}
@@ -200,6 +200,9 @@ func (n *Notifier) attach(o NotifyOptions) {
 	early := n.early
 	n.early = nil
 	n.mu.Unlock()
+	if err := o.Team.Unclaim(); err != nil {
+		fmt.Fprintln(os.Stderr, "tend-server: outbox:", err)
+	}
 	for _, x := range early {
 		n.keep(&o, x)
 	}
@@ -253,6 +256,9 @@ func (n *Notifier) dispatch(ctx context.Context) int {
 			} else if !ok {
 				o.Team.Settle(d.ID, store.DeliveryGone, "no device", d.Attempts, time.Time{})
 				continue
+			} else if dev.Version != d.DeviceVersion || dev.User != d.User {
+				o.Team.Settle(d.ID, store.DeliveryCanceled, "another owner", d.Attempts, time.Time{})
+				continue
 			}
 			ch, key = dev.Kind, d.Device
 		}
@@ -270,6 +276,10 @@ func (n *Notifier) dispatch(ctx context.Context) int {
 		select {
 		case slots <- struct{}{}:
 		default:
+			continue
+		}
+		if ok, err := o.Team.Claim(d.ID); !ok || err != nil {
+			<-slots
 			continue
 		}
 		n.mu.Lock()
@@ -357,15 +367,15 @@ func (n *Notifier) settle(d store.Delivery, dev store.PushDevice, gone bool, err
 	result := resultOf(err)
 	switch {
 	case gone:
-		team.RemoveDevice(dev.ID, result)
+		team.RemoveGone(dev.ID, dev.Version, result)
 	case err == nil:
 		team.Settle(d.ID, store.DeliveryOK, result, tries, time.Time{})
 		if dev.ID != "" {
-			team.DeviceWorked(dev.ID, n.now())
+			team.DeviceWorked(dev.ID, dev.Version, n.now())
 		}
 	default:
 		if dev.ID != "" {
-			team.DeviceFailed(dev.ID)
+			team.DeviceFailed(dev.ID, dev.Version)
 		}
 		var se *sendError
 		final := errors.As(err, &se) && se.final() || errors.Is(err, errEgress)

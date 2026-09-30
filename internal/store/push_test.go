@@ -38,6 +38,7 @@ func TestUpgradingTheDeliveriesKeepsWhatWentAndSendsNothingAgain(t *testing.T) {
 		t.Fatal(err)
 	}
 	tm.Close()
+	before0016(t, path)
 	before0015(t, path)
 	before0014(t, path)
 	before0013(t, path)
@@ -156,12 +157,13 @@ func TestADeviceIsFoundAgainByItsEndpoint(t *testing.T) {
 		t.Fatal("someone else dropped u_b's device")
 	}
 
-	must(t, tm.DeviceFailed(a.ID))
-	must(t, tm.DeviceFailed(a.ID))
+	cur, _, _ := tm.Device(a.ID)
+	must(t, tm.DeviceFailed(a.ID, cur.Version))
+	must(t, tm.DeviceFailed(a.ID, cur.Version))
 	if d, _, _ := tm.Device(a.ID); d.Failures != 2 {
 		t.Fatalf("failures %d", d.Failures)
 	}
-	must(t, tm.DeviceWorked(a.ID, t0.Add(3*time.Hour)))
+	must(t, tm.DeviceWorked(a.ID, cur.Version, t0.Add(3*time.Hour)))
 	if d, _, _ := tm.Device(a.ID); d.Failures != 0 || !d.LastOK.Equal(t0.Add(3*time.Hour)) {
 		t.Fatalf("after it worked: %+v", d)
 	}
@@ -231,6 +233,7 @@ func TestUpgradingForgetsTheAddressesDeliveriesRecorded(t *testing.T) {
 		t.Fatal(err)
 	}
 	tm.Close()
+	before0016(t, path)
 	before0015(t, path)
 	before0014(t, path)
 	before0013(t, path)
@@ -292,6 +295,7 @@ func TestADevicesSettingsAreItsOwnersAndOutliveItsRenewals(t *testing.T) {
 	old, err := tm.KeepDevice(PushDevice{User: LocalUser, Kind: KindWebPush, Name: "Mac", Target: []byte("s")}, "h0", t0)
 	must(t, err)
 	tm.Close()
+	before0016(t, path)
 	before0015(t, path)
 	before0014(t, path)
 	before0013(t, path)
@@ -357,5 +361,80 @@ func TestSomeoneKeepsAtMostTenDevices(t *testing.T) {
 	}
 	if d, ok, _ := tm.Device(b.ID); !ok || d.User != "u_b" {
 		t.Fatalf("the browser stays its owner's: %+v", d)
+	}
+}
+
+// before0016 takes devices and deliveries back to before registrations had versions.
+func before0016(t *testing.T, path string) {
+	exec(t, path, `ALTER TABLE push_devices DROP COLUMN version; ALTER TABLE deliveries DROP COLUMN device_version`)
+}
+
+// A delivery goes to the registration of its device it was written for: once the browser changed hands, it can be
+// neither claimed nor put back to pending by a try that was on its way, and a push service's "gone" for the old
+// registration leaves the new one; renewing by the same owner keeps what waits for them.
+func TestADeliveryIsBoundToItsDevicesRegistration(t *testing.T) {
+	tm := openTeam(t)
+	a, _ := tm.KeepDevice(PushDevice{User: LocalUser, Kind: KindWebPush, Target: []byte("s")}, "h1", t0)
+	a2, _ := tm.KeepDevice(PushDevice{User: LocalUser, Kind: KindWebPush, Target: []byte("s2")}, "h1", t0.Add(time.Minute))
+	if a.Version == 0 || a2.Version != a.Version {
+		t.Fatalf("its owner renewing keeps the registration: %d %d", a.Version, a2.Version)
+	}
+	row := func(seq int64) Delivery {
+		d := webhookRow(seq, LocalUser, "task.needs_you", t0)
+		d.Device, d.DeviceVersion = a.ID, a.Version
+		return d
+	}
+	_, err := tm.Enqueue([]Delivery{row(1), row(2)})
+	must(t, err)
+	due, _ := tm.Due(t0, 10)
+	if len(due) != 2 || due[0].DeviceVersion != a.Version {
+		t.Fatalf("%+v", due)
+	}
+	if ok, err := tm.Claim(due[0].ID); !ok || err != nil {
+		t.Fatalf("claimed: %t %v", ok, err)
+	}
+	if ok, _ := tm.Claim(due[0].ID); ok {
+		t.Fatal("claimed twice")
+	}
+	b, _ := tm.KeepDevice(PushDevice{User: "u_b", Kind: KindWebPush, Target: []byte("s")}, "h1", t0.Add(2*time.Minute))
+	if b.ID != a.ID || b.Version == a.Version {
+		t.Fatalf("another owner is another registration: %+v", b)
+	}
+	if ok, _ := tm.Claim(due[1].ID); ok {
+		t.Fatal("claimed for the old registration")
+	}
+	must(t, tm.Settle(due[0].ID, DeliveryPending, "503", 1, t0.Add(time.Hour)))
+	var status string
+	must(t, tm.r.QueryRow(`SELECT status FROM deliveries WHERE id = ?`, due[0].ID).Scan(&status))
+	if status != DeliveryCanceled {
+		t.Fatalf("the try on its way came back as %q", status)
+	}
+	must(t, tm.RemoveGone(a.ID, a.Version, "410"))
+	if d, ok, _ := tm.Device(a.ID); !ok || d.User != "u_b" {
+		t.Fatalf("the old registration's gone took the new one: %+v", d)
+	}
+	must(t, tm.DeviceFailed(a.ID, a.Version))
+	if d, _, _ := tm.Device(a.ID); d.Failures != 0 {
+		t.Fatal("the old registration's failure counts on the new one")
+	}
+	must(t, tm.RemoveGone(b.ID, b.Version, "410"))
+	if _, ok, _ := tm.Device(a.ID); ok {
+		t.Fatal("its own gone removes it")
+	}
+}
+
+// What was on its way when the server stopped goes again after it starts.
+func TestAClaimedDeliveryIsPendingAgainAfterARestart(t *testing.T) {
+	tm := openTeam(t)
+	_, err := tm.Enqueue([]Delivery{webhookRow(1, LocalUser, "task.done", t0)})
+	must(t, err)
+	due, _ := tm.Due(t0, 10)
+	tm.Claim(due[0].ID)
+	if due, _ := tm.Due(t0, 10); len(due) != 0 {
+		t.Fatal("a claimed delivery is not due")
+	}
+	must(t, tm.Unclaim())
+	if due, _ := tm.Due(t0, 10); len(due) != 1 {
+		t.Fatal("pending again")
 	}
 }

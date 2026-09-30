@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -120,14 +121,16 @@ type services struct {
 	keys    map[string]*ecdh.PrivateKey
 	auths   map[string][]byte
 	release chan struct{}
+	arrived chan struct{} // a request to /slow came and waits for release
 }
 
 func newServices(t *testing.T) *services {
 	s := &services{t: t, answers: map[string][]int{}, after: map[string]string{}, keys: map[string]*ecdh.PrivateKey{}, auths: map[string][]byte{},
-		release: make(chan struct{})}
+		release: make(chan struct{}), arrived: make(chan struct{}, 16)}
 	s.srv = httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
 		if r.URL.Path == "/slow" {
+			s.arrived <- struct{}{}
 			select {
 			case <-s.release:
 			case <-r.Context().Done():
@@ -698,5 +701,37 @@ func TestADeviceAtAnUnknownPushServiceIsNotPushedTo(t *testing.T) {
 	o.drain()
 	if got := o.svc.taken(); len(got) != 0 {
 		t.Fatalf("pushed: %+v", got)
+	}
+}
+
+// A browser that changes hands while a push to its last owner is on its way: the push service's answer, gone or
+// failed, neither removes the new owner's device nor puts the canceled delivery back.
+func TestAPushOnItsWayWhenItsBrowserChangesHandsSettlesNothing(t *testing.T) {
+	for _, status := range []int{http.StatusGone, http.StatusServiceUnavailable} {
+		t.Run(strconv.Itoa(status), func(t *testing.T) {
+			o := newOutbox(t)
+			d := o.device(store.LocalUser, "/slow")
+			if _, err := o.team.SetDevicePrefs(store.LocalUser, d.ID, store.DevicePrefs{Events: []string{store.EventDone}}); err != nil {
+				t.Fatal(err)
+			}
+			o.n.Send(coord.Notice{Seq: 5, Event: coord.NotifyTaskDone, Task: "t_1", Title: "x", To: []string{store.LocalUser}, At: n0})
+			if o.n.dispatch(context.Background()) != 1 {
+				t.Fatal("not started")
+			}
+			<-o.svc.arrived
+			b, err := o.team.KeepDevice(store.PushDevice{User: "u_b", Kind: store.KindWebPush, Target: d.Target}, store.Sum(o.svc.srv.URL+"/slow"), n0)
+			if err != nil || b.ID != d.ID {
+				t.Fatalf("%+v %v", b, err)
+			}
+			o.svc.answer("/slow", status)
+			o.svc.release <- struct{}{}
+			o.n.wg.Wait()
+			if now, ok, _ := o.team.Device(d.ID); !ok || now.User != "u_b" || now.Failures != 0 {
+				t.Fatalf("the new owner's device: %+v %t", now, ok)
+			}
+			if left := o.rows(); len(left) != 0 {
+				t.Fatalf("the canceled delivery came back: %+v", left)
+			}
+		})
 	}
 }

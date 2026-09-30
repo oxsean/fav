@@ -88,6 +88,7 @@ func TestUpgradingTheWriteBacksClaimsNoneOfThemAsTends(t *testing.T) {
 		Token: []byte("sealed"), HookSecret: []byte("sealed2"), Settings: "{}", CreatedBy: LocalUser})
 	must(t, err)
 	tm.Close()
+	before0016(t, path)
 	before0015(t, path)
 	before0014(t, path)
 	before0013(t, path)
