@@ -30,27 +30,38 @@ const wordsLeft = s => s.match(/\b(auth|signin|denied|device|app|home|why|theme|
 const press = (key, more = {}) => ({key, target: globalThis.document?.body, preventDefault() {}, ...more});
 const noStore = {getItem: () => null, setItem() {}};
 
+// fakeHistory keeps the entries as a browser does; back() moves to the one before and tells onPop.
 function fakeHistory(url = '/') {
   const loc = {pathname: '/', search: '', hash: ''};
   const set = u => { const x = new URL(u, 'http://tend.test'); loc.pathname = x.pathname; loc.search = x.search; loc.hash = x.hash; };
+  const entries = [{url, state: null}];
+  let at = 0;
   set(url);
-  return {location: loc, history: {pushState: (_, __, u) => set(u), replaceState: (_, __, u) => set(u)}};
+  const history = {
+    get state() { return entries[at].state; },
+    pushState(state, _, u) { entries.splice(++at, Infinity, {url: u, state}); set(u); },
+    replaceState(state, _, u) { entries[at] = {url: u, state}; set(u); },
+    back() { if (at > 0) { set(entries[--at].url); history.onPop?.(); } },
+    entries: () => entries.slice(0, at + 1).map(e => e.url),
+  };
+  return {location: loc, history};
 }
 
 // app builds the signed-in page around a home rig; ids numbers the command ids c1, c2, …
 // wire stands in for the rig's under the commands; changes for core/changes.js's.
-function app(r, {url = '/', fetchOutput = () => Promise.resolve({events: []}), wire = r.wire, changes} = {}) {
+function app(r, {url = '/', fetchOutput = () => Promise.resolve({events: []}), wire = r.wire, changes, storage = noStore} = {}) {
   const keys = createKeys({timers: r.clk});
   const toasts = createToasts({timers: r.clk});
   let n = 0;
   const commands = createCommands({wire, newID: () => 'c' + ++n});
   const {location, history} = fakeHistory(url);
   const router = createRouter({location, history});
+  history.onPop = () => router.popped();
   const prefs = createPrefs({storage: noStore, asked: 'zh'});
   const nav = createNav({storage: noStore, width: 1440});
   const props = {store: r.store, commands, toasts, wire: r.wire, router, keys, nav, prefs, session: {id: 'u_b', name: 'Bo'},
-    clock: () => NOW, fetchOutput, changes, onLogout: () => {}};
-  return {...props, vnode: () => html`<${KeysContext.Provider} value=${keys}><${App} ...${props} /><//>`};
+    clock: () => NOW, fetchOutput, changes, storage, onLogout: () => {}};
+  return {...props, history, vnode: () => html`<${KeysContext.Provider} value=${keys}><${App} ...${props} /><//>`};
 }
 
 function drawn(vnode, f, lang) {
@@ -85,9 +96,70 @@ test('the home draws in both forms and both languages, styled and worded', async
   return sizes;
 });
 
-test('the phone home: task titles over what they ask, one quick action each, what runs, and an open item that says whose it is and where an answer goes', async () => {
+test('the phone home: task titles over what they ask, one quick action each, what runs; a row opens its own page', async () => {
   const r = await home();
-  const calls = [], listed = [];
+  const calls = [];
+  const wire = {...r.wire, call: (method, params) => { calls.push([method, params]); return new Promise(() => {}); }};
+  const kept = new Map();
+  const storage = {getItem: k => kept.get(k) ?? null, setItem: (k, v) => kept.set(k, v), removeItem: k => kept.delete(k)};
+  const a = app(r, {wire, storage});
+  form.value = 'phone';
+  try {
+    const root = await mount(a.vnode());
+    const items = () => root.find('.xi');
+    eq(titles(root), ['Receipt PDF export', 'Refund webhook', 'Login rate limit', 'Cart price rounding', 'Price feed importer'], 'task titles, grouped');
+    eq(root.find('.xi-sub')[0].textContent, 'Which PDF library should the export use?', 'what it asks under the title');
+    eq(items().map(x => x.find('.xi-actions').flatMap(e => e.find('button')).map(b => b.textContent)),
+      [[], ['允许'], ['重试'], ['完成'], ['打开']], 'a question opens; the rest have one quick action');
+    eq(root.one('.home-going-head').textContent, '在跑 3 · 排队 1 ›', 'what runs, counted');
+    eq(root.find('.going-row').length, 3, 'only the running ones listed');
+    ok(items().every(x => x.one('.xi-head').getAttribute('aria-expanded') === null && x.one('.xi-toggle').textContent === '›'), 'rows that open a page');
+
+    await act(() => items()[0].one('.xi-head').dispatch('click'));
+    eq(a.router.route.value, {page: 'home', wait: 't2'}, 'the row opened its page');
+    eq(root.find('.xi').length, 0, 'the list gave way');
+    const page = () => root.one('.wait-page');
+    const head = () => [page().one('h1').textContent, root.one('.wait-pos').textContent];
+    eq(head(), ['等你回答', '1 / 5'], 'what it waits for, and where it stands');
+    eq(root.one('.wait-name').one('b').textContent, 'Receipt PDF export', 'the task');
+    eq(root.one('.wait-next').textContent, '处理完自动跳到下一条 · 还剩 4 条 · 返回回到「等你」', 'what comes after');
+    eq(root.one('.wait-meta').textContent, 't2 · claude @ mba · 你负责', 'whose it is');
+    eq(root.one('.wait-goes').find('span')[0].textContent, '回给 claude：它在这一轮里接着做', 'where the answer goes');
+    eq(page().find('.answer').length, 1, 'the answer form');
+
+    await act(() => a.router.go({page: 'home', wait: 't3'}, {replace: true}));
+    eq(head(), ['等你批准', '2 / 5'], 'a permission');
+    eq(page().find('.choice-hint').map(x => x.textContent), [words.t('ans.onceHint')], 'what allow does');
+    const allow = page().find('button').find(b => b.textContent.startsWith('允许'));
+    await act(() => allow.dispatch('click'));
+    eq(calls.at(-1)[0], 'run.answer', 'answered on its page');
+    await act(() => settle());
+    eq([a.router.route.value.wait, head()], ['t5', ['等你处理', '2 / 4']], 'the one now at its place took over');
+    eq(a.history.entries(), ['/', '?wait=t5'], 'in the place of the one handled');
+
+    await act(() => page().one('.back').dispatch('click'));
+    eq([a.router.route.value, root.find('.xi').length > 0], [{page: 'home'}, true], 'back to the list');
+
+    await act(() => a.router.go({page: 'home', wait: 't-gone'}));
+    eq(root.one('.wait-gone').one('b').textContent, '已经不等你了', 'no longer waiting when it opened');
+    await act(() => root.one('.wait-gone').find('button').find(b => b.textContent === '下一条').dispatch('click'));
+    eq(a.router.route.value.wait, 't2', 'the first of what waits');
+
+    await act(() => a.router.go({page: 'home'}));
+    await act(() => root.find('.chip').find(c => c.textContent.startsWith('我派发的')).dispatch('click'));
+    eq([titles(root), kept.get('tend-home-as')], [['Login rate limit'], 'dispatcher'], 'only what the viewer dispatched, remembered');
+    const again = await mount(app(r, {wire, storage}).vnode());
+    eq(titles(again), ['Login rate limit'], 'the next time too');
+
+    await act(() => root.find('.going-row')[0].dispatch('click'));
+    eq(a.router.route.value.page, 'tasks', 'a running row opens its task');
+  } finally { form.value = 'desktop'; }
+});
+
+test('the phone list allows in one press; the page of a run to accept shows what it changed; the last one handled brings the list back', async () => {
+  const r = await home();
+  const listed = [];
+  const calls = [];
   const wire = {...r.wire, call: (method, params) => { calls.push([method, params]); return new Promise(() => {}); }};
   const changes = {can: () => true, list: run => { listed.push(run); return Promise.resolve({total: {files: 4, add: 12, del: 3}, files: [
     {path: 'cart/round.go', op: 'modify', add: 9, del: 3}, {path: 'cart/round_test.go', op: 'add', add: 3, del: 0},
@@ -96,40 +168,50 @@ test('the phone home: task titles over what they ask, one quick action each, wha
   form.value = 'phone';
   try {
     const root = await mount(a.vnode());
-    const items = () => root.find('.xi');
-    const byTask = id => items().find(x => x.one('.xi-head').getAttribute('aria-controls') === 'expand-' + id);
-    eq(titles(root), ['Receipt PDF export', 'Refund webhook', 'Login rate limit', 'Cart price rounding', 'Price feed importer'], 'task titles, grouped');
-    eq(root.find('.xi-sub')[0].textContent, 'Which PDF library should the export use?', 'what it asks under the title');
-    eq(items().map(x => x.find('.xi-actions').flatMap(e => e.find('button')).map(b => b.textContent)),
-      [[], ['允许'], ['重试'], ['完成'], ['打开']], 'a question opens; the rest have one quick action');
-    eq(root.one('.home-going-head').textContent, '在跑 3 · 排队 1 ›', 'what runs, counted');
-    eq(root.find('.going-row').length, 3, 'only the running ones listed');
-
-
-    await act(() => byTask('t2').one('.xi-head').dispatch('click'));
-    eq(byTask('t2').one('.wait-meta').textContent, 't2 · claude @ mba · 你负责', 'whose it is');
-    eq(byTask('t2').one('.wait-goes').find('span')[0].textContent, '回给 claude：它在这一轮里接着做', 'where the answer goes');
-
-    await act(() => byTask('t4').one('.xi-head').dispatch('click'));
+    await act(() => root.find('.xi')[1].one('.xi-actions').one('button').dispatch('click'));
+    eq(calls.at(-1), ['run.answer', {run: 'r3', request: 'p1', allow: true}], 'allow in one press, from the list');
+    await act(() => a.router.go({page: 'home', wait: 't4'}));
     await act(() => settle());
     eq(listed, ['r4'], 'the changes of the run to accept, read once');
-    const acc = byTask('t4');
-    eq(acc.one('.lbl').textContent, '改动 · 4 个文件 · +12 −3', 'how much it changed');
-    eq(acc.find('.step').map(x => x.textContent), ['~cart/round.go+9 −3', '+cart/round_test.go+3 −0', '+docs/cart.png'], 'its first three files');
+    eq(root.one('.wait-page').one('h1').textContent, '等你验收', 'to accept');
+    eq(root.one('.wait-steps').one('.lbl').textContent, '改动 · 4 个文件 · +12 −3', 'how much it changed');
+    eq(root.find('.step').map(x => x.textContent), ['~cart/round.go+9 −3', '+cart/round_test.go+3 −0', '+docs/cart.png'], 'its first three files');
 
-    await act(() => byTask('t3').one('.xi-head').dispatch('click'));
-    eq(byTask('t3').find('.choice-hint').map(x => x.textContent), [words.t('ans.onceHint')], 'what allow does');
-    eq(byTask('t3').find('.answer-hint').length, 1, 'what deny does');
-    await act(() => byTask('t3').one('.xi-head').dispatch('click'));
-    await act(() => byTask('t3').one('.xi-actions').one('button').dispatch('click'));
-    eq(calls.at(-1), ['run.answer', {run: 'r3', request: 'p1', allow: true}], 'allow in one press');
-
-    await act(() => root.find('.chip').find(c => c.textContent.startsWith('我派发的')).dispatch('click'));
-    eq(titles(root), ['Login rate limit'], 'only what the viewer dispatched');
-
-    await act(() => root.find('.going-row')[0].dispatch('click'));
-    eq(a.router.route.value.page, 'tasks', 'a running row opens its task');
+    await act(() => a.router.go({page: 'home', wait: 't5'}, {replace: true}));
+    await act(() => { r.store.inbox.value = r.store.inbox.value.filter(x => x.task === 't5'); });
+    eq(root.one('.wait-next').textContent, '这是最后一条 · 处理完回到「等你」', 'the last one');
+    await act(() => { r.store.inbox.value = []; });
+    await act(() => settle());
+    eq([a.router.route.value, a.toasts.list.value.map(x => x.text)], [{page: 'home'}, ['都处理完了']], 'the list, and why');
   } finally { form.value = 'desktop'; }
+});
+
+test('a notice opened on another page stands on the list: handled, the next takes its place, back is the list', async () => {
+  const r = await home();
+  const wire = {...r.wire, call: () => new Promise(() => {})};
+  const a = app(r, {url: '/?page=runs', wire});
+  form.value = 'phone';
+  try {
+    const root = await mount(a.vnode());
+    await act(() => a.router.open('#wait-t3'));
+    eq([a.history.entries(), root.one('.wait-name').one('b').textContent], [['/?page=runs', '/', '?wait=t3'], 'Refund webhook'], 'the list under it');
+    const allow = root.one('.wait-page').find('button').find(b => b.textContent.startsWith('允许'));
+    await act(() => allow.dispatch('click'));
+    await act(() => settle());
+    eq([a.history.entries(), root.one('.wait-name').one('b').textContent], [['/?page=runs', '/', '?wait=t5'], 'Login rate limit'], 'the next in its place');
+    await act(() => root.one('.wait-page').one('.back').dispatch('click'));
+    eq([a.router.route.value, root.find('.wait-page').length, root.find('.xi').length > 0], [{page: 'home'}, 0, true], 'the list');
+  } finally { form.value = 'desktop'; }
+});
+
+test('on a desktop a notice about what waits opens its item in the list', async () => {
+  const r = await home();
+  const a = app(r, {url: '/?wait=t3'});
+  const root = await mount(a.vnode());
+  await act(() => settle());
+  eq(a.router.route.value, {page: 'home'}, 'the address of the list');
+  const open = root.find('.xi').filter(x => x.classList.contains('open'));
+  eq(open.map(x => [x.one('.xi-head').getAttribute('aria-controls'), x.classList.contains('sel')]), [['expand-t3', true]], 'the item open and selected');
 });
 
 test('the sign-in pages draw in both forms and both languages', () => {

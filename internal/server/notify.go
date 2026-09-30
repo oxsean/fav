@@ -487,7 +487,7 @@ func (n *Notifier) message(user string, dev store.PushDevice, x noticeRow, item 
 			Link: "#task-" + x.Task, At: x.At}
 	}
 	m := PushMessage{V: 1, Server: n.o.Coord.ID(), Seq: x.Seq, Event: x.Event, Task: x.Task, Title: clipRunes(item.Title, 200),
-		Project: item.Project, N: len(item.Pending), Link: "#task-" + x.Task, At: x.At}
+		Project: item.Project, N: len(item.Pending), Link: "#wait-" + x.Task, At: x.At}
 	for _, p := range x.Items {
 		i := slices.IndexFunc(item.Pending, func(q task.Pending) bool { return q.ID == p.ID && q.Version == p.Version })
 		if i < 0 {
@@ -495,9 +495,6 @@ func (n *Notifier) message(user string, dev store.PushDevice, x noticeRow, item 
 		}
 		p = item.Pending[i]
 		m.Item, m.Kind = p.ID, p.Kind
-		if p.Run != "" {
-			m.Link += "/r-" + p.Run
-		}
 		if p.Kind == task.PendPermission && p.Request != "" {
 			if r, ok := n.o.Coord.Request(p.Run, p.Request); ok {
 				m.What = clipRunes(cmp.Or(r.Summary, r.Tool), 300)

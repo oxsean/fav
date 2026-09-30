@@ -1,5 +1,6 @@
-// router maps the address to a route and back. A route is {page, task?, run?, view?, event?, auth?}: run is the run
-// whose conversation the task page shows, or the run the runs page has open; event and auth are one-time: event (from #task-<id>/r-<run>/e-<event>) is
+// router maps the address to a route and back. A route is {page, task?, run?, view?, wait?, event?, auth?}: run is the run
+// whose conversation the task page shows, or the run the runs page has open; wait the task whose waiting item the home
+// shows on its own (a notice's #wait-<task>); event and auth are one-time: event (from #task-<id>/r-<run>/e-<event>) is
 // the step to scroll to, auth a fragment (#device-, #invite-, #signin-) the page acts on; neither is written back.
 import {signal} from '../vendor/signals-core.mjs';
 
@@ -24,7 +25,10 @@ export function parse(search = '', hash = '') {
     if (q.get('task') && q.get('run')) route.run = q.get('run');
   }
   if (page === 'runs' && q.get('run')) route.run = q.get('run');
+  if (page === 'home' && q.get('wait')) route.wait = q.get('wait');
   const frag = hash.replace(/^#/, '');
+  const wait = frag.match(/^wait-(.+)$/);
+  if (wait) return {page: 'home', wait: decodeURIComponent(wait[1])};
   const task = frag.match(/^task-([^/]+)(?:\/r-([^/]+))?(?:\/e-(.+))?$/);
   if (task) {
     route.page = 'tasks';
@@ -57,24 +61,50 @@ export function format(route) {
     if (route.view && route.view !== 'list') q.set('view', route.view);
   }
   if (route.page === 'runs' && route.run) q.set('run', route.run);
+  if (route.page === 'home' && route.wait) q.set('wait', route.wait);
   const s = q.toString();
   return s ? `?${s}` : '/';
 }
 
-// createRouter keeps the route in a signal; location and history are the page's (the tests pass their own).
+const isWait = link => /^#wait-./.test(link);
+
+// createRouter keeps the route in a signal; location and history are the page's (the tests pass their own). Every
+// address it pushes is marked as having one of the page's before it. A page opened on a notice's #wait- stands on the
+// list of what waits with the item pushed on top, so going back from it goes to the list.
 export function createRouter({location, history}) {
   const route = signal(parse(location.search, location.hash));
-  return {
+  const write = (url, replace) => {
+    if (replace) history.replaceState(history.state, '', url);
+    else history.pushState({back: true}, '', url);
+    route.value = parse(url === '/' ? '' : url.replace(/#.*/, ''), url.replace(/^[^#]*/, ''));
+  };
+  if (isWait(location.hash)) {
+    const wait = route.value.wait;
+    write('/', true);
+    write(format({page: 'home', wait}), false);
+  }
+  const router = {
     route,
     go(to, {replace = false} = {}) {
       const next = {...to};
       delete next.auth;
       delete next.event;
-      const url = format(next);
-      (replace ? history.replaceState : history.pushState).call(history, null, '', url);
-      route.value = parse(url === '/' ? '' : url, '');
+      write(format(next), replace);
+    },
+    // open goes to a notice's link: one about what waits puts the list of what waits under it.
+    open(link) {
+      if (!isWait(link)) return write('/' + link, false);
+      const r = route.value;
+      if (r.page !== 'home' || r.wait) write('/', false);
+      write(format(parse('', link)), false);
+    },
+    // back goes where the page came from, or, when it came from nowhere of the page's, to in its place.
+    back(to) {
+      if (history.state?.back) history.back();
+      else router.go(to, {replace: true});
     },
     // popped: the browser moved through its history.
     popped() { route.value = parse(location.search, location.hash); },
   };
+  return router;
 }

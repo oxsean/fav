@@ -1,12 +1,13 @@
 // Home is where the day is seen at a glance: what waits on the viewer (to answer, to accept, what failed), what runs
 // and waits for a machine, what ended, each machine's day and the last seven days. On a phone it keeps what waits, each
-// item a card row with one quick action that opens to be answered in place, and a short list of what runs; the
-// figures stay on the desktop.
-import {useState, useEffect} from '../vendor/hooks.mjs';
+// item a card row with one quick action, and a short list of what runs; a row opens the item's own page, where it is
+// answered and the next one follows. The figures stay on the desktop.
+import {useState, useEffect, useRef} from '../vendor/hooks.mjs';
 import {html, cx, usePhone, useWords, useSignalValue, useActions} from '../ui/base.js';
 import {Panel, Stat} from '../ui/panel.js';
 import {Button, Chip, Chips} from '../ui/controls.js';
 import {Status} from '../ui/status.js';
+import {Icon} from '../ui/icons.js';
 import {ExpandItem} from '../ui/expand.js';
 import {Modal} from '../ui/overlay.js';
 import {Spark, Bars, Timeline, Meter} from '../ui/charts.js';
@@ -17,6 +18,7 @@ import * as sel from '../core/select.js';
 import {tokens, money, duration, clock as hhmm, usageTokens} from '../core/format.js';
 import {unsure} from '../core/commands.js';
 import {code} from '../core/proto.js';
+import {noInbox} from '../core/store.js';
 import {why} from './words.js';
 
 // ⚠️ An item's waiting bar is full after two hours.
@@ -39,9 +41,18 @@ function endWords(w, r) {
 
 const who = r => (r ? `${r.agent} @ ${r.machine}` : '');
 
+// ⚠️ Where the phone keeps which of the viewer's roles the list shows.
+const asKey = 'tend-home-as';
+const asRoles = ['owner', 'approver', 'dispatcher'];
+const readAs = storage => { try { const v = storage?.getItem(asKey) || ''; return asRoles.includes(v) ? v : ''; } catch { return ''; } };
+const keepAs = (storage, v) => { try { v ? storage?.setItem(asKey, v) : storage?.removeItem(asKey); } catch {} };
+
 // Home: clock gives now in ms; fetchOutput(run) the last events of a run (run.output.page); changes is core/changes.js's
-// (a phone shows what a run to accept changed); onOpen(task) goes to it.
-export function Home({store, commands, toasts, clock = () => Date.now(), fetchOutput, changes, onOpen, onNavigate}) {
+// (a phone shows what a run to accept changed); onOpen(task) goes to it. wait is the task whose item has the page to
+// itself (the route's); onWait(task, {replace}) goes to one ('' to the list), onBack() leaves it; storage keeps the
+// roles shown.
+export function Home({store, commands, toasts, clock = () => Date.now(), fetchOutput, changes, onOpen, onNavigate, wait = '', onWait = () => {},
+  onBack = () => onWait(''), storage = null}) {
   const w = useWords();
   const {t, f} = w;
   const phone = usePhone();
@@ -52,7 +63,8 @@ export function Home({store, commands, toasts, clock = () => Date.now(), fetchOu
   const hidden = useSignalValue(commands.hidden);
   const aff = useSignalValue(store.affordances);
   useSignalValue(commands.pending);
-  const [as, setAs] = useState('');
+  const [as, setAsNow] = useState(() => (phone ? readAs(storage) : ''));
+  const setAs = v => { setAsNow(v); if (phone) keepAs(storage, v); };
   const [selected, setSelected] = useState('');
   const [open, setOpen] = useState('');
   const [gone, setGone] = useState({});
@@ -60,10 +72,11 @@ export function Home({store, commands, toasts, clock = () => Date.now(), fetchOu
   const st = store.state, now = clock();
 
   const shown = inbox.filter(x => !hidden.has(x.task));
-  const list = sel.waits(shown, as).map(x => {
+  const viewOf = x => {
     const run = x.run ? st.runs[x.run] : null;
     return {x, task: st.tasks[x.task], run, group: sel.waitGroup(x.reason), req: run?.requests?.[0]};
-  });
+  };
+  const list = sel.waits(shown, as).map(viewOf);
   const ids = list.map(v => v.x.task);
   const current = list.find(v => v.x.task === selected) || null;
 
@@ -106,6 +119,13 @@ export function Home({store, commands, toasts, clock = () => Date.now(), fetchOu
     return quickOf(t, v.req, {scope: allowsRun(v.req, aff.runs?.[v.run.id])}).map(q => ({label: q.label, kind: q.kind, go: () => answer(v, q.params)}));
   };
 
+  useEffect(() => {
+    if (phone || !wait) return;
+    setSelected(wait);
+    setOpen(wait);
+    onWait('', {replace: true});
+  }, [phone, wait]);
+
   useListKeys({ids, selected, onSelect: setSelected, onOpen: id => onOpen(id), onToggle: id => setOpen(open === id ? '' : id),
     onPick: (n, id) => { const v = list.find(x => x.x.task === id); const c = choices(v)[n - 1]; if (c && !busy(v)) c.go(); },
     pickLabel: 'home.answer', canPick: id => choices(list.find(x => x.x.task === id)).length > 0, active: !confirm});
@@ -147,15 +167,16 @@ export function Home({store, commands, toasts, clock = () => Date.now(), fetchOu
     if (canRetry(v)) return [{label: t('home.retry'), onClick: () => askRetry(v)}];
     return [{label: t('home.openShort'), onClick: () => onOpen(v.x.task)}];
   };
-  const item = v => html`<${ExpandItem} key=${v.x.task} id=${v.x.task} open=${open === v.x.task} selected=${selected === v.x.task}
-      onToggle=${() => { setSelected(v.x.task); setOpen(open === v.x.task ? '' : v.x.task); }}
+  const body = v => html`<${WaitBody} v=${v} busy=${busy(v)} scope=${allowsRun(v.req, aff.runs?.[v.run?.id])} gone=${v.req && gone[v.run?.id + '\n' + v.req.id]}
+    fetchOutput=${fetchOutput} changes=${changes} onOpen=${onOpen} onClose=${() => setOpen('')}
+    onDone=${canDone(v) ? () => markDone(v) : null} onRetry=${canRetry(v) ? () => askRetry(v) : null}
+    onAnswer=${p => answer(v, p)} onReply=${text => reply(v, text)} />`;
+  const item = v => html`<${ExpandItem} key=${v.x.task} id=${v.x.task} open=${!phone && open === v.x.task} selected=${selected === v.x.task} page=${phone}
+      onToggle=${phone ? () => onWait(v.x.task) : () => { setSelected(v.x.task); setOpen(open === v.x.task ? '' : v.x.task); }}
       state=${stateOf(v.group, v.x.reason)} title=${phone ? v.task?.title || v.x.title || v.x.task : title(v)} sub=${phone ? title(v) : sub(v)}
       age=${duration(now - Date.parse(v.x.since))} agePct=${(now - Date.parse(v.x.since)) / waitFull * 100}
       actions=${busy(v) ? [] : phone ? quickPhone(v) : quick(v)}>
-      <${WaitBody} v=${v} busy=${busy(v)} scope=${allowsRun(v.req, aff.runs?.[v.run?.id])} gone=${v.req && gone[v.run?.id + '\n' + v.req.id]} fetchOutput=${fetchOutput}
-        changes=${changes} onOpen=${onOpen} onClose=${() => setOpen('')}
-        onDone=${canDone(v) ? () => markDone(v) : null} onRetry=${canRetry(v) ? () => askRetry(v) : null}
-        onAnswer=${p => answer(v, p)} onReply=${text => reply(v, text)} />
+      ${!phone && open === v.x.task && body(v)}
     <//>`;
   const roles = [['', 'home.all'], ['owner', 'home.asOwner'], ['approver', 'home.asApprover'], ...(phone ? [['dispatcher', 'home.asDispatcher']] : [])];
   const chips = html`<${Chips} label=${t('home.waiting')}>
@@ -195,6 +216,12 @@ export function Home({store, commands, toasts, clock = () => Date.now(), fetchOu
   const dialog = confirm && html`<${Modal} title=${confirm.title} onClose=${() => setConfirm(null)}
     actions=${[{label: t('home.cancel'), onClick: () => setConfirm(null)}, {label: confirm.label, kind: 'primary',
       keyName: 'Mod+Enter', onClick: () => { setConfirm(null); confirm.go(); }}]}><p>${confirm.note}</p><//>`;
+
+  if (phone && wait) {
+    const pool = list.some(v => v.x.task === wait) ? list : sel.waits(shown, '').map(viewOf);
+    return html`<${WaitPage} wait=${wait} list=${pool} loaded=${inbox !== noInbox} title=${title} body=${body} toasts=${toasts}
+      onWait=${onWait} onBack=${onBack} onOpen=${onOpen} dialog=${dialog} />`;
+  }
 
   if (phone) {
     const running = going.filter(g => g.run.state !== 'queued');
@@ -271,6 +298,52 @@ export function Home({store, commands, toasts, clock = () => Date.now(), fetchOu
     </div>
     ${dialog}
   </div>`;
+}
+
+// headOf is what the page of one waiting item is titled by.
+const headOf = v => (v.group === 'answer' ? (isPermission(v.req) ? 'home.wait.permission' : 'home.wait.answer')
+  : v.group === 'accept' ? 'home.wait.accept' : 'home.wait.error');
+
+// WaitPage is one waiting item with the phone's screen to itself, as a notice or a row of the list opens it: what it
+// asks, the ways to answer, where it stands among what waits. Once it no longer waits, the one now at its place in the
+// list takes over (the address replaced, so going back still goes to the list); when none is left the list comes back.
+// An item that no longer waited when the page opened says so. list is what waits, loaded whether the inbox came yet;
+// title(v) and body(v) are the home's words and answer forms for an item.
+function WaitPage({wait, list, loaded, title, body, toasts, onWait, onBack, onOpen, dialog}) {
+  const {t, f} = useWords();
+  const at = list.findIndex(v => v.x.task === wait);
+  const seen = useRef({task: '', index: 0});
+  useEffect(() => {
+    if (!loaded) return;
+    if (at >= 0) { seen.current = {task: wait, index: at}; return; }
+    if (seen.current.task !== wait) return;
+    if (list.length) return onWait(list[Math.min(seen.current.index, list.length - 1)].x.task, {replace: true});
+    toasts.show({text: t('home.allDone')});
+    onBack();
+  });
+  const v = at >= 0 ? list[at] : null;
+  return html`<section class="page-over wait-page" aria-labelledby="wait-head">
+    <header class="page-head">
+      <button type="button" class="back" onClick=${onBack}><${Icon} name="back" />${t('home.waiting')}</button>
+      <h1 id="wait-head" class="ell">${v ? t(headOf(v)) : t('home.waiting')}</h1>
+      <span class="mono t-muted wait-pos">${v ? `${at + 1} / ${list.length}` : ''}</span>
+    </header>
+    <div class="page-body">
+      ${v ? html`
+        <div class="wait-title"><${Status} state=${stateOf(v.group, v.x.reason)} />
+          <span class="wait-name"><b>${v.task?.title || v.x.title || v.x.task}</b><span class="t-muted">${title(v)}</span></span></div>
+        ${body(v)}
+        <p class="lbl wait-next">${list.length > 1 ? f('home.nextLeft', list.length - 1) : t('home.nextNone')}</p>`
+      : loaded && html`<div class="wait-gone">
+        <p><b>${t('home.goneTitle')}</b></p><p class="t-muted">${t('home.goneNote')}</p>
+        <div class="wait-foot">
+          ${list.length > 0 && html`<${Button} kind="primary" onClick=${() => onWait(list[0].x.task, {replace: true})}>${t('home.next')}<//>`}
+          <${Button} onClick=${() => onOpen(wait)}>${t('home.open')}<//>
+        </div>
+      </div>`}
+    </div>
+    ${dialog}
+  </section>`;
 }
 
 // WaitBody is an open waiting item: what it asks or how it failed, what it just did, and the ways to answer: the

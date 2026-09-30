@@ -63,7 +63,7 @@ export function App({store, commands, toasts, wire, http, router, keys, nav, pre
   const changes = useMemo(() => given || createChanges({wire}), [wire, given]);
   const drafts = useMemo(() => createDrafts(), []);
   const agentDefs = useMemo(() => givenDefs || createAgentDefs({wire}), [wire, givenDefs]);
-  const go = to => router.go(to);
+  const go = (to, o) => router.go(to, o);
   const phone = usePhone();
   useNotices({store, prefs, notices, doc, active: !phone, onOpen: task => go({page: 'tasks', task})});
   useEffect(() => push.clear(inbox), [inbox]);
@@ -91,8 +91,11 @@ export function App({store, commands, toasts, wire, http, router, keys, nav, pre
     {label: f('app.density', t('density.' + density)), onClick: prefs.cycleDensity},
     {label: t('app.logout'), kind: 'danger', onClick: onLogout},
   ];
+  // ⚠️ the phone's list and a waiting item's page are separate homes: one home switching between them in place could
+  // leave the page's old section behind when a notice opened it early on the me page.
   const page = route.page === 'home'
-    ? html`<${Home} store=${store} commands=${commands} toasts=${toasts} clock=${clock} fetchOutput=${fetchOutput} changes=${changes} onOpen=${onOpen} onNavigate=${onNavigate} />`
+    ? html`<${Home} key=${phone && route.wait ? 'wait' : 'list'} store=${store} commands=${commands} toasts=${toasts} clock=${clock} fetchOutput=${fetchOutput} changes=${changes} onOpen=${onOpen} onNavigate=${onNavigate}
+      wait=${route.wait || ''} onWait=${(task, o) => go(task ? {page: 'home', wait: task} : {page: 'home'}, o)} onBack=${() => router.back({page: 'home'})} storage=${storage} />`
     : route.page === 'tasks'
       ? html`<${Tasks} store=${store} commands=${commands} toasts=${toasts} wire=${wire} router=${router} session=${session} clock=${clock} storage=${storage}
         intent=${intent} prefs=${prefs} copy=${copy} changes=${changes} drafts=${drafts} />`

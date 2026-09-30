@@ -294,7 +294,7 @@ func TestAnUndeliveredOutboxGoesOutAfterARestart(t *testing.T) {
 	}
 	m, h := got[0].msg, got[0].headers
 	want := PushMessage{V: 1, Server: "c_test", Seq: 812, Event: coord.NotifyTaskWaiting, Task: "t_1", Item: "r_1/q1", Kind: task.PendPermission,
-		Title: "drop the old table", What: "psql -c 'DROP TABLE orders_old'", Project: "infra", N: 1, Link: "#task-t_1/r-r_1", At: n0}
+		Title: "drop the old table", What: "psql -c 'DROP TABLE orders_old'", Project: "infra", N: 1, Link: "#wait-t_1", At: n0}
 	if !reflect.DeepEqual(m, want) {
 		t.Fatalf("the message\n got %+v\nwant %+v", m, want)
 	}

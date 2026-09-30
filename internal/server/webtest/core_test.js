@@ -94,6 +94,9 @@ test('the router maps addresses to routes and back', () => {
     ['', '#signin-not_admitted?provider=github&username=u&verified=1',
       {page: 'home', auth: {kind: 'signin', value: 'not_admitted', params: {provider: 'github', username: 'u', verified: '1'}}}, '/'],
     ['', '#other-x', {page: 'home'}, '/'],
+    ['?wait=t%2F9', '', {page: 'home', wait: 't/9'}, '?wait=t%2F9'],
+    ['?page=tasks&wait=t1', '', {page: 'tasks', view: 'list'}, '?page=tasks'],
+    ['?page=tasks', '#wait-t%2F9', {page: 'home', wait: 't/9'}, '?wait=t%2F9'],
   ];
   for (const [search, hash, route, url] of cases) {
     eq(parse(search, hash), route, `${search}${hash}`);
@@ -114,6 +117,48 @@ test('the router pushes addresses and follows the history', () => {
   location.hash = '';
   r.popped();
   eq(r.route.value, {page: 'me'}, 'popped');
+});
+
+// fakeHistory is a page's address and history: the entries, where it stands, and the state of each.
+function fakeHistory(search = '', hash = '') {
+  const location = {search, hash};
+  const entries = [{url: search + hash, state: null}];
+  let at = 0;
+  const set = url => { const [q, h = ''] = url.split('#'); location.search = q === '/' ? '' : q; location.hash = h ? '#' + h : ''; };
+  const history = {
+    get state() { return entries[at].state; },
+    pushState(state, _, url) { entries.splice(at + 1); entries.push({url, state}); at++; set(url); },
+    replaceState(state, _, url) { entries[at] = {url, state}; set(url); },
+    back() { at--; set(entries[at].url); },
+  };
+  return {location, history, urls: () => entries.map(e => e.url), at: () => at};
+}
+
+test('a notice lands on what waits, with the list of what waits behind it', () => {
+  const h = fakeHistory('', '#wait-t1');
+  const r = createRouter(h);
+  eq([r.route.value, h.urls(), h.at()], [{page: 'home', wait: 't1'}, ['/', '?wait=t1'], 1], 'a page opened on it');
+  r.back({page: 'home'});
+  r.popped();
+  eq([r.route.value, h.at()], [{page: 'home'}, 0], 'back to what waits');
+
+  const open = fakeHistory('?page=runs');
+  const o = createRouter(open);
+  o.open('#wait-t2');
+  eq([o.route.value, open.urls()], [{page: 'home', wait: 't2'}, ['?page=runs', '/', '?wait=t2']], 'a page open elsewhere');
+  o.open('#wait-t3');
+  eq(open.urls(), ['?page=runs', '/', '?wait=t2', '/', '?wait=t3'], 'from one it waits on to another');
+  const home = fakeHistory('');
+  const m = createRouter(home);
+  m.open('#wait-t2');
+  eq(home.urls(), ['', '?wait=t2'], 'a page on what waits');
+  m.open('#task-t9');
+  eq([m.route.value.task, home.urls().at(-1)], ['t9', '/#task-t9'], 'another link');
+
+  const fresh = fakeHistory('?wait=t1');
+  const f = createRouter(fresh);
+  f.back({page: 'home'});
+  eq([f.route.value, fresh.urls()], [{page: 'home'}, ['/']], 'nothing of the page behind it: back goes to the list in its place');
 });
 
 test('words: one owner per key, both languages, the same verbs', async () => {
