@@ -70,6 +70,9 @@ register('me', {
   'me.unlinkTitle': ['解除和 %s 的关联？', 'Unlink %s?'],
   'me.unlinkNote': ['之后不能再用它登录这个账号，再用它登录会按准入规则当成另一个人；工单里指派给它的 issue 也不再归你。已经登录的浏览器会话不受影响。', 'It no longer signs you in, and signing in with it again goes by the admission rules as someone else; issues assigned to it are no longer yours. Browser sessions already signed in stay.'],
   'me.unlinkedDone': ['已解除和 %s 的关联', '%s is unlinked'],
+  'me.trackers': ['工单账号', 'Tracker accounts'],
+  'me.trackersNote': ['指派给你的 issue、进度评论里的 @ 按这些账号对上你', 'Issues assigned to you and mentions in progress comments find you by these'],
+  'me.trackerUnmatched': ['没对上：把在这个地址登录的账号关联过来', 'Not matched: link the account you sign in with here'],
   'me.tokens': ['token', 'Tokens'], 'me.tokensNote': ['给 CLI 和 TUI 用；值只在新建时显示一次', 'For the CLI and the TUI; the value shows only when made'],
   'me.noTokens': ['还没有 token：tend login 会建一个，或在这里新建', 'No token yet: tend login makes one, or make one here'],
   'me.newToken': ['新建 token', 'New token'], 'me.tokenName': ['名称', 'Name'], 'me.tokenNameNote': ['让你认得出它用在哪，最多 64 个字符', 'So you know where it is used; up to 64 characters'],
@@ -329,6 +332,21 @@ function Logins({logins, identities, onLink, onUnlink}) {
 
 // facts are what the page knows of a credential's use: the browser it signed in with (a session), when it was made,
 // when and from where it was last used, when it ends.
+const trackerNames = {github: 'GitHub', gitea: 'Gitea', gitlab: 'GitLab'};
+
+// Trackers are the trackers of the viewer's projects and who they are on each (GET /api/me/trackers).
+function Trackers({accounts}) {
+  const {t} = useWords();
+  if (!accounts.length) return null;
+  return html`<${Panel} title=${t('me.trackers')} actions=${html`<span class="t-muted">${t('me.trackersNote')}</span>`}>
+    <ul class="me-rows">
+      ${accounts.map(a => html`<li class="me-row" key=${a.kind + a.base}><span class=${cx('st', a.login ? 's-success' : 's-muted')} aria-hidden="true">${a.login ? '✓' : '·'}</span>
+        <span class="me-main"><b>${trackerNames[a.kind] || a.kind}</b>${a.login ? html`<span class="mono">${a.login}</span>` : html`<span class="t-warning">${t('me.trackerUnmatched')}</span>`}</span>
+        <span class="mono t-muted me-side">${a.base.replace(/^https?:\/\//, '')}</span></li>`)}
+    </ul>
+  <//>`;
+}
+
 const facts = (w, c) => [browserOf(c.agent), w.f('me.madeAt', when(c.created)),
   !c.last_used ? w.t('me.unused') : c.last_ip ? w.f('me.usedFrom', when(c.last_used), c.last_ip) : w.f('me.usedAt', when(c.last_used)),
   c.expires && w.f('me.until', when(c.expires))].filter(Boolean).join(' · ');
@@ -426,6 +444,7 @@ export function Me({session, http, prefs, toasts, router, notices, tab, platform
   const [identities, setIdentities] = useState([]);
   const [logins, setLogins] = useState([]);
   const [webhook, setWebhook] = useState(null);
+  const [accounts, setAccounts] = useState([]);
   const [presets, setPresets] = useState([]);
   const [modal, setModal] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -437,6 +456,7 @@ export function Me({session, http, prefs, toasts, router, notices, tab, platform
     http.identities().then(setIdentities, () => {});
     http.logins().then(setLogins, () => {});
     http.webhook().then(setWebhook, () => {});
+    http.trackerAccounts().then(setAccounts, () => {});
     http.presets().then(setPresets, () => {});
   }, [phone]);
 
@@ -506,6 +526,7 @@ export function Me({session, http, prefs, toasts, router, notices, tab, platform
       </div>
       <div class="me-col">
         <${Logins} logins=${logins} identities=${identities} onLink=${() => linking(tab, now())} onUnlink=${i => setModal({kind: 'unlink', id: i})} />
+        <${Trackers} accounts=${accounts} />
         <${Tokens} tokens=${tokens} onNew=${() => setModal({kind: 'new'})} onRevoke=${c => setModal({kind: 'revoke', cred: c})} />
         <${Sessions} sessions=${sessions} tokens=${tokens} onEnd=${c => setModal({kind: 'end', cred: c})} onEndOthers=${() => setModal({kind: 'others'})} />
       </div>

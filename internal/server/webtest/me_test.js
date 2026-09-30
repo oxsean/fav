@@ -56,6 +56,7 @@ function fakeHTTP({refuse = []} = {}) {
     webhook: () => ans('GET /api/me/webhook').then(v => v?.url || ''),
     setWebhook: url => ans('POST /api/me/webhook', {url}),
     testWebhook: () => ans('POST /api/me/webhook/test'),
+    trackerAccounts: () => ans('GET /api/me/trackers'),
     presets: () => ans('GET /theme/presets.json'),
     logout: () => ans('POST /logout'),
   };
@@ -173,6 +174,8 @@ test('the page draws in both forms and both languages, styled and worded', async
       for (const k of ['me.look', 'me.notices', 'me.logins', 'me.tokens', 'me.sessions']) ok(text.includes(words.t(k)), `${lang}: ${k}`);
       ok(text.includes('bo@example.com · ' + words.t('role.member') + ' · ' + words.f('me.joined', '8-03')), `${lang}: who, and since when`);
       ok(text.includes(words.f('me.viaToken', 'login:tend on mba')), `${lang}: a session a token signed in`);
+      const trackers = a.el.find('.me-row').filter(r => r.textContent.endsWith('github.com') || r.textContent.endsWith('git.example.com'));
+      eq(trackers.map(r => r.textContent.includes(words.t('me.trackerUnmatched'))), [false, true], `${lang}: matched on one tracker, not on the other`);
       ok(text.includes(words.f('me.viaDevice', 'Android')), `${lang}: a session another device allowed`);
       eq(rowOf(a.el, words.t('me.thisBrowser')).find('button').length, 0, `${lang}: this browser signs out at the top`);
       eq(a.el.find('.me-link').map(l => [l.textContent, l.getAttribute('href')]), [[words.t('me.link'), '/auth/github/start?link=1']], `${lang}: only what is not linked links`);

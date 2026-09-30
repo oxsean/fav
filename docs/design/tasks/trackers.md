@@ -43,7 +43,7 @@
 - issue 的正文或评论变了，就记一个新版本（`pending`），任务进 `waiting: source_changed`（「需求有变化」），由人「采用新版本」（标题和任务书换成新版本）或「维持本轮范围」（这个版本不再提起）；有未决变化时不能标完成。
 - issue 在外面被关掉了，需求不自动取消，而是进 `waiting: source_closed`，原因「issue 已关闭」，由人「继续做」或取消任务。tend 自己关的不算：同步 worker 报给协调器的 `closed` 不含 tend 自己那次还在的关单（见下文「回写」），所以 `Source.closed` 只表示在外面关的。
 - 事件：`task_created`（带 source）、`task_sourced`、`task_source_acked`。
-- **指派人对应**：issue 的指派人按「在这个 tracker 的地址上登录过的账号」对应到成员（`identities.issuer` 与绑定的地址一致、用户名相同、只有一个；GitHub 登录的 issuer 是 `https://github.com`，GitLab、Gitea 走 OIDC，issuer 就是它们的地址）；对应不上时归项目负责人并打 `unmapped_assignee`，之后对应上了再改回（见 [team.md](team.md)「人在任务里」）。`tracker_accounts` 显式对应表未实现。
+- **指派人对应**：issue 的指派人按「在这个 tracker 的地址上登录过的账号」对应到成员（`identities.issuer` 与绑定的地址一致、用户名相同、只有一个；GitHub 登录的 issuer 是 `https://github.com`，GitLab、Gitea 走 OIDC，issuer 就是它们的地址）；对应不上时归项目负责人并打 `unmapped_assignee`，之后对应上了再改回（见 [team.md](team.md)「人在任务里」）。`tracker_accounts` 显式对应表未实现。每个人在「我」页的「工单账号」里看到自己所在项目的工单系统和按这条规则对上的用户名（`GET /api/me/trackers`，按地址去重）。
 
 ## 回写
 

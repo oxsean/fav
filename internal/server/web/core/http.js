@@ -97,6 +97,9 @@ export function createHTTP({fetch = (...a) => globalThis.fetch(...a)} = {}) {
     // webhook is the caller's personal webhook ('' for none); setWebhook changes it ('' removes it).
     webhook: async () => (await ask('GET', '/api/me/webhook'))?.url || '',
     setWebhook: url => ask('POST', '/api/me/webhook', {url}),
+    // trackerAccounts are the trackers of the caller's projects, one per address, and who they are there: [{kind, base,
+    // login?}].
+    trackerAccounts: async () => (await ask('GET', '/api/me/trackers')) || [],
     // testWebhook posts a test to the saved webhook → {ok, status?}: the HTTP status it answered, or unreachable.
     testWebhook: () => ask('POST', '/api/me/webhook/test'),
     // presets are the built-in skins, the default first: [{name, input: {base, accent}}].

@@ -64,6 +64,7 @@
       "linked": "2026-09-12T10:00:00Z", "last_login": "2026-09-30T08:55:00Z"},
     {"provider": "gitea", "issuer": "https://git.example.com", "subject": "17", "username": "bo", "linked": "2026-09-20T09:00:00Z"}
   ],
+  "GET /api/me/trackers": [{"kind": "github", "base": "https://github.com", "login": "bo-lin"}, {"kind": "gitea", "base": "https://git.example.com"}],
   "GET /api/me/webhook": {"url": "https://ntfy.example.com/tend-bo"},
   "GET /auth/logins": [{"name": "github", "display": "GitHub"}, {"name": "oidc", "display": "Company SSO"}],
   "GET /theme/presets.json": [

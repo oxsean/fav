@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -412,5 +413,43 @@ func TestEachTaskSaysHowItsIssueSyncs(t *testing.T) {
 	}
 	if list, _ := r.s.TaskStates("p2"); len(list) != 0 {
 		t.Fatalf("another project's: %+v", list)
+	}
+}
+
+// The Me page's tracker accounts are the trackers of the caller's own projects, one per address, each with the
+// username they signed in with there; another project's tracker is not theirs to see.
+func TestTheTrackerAccountsAreThoseOfTheCallersProjects(t *testing.T) {
+	r := newRig(t)
+	ann, annC := r.member("Ann")
+	must(t, r.team.Link(ann.ID, store.Identity{Provider: "github", Issuer: "https://github.com", Subject: "9", Username: "ann-gh"}))
+	create := func(id string, members map[string]string) {
+		b, _ := json.Marshal(coord.ProjectCreate{ID: id, Name: id, Owner: store.LocalUser})
+		if _, err := r.c.HandlerFor(coord.Owner)(context.Background(), &wire.Request{Method: coord.MProjectCreate, CommandID: "p-" + id, Params: b}); err != nil {
+			t.Fatal(err)
+		}
+		for u, role := range members {
+			b, _ := json.Marshal(task.MemberSet{Project: id, User: u, Role: role})
+			if _, err := r.c.HandlerFor(coord.Owner)(context.Background(), &wire.Request{Method: coord.MProjectMember, CommandID: "m-" + id + u, Params: b}); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	create("p1", map[string]string{ann.ID: task.RoleReader})
+	create("p2", nil)
+	for _, x := range []store.Tracker{{Project: "p1", Kind: "github", Base: "https://github.com/", Repo: "a/one"},
+		{Project: "p1", Kind: "github", Base: "https://github.com", Repo: "a/two"},
+		{Project: "p1", Kind: "gitea", Base: "https://git.example.com", Repo: "a/three"},
+		{Project: "p2", Kind: "gitlab", Base: "https://gitlab.com", Repo: "b/four"}} {
+		x.Token, x.HookSecret, x.Settings = []byte("sealed"), []byte("sealed"), "{}"
+		_, err := r.team.AddTracker(x)
+		must(t, err)
+	}
+	var got []TrackerAccount
+	if code := r.api(annC, "GET", "/api/me/trackers", nil, &got); code != http.StatusOK {
+		t.Fatal(code)
+	}
+	want := []TrackerAccount{{Kind: "github", Base: "https://github.com", Login: "ann-gh"}, {Kind: "gitea", Base: "https://git.example.com"}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("%+v", got)
 	}
 }

@@ -48,6 +48,7 @@ func (s *Server) trackerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/trackers/issues", s.api(s.trackerIssues))
 	mux.HandleFunc("GET /api/trackers/preview", s.api(s.trackerPreview))
 	mux.HandleFunc("GET /api/trackers/tasks", s.api(s.trackerTasks))
+	mux.HandleFunc("GET /api/me/trackers", s.api(s.myTrackers))
 	mux.HandleFunc("POST /hooks/{id}", s.trackerHook)
 }
 
@@ -92,6 +93,46 @@ func (s *Server) managed(w http.ResponseWriter, c caller, id string) (store.Trac
 		return store.Tracker{}, false
 	}
 	return x, true
+}
+
+// TrackerAccount is a tracker the caller's projects are bound to, by its address, and who they are there: the
+// username they signed in with at that address ("" when they have not), which is how its issues' assignees and the
+// progress comment's mentions come to them.
+type TrackerAccount struct {
+	Kind  string `json:"kind"`
+	Base  string `json:"base"`
+	Login string `json:"login,omitempty"`
+}
+
+// myTrackers are the trackers of the projects the caller is in, one per address.
+func (s *Server) myTrackers(w http.ResponseWriter, r *http.Request, c caller) {
+	xs, err := s.team().Trackers()
+	if err != nil {
+		apiError(w, http.StatusInternalServerError, "internal")
+		return
+	}
+	in := map[string]bool{}
+	s.opt.Coord.Read(func(st *task.State) {
+		for id, p := range st.Projects {
+			in[id] = p.Role(c.user.ID) != ""
+		}
+	})
+	out := []TrackerAccount{}
+	seen := map[string]bool{}
+	for _, x := range xs {
+		key := x.Kind + " " + strings.TrimRight(x.Base, "/")
+		if !in[x.Project] || seen[key] {
+			continue
+		}
+		seen[key] = true
+		login, err := s.team().LoginOf(c.user.ID, x.Base)
+		if err != nil {
+			apiError(w, http.StatusInternalServerError, "internal")
+			return
+		}
+		out = append(out, TrackerAccount{Kind: x.Kind, Base: strings.TrimRight(x.Base, "/"), Login: login})
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 func (s *Server) listTrackers(w http.ResponseWriter, r *http.Request, c caller) {

@@ -381,6 +381,7 @@ func TestPageAPIAnswersAreTheServersShapes(t *testing.T) {
 				Token string `json:"token"`
 			})
 		},
+		"GET /api/me/trackers": func() any { return new([]TrackerAccount) },
 		"POST /api/me/webhook/test": func() any {
 			return new(struct {
 				OK     bool   `json:"ok"`
