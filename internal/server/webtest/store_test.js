@@ -67,15 +67,18 @@ test('no_briefs: a brief is fetched when asked for; the watch resumes after the 
 test('run output: one watch per run, keyed events replaced, a gap marked, the last release cancels', async () => {
   const {srv, store} = rig();
   const held = [];
-  let seen, writing, r2;
+  let seen, writing, running, r2;
   await srv.play('output', {
     hold() { held.push(store.output('r1'), store.output('r1')); },
     writing() { writing = held[0].events.value.filter(e => e.temp).map(e => [e.key, e.text]); },
+    running() { running = held[0].events.value.filter(e => e.temp).map(e => [e.key, e.title]); },
     gap() { seen = held[0].events.value.map(e => [e.id || '', e.key || '', e.text || e.tool]); r2 = store.output('r2'); },
     release() { held.pop().release(); },
   });
   eq(writing, [['item_7', '正在写这一句'], ['item_8', '想一下']], 'two being written');
-  eq(seen, [['a1:9:0:0', '', '先跑一遍测试。'], ['a1:9:40:0', 'item_7', '正在写这一句。'], ['a1:9:90:0', '', 'Bash']], 'r1: the one without text is gone');
+  eq(running, [['p:exec-1', 'go vet ./...']], 'a command running without output yet is not taken away');
+  eq(seen, [['a1:9:0:0', '', '先跑一遍测试。'], ['a1:9:40:0', 'item_7', '正在写这一句。'], ['a1:9:90:0', '', 'Bash'], ['a1:9:120:0', 'p:exec-1', 'commandExecution']],
+    'r1: the one without text is gone, the finished command in the running one\'s place');
   eq(r2.events.value, [{kind: 'gap', from: {file: 'b2:1', off: 0}, to: {file: 'b2:1', off: 900}}], 'r2');
   eq([store.open('r1'), store.open('r2')], [0, 1], 'holders');
 });
@@ -95,6 +98,11 @@ test('a keyed event replaces or removes its own after earlier pages came in befo
   eq(texts(), ['earlier', 'first'], 'removed');
   push('run.output', {events: [{kind: 'say', temp: true, key: 'k', text: 'again'}]});
   eq(texts(), ['earlier', 'first', 'again'], 'a key removed can come back');
+  push('run.output', {events: [{kind: 'cmd', temp: true, key: 'c', title: 'make'}]});
+  push('run.output', {events: [{kind: 'cmd', temp: true, key: 'c', title: 'make', output: 'cc a.c\n'}]});
+  eq(o.events.value.at(-1).output, 'cc a.c\n', 'a command with a title and no text stays and is replaced');
+  push('run.output', {events: [{kind: 'cmd', temp: true, key: 'c'}]});
+  eq(texts(), ['earlier', 'first', 'again'], 'without text or title it goes');
 });
 
 test('a push the state cannot take starts over from a snapshot', async () => {

@@ -96,7 +96,6 @@ func TestCodexDeltasMakeTheItemsBeingWrittenUntilTheyComplete(t *testing.T) {
 		delta("item/reasoning/textDelta", "rs_1", " more", 0),
 		delta("item/agentMessage/delta", "msg_1", "我将", 0),
 		delta("item/agentMessage/delta", "msg_1", "执行", 0),
-		delta("item/commandExecution/outputDelta", "call_1", "out\n", 0),
 		delta("item/plan/delta", "plan_1", "step", 0),
 	} {
 		if !p.take([]byte(l)) {
@@ -106,7 +105,7 @@ func TestCodexDeltasMakeTheItemsBeingWrittenUntilTheyComplete(t *testing.T) {
 	got := partialsOf(t, p)
 	want := []Partial{{Key: "rs_1", Kind: output.KindThink, Src: "rs_1", Text: "first\nsecond"}, {Key: "msg_1", Kind: output.KindSay, Src: "msg_1", Text: "我将执行"}}
 	if len(got) != 2 || got[0] != want[0] || got[1] != want[1] {
-		t.Fatalf("the summary over the raw reasoning, the message; no command output: %+v", got)
+		t.Fatalf("the summary over the raw reasoning, the message; no plan: %+v", got)
 	}
 	if p.take([]byte(`{"id":7,"method":"x/delta","params":{"itemId":"i"}}`)) {
 		t.Fatal("a request is not a delta")
@@ -118,6 +117,62 @@ func TestCodexDeltasMakeTheItemsBeingWrittenUntilTheyComplete(t *testing.T) {
 	p.done([]byte(`{"method":"turn/completed","params":{"turn":{"status":"completed"}}}`))
 	if got := partialsOf(t, p); got != nil {
 		t.Fatalf("the turn's end ends them all: %+v", got)
+	}
+}
+
+func TestACodexCommandIsListedFromItsStartWithTheLastLinesOfItsOutput(t *testing.T) {
+	dir := t.TempDir()
+	p := newPartials(dir)
+	defer p.close()
+	out := func(item, d string) string {
+		return fmt.Sprintf(`{"method":"item/commandExecution/outputDelta","params":{"threadId":"th","turnId":"tu","itemId":%q,"delta":%q}}`, item, d)
+	}
+	p.done([]byte(`{"method":"item/started","params":{"item":{"type":"commandExecution","id":"exec-1","command":"/bin/zsh -lc 'go test ./...'","status":"inProgress","aggregatedOutput":null}}}`))
+	p.done([]byte(`{"method":"item/started","params":{"item":{"type":"agentMessage","id":"msg_1","text":""}}}`))
+	want := Partial{Key: "exec-1", Kind: output.KindCmd, Src: "exec-1", Command: "/bin/zsh -lc 'go test ./...'"}
+	if got := partialsOf(t, p); len(got) != 1 || got[0] != want {
+		t.Fatalf("a command runs before it prints anything; other items wait for their text: %+v", got)
+	}
+	for _, d := range []string{"ok  a\n", "ok  b\nok  c\n", "ok  d\n--- FA", "IL: e"} {
+		if !p.take([]byte(out("exec-1", d))) {
+			t.Fatal("command output stays out of the log")
+		}
+	}
+	p.take([]byte(`{"method":"item/agentMessage/delta","params":{"itemId":"msg_1","delta":"跑着"}}`))
+	want.Text, want.Bytes = "ok  c\nok  d\n--- FAIL: e", len("ok  a\nok  b\nok  c\nok  d\n--- FAIL: e")
+	if got := partialsOf(t, p); len(got) != 2 || got[0] != want || got[1].Key != "msg_1" {
+		t.Fatalf("the last %d lines, the one being written among them, and every byte counted: %+v", output.RunningTail, got)
+	}
+	p.take([]byte(out("exec-1", "\n")))
+	if got := partialsOf(t, p); got[0].Text != "ok  c\nok  d\n--- FAIL: e\n" {
+		t.Fatalf("a line ended keeps its newline: %q", got[0].Text)
+	}
+	p.take([]byte(out("exec-2", strings.Repeat("字", maxPartial))))
+	if got := partialsOf(t, p); len(got) != 3 || got[2].Command != "" || !strings.HasPrefix(got[2].Text, "…") || len(got[2].Text) > maxPartial+len("…") {
+		t.Fatalf("output of a command whose start was not seen; a long line is sent as its tail: %d", len(got))
+	}
+	p.done([]byte(`{"method":"item/completed","params":{"item":{"type":"commandExecution","id":"exec-1","command":"go test","exitCode":1,"aggregatedOutput":"…"}}}`))
+	if got := partialsOf(t, p); len(got) != 2 || got[0].Key != "msg_1" || got[1].Key != "exec-2" {
+		t.Fatalf("the completed command leaves: %+v", got)
+	}
+	p.done([]byte(`{"method":"turn/completed","params":{"turn":{"status":"interrupted"}}}`))
+	if got := partialsOf(t, p); got != nil {
+		t.Fatalf("the turn's end ends the commands too: %+v", got)
+	}
+}
+
+func TestTheTailOfACommandsOutput(t *testing.T) {
+	for _, c := range []struct{ in, want string }{
+		{"", ""},
+		{"a", "a"},
+		{"a\nb\nc\nd", "b\nc\nd"},
+		{"a\nb\nc\nd\n", "b\nc\nd\n"},
+		{"a\nb\n", "a\nb\n"},
+		{"a\n\n\n\n", "\n\n\n"},
+	} {
+		if got := cmdTail(c.in); got != c.want {
+			t.Errorf("cmdTail(%q) = %q, want %q", c.in, got, c.want)
+		}
 	}
 }
 

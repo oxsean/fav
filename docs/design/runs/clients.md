@@ -39,13 +39,13 @@ tend journal verify [--json] | repair [-y]
 - Tasks 视图：第 5 个 tab（`5`）。一行一个 task：状态图标、标题、最近 run 的状态和机器；筛选行位置显示谁在协调、每台机器的连接和负载。需要你的 task 排最前（等得最久的在前、图标换成警示），然后是未完成、已结束；标题带「N 个等你处理」。
 - 键：`w` 新建 task（表单：标题、目录、机器、档案、任务书）；`e` 编辑；`x` 标完成 / 重新打开；Enter 打开 task 对话框：`跑起来`（选机器、档案，Enter 执行）、`停止`、`放弃`（已开始的 run）、`接手`、`查看会话`；`X` 停止当前 run（确认）；`Space` 到会话视图看最近一次 run 的对话（现有 probe）。表单和运行对话框的键在键表里（scope `inTaskForm` / `inTaskRun`），← → 改选项，Space 不改。
 - 编辑表单打开前先 `task.get` 取整条 task，保存时只提交改过的字段；标题上限 1 KiB，任务书 256 KiB。模式二的新建表单不预填本机目录。
-- 右栏：任务书、最近 4 次 run、最近一次 run 的输出（`run.output.watch` 推来的事件，经 `render.RunOutputLines` 读成可读的行再 `render.Sanitize`：前缀 `> ` 用户、`+ ` 工具调用、`$ ` 命令、`~ ` 改动的文件、`? ` 提问和审批、`- ` 警告、`= ` 结果、`! ` 错误和失败的调用的最后一行；思考、系统行和成功的结果不显示；摘要略掉的行数、文件数、问题数由 i18n 写出；原始行用 `tend run logs` 看）；最近一次 run 下面是原因（`render.RunReason` + 原话）、提问或进展、下一步（`render.RunHint`）。
+- 右栏：任务书、最近 4 次 run、最近一次 run 的输出（`run.output.watch` 推来的事件，经 `render.RunOutputLines` 读成可读的行再 `render.Sanitize`：前缀 `> ` 用户、`+ ` 工具调用、`$ ` 命令、`~ ` 改动的文件、`? ` 提问和审批、`- ` 警告、`= ` 结果、`! ` 错误和失败的调用的最后一行；思考、系统行和成功的结果不显示；正在写的消息照写，正在写的思考只写一行「思考中…」，codex 还在跑的命令写 `$ 命令（运行中）`，下面缩进露最后 3 行；摘要略掉的行数、文件数、问题数由 i18n 写出；原始行用 `tend run logs` 看）；最近一次 run 下面是原因（`render.RunReason` + 原话）、提问或进展、下一步（`render.RunHint`）。
 - 状态文字后面带 attention（等你回复 / 等你批准 / 长时间没有输出），图标换成警示。
 - 运行对话框打开和改选项时调 `run.preview`，在目录下面列出检查结果、blocker（红）和 notes；不拦 Enter。
 - 作答：运行中的 run 有请求时 task 对话框的主按钮是「回答」，打开回答对话框（scope `inTaskRun`）：权限请求显示工具和摘要，按钮「允许」（主）/「拒绝」/ 取消；提问每个问题一个选项选择器（← → 改选项，Tab 在问题和按钮间移动），按钮「回答」（主）/「不回答」/ 取消。running 的 stream run 另有「发消息」按钮，打开和回复同样的多行输入框，发 `run.send`。右栏和对话框列出等着的请求和最近两条消息的状态；运行中的 run 显示最后一句话，结束后显示用量。
 - 回复：run 在等时 task 对话框的主按钮是「回复」，别的已结束且有会话的 run 也有「回复」按钮；回复框是多行输入（scope `inTaskForm`：Enter 换行、Ctrl+S 发送、Tab 到按钮、Esc 放弃），发 `run.continue`。
 - 接手：打开该会话的恢复对话框；run 还在跑时对话框提示先停（`resume.check.running_run`）。
-- 状态：视图打开时连协调器（连 socket，没人持锁就自己持锁），开 `state.watch`（带任务书，搜索要查），推送由 `coord.StateFold` 折进状态（见 [coordinator.md](coordinator.md)「订阅」）：`lagged` 按副本的 seq 重开，副本接不上时不带 `after_seq` 重开。机器由 `machines.watch` 推来（协调器没有这个方法时读一次 `machine.list`），agent 列表每次连上读一次；视图没有定时轮询。选中任务的最近一次 run 和「盯在旁边」的 run 各开一个 `run.output.watch`，不再显示的就取消；带 `key` 的事件原地替换前一条（agent 正在写的消息就这样一段段长出来，最终的那条换上去），没有 `text` 的临时事件把它去掉，每个 run 最多留 1000 个事件；流结束（`done`）就不再开，断了（机器离线等）过 5 s 在下一次更新时从游标重开，`unauthorized` 丢掉这个 run 的输出。连接结束（协调器退出、保活超时）时，视图开着就马上重连并重新订阅，否则等下次打开；退出 TUI 时放锁，run 照常跑。
+- 状态：视图打开时连协调器（连 socket，没人持锁就自己持锁），开 `state.watch`（带任务书，搜索要查），推送由 `coord.StateFold` 折进状态（见 [coordinator.md](coordinator.md)「订阅」）：`lagged` 按副本的 seq 重开，副本接不上时不带 `after_seq` 重开。机器由 `machines.watch` 推来（协调器没有这个方法时读一次 `machine.list`），agent 列表每次连上读一次；视图没有定时轮询。选中任务的最近一次 run 和「盯在旁边」的 run 各开一个 `run.output.watch`，不再显示的就取消；带 `key` 的事件原地替换前一条（agent 正在写的消息和还在跑的命令就这样一段段长出来，最终的那条换上去），没有 `text` 也没有 `title` 的临时事件把它去掉，每个 run 最多留 1000 个事件；流结束（`done`）就不再开，断了（机器离线等）过 5 s 在下一次更新时从游标重开，`unauthorized` 丢掉这个 run 的输出。连接结束（协调器退出、保活超时）时，视图开着就马上重连并重新订阅，否则等下次打开；退出 TUI 时放锁，run 照常跑。
 - 协调器不可用（别的进程持锁且 socket 不通）：Tasks 视图显示原因，其它视图不受影响。
 
 ## Web UI（模式二）
@@ -85,7 +85,7 @@ tend journal verify [--json] | repair [-y]
     - 状态原地折叠，每张表一个版本号 signal，一帧最多加一次（页面上用 `requestAnimationFrame`）。
     - 折叠遇到自己没有的对象，或者不认识的 part：结束这个流，不带 `after_seq` 重开。重开时的参数：已经 live 过就带 `after_seq`；`no_briefs` 时任务不带任务书，由 `brief(id)` 用 `task.get` 按需取回并填进状态；`briefOf(id)` 同步地说有没有：有就是任务书，开着 `no_briefs` 但还没取回是 `undefined`，没开 `no_briefs` 而任务没有任务书是空字符串。
     - `machines.watch` 推 `machines{items}`，`inbox.watch` 推 `inbox{items}`，都是整份替换。
-    - `output(run)` 按运行引用计数：第一个持有者开 `run.output.watch`（可暂停，续传带 `from`），最后一个释放时 `cancel`。`run.output{events, cursor}` 里带 `key` 的事件替换前一条同 `key` 的（按事件本身找，前面补进的页不影响），没有 `text` 的临时事件删掉同 `key` 的临时事件，`output.js` 也不画没有文字的临时事件；`open{mode: gap}` 在事件里插一条 `gap{from, to}`。
+    - `output(run)` 按运行引用计数：第一个持有者开 `run.output.watch`（可暂停，续传带 `from`），最后一个释放时 `cancel`。`run.output{events, cursor}` 里带 `key` 的事件替换前一条同 `key` 的（按事件本身找，前面补进的页不影响），没有 `text` 也没有 `title` 的临时事件删掉同 `key` 的临时事件，`output.js` 也不画这样的临时事件；`open{mode: gap}` 在事件里插一条 `gap{from, to}`。
     - `more()` 取最早一个事件之前的一页：`run.output.page{before, file, n: 200}`，一个都没有时 `before: -1`，按 id 去重；翻到这一代日志的开头而有 `prev` 时，下一页从上一代的末尾取。`head` 这个 signal 说前面还有什么：`{more}`、`{start}`（运行的开头）、`{gone}`（`gone` / `not_found`，已清理），取页时带 `loading`，失败带 `failed`，`stale` 时从最后一页重新找。`output(run, {watch: false})` 只翻页不开流；server 没有 `run.output.watch`（`unsupported`）时也改成 `more()` 取最后一页。往前取的页加起来超过 `OUTPUT_BYTES`（32 MiB）时，`trim()` 丢掉最早的几页。`raw(run)` 取最后一页的原始行。
   - `keys.js`：作用域栈，顺序是 `modal` → `drawer` → `list` → `page` → `global`，同一层里后推入的先查；`blocks` 的作用域挡住下面各层，`when` 为假的绑定让给下一层。
     - 键名的写法和操作表一致：`n`、`Shift+D`、`Mod+K`（⌘ 或 Ctrl）、`g h`（先按 g，1.2 s 内按 h）、`Esc`、`Space`；`Alt` 组合不认。
@@ -162,7 +162,7 @@ tend journal verify [--json] | repair [-y]
   - 对话是一串运行：最新的那次开 `run.output.watch`，更早的只在往上翻到时取它的最后一页，接着往前翻。每次运行之间一条分隔线（第几次运行、续接、在哪台机器）。
   - 事件除了 [output.md](output.md) 的种类，还认节点和协调器加上的：`you{input, text, by, mode, at}`（送到 agent 的一条消息，`input` 是它的发送 id）、`resolved{request, by, decision, at}`、`interrupt{id, n, by, at}`、`mark{event: "hook", name, phase}`、`gap`。运行的 `sends` 里还没被 `you` 事件认领、排队中或没送到的消息画在最后，没送到的可以重发。`after` / `interrupt` 的消息由协调器留到运行结束，再用它们续接出下一次运行（`takes` 是它们的 id，任务书是它们的原文用空行连起来）：那次运行的第一条提示按 `takes` 拆回每条一行 `you`，写发送人，不当作任务书或无名的提示。
   - 一步一行：命令写命令本身和状态、用时、行数；读和搜并成一行（「读了 2 个文件 · 搜了 1 次」）；改动写文件和 `+N −M`；计划写更新了第几步，最新的计划钉在时间线上方。说的话、你的消息、问题和出错总是展开；第一次运行的第一条消息是任务书，只露前三行。
-  - 三种密度按 `proto.js` 的 `density` 表画（[output.md](output.md)「密度」）：简洁把一轮里对话以外的步骤并成一行小结（出错的照样单独一行）；标准每步一行，agent 超过 30 行的话折起；详细把思考、命令、改动、读和搜、计划都展开，输出只露头尾各 10 行，diff 超过 200 行截断。任何密度下，出错的步骤、还在跑的命令（露最后 3 行）、没答的问题自己展开；出错的输出露最后 8 行，点开看全部。
+  - 三种密度按 `proto.js` 的 `density` 表画（[output.md](output.md)「密度」）：简洁把一轮里对话以外的步骤并成一行小结（出错的照样单独一行）；标准每步一行，agent 超过 30 行的话折起；详细把思考、命令、改动、读和搜、计划都展开，输出只露头尾各 10 行，diff 超过 200 行截断。任何密度下，出错的步骤、还在跑的命令（露最后 3 行）、没答的问题自己展开；出错的输出露最后 8 行，点开看全部。临时事件按它最终会成为的那一步画，同样守密度和筛选，排在最后：正在写的消息是斜体的正文；正在写的思考是思考那一行，写「思考中…」和第一行；codex 还在跑的命令是一条 `$ 命令 ● 运行中` 的命令，带到这时为止的字节数，露最后 3 行，简洁档也显示。
   - 最新一轮以外的轮次折成一行：第几轮、工作了多久、几步、改了几个文件、最后一句话，点开展开。筛选：全部、只看对话、只看命令、只看改动、出错的；「下一处错误」按顺序跳。
   - 跟随（`follow.js`）：在底部时新内容把视图带到底部（增长不到一屏时平滑，超过一屏或手指按着时直接跳），程序自己的滚动不算离开。滚轮向上、手指向下拖、`↑` / `PageUp` / `Home`、点滚动条、跳到某一步都算离开：视图停住，底部的按钮数离开后新来的步骤（临时事件、还没送到的消息、标题行不算），有等你的（没答的问题、出错）时换警示色并能直接跳过去，运行在离开后结束时写「运行结束了 · 看结果」；新内容前面画一条「新的」线，滚过去就消失。滚动停下（`SETTLE_MS` 100 ms，触屏松手后 `TOUCH_MS` 150 ms）时离底部不到 `NEAR`（48 px）就恢复跟随。
   - 视图上方的缓冲：离开底部并且还在滚时，锚点（视野里第一行）以上的行保持画出时的样子，从锚点往下用最新的；滚动停下后一次换上，并按锚点的新位置补偿滚动距离，视野里的那一行不动。展开、收起一步时以它为锚点。超过 `KEEP_ROWS`（1500）行时，离视野 `SCREENS`（5）屏以外的每 `PAGE`（200）行换成等高的占位，有焦点、选中文字、正在写回答的那页不换。分页从顶上的「更早」行之后算起，上次画出时每页的第一行这次仍开一页，往前补进的页和后面长出的行不挪动已有的页和行，没提交的选项和输入跟着留下；离顶部 `PREFETCH_SCREENS`（1.5）屏以内时往前取一页。

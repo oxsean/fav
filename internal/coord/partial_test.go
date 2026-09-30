@@ -123,3 +123,39 @@ func TestAWatcherSeesTheMessageBeingWritten(t *testing.T) {
 		}
 	}
 }
+
+func TestARunningCommandIsATempEventTheCompletedItemReplaces(t *testing.T) {
+	h := newTestHub()
+	cmd := node.Partial{Key: "exec-1", Kind: output.KindCmd, Src: "exec-1", Command: "/bin/zsh -lc 'go test ./...'"}
+	h.take(partialPush(cmd), output.Said{})
+	if len(h.pending) != 1 {
+		t.Fatalf("%+v", h.pending)
+	}
+	e := h.pending[0]
+	if !e.Temp || e.Key != "p:exec-1" || e.Kind != output.KindCmd || e.Family != output.FamilyShell || e.Title != "go test ./..." || e.Text != "" || e.Output != "" {
+		t.Fatalf("a command without output yet is a temp event with its title: %+v", e)
+	}
+	h.pending = nil
+	h.take(partialPush(cmd), output.Said{})
+	cmd.Text, cmd.Bytes = "ok  a\nok  b\n", 12
+	h.take(partialPush(cmd), output.Said{})
+	if len(h.pending) != 1 || h.pending[0].Output != "ok  a\nok  b\n" || h.pending[0].Bytes != 12 || h.pending[0].Title != "go test ./..." {
+		t.Fatalf("nothing while unchanged, then its output: %+v", h.pending)
+	}
+	h.pending = nil
+	l := node.TailLine{Off: 0, Text: `{"method":"item/completed","params":{"item":{"type":"commandExecution","id":"exec-1","command":"go test ./...","exitCode":0,"aggregatedOutput":"ok  a\nok  b\n","status":"completed"}}}` + "\n"}
+	h.take(node.Follow{File: "f:1", Lines: []node.TailLine{l}, Partial: &node.Partials{}, Cursor: node.Cursor{File: "f:1", Off: int64(len(l.Text))}}, output.Said{})
+	if len(h.pending) != 1 || h.pending[0].Temp || h.pending[0].Key != "p:exec-1" || h.pending[0].Kind != output.KindCmd || h.pending[0].ID == "" {
+		t.Fatalf("the completed command takes the key and nothing clears it: %+v", h.pending)
+	}
+	h.pending = nil
+	h.take(partialPush(node.Partial{Key: "exec-2", Kind: output.KindCmd, Src: "exec-2", Text: "x"}), output.Said{})
+	if len(h.pending) != 1 || h.pending[0].Title != "commandExecution" {
+		t.Fatalf("a command whose start was not seen is titled by its tool: %+v", h.pending)
+	}
+	h.pending = nil
+	h.take(partialPush(), output.Said{})
+	if len(h.pending) != 1 || h.pending[0].Key != "p:exec-2" || h.pending[0].Text != "" || h.pending[0].Title != "" {
+		t.Fatalf("gone, it is taken away: %+v", h.pending)
+	}
+}

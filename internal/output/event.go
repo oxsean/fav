@@ -91,7 +91,7 @@ type Event struct {
 	To       *Pos   `json:"to,omitempty"`
 
 	Echo string `json:"-"` // a user event: the id the agent gave the message back with (claude's uuid, codex's clientId)
-	Src  string `json:"-"` // say, think: the message or item the line finishes (claude's message id, codex's item id)
+	Src  string `json:"-"` // say, think, cmd: the message or item the line finishes (claude's message id, codex's item id)
 }
 
 // Pos is a place in a run's output: a log file's identity and an offset in it.

@@ -34,6 +34,9 @@ func TestRunOutputLinesReadEvents(t *testing.T) {
 		{Kind: output.KindResult},
 		{Kind: output.KindRaw, Text: `{"hello":"world"}`},
 		{Kind: output.KindSay, Temp: true, Text: "half"},
+		{Kind: output.KindThink, Temp: true, Text: "pondering"},
+		{Kind: output.KindCmd, Temp: true, Family: output.FamilyShell, Title: "go test ./..."},
+		{Kind: output.KindCmd, Temp: true, Family: output.FamilyShell, Title: "make", Output: "cc a.c\ncc b.c\nld x\n"},
 	}
 	want := []string{
 		"> fix it", "two", "lines",
@@ -48,6 +51,9 @@ func TestRunOutputLinesReadEvents(t *testing.T) {
 		"- descriptions shortened",
 		"! quota", "= Done.", "! usage limit",
 		`{"hello":"world"}`, "half",
+		"- " + i18n.T("tasks.output_thinking"),
+		"$ go test ./... " + i18n.T("tasks.output_running"),
+		"$ make " + i18n.T("tasks.output_running"), "  cc a.c", "  cc b.c", "  ld x",
 	}
 	if got := RunOutputLines(evs); strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("got\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))

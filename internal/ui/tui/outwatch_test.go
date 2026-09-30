@@ -29,4 +29,12 @@ func TestATempEventWithoutTextTakesAwayTheOneWithItsKey(t *testing.T) {
 	if len(f.events) != 1 {
 		t.Fatalf("one never shown is not added: %+v", f.events)
 	}
+	f.take(outputPush(output.Event{Kind: output.KindCmd, Temp: true, Key: "p:exec-1", Title: "sleep 30"}))
+	if len(f.events) != 2 || f.events[1].Title != "sleep 30" {
+		t.Fatalf("a command running without output yet stays: %+v", f.events)
+	}
+	f.take(outputPush(output.Event{Kind: output.KindCmd, Temp: true, Key: "p:exec-1"}))
+	if len(f.events) != 1 {
+		t.Fatalf("without text or title it goes: %+v", f.events)
+	}
 }

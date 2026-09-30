@@ -144,7 +144,7 @@ func (f *outFeed) take(p wire.Push) {
 		for _, e := range op.Events {
 			i := keyedAt(f.events, e.Key)
 			switch {
-			case e.Temp && e.Text == "": // a message being written that ended without its final event
+			case e.Temp && e.Text == "" && e.Title == "": // a message or command that ended without its final event
 				if i >= 0 {
 					f.events = slices.Delete(f.events, i, i+1)
 				}

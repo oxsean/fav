@@ -1,4 +1,4 @@
-{"note":"run output held twice is watched once; keyed events replace the one before them, a temp event without text removes it; the last release cancels"}
+{"note":"run output held twice is watched once; keyed events replace the one before them, a temp event without text or title removes it, a running command without output stays; the last release cancels"}
 {"connect":true}
 {"c":{"type":"req","id":1,"method":"hello","params":{"proto":2,"role":"client"}}}
 {"s":{"type":"res","id":1,"result":{"proto":2,"version":"test","role":"coordinator","methods":["hello","task.get","state.watch","run.output.watch","machines.watch","inbox.watch"]}}}
@@ -11,6 +11,9 @@
 {"step":"writing"}
 {"s":{"type":"push","id":2,"method":"run.output","params":{"events":[{"kind":"think","key":"item_8","temp":true}]}}}
 {"s":{"type":"push","id":2,"method":"run.output","params":{"events":[{"id":"a1:9:40:0","off":40,"kind":"say","key":"item_7","text":"正在写这一句。"},{"id":"a1:9:90:0","off":90,"kind":"tool","tool":"Bash","input":{"command":"go test ./..."},"call":"toolu_01"}],"cursor":{"file":"a1:9","off":120}}}}
+{"s":{"type":"push","id":2,"method":"run.output","params":{"events":[{"kind":"cmd","key":"p:exec-1","temp":true,"tool":"commandExecution","call":"exec-1","family":"shell","title":"go vet ./...","input":{"command":"go vet ./..."}}]}}}
+{"step":"running"}
+{"s":{"type":"push","id":2,"method":"run.output","params":{"events":[{"id":"a1:9:120:0","off":120,"kind":"cmd","key":"p:exec-1","tool":"commandExecution","call":"exec-1","family":"shell","title":"go vet ./...","input":{"command":"go vet ./..."},"exit":0}],"cursor":{"file":"a1:9","off":200}}}}
 {"step":"gap"}
 {"c":{"type":"req","id":3,"method":"run.output.watch","params":{"run":"r2"}}}
 {"s":{"type":"push","id":3,"method":"open","params":{"cursor":{"file":"b2:1","off":900},"mode":"gap","from":{"file":"b2:1","off":0},"to":{"file":"b2:1","off":900}}}}

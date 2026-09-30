@@ -11,7 +11,7 @@ import (
 // RunOutputLines are a run's events as lines to read. Prefixes: "> " the user, "+ " a tool call, "$ " a command,
 // "~ " changed files, "? " a question or approval, "- " a warning, an answer or lost output, "= " the result, "! " an error or what a failed
 // call ended with; the agent's words as they are. Thoughts, system lines and a call's result that did not fail are
-// left out.
+// left out. Of what is still being written, a thought is one line saying so, a command still running its last lines.
 func RunOutputLines(evs []output.Event) []string {
 	var out []string
 	add := func(prefix, text string) {
@@ -34,7 +34,24 @@ func RunOutputLines(evs []output.Event) []string {
 			add("- ", i18n.T("tasks.output_gap"))
 		case output.KindSay, output.KindRaw:
 			add("", e.Text)
-		case output.KindTool, output.KindCmd, output.KindEdit, output.KindMCP:
+		case output.KindThink:
+			if e.Temp {
+				add("- ", i18n.T("tasks.output_thinking"))
+			}
+		case output.KindCmd:
+			if e.Temp {
+				prefix, title := callLine(e)
+				add(prefix, title+" "+i18n.T("tasks.output_running"))
+				for _, l := range tailLines(e.Output, output.RunningTail) {
+					add("  ", l)
+				}
+				continue
+			}
+			add(callLine(e))
+			if e.Error {
+				add("! ", lastLine(e.Output))
+			}
+		case output.KindTool, output.KindEdit, output.KindMCP:
 			add(callLine(e))
 			if e.Error && e.Kind != output.KindTool {
 				add("! ", lastLine(e.Output))
@@ -87,6 +104,14 @@ func callLine(e output.Event) (string, string) {
 		return "+ ", title
 	}
 	return "+ ", strings.TrimSpace(e.Tool + " " + title)
+}
+
+func tailLines(s string, n int) []string {
+	if s = strings.TrimRight(s, "\r\n"); s == "" {
+		return nil
+	}
+	lines := strings.Split(s, "\n")
+	return lines[max(0, len(lines)-n):]
 }
 
 func lastLine(s string) string {

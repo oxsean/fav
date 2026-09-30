@@ -31,18 +31,22 @@ type Partials struct {
 	Items []Partial `json:"items"`
 }
 
-// Partial is one message the agent is writing. Key names it until its final line is logged; Src is the id that line
-// carries (claude's message id, codex's item id), Kind is output.KindSay or output.KindThink.
+// Partial is one message the agent is writing, or a codex command still running. Key names it until its final line is
+// logged; Src is the id that line carries (claude's message id, codex's item id), Kind is output.KindSay,
+// output.KindThink or output.KindCmd. A command's Text is the last output.RunningTail lines of its output, Bytes all it
+// printed so far.
 type Partial struct {
-	Key    string `json:"key"`
-	Kind   string `json:"kind"`
-	Src    string `json:"src"`
-	Parent string `json:"parent,omitempty"`
-	Text   string `json:"text"`
+	Key     string `json:"key"`
+	Kind    string `json:"kind"`
+	Src     string `json:"src"`
+	Parent  string `json:"parent,omitempty"`
+	Command string `json:"command,omitempty"`
+	Text    string `json:"text"`
+	Bytes   int    `json:"bytes,omitempty"`
 }
 
 // partials assembles the deltas of claude's stream_event lines and codex's */delta notices into the messages being
-// written, and keeps partial.json in step: a message leaves it once its final line is logged (done), so a reader that
+// written and the commands running, and keeps partial.json in step: a message leaves it once its final line is logged (done), so a reader that
 // sees it gone finds that line in the log.
 type partials struct {
 	mu    sync.Mutex
@@ -171,7 +175,7 @@ func (p *partials) codex(line []byte) bool {
 		return false
 	}
 	kind := map[string]string{"item/agentMessage/delta": output.KindSay, "item/reasoning/textDelta": output.KindThink,
-		"item/reasoning/summaryTextDelta": output.KindThink}[l.Method]
+		"item/reasoning/summaryTextDelta": output.KindThink, "item/commandExecution/outputDelta": output.KindCmd}[l.Method]
 	if kind == "" || l.Params.Item == "" {
 		return true
 	}
@@ -195,6 +199,9 @@ func (p *partials) codex(line []byte) bool {
 		if o.summary.Len() == 0 {
 			o.Text = trimHead(o.think.String())
 		}
+	case "item/commandExecution/outputDelta":
+		o.Text = trimHead(cmdTail(o.Text + l.Params.Delta))
+		o.Bytes += len(l.Params.Delta)
 	default:
 		o.Text = trimHead(o.Text + l.Params.Delta)
 	}
@@ -202,8 +209,10 @@ func (p *partials) codex(line []byte) bool {
 	return true
 }
 
-// done reads a line just logged: the final line of a message being written takes it out of partial.json, and so does
-// the end of a turn for all of them.
+var itemStartedPattern = []byte(`"method":"item/started"`)
+
+// done reads a line just logged: codex's start of a command lists it in partial.json; the final line of a message being
+// written or a command running takes it out, and so does the end of a turn for all of them.
 func (p *partials) done(line []byte) {
 	var l struct {
 		Type    string `json:"type"`
@@ -217,16 +226,29 @@ func (p *partials) done(line []byte) {
 		} `json:"message"`
 		Params struct {
 			Item struct {
-				ID string `json:"id"`
+				ID      string `json:"id"`
+				Type    string `json:"type"`
+				Command string `json:"command"`
 			} `json:"item"`
 		} `json:"params"`
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if len(p.open) == 0 || json.Unmarshal(line, &l) != nil {
+	if len(p.open) == 0 && !bytes.Contains(line, itemStartedPattern) || json.Unmarshal(line, &l) != nil {
 		return
 	}
 	switch {
+	case l.Method == "item/started":
+		it := l.Params.Item
+		if it.Type != "commandExecution" || it.ID == "" {
+			return
+		}
+		if o := p.find(it.ID); o != nil {
+			o.Command = it.Command
+		} else {
+			p.open = append(p.open, &partial{Partial: Partial{Key: it.ID, Kind: output.KindCmd, Src: it.ID, Command: it.Command}})
+		}
+		p.dirty = true
 	case l.Type == "assistant" && len(l.Message.Content) > 0:
 		kind := map[string]string{"text": output.KindSay, "thinking": output.KindThink}[l.Message.Content[0].Type]
 		for _, o := range p.open {
@@ -276,7 +298,7 @@ func (p *partials) flush() {
 	p.dirty = false
 	var ps Partials
 	for _, o := range p.open {
-		if o.Text != "" {
+		if o.Text != "" || o.Kind == output.KindCmd {
 			ps.Items = append(ps.Items, o.Partial)
 		}
 	}
@@ -289,6 +311,18 @@ func (p *partials) flush() {
 	}
 	b, _ := json.Marshal(ps)
 	fileio.WriteFile(p.path, b, 0o600)
+}
+
+// cmdTail is the last output.RunningTail lines of a command's output, the line being written counted as one.
+func cmdTail(s string) string {
+	end := strings.TrimSuffix(s, "\n")
+	i := len(end)
+	for range output.RunningTail {
+		if i = strings.LastIndexByte(end[:i], '\n'); i < 0 {
+			return s
+		}
+	}
+	return s[i+1:]
 }
 
 // trimHead keeps a message being assembled to twice what is sent of it.

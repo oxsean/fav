@@ -28,7 +28,7 @@ register('output', {
   'out.sum.shell': ['跑了 %d 条命令', 'ran %d commands'], 'out.sum.reads': ['读了 %d 个文件', 'read %d files'], 'out.sum.searches': ['搜了 %d 次', 'searched %d times'],
   'out.sum.other': ['%d 次别的调用', '%d other calls'], 'out.sum.failed': ['%d 处失败', '%d failed'],
   'out.brief': ['任务书', 'Brief'], 'out.you': ['你', 'You'], 'out.by': ['%s 说', '%s said'],
-  'out.whole': ['展开全文', 'Show all'], 'out.fold': ['收起', 'Fold'], 'out.think': ['思考', 'Thought'],
+  'out.whole': ['展开全文', 'Show all'], 'out.fold': ['收起', 'Fold'], 'out.think': ['思考', 'Thought'], 'out.thinking': ['思考中…', 'Thinking…'],
   'out.running': ['运行中', 'running'], 'out.exit': ['exit %d', 'exit %d'], 'out.lines': ['%d 行', '%d lines'],
   'out.cut': ['… 中间省略 %d 行 …', '… %d lines left out …'], 'out.truncated': ['全文 %s，这里只有头尾', 'In full %s: only its head and tail are here'],
   'out.copyCmd': ['复制命令', 'Copy the command'], 'out.copyOut': ['复制输出', 'Copy the output'], 'out.copied': ['已复制', 'Copied'],
@@ -134,7 +134,7 @@ function stepLine(w, s, density) {
     case 'agent': return {glyph: '↳', text: f('out.agent', s.title, (s.kids || []).length)};
     case 'mcp': case 'web': case 'other': return {glyph: '·', text: s.title, mono: true};
     case 'output': return {glyph: '=', text: s.output.split('\n')[0], mono: true};
-    case 'think': return {glyph: '…', text: t('out.think') + (s.text ? ' · ' + s.text.split('\n')[0] : ''), muted: true};
+    case 'think': return {glyph: '…', text: t(s.temp ? 'out.thinking' : 'out.think') + (s.text ? ' · ' + s.text.split('\n')[0] : ''), muted: true};
     case 'sys': return {glyph: s.warn ? '!' : '·', text: s.text || s.name, muted: !s.warn, warn: s.warn, mono: true};
     case 'raw': return {glyph: '·', text: s.text.split('\n')[0], muted: true, mono: true};
   }
@@ -149,6 +149,7 @@ function StepMeta({s}) {
     <span class=${tone[s.state]}>${glyph[s.state]}${s.state === 'running' ? ' ' + t('out.running') : s.failed && s.exit ? ' ' + f('out.exit', s.exit) : ''}</span>
     ${s.dur > 0 && html`<span>${duration(s.dur)}</span>`}
     ${s.kind === 'shell' && s.lines > 0 && html`<span>${f('out.lines', s.lines)}</span>`}
+    ${s.kind === 'shell' && s.temp && s.bytes > 0 && html`<span>${kib(s.bytes)}</span>`}
   </span>`;
 }
 
@@ -168,7 +169,8 @@ function Row({row, density, onToggle, onMore, onResend, renderAsk, copy, target,
   const w = useWords();
   const {t, f} = w;
   const name = useName();
-  const base = cx('out-row', 'out-' + row.type, row.depth > 0 && 'out-nested', row.key === target && 'out-flash', row.key === selected && 'sel');
+  const type = row.type === 'temp' && row.step.kind !== 'say' ? 'step' : row.type;
+  const base = cx('out-row', 'out-' + type, row.depth > 0 && 'out-nested', row.key === target && 'out-flash', row.key === selected && 'sel');
   const depth = row.depth ? {paddingLeft: 12 + row.depth * 16 + 'px'} : undefined;
   switch (row.type) {
     case 'head':
@@ -192,7 +194,8 @@ function Row({row, density, onToggle, onMore, onResend, renderAsk, copy, target,
       return html`<div class=${base} data-key=${row.key}><span class="out-glyph mono t-muted">·</span><span class="t-muted">${bits.join(' · ')}</span></div>`;
     }
     case 'temp':
-      return html`<div class=${base} data-key=${row.key}><span class="out-temp">${row.text}</span></div>`;
+      if (row.step.kind === 'say') return html`<div class=${base} data-key=${row.key}><span class="out-temp">${row.text}</span></div>`;
+      break;
     case 'send':
       return html`<div class=${base} data-key=${row.key}><div class="out-you pending"><div class="out-text">${row.text}</div>
         <span class=${cx('out-meta', row.state === 'failed' && 't-failed')}>${t(row.state === 'failed' ? 'out.notSent' : 'out.queued')}

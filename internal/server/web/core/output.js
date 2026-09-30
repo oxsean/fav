@@ -128,11 +128,21 @@ function runModel(run, events, {first = true, head = null, taken = []} = {}) {
     if (!turn || n !== turn.n) turns.push(turn = {key: `${ctx.run}:t${n}`, run: ctx.run, n, steps: []});
     turn.steps.push(s);
   }
-  const temps = events.filter(e => e.temp && e.text).map(e => ({key: 'temp:' + e.key, kind: 'temp', text: e.text, run: ctx.run}));
+  const temps = events.filter(e => e.temp && (e.text || e.title)).map(e => tempStep(e, ctx));
   const shown = new Set(events.filter(e => e.kind === 'you' && e.input).map(e => e.input));
   const sends = (run?.sends || []).filter(m => !shown.has(m.id) && (m.state === 'queued' || m.state === 'failed'))
     .map(m => ({key: 'send:' + m.id, kind: 'send', id: m.id, text: m.text, state: m.state, run: ctx.run}));
   return {run, id: ctx.run, open, turns, temps, sends, head};
+}
+
+// tempStep is a temp event as the step it will be once final: what the agent is writing (say, think; a half line reads
+// as say) or a codex command still running, with the last lines of its output and the bytes it printed.
+function tempStep(e, ctx) {
+  const base = {key: 'temp:' + e.key, run: ctx.run, turn: e.turn || 0, parent: e.parent || '', temp: true};
+  if (e.kind === 'think') return {...base, kind: 'think', text: e.text || ''};
+  if (e.kind !== 'cmd') return {...base, kind: 'say', text: e.text || ''};
+  return {...base, kind: 'shell', family: 'shell', tool: e.tool || '', title: e.title || e.tool || '', more: e.more || 0, call: e.call || '',
+    input: e.input, output: e.output || '', bytes: e.bytes || 0, lines: 0, dur: 0, failed: false, state: 'running'};
 }
 
 // carried are the steps of a continuation's first prompt: one you per message it carries, as its sender sent it (the
@@ -211,7 +221,8 @@ function shownAt(s, density) {
 // lay gives the rows to draw for a model at a density: {density, filter, open: Map key → bool (what the viewer set),
 // peek: Set of keys open for now (a find hit, its turn, the agents it is in)}. A row is {type, key, depth, ...}: run
 // (a later run of the conversation begins), head (what is before the loaded events), turn (a finished turn folded),
-// step (with open and clip), summary (a brief turn's other steps), temp, send.
+// step (with open and clip), summary (a brief turn's other steps), temp (a step still being written, by the same
+// rules; a running command at any density), send.
 export function lay(m, {density = 'standard', filter = 'all', open = new Map(), peek = new Set()} = {}) {
   const rows = [];
   const isOpen = (key, byDefault) => peek.has(key) || (open.has(key) ? open.get(key) : byDefault);
@@ -240,10 +251,12 @@ export function lay(m, {density = 'standard', filter = 'all', open = new Map(), 
       }
       if (summary) Object.assign(summary, summaryOf(summary.steps));
     }
-    if (filter === 'all') {
-      for (const x of r.temps) rows.push({type: 'temp', key: x.key, text: x.text});
-      for (const x of r.sends) rows.push({type: 'send', key: x.key, ...x});
+    for (const s of r.temps) {
+      if (passes(s, filter) && (shownAt(s, density) || autoOpen(s))) {
+        rows.push({type: 'temp', key: s.key, depth: 0, step: s, text: s.text, open: isOpen(s.key, autoOpen(s) || openByDensity(s, density))});
+      }
     }
+    if (filter === 'all') for (const x of r.sends) rows.push({type: 'send', key: x.key, ...x});
   });
   return rows;
 }

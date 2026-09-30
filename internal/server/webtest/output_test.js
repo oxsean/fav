@@ -158,6 +158,34 @@ test('follow: sticks until the viewer moves up, then counts what is new and what
   eq(out.lay(emptied).filter(r => r.type === 'temp').length, out.lay(m).filter(r => r.type === 'temp').length, 'a temp event without text draws no row');
 });
 
+test('temp events drawn by kind: a message being written, a thought, a command still running', () => {
+  const temps = [
+    {off: 900, kind: 'say', temp: true, key: 'x:900', text: 'half'},
+    {kind: 'think', temp: true, key: 'p:rs_1', text: 'weighing\nit up'},
+    {kind: 'cmd', temp: true, key: 'p:exec-1', tool: 'commandExecution', family: 'shell', title: 'sleep 30', input: {command: 'sleep 30'}},
+    {kind: 'cmd', temp: true, key: 'p:exec-2', tool: 'commandExecution', family: 'shell', title: 'make', output: 'cc a.c\ncc b.c\nld x\n', bytes: 5000},
+  ];
+  const m = out.model([both()[0], {...both()[1], run: {...state.r2, sends: []}, events: [...both()[1].events.filter(e => !e.temp), ...temps]}]);
+  const tempShape = rows => rows.filter(r => r.type === 'temp').map(r => r.step.kind + (r.open ? '+' : ''));
+  eq(tempShape(out.lay(m, {density: 'standard'})), ['say', 'think', 'shell+', 'shell+'], 'standard: the thought one line, the commands open');
+  eq(tempShape(out.lay(m, {density: 'brief'})), ['say', 'shell+', 'shell+'], 'brief: no thought, the running commands still shown');
+  eq(tempShape(out.lay(m, {density: 'detailed'})), ['say', 'think+', 'shell+', 'shell+'], 'detailed: the thought open');
+  eq(tempShape(out.lay(m, {filter: 'shell'})), ['shell+', 'shell+'], 'only commands');
+  eq(tempShape(out.lay(m, {filter: 'talk'})), ['say'], 'only talk');
+  const step = out.lay(m).find(r => r.key === 'temp:p:exec-2').step;
+  eq([step.state, step.title, step.bytes, step.temp], ['running', 'make', 5000, true], 'a running command step');
+  eq(out.counted(out.lay(m)), out.counted(out.lay(out.model([both()[0], {...both()[1], run: {...state.r2, sends: []}, events: both()[1].events.filter(e => !e.temp)}]))), 'none of them is new');
+  for (const lang of ['zh', 'en']) {
+    const s = drawn(html`<${Output} parts=${[both()[0], {...both()[1], run: {...state.r2, sends: []}, events: [...both()[1].events.filter(e => !e.temp), ...temps]}]} density="standard" />`, 'desktop', lang);
+    words.lang.value = lang;
+    ok(s.includes(words.t('out.thinking') + ' · weighing') && !s.includes('it up'), `${lang}: the thought as one line`);
+    ok(s.includes('sleep 30') && s.includes(words.t('out.running')), `${lang}: a command without output runs`);
+    ok(s.includes('cc b.c') && s.includes('ld x') && s.includes('5 KiB'), `${lang}: the last lines and the bytes so far`);
+    ok(s.includes('class="out-temp">half'), `${lang}: the message being written`);
+    words.lang.value = 'zh';
+  }
+});
+
 test('follow: scrolling to the bottom, the anchor, what is held above, placeholders, the place', () => {
   const rowsOf = (from, n) => Array.from({length: n}, (_, i) => ({key: 'k' + (from + i)}));
   const firsts = ps => ps.map(p => [p[0].key, p.length]);

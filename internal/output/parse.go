@@ -513,7 +513,7 @@ func codexItemEvents(it codexItem, whole bool) ([]Event, bool) {
 		}
 		return []Event{{Kind: KindThink, Text: text, Src: it.ID}}, true
 	case "commandExecution", "command_execution":
-		e := Event{Kind: KindCmd, Tool: it.Type, Call: it.ID, Family: FamilyOf(it.Type), Input: commandInput(it.Command), DurMS: it.DurationMS}
+		e := Event{Kind: KindCmd, Tool: it.Type, Call: it.ID, Family: FamilyOf(it.Type), Input: commandInput(it.Command), DurMS: it.DurationMS, Src: it.ID}
 		e.Title, e.More = shellTitle(it.Command)
 		e.Output, e.Lines, e.Bytes, e.Truncated = shown(deref(firstPtr(it.AggregatedOutput, it.AggregatedOut2)), whole)
 		e.Exit = firstPtr(it.ExitCode, it.ExitCode2)
@@ -565,6 +565,20 @@ func codexItemEvents(it codexItem, whole bool) ([]Event, bool) {
 		return []Event{{Kind: KindError, Text: it.Message}}, true
 	}
 	return nil, false
+}
+
+// Running is the temp event of a codex command still running: call is its item id, tail the last lines of its output,
+// bytes all it printed so far. Without the command it is titled by its tool, so it never reads as taken away.
+func Running(call, command, tail string, bytes int) Event {
+	e := Event{Kind: KindCmd, Temp: true, Tool: "commandExecution", Call: call, Family: FamilyShell, Output: tail, Bytes: bytes, Src: call}
+	e.Title, e.More = shellTitle(command)
+	if command != "" {
+		e.Input = commandInput(command)
+	}
+	if e.Title == "" {
+		e.Title = e.Tool
+	}
+	return e
 }
 
 func commandInput(command string) json.RawMessage {

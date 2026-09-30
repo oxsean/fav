@@ -1002,6 +1002,8 @@
   "tasks.output_resolved": "已作答",
   "tasks.output_interrupted": "这一轮被打断了",
   "tasks.output_gap": "这里省略了一段输出",
+  "tasks.output_thinking": "思考中…",
+  "tasks.output_running": "（运行中）",
   "tasks.more_lines": "…… 还有 %d 行",
   "tasks.never_ran": "还没跑过",
   "tasks.reason": "原因：%s",

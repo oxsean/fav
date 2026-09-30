@@ -685,8 +685,12 @@ func (h *hub) partials(items []node.Partial) []output.Event {
 			continue
 		}
 		listed[k] = true
-		e := output.Event{Kind: it.Kind, Temp: true, Key: k, Text: it.Text, Parent: it.Parent, Turn: max(h.turns.Turn, 1), Src: it.Src}
-		if old, ok := h.parts[k]; ok && old.Text == e.Text {
+		e := output.Event{Kind: it.Kind, Text: it.Text, Src: it.Src}
+		if it.Kind == output.KindCmd {
+			e = output.Running(it.Src, it.Command, it.Text, it.Bytes)
+		}
+		e.Temp, e.Key, e.Parent, e.Turn = true, k, it.Parent, max(h.turns.Turn, 1)
+		if old, ok := h.parts[k]; ok && old.Text == e.Text && old.Output == e.Output && old.Bytes == e.Bytes && old.Title == e.Title {
 			continue
 		}
 		h.parts[k] = e

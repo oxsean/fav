@@ -143,8 +143,8 @@ export function createStore({wire, frame = fn => globalThis.requestAnimationFram
   // output is a run's events while held: release it when done. watch opens run.output.watch (a server without it
   // gives the last page instead); either way more() fetches the page before the earliest event held, and head says
   // what is before them: {more} while there is, {start} at the run's start, {gone} when it was cleared, loading while a
-  // page is out. Events with a key replace the one before them with that key, and a temp event without text removes a
-  // temp one; the cursor moves only as a push says.
+  // page is out. Events with a key replace the one before them with that key, and a temp event without text or title
+  // removes a temp one; the cursor moves only as a push says.
   function output(run, {watch = true} = {}) {
     let o = outputs.get(run);
     if (!o) {
@@ -159,7 +159,7 @@ export function createStore({wire, frame = fn => globalThis.requestAnimationFram
           for (const ev of p.events || []) {
             const had = ev.key !== undefined ? o.keys.get(ev.key) : undefined;
             const at = had ? list.lastIndexOf(had) : -1;
-            if (ev.temp && !ev.text) {
+            if (ev.temp && !ev.text && !ev.title) {
               if (at >= 0 && had.temp) list.splice(at, 1);
               o.keys.delete(ev.key);
               continue;

@@ -1002,6 +1002,8 @@
   "tasks.output_resolved": "Answered",
   "tasks.output_interrupted": "The turn was interrupted",
   "tasks.output_gap": "Some output is left out here",
+  "tasks.output_thinking": "Thinking…",
+  "tasks.output_running": "(running)",
   "tasks.more_lines": "… %d more lines",
   "tasks.never_ran": "Never ran",
   "tasks.reason": "Reason: %s",
