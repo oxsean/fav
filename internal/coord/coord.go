@@ -286,14 +286,14 @@ func (c *Coord) commit(actor journal.Actor, cmd *journal.Receipt, events ...jour
 		c.receipts[receiptKey(actor.ID, cmd.ID)] = *cmd
 	}
 	before := c.observed(events)
+	ids := c.touched(events)
 	var sits map[string]task.Situation
 	if c.opt.Notice != nil || len(c.opt.Config.NotifyCommand) > 0 {
-		sits = c.situations(c.touched(events))
+		sits = c.situations(ids)
 	}
-	var ids []string
+	inbox := c.watching(PushInbox)
 	concerned := map[string]bool{}
-	if c.watching(PushInbox) {
-		ids = c.touched(events)
+	if inbox {
 		c.concerned(ids, concerned) // as they stood: someone the task stops waiting for is told too
 	}
 	u := c.undoOf(env)
@@ -306,13 +306,13 @@ func (c *Coord) commit(actor journal.Actor, cmd *journal.Receipt, events ...jour
 	if sits != nil {
 		c.deliver(c.notices(env, sits))
 	}
-	c.publish(env)
+	c.publish(env, ids)
 	all := reshapes(env)
 	if all {
 		c.recheckOutputs()
 	}
 	c.machinesMoved()
-	if len(ids) > 0 || all {
+	if inbox && (len(ids) > 0 || all) {
 		c.concerned(ids, concerned)
 		c.kick(PushInbox, func(p Principal) bool { return all || p.Admin || concerned[p.User] })
 	}

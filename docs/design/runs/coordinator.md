@@ -103,12 +103,12 @@ run `state` 转移表（终态单调，重复事件无副作用）：
   - 否则推 `open{mode: snapshot}`，然后按表推 `snapshot{part, items}`（`part` 是 `task.State` 的 JSON 名：`projects`、`tasks`、`runs`、`shares`、`agent_defs`，`items` 按 id；每批不超过 `snapshotBatch`（1 MiB），每张表至少推一次，空表也推），接着是 `affordances` 这个 part（这个人能做的事，见下面「能做什么、等谁」），最后 `live{seq}`，之后是实时信封。
   - 实时信封是 `journal`，按人过滤（`visibleEnv`），每个 seq 都到，没有可见事件时是空的。`reshapes` 的信封不单独推：推 `reset{}`，接着推新的快照和 `live`，这个信封只体现在新快照里。所以客户端的副本停在它的 seq 上时一定是它之后做的快照，断线续传不会跳过撤权。
   - 推送用 `PushWait`：客户端读得慢时协调器等，不丢；实时通道积压超过 `stateQueue`（256）条，流以 `lagged` 结束，客户端按自己的 seq 重开。协调器关闭时流以 `gone` 结束。常数在 `internal/coord/limits.go`。
-  - 每推一个实时信封之后，协调器为它碰到的任务（`touched`）和这些任务的运行，按这个人重算 `affordances`，只推变了的：`affordances{runs: {id: [动作] | null}, tasks: {id: {actions, route} | null}}`，`null` 是这一项没了（没有可做的也算没了）。每个流记着自己发过什么。续传的流在回放之后推一次全量（看得见的每一项，空的推 `null`），因为不知道客户端手里的那份。`affordances` 不经 journal 折叠，也不带 seq。
+  - 每推一个实时信封之后，协调器为它碰到的任务（`touched`：提交时、事件折叠之前算好，随信封交给每个流；包括事件点名的任务和它的父任务，新建、移动、撤销移动的还有事件里的新父任务，移动和撤销移动的还有它下面的整棵子树，因为深度变了）和这些任务的运行，按这个人重算 `affordances`，只推变了的：`affordances{runs: {id: [动作] | null}, tasks: {id: {actions, route} | null}}`，`null` 是这一项没了（没有可做的也算没了）。每个流记着自己发过什么。续传的流在回放之后推一次全量（看得见的每一项，空的推 `null`），因为不知道客户端手里的那份。`affordances` 不经 journal 折叠，也不带 seq。
   - journal 之外的变化也会改动作：机器主人、用户停用（`tend-server` 的 `sweep`）、节点连上换了版本（`hello` 的 feature）。这时调 `Coord.Reaffirm()`，每个流全部重算一遍，只推差异。
   - 客户端这边的折叠是 `coord.StateFold`：`open` 为 snapshot 或收到 `reset` 时开始一份新副本，`live` 时换上，`journal` 按 seq 折进去，`affordances` 的 part 和推送收进 `Aff`；遇到不认识的 part、seq 断档或折叠出错，丢掉副本，不带 `after_seq` 重开。
 - `machines.watch{}` 和 `inbox.watch{}` 是快照型的流（`ClassStream`，`internal/coord/topics.go`）：先推 `open{mode: snapshot}`，然后推整份列表，之后每次都推整份替换，客户端不处理增删，看不见的自然消失。每个订阅记着上次发出的 JSON，重算后一样就不推。
   - `machines{items}`：和 `machine.list` 同样的 `Machine`，按 `canSee` 过滤。重算的触发：每次提交、开始拨号、连上或断开、`Attach` / `Expect`、退避变化、`node.agents` 回来、调用出错、`Reaffirm`；200 ms 内的合成一次，订阅期间另外每 5 s 兜底重算一次。`retry_at` 照常推，由客户端倒数；立即重连仍是 `machine.list{connect}`。
-  - `inbox{items}`：和 `inbox.list` 同样的 `Inbox`，在协调器算（管理员那几项要看机器是否退役，客户端不知道）。每次提交后，只唤醒这次碰到的任务（`touched`）在提交前后关系到的人（`concerns`，换负责人时新旧两人都算）和管理员；`reshapes` 的提交和 `Reaffirm` 唤醒所有订阅。300 ms 内的合成一次，被唤醒的订阅按自己的人重算整份。
+  - `inbox{items}`：和 `inbox.list` 同样的 `Inbox`，在协调器算（管理员那几项要看机器是否退役，客户端不知道）。每次提交后，只唤醒这次碰到的任务（`touched`，同上：移动时旧父任务和新父任务都算）在提交前后关系到的人（`concerns`，换负责人时新旧两人都算）和管理员；`reshapes` 的提交和 `Reaffirm` 唤醒所有订阅。300 ms 内的合成一次，被唤醒的订阅按自己的人重算整份。
   - 协调器关闭时这两种流以 `gone` 结束，推送用 `PushWait`。模式一的 TUI 不订阅 `inbox.watch`，「等你」在本地由状态推导。
 
 ## 能做什么、等谁

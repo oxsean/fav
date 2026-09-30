@@ -296,6 +296,7 @@ type subject struct {
 	Project string `json:"project"`
 	Machine string `json:"machine"`
 	Name    string `json:"name"`
+	Parent  string `json:"parent"`
 }
 
 // sees: p may see event e, by what it is about now; the caller holds mu.

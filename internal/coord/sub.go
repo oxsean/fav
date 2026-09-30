@@ -31,10 +31,16 @@ type Live struct {
 
 type sub struct {
 	p      Principal
-	ch     chan journal.Envelope
+	ch     chan published
 	closed bool              // the coordinator is closing; under mu
 	again  chan struct{}     // Reaffirm: count the affordances again
 	aff    map[string]string // the affordances sent, by key (see affordances); only the feed touches it
+}
+
+// published is a committed envelope with the tasks it touched, counted before it applied (touched).
+type published struct {
+	env journal.Envelope
+	ids []string
 }
 
 // watchState opens a state stream: the live feed is registered under mu with the journal's end, then the snapshot or
@@ -48,7 +54,7 @@ func (c *Coord) watchState(p Principal, r *wire.Request) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	sb := &sub{p: p, ch: make(chan journal.Envelope, stateQueue), again: make(chan struct{}, 1)}
+	sb := &sub{p: p, ch: make(chan published, stateQueue), again: make(chan struct{}, 1)}
 	c.mu.Lock()
 	c.subs[s] = sb
 	end := c.log.Seq()
@@ -81,7 +87,8 @@ func (c *Coord) feed(s *wire.Stream, sb *sub, wp WatchParams, end int64) {
 			return
 		case <-sb.again:
 			err = c.pushAfford(ctx, s, sb, nil)
-		case env, ok := <-sb.ch:
+		case pub, ok := <-sb.ch:
+			env := pub.env
 			if !ok {
 				c.mu.Lock()
 				why := &wire.Error{Code: wire.CodeLagged}
@@ -96,13 +103,8 @@ func (c *Coord) feed(s *wire.Stream, sb *sub, wp WatchParams, end int64) {
 				continue
 			}
 			if !reshapes(env) {
-				if err = c.pushEnv(ctx, s, sb.p, env); err == nil {
-					c.mu.Lock()
-					ids := c.touched(env.Events)
-					c.mu.Unlock()
-					if len(ids) > 0 {
-						err = c.pushAfford(ctx, s, sb, ids)
-					}
+				if err = c.pushEnv(ctx, s, sb.p, env); err == nil && len(pub.ids) > 0 {
+					err = c.pushAfford(ctx, s, sb, pub.ids)
 				}
 			} else if err = s.PushWait(ctx, PushReset, struct{}{}); err == nil {
 				// the envelope itself only as part of the new snapshot: a copy at its seq is always one made after it
@@ -233,12 +235,12 @@ func anyMap[V any](m map[string]V) map[string]any {
 	return out
 }
 
-// publish hands env to every state stream; one too slow to keep stateQueue envelopes ends as lagged. The caller holds
-// mu.
-func (c *Coord) publish(env journal.Envelope) {
+// publish hands env and the tasks it touched to every state stream; one too slow to keep stateQueue envelopes ends as
+// lagged. The caller holds mu.
+func (c *Coord) publish(env journal.Envelope, ids []string) {
 	for s, sb := range c.subs {
 		select {
-		case sb.ch <- env:
+		case sb.ch <- published{env, ids}:
 		default:
 			delete(c.subs, s)
 			close(sb.ch)

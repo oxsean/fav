@@ -96,7 +96,8 @@ func concerns(st *task.State, t *task.Task, sit task.Situation) []string {
 	return out
 }
 
-// touched are the tasks events are about; the caller holds mu.
+// touched are the tasks events are about, read before they apply: a task moving takes its old parent and its new one,
+// and the tasks under it, whose depth changes. The caller holds mu.
 func (c *Coord) touched(events []journal.Event) []string {
 	var ids []string
 	add := func(id string) {
@@ -123,6 +124,15 @@ func (c *Coord) touched(events []journal.Event) []string {
 		}
 		if t := c.st.Tasks[s.ID]; t != nil { // a subtask's end moves its parent
 			add(t.Parent)
+		}
+		switch e.Type {
+		case task.ETaskCreated, task.ETaskMoved, task.ETaskRestored:
+			add(s.Parent)
+		}
+		if e.Type == task.ETaskMoved || e.Type == task.ETaskRestored {
+			for _, x := range c.st.Subtree(s.ID) {
+				add(x.ID)
+			}
 		}
 	}
 	return ids
