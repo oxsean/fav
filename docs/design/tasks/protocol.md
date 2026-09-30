@@ -19,7 +19,7 @@
 | 调用者 `Principal`、方法授权表、可见性过滤 `visibleState` / `sees` | `internal/coord`（`access.go`；见 [team.md](team.md)「权限：两层，外加三种归属」） |
 | 身份、会话、邀请、OAuth / OIDC | `internal/auth`，以及 `internal/server` 的 `/auth/*`（只被 `tend-server` 引用；见 [team.md](team.md)） |
 | Gitea / GitLab / GitHub 适配、webhook、同步 worker | `internal/tracker`（只被 `tend-server` 引用；见 [trackers.md](trackers.md)）。接口覆盖 issue、评论、标签、关单和 PR / MR；各家能力不同（比如子 issue）时在 `internal/tracker` 里消化；用 `Caps` 声明能力、调用方按能力降级未实现 |
-| 通知：收件箱、浏览器、个人 webhook、工单 @提及、`notify_command` | 协调器只出 `Options.Notice func(Notice)`；个人 webhook 的投递 `Notifier` 在 `internal/server`，投递记录和去重在 `deliveries` 表（见 [team.md](team.md)「人在任务里」） |
+| 通知：收件箱、浏览器、个人 webhook、工单 @提及、`notify_command` | 协调器只出 `Options.Notice func(Notice)`；投递 `Notifier` 在 `internal/server`（个人 webhook、Web Push），发件箱是 `deliveries` 表（见 [team.md](team.md)「人在任务里」） |
 | git 操作：worktree、fetch / push、合并、冲突检测 | 节点在 `internal/node/work.go` 里包一层 exec 直接调 `git`，没有单独的包，`platformcheck` 不管（见 [execution.md](execution.md)） |
 | 团队实体的读写 | `internal/store` 对外只给有类型的方法（例如 `Team.Users`、`Team.AddTracker`），SQL 不出这个包 |
 | 客户端拨号（节点、TUI、CLI 连 server） | `internal/dial`（见 [storage.md](storage.md)「进程与代码划分」） |

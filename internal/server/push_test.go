@@ -2,6 +2,8 @@ package server
 
 import (
 	"bytes"
+	"crypto/ecdh"
+	"crypto/rand"
 	"crypto/x509"
 	"encoding/base64"
 	"net/http"
@@ -89,5 +91,38 @@ func TestThePushKeyIsServedToWhoeverIsSignedIn(t *testing.T) {
 	none.pushKey(w, httptest.NewRequest("GET", "/api/push/key", nil), caller{})
 	if w.Code != http.StatusServiceUnavailable || !strings.Contains(w.Body.String(), `"push_key"`) {
 		t.Fatalf("without a key: %d %s", w.Code, w.Body)
+	}
+}
+
+// A signed-in page registers its browser's subscription and renews it each time it opens, as the same device; one it
+// cannot push to is refused; turning push off forgets it.
+func TestAPageRegistersItsBrowserForPushAndForgetsIt(t *testing.T) {
+	r := newRig(t)
+	c := browser(t)
+	login(t, c, r.url, r.client)
+	ua, _ := ecdh.P256().GenerateKey(rand.Reader)
+	sub := map[string]any{"endpoint": "https://push.example/send/abc", "keys": map[string]string{
+		"p256dh": base64.RawURLEncoding.EncodeToString(ua.PublicKey().Bytes()), "auth": base64.RawURLEncoding.EncodeToString(make([]byte, 16))}}
+	var a, b struct{ ID string }
+	if got := r.api(c, "PUT", "/api/push/device", map[string]any{"subscription": sub, "name": "Android"}, &a); got != http.StatusOK || a.ID == "" {
+		t.Fatalf("%d %+v", got, a)
+	}
+	if got := r.api(c, "PUT", "/api/push/device", map[string]any{"subscription": sub, "name": "Android"}, &b); got != http.StatusOK || b.ID != a.ID {
+		t.Fatalf("renewing made another device: %d %+v", got, b)
+	}
+	ds, _ := r.team.Devices(store.LocalUser)
+	if len(ds) != 1 || ds[0].Name != "Android" || bytes.Contains(ds[0].Target, []byte("push.example")) {
+		t.Fatalf("the device, its target sealed: %+v", ds)
+	}
+	for _, bad := range []map[string]any{{"endpoint": "http://push.example/x", "keys": sub["keys"]}, {"endpoint": "https://push.example/x"}} {
+		if got := r.api(c, "PUT", "/api/push/device", map[string]any{"subscription": bad}, nil); got != http.StatusBadRequest {
+			t.Fatalf("%v: %d", bad, got)
+		}
+	}
+	if got := r.api(c, "DELETE", "/api/push/device", map[string]string{"endpoint": "https://push.example/send/abc"}, nil); got != http.StatusNoContent {
+		t.Fatal(got)
+	}
+	if ds, _ := r.team.Devices(store.LocalUser); len(ds) != 0 {
+		t.Fatalf("still there: %+v", ds)
 	}
 }

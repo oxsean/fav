@@ -1,0 +1,223 @@
+package store
+
+import (
+	"database/sql"
+	"errors"
+	"time"
+)
+
+// KindWebPush is a browser's Web Push subscription.
+const KindWebPush = "webpush"
+
+// PushDevice is somewhere a user's notices show: Target says where, sealed by the server.
+type PushDevice struct {
+	ID       string    `json:"id"`
+	User     string    `json:"user"`
+	Kind     string    `json:"kind"`
+	Name     string    `json:"name,omitempty"`
+	Target   []byte    `json:"-"`
+	Created  time.Time `json:"created,omitzero"`
+	Renewed  time.Time `json:"renewed,omitzero"`
+	LastOK   time.Time `json:"last_ok,omitzero"`
+	Failures int       `json:"failures,omitempty"`
+}
+
+// Delivery states.
+const (
+	DeliveryPending  = "pending"
+	DeliveryOK       = "ok"
+	DeliveryGone     = "gone"     // its device went away
+	DeliveryFailed   = "failed"   // the last try failed, or the channel refused it for good
+	DeliveryCanceled = "canceled" // what it was about is gone, or its recipient may no longer see it
+)
+
+// Delivery is one notice to one recipient on one device ("" is the recipient's webhook): the outbox's row.
+type Delivery struct {
+	ID       int64
+	Seq      int64
+	User     string
+	Event    string
+	Device   string
+	Status   string
+	Attempts int
+	Next     time.Time
+	Notice   []byte
+	Result   string
+	At       time.Time
+}
+
+// KeepDevice registers d, or renews the device already registered under hash (a browser's endpoint): it moves to
+// d.User with d's target and name, renewed at now.
+func (t *Team) KeepDevice(d PushDevice, hash string, now time.Time) (PushDevice, error) {
+	_, err := t.w.Exec(`INSERT INTO push_devices (id, user_id, kind, target, target_hash, name, created_at, renewed_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT (target_hash) DO UPDATE SET user_id = excluded.user_id, kind = excluded.kind, target = excluded.target,
+			name = excluded.name, renewed_at = excluded.renewed_at`,
+		newID("d_"), d.User, d.Kind, d.Target, hash, d.Name, now.UnixNano(), now.UnixNano())
+	if err != nil {
+		return PushDevice{}, err
+	}
+	var id string
+	if err := t.w.QueryRow(`SELECT id FROM push_devices WHERE target_hash = ?`, hash).Scan(&id); err != nil {
+		return PushDevice{}, err
+	}
+	kept, _, err := t.device(t.w, id)
+	return kept, err
+}
+
+const deviceCols = `id, user_id, kind, target, name, created_at, renewed_at, last_ok_at, failures`
+
+func scanDevice(s interface{ Scan(...any) error }) (PushDevice, error) {
+	var d PushDevice
+	var created, renewed, ok int64
+	err := s.Scan(&d.ID, &d.User, &d.Kind, &d.Target, &d.Name, &created, &renewed, &ok, &d.Failures)
+	d.Created, d.Renewed, d.LastOK = fromNanos(created), fromNanos(renewed), fromNanos(ok)
+	return d, err
+}
+
+func (t *Team) device(db *sql.DB, id string) (PushDevice, bool, error) {
+	d, err := scanDevice(db.QueryRow(`SELECT `+deviceCols+` FROM push_devices WHERE id = ?`, id))
+	if errors.Is(err, sql.ErrNoRows) {
+		return PushDevice{}, false, nil
+	}
+	return d, err == nil, err
+}
+
+// Device is the device id, false when there is none.
+func (t *Team) Device(id string) (PushDevice, bool, error) { return t.device(t.r, id) }
+
+// Devices are user's devices, oldest first.
+func (t *Team) Devices(user string) ([]PushDevice, error) {
+	rows, err := t.r.Query(`SELECT `+deviceCols+` FROM push_devices WHERE user_id = ? ORDER BY created_at, id`, user)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []PushDevice
+	for rows.Next() {
+		d, err := scanDevice(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, d)
+	}
+	return out, rows.Err()
+}
+
+// DropDevice removes user's device registered under hash, with the deliveries still to go to it.
+func (t *Team) DropDevice(user, hash string) error {
+	var id string
+	err := t.w.QueryRow(`SELECT id FROM push_devices WHERE user_id = ? AND target_hash = ?`, user, hash).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	return t.RemoveDevice(id, "dropped")
+}
+
+// RemoveDevice removes device id, which went away (why: the channel's answer); what was still to go to it is gone.
+func (t *Team) RemoveDevice(id, why string) error {
+	return inTx(t.w, func(tx *sql.Tx) error {
+		if _, err := tx.Exec(`DELETE FROM push_devices WHERE id = ?`, id); err != nil {
+			return err
+		}
+		_, err := tx.Exec(`UPDATE deliveries SET status = ?, result = ? WHERE device_id = ? AND status = ?`, DeliveryGone, why, id, DeliveryPending)
+		return err
+	})
+}
+
+// DeviceWorked records that a delivery to device id went through at at.
+func (t *Team) DeviceWorked(id string, at time.Time) error {
+	_, err := t.w.Exec(`UPDATE push_devices SET last_ok_at = ?, failures = 0 WHERE id = ?`, at.UnixNano(), id)
+	return err
+}
+
+// DeviceFailed counts a failed delivery to device id.
+func (t *Team) DeviceFailed(id string) error {
+	_, err := t.w.Exec(`UPDATE push_devices SET failures = failures + 1 WHERE id = ?`, id)
+	return err
+}
+
+// ExpireDevices removes the devices last renewed before before, and answers how many went.
+func (t *Team) ExpireDevices(before time.Time) (int, error) {
+	rows, err := t.w.Query(`SELECT id FROM push_devices WHERE renewed_at < ?`, before.UnixNano())
+	if err != nil {
+		return 0, err
+	}
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return 0, err
+		}
+		ids = append(ids, id)
+	}
+	rows.Close()
+	for _, id := range ids {
+		if err := t.RemoveDevice(id, "expired"); err != nil {
+			return 0, err
+		}
+	}
+	return len(ids), nil
+}
+
+// Enqueue puts ds in the outbox as pending, in one transaction; a delivery of the journal (Seq > 0) already there is
+// left as it is. It answers how many went in.
+func (t *Team) Enqueue(ds []Delivery) (int, error) {
+	n := 0
+	err := inTx(t.w, func(tx *sql.Tx) error {
+		for _, d := range ds {
+			res, err := tx.Exec(`INSERT OR IGNORE INTO deliveries (seq, user_id, event, device_id, status, next_at, notice, at)
+				VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, d.Seq, d.User, d.Event, d.Device, DeliveryPending, d.Next.UnixNano(), string(d.Notice), d.At.UnixNano())
+			if err != nil {
+				return err
+			}
+			k, _ := res.RowsAffected()
+			n += int(k)
+		}
+		return nil
+	})
+	return n, err
+}
+
+// Due are up to n pending deliveries whose time has come by now, soonest first.
+func (t *Team) Due(now time.Time, n int) ([]Delivery, error) {
+	rows, err := t.r.Query(`SELECT id, seq, user_id, event, device_id, status, attempts, next_at, notice, result, at FROM deliveries
+		WHERE status = ? AND next_at <= ? ORDER BY next_at, id LIMIT ?`, DeliveryPending, now.UnixNano(), n)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Delivery
+	for rows.Next() {
+		var d Delivery
+		var next, at int64
+		var notice string
+		if err := rows.Scan(&d.ID, &d.Seq, &d.User, &d.Event, &d.Device, &d.Status, &d.Attempts, &next, &notice, &d.Result, &at); err != nil {
+			return nil, err
+		}
+		d.Next, d.At, d.Notice = fromNanos(next), fromNanos(at), []byte(notice)
+		out = append(out, d)
+	}
+	return out, rows.Err()
+}
+
+// NextDue is when the soonest pending delivery is due; false when none is pending.
+func (t *Team) NextDue() (time.Time, bool, error) {
+	var next sql.NullInt64
+	if err := t.r.QueryRow(`SELECT MIN(next_at) FROM deliveries WHERE status = ?`, DeliveryPending).Scan(&next); err != nil || !next.Valid {
+		return time.Time{}, false, err
+	}
+	return time.Unix(0, next.Int64).UTC(), true, nil
+}
+
+// Settle records how delivery id went: its state, the channel's answer, the tries so far, and, while it is still
+// pending, when it goes next.
+func (t *Team) Settle(id int64, status, result string, attempts int, next time.Time) error {
+	_, err := t.w.Exec(`UPDATE deliveries SET status = ?, result = ?, attempts = ?, next_at = ? WHERE id = ?`,
+		status, result, attempts, nanos(next), id)
+	return err
+}

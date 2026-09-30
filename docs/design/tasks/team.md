@@ -171,7 +171,15 @@
 
 ### 实现
 
-- 通知：协调器在每次提交后比较受影响任务的前后处境和待处理项（`task.State.Pending`，按 `id`、`version`、`reason` 比）：任务在等人（`dispatch` 除外）并且有了之前没有的待处理项，就产生 `task.needs_you`，`items` 带上新出现的那几项，所以权限请求 A 换成 B、或者旧的还没答又来一个同类的，都会再通知；变成完成产生 `task.done`。收件人是负责人、在 `accept` 时加上验收人、以及相关 run 的发起人。`tend-server` 把它们交给个人 webhook（`users.webhook`，「我」页设置，POST 一段带 `text` 的 JSON；配了 `public_url` 时带任务链接 `#task-<id>`），`deliveries` 表按「seq × 收件人 × 事件」去重；收件人在提交那一刻按当时的状态算出，已停用的人不投。
+- 通知：协调器在每次提交后比较受影响任务的前后处境和待处理项（`task.State.Pending`，按 `id`、`version`、`reason` 比）：任务在等人（`dispatch` 除外）并且有了之前没有的待处理项，就产生 `task.needs_you`，`items` 带上新出现的那几项，所以权限请求 A 换成 B、或者旧的还没答又来一个同类的，都会再通知；变成完成产生 `task.done`。收件人是负责人、在 `accept` 时加上验收人、以及相关 run 的发起人，在提交那一刻按当时的状态算出。
+- 投递（`tend-server` 的 `Notifier`，`notify.go`）：
+  - **发件箱**：`Options.Notice` 在协调器的锁里把通知写进 `deliveries`（[storage.md](storage.md)「表」），每个收件人的个人 webhook 一行、每台推送设备一行，同一个「seq × 收件人 × 事件 × 设备」只写一次。通知在 `Notifier` 接上库之前到的（`coord.Open` 期间），先留在内存里，接上后写入。重启后没投完的行照投；投到一半被杀的会再投一次，同一个任务的通知在浏览器里互相替换（`tag`），重复无害。
+  - **渠道**：`webhook`（`users.webhook`，「我」页设置，POST 一段带 `text` 的 JSON；配了 `public_url` 时带任务链接 `#task-<id>`；所有事件、立即投）和 `webpush`（只投 `task.needs_you`）。每个渠道一个有界的并发（webhook 4、webpush 8），每台设备（webhook 按人）同时只有一个在途，单次 10 s 超时，一个慢的推送服务只挡它自己那台设备。
+  - **升级，不抑制**：推送那一行排在通知之后 N 秒才投：新出现的项里有权限请求时 30 s，否则 60 s；这段时间里网页（电脑上的浏览器通知、页面本身）先提示。页面没有计时器，等待全在发件箱的 `next_at` 里。
+  - **每次投递和重试之前再核一次**，不成立就记 `canceled`、不发：人还在、没停用；`task.needs_you` 的任务还在他的收件箱里（`coord.Waiting`，和 `inbox.list` 同一条规则，权限请求只给能批的人），并且这条通知带来的项（`id` 和 `version`）至少还剩一个，所以 N 秒内处理掉的不推，被替换掉的也不推；别的事件要他还看得到这个任务（`coord.Sees`）；webhook 已经去掉的不投；设备行还在。
+  - **结果**：2xx 成功（设备 `failures` 清零、记 `last_ok_at`）；Web Push 回 404 / 410 时删掉这台设备，它其余待投的行记 `gone`；5xx、429、408、网络错误隔 30 s、2 min、8 min 各重试一次（推送服务给的 `Retry-After` 更长就等它，最多 1 h），第 4 次仍失败记 `failed`；其余 4xx 直接 `failed`。
+  - **推送的内容**在投递时按当时的状态算，RFC 8291 加密，只有那个浏览器能读：`{v:1, server, seq, event, task, item, kind, title, what?, project?, n, link, at}`。`item` / `kind` 是这条通知带来、现在还在的第一项；`n` 是这个任务现在等他的项数；`what` 只在权限请求时带（`Request.Summary`，没有就是工具名），锁屏上点开之前就看得到要批准的是什么；`link` 是 `#task-<id>`，项在运行上时加 `/r-<run>`；标题和 `what` 截短，正文不超过推送服务的 4 KB。请求头 `TTL` 24 h、`Urgency`（权限请求和提问 `high`，其余 `normal`）、`Topic` 是任务 id（推送服务那边同一个任务还没送到的旧消息被替换）。通知上的动作按钮（「查看 / 拒绝」和 `/api/act`）还没有，这版的推送不带 `actions`。
+- 推送设备（`push_devices`，挂在人身上，不挂在会话上）：`PUT /api/push/device {subscription, name}` 登记或续期一个浏览器的订阅（`subscription` 是 `PushSubscription.toJSON()`，endpoint 必须是 https）；按 endpoint 认出同一个浏览器，换了人登录，设备改归新人。`DELETE /api/push/device {endpoint}` 去掉自己的。90 天没续期的设备，`Notifier` 每小时清一次。
 - 收件箱：`inbox.list`（跟随用 `inbox.watch`）列出处于 `waiting`（`dispatch` 除外）、与我有关、并且我能写的任务，等得最久的排前面。网页首页有「等你」和计数；电脑上页面开着、在后台，本人在「我」页打开了浏览器通知并且浏览器允许时，等的东西有了新的条目弹浏览器通知（手机上的通知是 Web Push 的事）。
 
 ## 审计与隐私

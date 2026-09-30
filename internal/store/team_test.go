@@ -172,24 +172,6 @@ func must(t *testing.T, err error) {
 	}
 }
 
-func TestANoticeIsDeliveredOncePerUser(t *testing.T) {
-	team := openTeam(t)
-	if err := team.SetWebhook(LocalUser, "https://hooks.example/x"); err != nil {
-		t.Fatal(err)
-	}
-	if url, _ := team.Webhook(LocalUser); url != "https://hooks.example/x" {
-		t.Fatal(url)
-	}
-	first, err := team.Claim(7, LocalUser, "task.needs_you")
-	again, _ := team.Claim(7, LocalUser, "task.needs_you")
-	if err != nil || !first || again {
-		t.Fatalf("%v %v %v", first, again, err)
-	}
-	if err := team.Delivered(7, LocalUser, "task.needs_you", "200"); err != nil {
-		t.Fatal(err)
-	}
-}
-
 // A secret the server keeps is written once: whoever comes second gets the first one back, now and after reopening.
 func TestASecretIsKeptOnceAndTheFirstStays(t *testing.T) {
 	path := filepath.Join(t.TempDir(), File)
@@ -233,6 +215,7 @@ func TestUpgradingToTheSecretsTableKeepsTheTeam(t *testing.T) {
 		t.Fatal(err)
 	}
 	tm.Close()
+	before0009(t, path)
 	exec(t, path, "DROP TABLE secrets")
 	setVersion(t, path, 7)
 	if tm, err = OpenTeam(path); err != nil {

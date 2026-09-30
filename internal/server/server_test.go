@@ -111,7 +111,7 @@ func newRig(t *testing.T, logins ...tend.Login) *rig {
 	if err != nil {
 		t.Fatal(err)
 	}
-	srv := New(Options{Home: r.home, Coord: r.c, Dir: dir, Config: tend.ServerConfig{Logins: logins}, Push: push})
+	srv := New(Options{Home: r.home, Coord: r.c, Dir: dir, Config: tend.ServerConfig{Logins: logins}, Push: push, Seal: seal})
 	srv.sweep()
 	r.srv = srv
 	hs := httptest.NewServer(srv.Handler())

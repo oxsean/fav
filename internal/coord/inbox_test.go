@@ -155,4 +155,20 @@ func TestANoticeGoesWhenAPendingItemAppearsOrIsReplaced(t *testing.T) {
 	if ns := taken(); len(ns) != 1 || !slices.Equal(items(ns[0]), []string{rid + "/q4"}) {
 		t.Fatalf("another of the same kind while one is open: %+v", ns)
 	}
+
+	if it, ok := e.c.Waiting(bob.User, tid); !ok || len(it.Pending) != 2 || it.Pending[0].ID != rid+"/q3" {
+		t.Fatalf("what waits on bob now: %+v %v", it, ok)
+	}
+	if _, ok := e.c.Waiting(dee.User, tid); ok {
+		t.Fatal("a reader has nothing to act on")
+	}
+	if !e.c.Sees(dee.User, tid) || e.c.Sees("u_nobody", tid) {
+		t.Fatal("who may see the task")
+	}
+	if r, ok := e.c.Request(rid, "q3"); !ok || r.Summary != "rm -rf build" {
+		t.Fatalf("%+v %v", r, ok)
+	}
+	if _, ok := e.c.Request(rid, "q1"); ok {
+		t.Fatal("an answered request")
+	}
 }

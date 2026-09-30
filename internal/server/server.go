@@ -75,6 +75,7 @@ type Options struct {
 	TLSKey  string
 	Syncer  *Syncer  // nil: no tracker sync
 	Push    *PushKey // nil: no Web Push
+	Seal    *Sealer  // opens and seals what the database keeps sealed (push devices)
 }
 
 // Server serves the coordinator over HTTP.

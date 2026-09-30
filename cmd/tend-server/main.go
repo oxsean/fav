@@ -145,7 +145,6 @@ func cmdServe(args []string) error {
 	defer cancel()
 	go c.Serve(ctx)
 	go c.Run(ctx)
-	go notifier.Run(ctx, team, sc.PublicURL)
 	seal, err := server.LoadSealer(home)
 	if err != nil {
 		return err
@@ -154,11 +153,12 @@ func cmdServe(args []string) error {
 	if err != nil {
 		fmt.Fprint(os.Stderr, i18n.F("cli.server.no_push", err))
 	}
+	notifier.Start(ctx, server.NotifyOptions{Team: team, Coord: c, Seal: seal, Push: push, Base: sc.PublicURL})
 	syncer := server.NewSyncer(team, c, seal, notifier.Send)
 	go syncer.Run(ctx)
 	fmt.Fprint(os.Stderr, i18n.F("cli.server.started", c.ID(), *listen))
 	return server.New(server.Options{Home: home, Coord: c, Dir: dir, Config: sc, Listen: *listen, TLSCert: *cert, TLSKey: *key,
-		Syncer: syncer, Push: push}).Serve(ctx)
+		Syncer: syncer, Push: push, Seal: seal}).Serve(ctx)
 }
 
 func openTeam() (*store.Team, error) { return store.OpenTeam(dbPath(tend.Home())) }

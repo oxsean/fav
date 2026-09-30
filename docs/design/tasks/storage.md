@@ -36,9 +36,10 @@
 | `imports` | `source, sum, last_seq, at`：导入过的日志，按内容摘要识别重复导入 |
 | `snapshots`（未实现） | `seq, state`：Go 状态的 JSON；启动 = 读最新快照 + 回放其后的信封。等实测启动变慢再加 |
 | 团队实体 | `users`（含内置 `local`）、`identities`（`(provider, issuer, subject)` 唯一）、`admits`、`invites`、`credentials`（`web / token / node`，只存 sha256，节点名在未吊销的凭据里唯一）、`audit`：迁移 `0002_team.sql` |
-| 团队实体 | `deliveries`（通知投递去重，0003）；`trackers`、`tracker_issues`、`tracker_deliveries`（工单绑定、每个 issue 的回写状态、webhook 去重，0004） |
+| 团队实体 | `deliveries`（通知投递，0003，0009 起是发件箱）；`trackers`、`tracker_issues`、`tracker_deliveries`（工单绑定、每个 issue 的回写状态、webhook 去重，0004） |
 | 加列 | `tracker_issues.parent`、`pr`（子 issue 和 PR 链接，0005）；`invites.project`、`access`（邀请带项目，0006）；`tracker_issues.synced`（任务级同步状态，0007） |
 | server 自己的密钥 | `secrets`（`name` 主键、`value`、`at`，0008）：值是 `seal.go` 封存过的，密钥是 `server.key` 或 `TEND_SERVER_KEY`，不在库里；先写的赢（`KeepSecret`）。现在只有 Web Push 的密钥对 `vapid` |
+| 推送设备与发件箱 | `push_devices`（0009）：`id`、`user_id`、`kind`（现在只有 `webpush`）、`target`（`seal.go` 封存的 endpoint + `p256dh` + `auth`）、`target_hash`（endpoint 的 sha256，唯一，续期时凭它认出同一个浏览器）、`name`、`created_at`、`renewed_at`、`last_ok_at`、`failures`。`deliveries` 在 0009 重建成发件箱（SQLite 改不了主键，拷表）：`id`（rowid）、`seq, user_id, event, device_id`（空是个人 webhook）、`status`（`pending` / `ok` / `gone` / `failed` / `canceled`）、`attempts`、`next_at`、`notice`（通知的 JSON，不含收件人）、`result`（最后一次的 HTTP 码或错误）、`at`；`(seq, user_id, event, device_id)` 在 `seq > 0` 时唯一（server 自己的通知 seq 是 0，每次都投）；0009 之前的行照拷，2xx 记 `ok`，其余记 `failed`，都不再投。App 设备要的 `credential_id` 和每台设备的设置 `prefs` 等用到它们的功能再加列 |
 | 团队实体（未实现） | `comments, inbox_reads`；agent 定义、项目、成员和分享是事件，不另建表 |
 
 - tasks 和 runs 不做 SQL 投影，状态在内存里，`state.get` 从内存出。等内存或分页真成了问题，再加存 JSON 的投影表，另加少量索引列（`id, project, status, machine, updated_seq`）；投影随时可以丢掉、从事件重建。
@@ -50,7 +51,7 @@
 2. 在一个事务里写信封、事件、收据和实体表，然后提交；
 3. 提交成功后，才替换内存状态、发布推送。
 
-- 外部动作（调节点、调工单 API、发通知）都在事务之外做，靠持久化的意图重试：`run_queued`，以及按状态对账的工单回写（见 [trackers.md](trackers.md)「回写」）。
+- 外部动作（调节点、调工单 API、发通知）都在事务之外做，靠持久化的意图重试：`run_queued`，按状态对账的工单回写（见 [trackers.md](trackers.md)「回写」），以及通知的发件箱（`deliveries`，见 [team.md](team.md)「人在任务里」的实现）。发件箱的行在信封提交之后、仍在协调器的锁里写，是同一个库上紧接着的第二次本地提交：进程恰好死在两次提交之间，这一条通知就丢了，和 `synchronous=NORMAL` 下断电丢最后几个信封同一个口径，不在启动回放时补算。
 - 「提交之后、更新内存之前」崩溃，重启回放就能恢复。
 - 从事件重建投影时，不触发通知，也不派发。
 

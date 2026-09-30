@@ -6,6 +6,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/oxsean/fav/internal/agent"
 	"github.com/oxsean/fav/internal/journal"
 	"github.com/oxsean/fav/internal/task"
 )
@@ -241,24 +242,29 @@ func (c *Coord) inbox(p Principal) Inbox {
 	defer c.mu.Unlock()
 	out := Inbox{Items: []InboxItem{}}
 	for _, t := range c.st.Tasks {
-		sit := c.st.Situation(t)
-		if r := c.st.Runs[sit.Run]; p.Admin && r != nil && task.Open(r.State) && c.retired(r.Machine) {
-			out.Items = append(out.Items, InboxItem{Task: t.ID, Title: t.Title, Project: t.Project, Reason: sit.Reason, Run: r.ID, Since: r.Since(),
-				As: []string{AsAdmin}})
-			continue
+		if it, ok := c.inboxItem(p, t); ok {
+			out.Items = append(out.Items, it)
 		}
-		if sit.Kind != task.SitWaiting || sit.Reason == task.WhyDispatch || !canWrite(c.st, p, t) || !slices.Contains(concerns(c.st, t, sit), p.User) {
-			continue
-		}
-		since := t.UpdatedAt
-		if r := c.st.Runs[sit.Run]; r != nil {
-			since = r.Since()
-		}
-		out.Items = append(out.Items, InboxItem{Task: t.ID, Title: t.Title, Project: t.Project, Reason: sit.Reason, Run: sit.Run, Since: since,
-			As: roles(c.st, t, sit, p.User), Pending: c.pendingFor(p, t)})
 	}
 	sort.Slice(out.Items, func(i, j int) bool { return out.Items[i].Since.Before(out.Items[j].Since) })
 	return out
+}
+
+// inboxItem is what t waits on p for; false when it waits on them for nothing. The caller holds mu.
+func (c *Coord) inboxItem(p Principal, t *task.Task) (InboxItem, bool) {
+	sit := c.st.Situation(t)
+	if r := c.st.Runs[sit.Run]; p.Admin && r != nil && task.Open(r.State) && c.retired(r.Machine) {
+		return InboxItem{Task: t.ID, Title: t.Title, Project: t.Project, Reason: sit.Reason, Run: r.ID, Since: r.Since(), As: []string{AsAdmin}}, true
+	}
+	if sit.Kind != task.SitWaiting || sit.Reason == task.WhyDispatch || !canWrite(c.st, p, t) || !slices.Contains(concerns(c.st, t, sit), p.User) {
+		return InboxItem{}, false
+	}
+	since := t.UpdatedAt
+	if r := c.st.Runs[sit.Run]; r != nil {
+		since = r.Since()
+	}
+	return InboxItem{Task: t.ID, Title: t.Title, Project: t.Project, Reason: sit.Reason, Run: sit.Run, Since: since,
+		As: roles(c.st, t, sit, p.User), Pending: c.pendingFor(p, t)}, true
 }
 
 // pendingFor is what waits on p about t: a permission only for those who may grant it. The caller holds mu.
@@ -267,4 +273,42 @@ func (c *Coord) pendingFor(p Principal, t *task.Task) []task.Pending {
 		r := c.st.Runs[x.Run]
 		return x.Kind == task.PendPermission && x.Request != "" && r != nil && !c.canApprove(p, r)
 	})
+}
+
+// Waiting is what task id waits on user for now, as their inbox shows it; false when it waits on them for nothing
+// (or they are gone).
+func (c *Coord) Waiting(user, id string) (InboxItem, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	p, ok := c.principal(user)
+	t := c.st.Tasks[id]
+	if !ok || t == nil {
+		return InboxItem{}, false
+	}
+	return c.inboxItem(p, t)
+}
+
+// Sees: user may read task id.
+func (c *Coord) Sees(user, id string) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	p, ok := c.principal(user)
+	t := c.st.Tasks[id]
+	return ok && t != nil && canRead(c.st, p, t)
+}
+
+// Request is what run asks in its request id, while it is unanswered.
+func (c *Coord) Request(run, id string) (agent.Request, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	r := c.st.Runs[run]
+	if r == nil {
+		return agent.Request{}, false
+	}
+	for _, q := range r.Unanswered() {
+		if q.ID == id {
+			return q, true
+		}
+	}
+	return agent.Request{}, false
 }
