@@ -1,6 +1,7 @@
 // Home is where the day is seen at a glance: what waits on the viewer (to answer, to accept, what failed), what runs
-// and waits for a machine, what ended, each machine's day and the last seven days. On a phone it keeps what waits and
-// what runs; the figures stay on the desktop.
+// and waits for a machine, what ended, each machine's day and the last seven days. On a phone it keeps what waits, each
+// item a card row with one quick action that opens to be answered in place, and a short list of what runs; the
+// figures stay on the desktop.
 import {useState, useEffect} from '../vendor/hooks.mjs';
 import {html, cx, usePhone, useWords, useSignalValue, useActions} from '../ui/base.js';
 import {Panel, Stat} from '../ui/panel.js';
@@ -23,6 +24,7 @@ const waitFull = 2 * 3600e3;
 const stepsShown = 3;
 
 const glyphOf = {shell: '$', read: '+', search: '+', edit: '~'};
+const opGlyph = {add: '+', delete: '−', rename: '→'};
 
 // stateOf is how a waiting item is drawn: its reason when it asks, done when it is to be accepted, failed (or unknown).
 const stateOf = (group, reason) => (group === 'answer' ? reason : group === 'accept' ? 'done' : group === 'error'
@@ -37,8 +39,9 @@ function endWords(w, r) {
 
 const who = r => (r ? `${r.agent} @ ${r.machine}` : '');
 
-// Home: clock gives now in ms; fetchOutput(run) the last events of a run (run.output.page); onOpen(task) goes to it.
-export function Home({store, commands, toasts, clock = () => Date.now(), fetchOutput, onOpen, onNavigate}) {
+// Home: clock gives now in ms; fetchOutput(run) the last events of a run (run.output.page); changes is core/changes.js's
+// (a phone shows what a run to accept changed); onOpen(task) goes to it.
+export function Home({store, commands, toasts, clock = () => Date.now(), fetchOutput, changes, onOpen, onNavigate}) {
   const w = useWords();
   const {t, f} = w;
   const phone = usePhone();
@@ -136,18 +139,32 @@ export function Home({store, commands, toasts, clock = () => Date.now(), fetchOu
   };
   const sub = v => [v.task?.title || v.x.title, v.x.task, who(v.run), ...(v.x.as || []).map(a => t('home.as.' + a))].filter(Boolean).join(' · ');
 
-  const waiting = html`<${Panel} title=${t('home.waiting')} count=${shown.length} actions=${html`<${Chips} label=${t('home.waiting')}>
-      ${[['', 'home.all'], ['owner', 'home.asOwner'], ['approver', 'home.asApprover']].map(([k, label]) => html`<${Chip} label=${t(label)} on=${as === k}
-        count=${k ? shown.filter(x => (x.as || []).includes(k)).length : undefined} onClick=${() => setAs(k)} />`)}
-    <//>`}>
-    ${list.length ? list.map(v => html`<${ExpandItem} key=${v.x.task} id=${v.x.task} open=${open === v.x.task} selected=${selected === v.x.task}
-        onToggle=${() => { setSelected(v.x.task); setOpen(open === v.x.task ? '' : v.x.task); }}
-        state=${stateOf(v.group, v.x.reason)} title=${title(v)} sub=${sub(v)} age=${duration(now - Date.parse(v.x.since))}
-        agePct=${(now - Date.parse(v.x.since)) / waitFull * 100} actions=${busy(v) ? [] : quick(v)}>
-        <${WaitBody} v=${v} busy=${busy(v)} scope=${allowsRun(v.req, aff.runs?.[v.run?.id])} gone=${v.req && gone[v.run?.id + '\n' + v.req.id]} fetchOutput=${fetchOutput} onOpen=${onOpen} onClose=${() => setOpen('')}
-          onDone=${canDone(v) ? () => markDone(v) : null} onRetry=${canRetry(v) ? () => askRetry(v) : null}
-          onAnswer=${p => answer(v, p)} onReply=${text => reply(v, text)} />
-      <//>`) : html`<p class="empty">${t('home.none')}</p>`}
+  // quickPhone is the one action a closed item has on a phone: allow a permission, mark done, retry, or open the task;
+  // a question is opened to be answered.
+  const quickPhone = v => {
+    if (v.group === 'answer') return isPermission(v.req) ? choices(v).slice(0, 1).map(c => ({label: c.label, onClick: c.go})) : [];
+    if (canDone(v)) return [{label: t('home.done'), onClick: () => markDone(v)}];
+    if (canRetry(v)) return [{label: t('home.retry'), onClick: () => askRetry(v)}];
+    return [{label: t('home.openShort'), onClick: () => onOpen(v.x.task)}];
+  };
+  const item = v => html`<${ExpandItem} key=${v.x.task} id=${v.x.task} open=${open === v.x.task} selected=${selected === v.x.task}
+      onToggle=${() => { setSelected(v.x.task); setOpen(open === v.x.task ? '' : v.x.task); }}
+      state=${stateOf(v.group, v.x.reason)} title=${phone ? v.task?.title || v.x.title || v.x.task : title(v)} sub=${phone ? title(v) : sub(v)}
+      age=${duration(now - Date.parse(v.x.since))} agePct=${(now - Date.parse(v.x.since)) / waitFull * 100}
+      actions=${busy(v) ? [] : phone ? quickPhone(v) : quick(v)}>
+      <${WaitBody} v=${v} busy=${busy(v)} scope=${allowsRun(v.req, aff.runs?.[v.run?.id])} gone=${v.req && gone[v.run?.id + '\n' + v.req.id]} fetchOutput=${fetchOutput}
+        changes=${changes} onOpen=${onOpen} onClose=${() => setOpen('')}
+        onDone=${canDone(v) ? () => markDone(v) : null} onRetry=${canRetry(v) ? () => askRetry(v) : null}
+        onAnswer=${p => answer(v, p)} onReply=${text => reply(v, text)} />
+    <//>`;
+  const roles = [['', 'home.all'], ['owner', 'home.asOwner'], ['approver', 'home.asApprover'], ...(phone ? [['dispatcher', 'home.asDispatcher']] : [])];
+  const chips = html`<${Chips} label=${t('home.waiting')}>
+      ${roles.map(([k, label]) => html`<${Chip} label=${t(label)} on=${as === k}
+        count=${k ? shown.filter(x => (x.as || []).includes(k)).length : phone ? shown.length : undefined} onClick=${() => setAs(k)} />`)}
+    <//>`;
+
+  const waiting = html`<${Panel} title=${t('home.waiting')} count=${shown.length} actions=${chips}>
+    ${list.length ? list.map(item) : html`<p class="empty">${t('home.none')}</p>`}
   <//>`;
 
   const going = sel.openRuns(st);
@@ -179,7 +196,22 @@ export function Home({store, commands, toasts, clock = () => Date.now(), fetchOu
     actions=${[{label: t('home.cancel'), onClick: () => setConfirm(null)}, {label: confirm.label, kind: 'primary',
       keyName: 'Mod+Enter', onClick: () => { setConfirm(null); confirm.go(); }}]}><p>${confirm.note}</p><//>`;
 
-  if (phone) return html`<div class="home">${waiting}${runsPanel}${dialog}</div>`;
+  if (phone) {
+    const running = going.filter(g => g.run.state !== 'queued');
+    return html`<div class="home">
+      <div class="home-head"><h1>${t('home.waiting')}</h1><span class="mono t-muted">${shown.length}</span><span class="lbl home-hint">${t('home.hint')}</span></div>
+      ${chips}
+      <div class="home-waits">${list.length ? list.map(item) : html`<p class="empty">${t('home.none')}</p>`}</div>
+      <section class="home-going">
+        <button type="button" class="home-going-head" onClick=${() => onNavigate('runs')}>${f('home.running', c.running, c.queued)} ›</button>
+        <div class="home-going-list">${running.length ? running.map(({run, task}) => html`<button type="button" class="going-row" key=${run.id} onClick=${() => onOpen(run.task)}>
+          <${Status} state=${run.state} /><span class="going-title ell">${task?.title || run.task}</span>
+          <span class="mono t-muted">${duration(now - Date.parse(run.started_at || run.queued_at))}</span>
+        </button>`) : html`<p class="empty">${t('home.nothingRuns')}</p>`}</div>
+      </section>
+      ${dialog}
+    </div>`;
+  }
 
   const day = sel.today(st, now);
   const wk = sel.week(st, now);
@@ -243,12 +275,16 @@ export function Home({store, commands, toasts, clock = () => Date.now(), fetchOu
 
 // WaitBody is an open waiting item: what it asks or how it failed, what it just did, and the ways to answer: the
 // answer form for a request (every question, allow for the run when offered), a reply for a run that ended asking.
-function WaitBody({v, busy, scope, gone, fetchOutput, onOpen, onClose, onDone, onRetry, onAnswer, onReply}) {
-  const {t} = useWords();
+// On a phone it also says whose it is, where an answer goes, and, for a run to accept, what it changed.
+function WaitBody({v, busy, scope, gone, fetchOutput, changes, onOpen, onClose, onDone, onRetry, onAnswer, onReply}) {
+  const {t, f} = useWords();
+  const phone = usePhone();
   const [steps, setSteps] = useState(null);
+  const [changed, setChanged] = useState(null);
   const [text, setText] = useState('');
+  const showChanges = phone && v.group === 'accept' && !!v.run && !!changes?.can?.();
   useEffect(() => {
-    if (!v.run || !fetchOutput) return;
+    if (!v.run || !fetchOutput || showChanges) return;
     let live = true;
     fetchOutput(v.run.id).then(p => {
       if (!live) return;
@@ -256,14 +292,28 @@ function WaitBody({v, busy, scope, gone, fetchOutput, onOpen, onClose, onDone, o
       setSteps(tools.slice(-stepsShown).map(e => ({glyph: glyphOf[e.family] || '·', text: e.title})));
     }, () => live && setSteps([]));
     return () => { live = false; };
-  }, [v.run?.id]);
+  }, [v.run?.id, showChanges]);
+  useEffect(() => {
+    if (!showChanges) return;
+    let live = true;
+    changes.list(v.run.id, {ended: !sel.openStates.includes(v.run.state)}).then(c => live && setChanged(c), () => live && setChanged(null));
+    return () => { live = false; };
+  }, [v.run?.id, showChanges]);
   const permission = isPermission(v.req);
   const q = v.req?.questions?.[0];
   const detail = v.group === 'answer' ? (v.req ? (permission ? '' : v.run?.ask !== q?.question ? v.run?.ask : '') : v.run?.ask) : v.group === 'error'
     ? [v.run?.detail, v.run?.checked?.tail].filter(Boolean).join('\n') : v.run?.last;
   const sendReply = () => { if (text.trim()) { onReply(text.trim()); setText(''); } };
+  const agent = v.run?.agent || '';
+  const goes = v.group === 'answer' && v.run ? (v.req ? (gone === undefined ? f('home.toRun', agent) : '') : f('home.toReply', agent))
+    : v.group === 'accept' && v.run?.checked?.exit === 0 ? f('home.checkPassed', (v.run.checked.argv || []).join(' ')) : '';
   return html`<div class="wait-body">
+    ${phone && html`<div class="mono wait-meta">${[v.x.task, who(v.run), ...(v.x.as || []).map(a => t('home.as.' + a))].filter(Boolean).join(' · ')}</div>`}
     ${detail && html`<pre class="box">${detail}</pre>`}
+    ${changed?.files?.length > 0 && html`<div class="wait-steps"><span class="lbl">${changed.total.files === 1
+      ? f('home.changedOne', changed.total.add, changed.total.del) : f('home.changed', changed.total.files, changed.total.add, changed.total.del)}</span>
+      ${changed.files.slice(0, stepsShown).map(c => html`<div class="step"><span class="mono step-glyph">${opGlyph[c.op] || '~'}</span>
+        <span class="mono ell">${c.path}</span><span class="mono t-muted step-n">${c.binary ? '' : `+${c.add} −${c.del}`}</span></div>`)}</div>`}
     ${steps?.length > 0 && html`<div class="wait-steps"><span class="lbl">${t('home.did')}</span>
       ${steps.map(s => html`<div class="step"><span class="mono step-glyph">${s.glyph}</span><span class="mono ell">${s.text}</span></div>`)}</div>`}
     ${v.group === 'answer' && v.req && html`<${AnswerForm} req=${v.req} scope=${scope} gone=${gone} busy=${busy} onAnswer=${onAnswer} />`}
@@ -272,11 +322,17 @@ function WaitBody({v, busy, scope, gone, fetchOutput, onOpen, onClose, onDone, o
         onKeyDown=${e => { if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); sendReply(); } }} />
       <${Button} kind="primary" disabled=${busy || !text.trim()} onClick=${sendReply}>${t('home.send')}<//>
     </div>`}
-    <div class="wait-foot">
+    ${phone ? html`
+      ${(onDone || onRetry) && html`<div class="wait-foot">
+        ${onDone && html`<${Button} kind="primary" disabled=${busy} onClick=${onDone}>${t('home.done')}<//>`}
+        ${onRetry && html`<${Button} kind="primary" disabled=${busy} onClick=${onRetry}>${t('home.retry')}<//>`}
+      </div>`}
+      <div class="wait-goes"><span class="ell">${goes}</span><${Button} kind="quiet" onClick=${() => onOpen(v.x.task)}>${t('home.openTask')}<//></div>`
+    : html`<div class="wait-foot">
       ${onDone && html`<${Button} kind="primary" keyName="Shift+D" disabled=${busy} onClick=${onDone}>${t('home.done')}<//>`}
       ${onRetry && html`<${Button} keyName="d" disabled=${busy} onClick=${onRetry}>${t('home.retry')}<//>`}
       <${Button} kind="quiet" keyName="Enter" onClick=${() => onOpen(v.x.task)}>${t('home.open')}<//>
       <${Button} kind="quiet" keyName="Space" onClick=${onClose}>${t('home.collapse')}<//>
-    </div>
+    </div>`}
   </div>`;
 }

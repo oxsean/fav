@@ -88,7 +88,7 @@ export function App({store, commands, toasts, wire, http, router, keys, nav, pre
     {label: t('app.logout'), kind: 'danger', onClick: onLogout},
   ];
   const page = route.page === 'home'
-    ? html`<${Home} store=${store} commands=${commands} toasts=${toasts} clock=${clock} fetchOutput=${fetchOutput} onOpen=${onOpen} onNavigate=${onNavigate} />`
+    ? html`<${Home} store=${store} commands=${commands} toasts=${toasts} clock=${clock} fetchOutput=${fetchOutput} changes=${changes} onOpen=${onOpen} onNavigate=${onNavigate} />`
     : route.page === 'tasks'
       ? html`<${Tasks} store=${store} commands=${commands} toasts=${toasts} wire=${wire} router=${router} session=${session} clock=${clock} storage=${storage}
         intent=${intent} prefs=${prefs} copy=${copy} changes=${changes} drafts=${drafts} />`

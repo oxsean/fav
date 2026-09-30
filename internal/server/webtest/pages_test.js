@@ -38,17 +38,18 @@ function fakeHistory(url = '/') {
 }
 
 // app builds the signed-in page around a home rig; ids numbers the command ids c1, c2, …
-function app(r, {url = '/', fetchOutput = () => Promise.resolve({events: []})} = {}) {
+// wire stands in for the rig's under the commands; changes for core/changes.js's.
+function app(r, {url = '/', fetchOutput = () => Promise.resolve({events: []}), wire = r.wire, changes} = {}) {
   const keys = createKeys({timers: r.clk});
   const toasts = createToasts({timers: r.clk});
   let n = 0;
-  const commands = createCommands({wire: r.wire, newID: () => 'c' + ++n});
+  const commands = createCommands({wire, newID: () => 'c' + ++n});
   const {location, history} = fakeHistory(url);
   const router = createRouter({location, history});
   const prefs = createPrefs({storage: noStore, asked: 'zh'});
   const nav = createNav({storage: noStore, width: 1440});
   const props = {store: r.store, commands, toasts, wire: r.wire, router, keys, nav, prefs, session: {id: 'u_b', name: 'Bo'},
-    clock: () => NOW, fetchOutput, onLogout: () => {}};
+    clock: () => NOW, fetchOutput, changes, onLogout: () => {}};
   return {...props, vnode: () => html`<${KeysContext.Provider} value=${keys}><${App} ...${props} /><//>`};
 }
 
@@ -79,8 +80,56 @@ test('the home draws in both forms and both languages, styled and worded', async
     '869k tok · claude 估算 $12.47', '10 次', '最久一条等了 4h 32m']) ok(d.includes(want), `desktop: no ${want}`);
   const p = drawn(a.vnode(), 'phone', 'en');
   for (const not of ['home-stats', 'timeline', 'class="bars"', 'class="meter"', 'Ended lately']) ok(!p.includes(not), `phone: has ${not}`);
-  for (const want of ['Waiting on you', 'Running / queued', 'class="tabbar"']) ok(p.includes(want), `phone: no ${want}`);
+  for (const want of ['Waiting on you', '3 running · 1 queued ›', 'I dispatched', 'class="tabbar"']) ok(p.includes(want), `phone: no ${want}`);
+  ok(!p.includes('run-row'), 'phone: the desktop run rows');
   return sizes;
+});
+
+test('the phone home: task titles over what they ask, one quick action each, what runs, and an open item that says whose it is and where an answer goes', async () => {
+  const r = await home();
+  const calls = [], listed = [];
+  const wire = {...r.wire, call: (method, params) => { calls.push([method, params]); return new Promise(() => {}); }};
+  const changes = {can: () => true, list: run => { listed.push(run); return Promise.resolve({total: {files: 4, add: 12, del: 3}, files: [
+    {path: 'cart/round.go', op: 'modify', add: 9, del: 3}, {path: 'cart/round_test.go', op: 'add', add: 3, del: 0},
+    {path: 'docs/cart.png', op: 'add', add: 0, del: 0, binary: true}, {path: 'cart/old.go', op: 'delete', add: 0, del: 0}]}); }};
+  const a = app(r, {wire, changes});
+  form.value = 'phone';
+  try {
+    const root = await mount(a.vnode());
+    const items = () => root.find('.xi');
+    const byTask = id => items().find(x => x.one('.xi-head').getAttribute('aria-controls') === 'expand-' + id);
+    eq(titles(root), ['Receipt PDF export', 'Refund webhook', 'Login rate limit', 'Cart price rounding', 'Price feed importer'], 'task titles, grouped');
+    eq(root.find('.xi-sub')[0].textContent, 'Which PDF library should the export use?', 'what it asks under the title');
+    eq(items().map(x => x.find('.xi-actions').flatMap(e => e.find('button')).map(b => b.textContent)),
+      [[], ['允许'], ['重试'], ['完成'], ['打开']], 'a question opens; the rest have one quick action');
+    eq(root.one('.home-going-head').textContent, '在跑 3 · 排队 1 ›', 'what runs, counted');
+    eq(root.find('.going-row').length, 3, 'only the running ones listed');
+
+
+    await act(() => byTask('t2').one('.xi-head').dispatch('click'));
+    eq(byTask('t2').one('.wait-meta').textContent, 't2 · claude @ mba · 你负责', 'whose it is');
+    eq(byTask('t2').one('.wait-goes').find('span')[0].textContent, '回给 claude：它在这一轮里接着做', 'where the answer goes');
+
+    await act(() => byTask('t4').one('.xi-head').dispatch('click'));
+    await act(() => settle());
+    eq(listed, ['r4'], 'the changes of the run to accept, read once');
+    const acc = byTask('t4');
+    eq(acc.one('.lbl').textContent, '改动 · 4 个文件 · +12 −3', 'how much it changed');
+    eq(acc.find('.step').map(x => x.textContent), ['~cart/round.go+9 −3', '+cart/round_test.go+3 −0', '+docs/cart.png'], 'its first three files');
+
+    await act(() => byTask('t3').one('.xi-head').dispatch('click'));
+    eq(byTask('t3').find('.choice-hint').map(x => x.textContent), [words.t('ans.onceHint')], 'what allow does');
+    eq(byTask('t3').find('.answer-hint').length, 1, 'what deny does');
+    await act(() => byTask('t3').one('.xi-head').dispatch('click'));
+    await act(() => byTask('t3').one('.xi-actions').one('button').dispatch('click'));
+    eq(calls.at(-1), ['run.answer', {run: 'r3', request: 'p1', allow: true}], 'allow in one press');
+
+    await act(() => root.find('.chip').find(c => c.textContent.startsWith('我派发的')).dispatch('click'));
+    eq(titles(root), ['Login rate limit'], 'only what the viewer dispatched');
+
+    await act(() => root.find('.going-row')[0].dispatch('click'));
+    eq(a.router.route.value.page, 'tasks', 'a running row opens its task');
+  } finally { form.value = 'desktop'; }
 });
 
 test('the sign-in pages draw in both forms and both languages', () => {

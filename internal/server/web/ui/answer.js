@@ -14,6 +14,9 @@ register('answer', {
   'ans.multi': ['可多选', 'Pick any'], 'ans.left': ['还有 %d 个问题没答', '%d questions left to answer'],
   'ans.goneBy': ['已经被 %s 答了', '%s answered it already'], 'ans.gone': ['这个请求已经不在了', 'It is no longer asked'],
   'ans.open': ['作答…', 'Answer…'], 'ans.asks': ['要你批准：%s', 'Asks to run: %s'],
+  'ans.onceHint': ['只这一次，下次还会问你', 'This once; it asks again next time'],
+  'ans.runHint': ['这次运行里同样的命令不再问', 'Not asked again for this command in this run'],
+  'ans.denyHint': ['理由会转给 agent，它会换个做法或停下来问你', 'The reason goes to the agent: it tries another way or stops to ask'],
 });
 
 // isPermission tells a request that asks leave to run a tool from one that asks questions.
@@ -71,13 +74,15 @@ export function AnswerForm({req, scope = false, busy = false, onAnswer, detail =
       ${req.tool && html`<div class="answer-q">${f('ans.asks', req.tool)}</div>`}
       ${text && html`<pre class="box">${text}</pre>`}
       <div class=${cx('answer-acts', phone && 'answer-acts-phone')}>
-        ${quickOf(t, req, {scope}).filter(q => q.params.allow).map((q, i) => html`<button type="button" class=${cx('choice', q.kind)} disabled=${busy}
-          onClick=${() => onAnswer(q.params)}>${!phone && html`<span class="mono choice-n">${i + 1}</span>`}${q.label}</button>`)}
+        ${quickOf(t, req, {scope}).filter(q => q.params.allow).map((q, i) => html`<button type="button" class=${cx('choice', q.kind, phone && 'choice-hinted')} disabled=${busy}
+          onClick=${() => onAnswer(q.params)}>${phone ? html`<b>${q.label}</b><span class="choice-hint">${t(q.params.decision ? 'ans.runHint' : 'ans.onceHint')}</span>`
+            : html`<span class="mono choice-n">${i + 1}</span>${q.label}`}</button>`)}
       </div>
       <form class="answer-own" onSubmit=${e => { e.preventDefault(); onAnswer({allow: false, ...(why.trim() ? {message: why.trim()} : {})}); }}>
         <input class="in" value=${why} placeholder=${t('ans.why')} aria-label=${t('ans.why')} onInput=${e => setWhy(e.currentTarget.value)} onKeyDown=${submitKey} />
         <button type="submit" class="btn danger" disabled=${busy}>${t('ans.deny')}</button>
       </form>
+      ${phone && html`<p class="answer-hint">${t('ans.denyHint')}</p>`}
     </div>`;
   }
 
