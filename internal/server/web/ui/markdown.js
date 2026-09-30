@@ -60,7 +60,8 @@ export function blocks(text) {
   return out;
 }
 
-const inlineRe = /`([^`]+)`|\*\*([^*]+)\*\*|__([^_]+)__|\[([^\]]+)\]\(([^)\s]+)\)|\*([^*\s][^*]*)\*|_([^_\s][^_]*)_|(https?:\/\/[^\s<>()]+[^\s<>().,;:!?'"])/g;
+// Underscores mark text only from outside a word, as in GitHub's Markdown: snake_case and ids stay as they are.
+const inlineRe = /`([^`]+)`|\*\*([^*]+)\*\*|(?<![\p{L}\p{N}_])__([^_]+)__(?![\p{L}\p{N}_])|\[([^\]]+)\]\(([^)\s]+)\)|\*([^*\s][^*]*)\*|(?<![\p{L}\p{N}_])_([^_\s][^_]*)_(?![\p{L}\p{N}_])|(https?:\/\/[^\s<>()]+[^\s<>().,;:!?'"])/gu;
 
 // inline draws the spans of one line of text.
 export function inline(text) {

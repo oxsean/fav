@@ -347,7 +347,7 @@ function Sync({project: p, st, http, toasts, copy}) {
   })[modal.kind]?.();
   const preview = (x, n) => {
     setModal({kind: 'preview', number: n});
-    http.trackerPreview(x.id, n).then(v => setModal(m => (m?.kind === 'preview' ? {...m, body: v.body} : m)), e => { close(); toasts.show({text: apiText(w, e), tone: 'danger'}); });
+    http.trackerPreview(x.id, n).then(v => setModal(m => (m?.kind === 'preview' ? {...m, body: tm.shownComment(v.body)} : m)), e => { close(); toasts.show({text: apiText(w, e), tone: 'danger'}); });
   };
   const state = x => {
     const s = tm.trackerState(x);

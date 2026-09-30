@@ -231,6 +231,9 @@ export const trackerKinds = {github: 'https://github.com', gitea: '', gitlab: 'h
 // trackerState is how a binding syncs: stopped (its token was refused), paused (rate limited) or ok.
 export const trackerState = x => (x.stopped ? 'stopped' : x.paused_until ? 'paused' : 'ok');
 
+// shownComment is a comment body as the tracker shows it: its HTML comments, tend's hidden marker among them, left out.
+export const shownComment = body => String(body || '').replace(/<!--[\s\S]*?-->\n?/g, '').trim();
+
 // issueURL is issue n of binding x on its tracker.
 export const issueURL = (x, n) => `${x.base.replace(/\/$/, '')}/${x.repo}/${x.kind === 'gitlab' ? '-/' : ''}issues/${n}`;
 

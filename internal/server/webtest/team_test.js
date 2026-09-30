@@ -150,6 +150,7 @@ test('project settings: only what changed is sent; paths, directory checks and w
     ['my-flow', 'hot-fix', '', ''], 'workflow names from the front matter only');
   eq([tm.issueURL({base: 'https://github.com/', repo: 'shop/shop', kind: 'github'}, 7), tm.issueURL({base: 'https://gitlab.com', repo: 'g/sub/r', kind: 'gitlab'}, 7)],
     ['https://github.com/shop/shop/issues/7', 'https://gitlab.com/g/sub/r/-/issues/7'], 'issue links');
+  eq(tm.shownComment('<!-- tend:progress c_1 t_2 -->\n**tend** · done\n<!-- a\nnote -->\nPart of #3'), '**tend** · done\nPart of #3', 'a comment as the tracker shows it');
 });
 
 test('machines: drawn in both forms and languages, grouped as each viewer sees them', async () => {
@@ -495,6 +496,7 @@ test('issue sync: a binding\'s state, log and comment preview; its settings, tok
   await click(buttonOf(root.find('.proj-issue')[0], words.t('proj.preview')));
   await until(() => root.find('.proj-preview').length === 1, 'the comment');
   ok(root.one('.proj-preview').textContent.includes('Cart totals'), 'the comment as it would be written');
+  ok(!root.one('.proj-preview').textContent.includes('tend:progress'), 'without its hidden marker, as the tracker shows it');
   await click(buttonOf(root.one('.modal-foot'), words.t('team.done')));
 
   await click(buttonOf(drawer(), words.t('proj.syncSettings')));

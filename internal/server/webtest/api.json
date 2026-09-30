@@ -46,7 +46,7 @@
     {"number": 43, "task": "t4", "last_error": "422 Unprocessable Entity"},
     {"number": 40, "closed": true, "dirty": true}
   ],
-  "GET /api/trackers/preview": {"body": "**tend** is working on this: Refund emails\n\n- [x] Cart totals\n- [ ] Refund emails"},
+  "GET /api/trackers/preview": {"body": "<!-- tend:progress c_7d61b8b99c1b9aa9 t_7b8d61e21e46 -->\n**tend** is working on this: Refund emails\n\n- [x] Cart totals\n- [ ] Refund emails"},
   "GET /api/tokens": [
     {"id": "k1", "kind": "token", "name": "login:tend on mba", "owner": "u_b", "created": "2026-09-24T09:00:00Z", "last_used": "2026-09-30T14:20:00Z"},
     {"id": "k2", "kind": "token", "name": "ci-bot", "owner": "u_b", "created": "2026-09-10T09:00:00Z"},

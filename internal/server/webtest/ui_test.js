@@ -336,6 +336,9 @@ test('markdown draws a brief\'s blocks as elements, and a link only to http(s) o
   ok(s.includes('<h3 class="md-h">Top</h3>') && s.includes('<li><strong>two</strong></li>'), 'heading and list');
   ok(s.includes('<a href="/docs?a=1"') && !s.includes('href="javascript') && !s.includes('href="//evil'), 'only safe links');
   ok(s.includes('[x](javascript:alert(1))') && s.includes('&lt;b>raw&lt;/b>'), 'the rest as text');
+  const ids = renderToString(html`<${Markdown} text=${'run c_7d61b8b99c1b9aa9 t_7b8d61e21e46 in snake_case_dir, but _this_ and __that__ stand out'} />`);
+  ok(ids.includes('c_7d61b8b99c1b9aa9 t_7b8d61e21e46 in snake_case_dir, but'), `an underscore inside a word is text: ${ids}`);
+  ok(ids.includes('<em>this</em>') && ids.includes('<strong>that</strong>'), `one around words still marks them: ${ids}`);
   eq(['https://a.test/x', 'http://a.test', '/p', '?q', '#f', '//a.test', 'javascript:x', 'data:text/html,x', ' /p'].map(u => !!safeHref(u)),
     [true, true, true, true, true, false, false, false, true], 'safeHref');
 });
