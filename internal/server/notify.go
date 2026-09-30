@@ -450,6 +450,11 @@ func (n *Notifier) webhook(ctx context.Context, hook string, x noticeRow) error 
 	if n.o.Base != "" && x.Task != "" {
 		p.URL = strings.TrimRight(n.o.Base, "/") + "/#task-" + x.Task
 	}
+	return postWebhook(ctx, n.client, hook, p)
+}
+
+// postWebhook posts p to hook: nil for a 2xx answer, a *sendError with the status for another.
+func postWebhook(ctx context.Context, client *http.Client, hook string, p WebhookPayload) error {
 	b, _ := json.Marshal(p)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, hook, bytes.NewReader(b))
 	if err != nil {
@@ -457,7 +462,7 @@ func (n *Notifier) webhook(ctx context.Context, hook string, x noticeRow) error 
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", "tend-server")
-	res, err := n.client.Do(req)
+	res, err := client.Do(req)
 	if err != nil {
 		return err
 	}

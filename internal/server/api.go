@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -94,6 +95,7 @@ func (s *Server) apiRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/audit", s.api(s.adminOnly(s.listAudit)))
 	mux.HandleFunc("GET /api/me/webhook", s.api(s.getWebhook))
 	mux.HandleFunc("POST /api/me/webhook", s.api(s.setWebhook))
+	mux.HandleFunc("POST /api/me/webhook/test", s.limited(s.api(s.testWebhook)))
 	mux.HandleFunc("POST /api/users/offboard", s.api(s.adminOnly(s.offboard)))
 	mux.HandleFunc("GET /api/device", s.api(s.deviceLookup))
 	mux.HandleFunc("POST /api/device", s.api(s.deviceDecide))
@@ -475,6 +477,34 @@ func (s *Server) setWebhook(w http.ResponseWriter, r *http.Request, c caller) {
 	}
 	s.audit(r, c.user.ID, "webhook", c.user.ID)
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// testWebhook posts a test notice to the caller's saved webhook and says how it went: ok, and the HTTP status the
+// webhook answered, or "unreachable" for any other failure (the kind of network error is not told: the address is the
+// caller's to pick, and the answer should not map what the server can reach).
+func (s *Server) testWebhook(w http.ResponseWriter, r *http.Request, c caller) {
+	hook, err := s.team().Webhook(c.user.ID)
+	switch {
+	case err != nil:
+		apiError(w, http.StatusInternalServerError, "internal")
+		return
+	case hook == "":
+		apiError(w, http.StatusConflict, "no_webhook")
+		return
+	}
+	now := time.Now().UTC()
+	err = postWebhook(r.Context(), &http.Client{Timeout: sendTimeout}, hook, WebhookPayload{Event: "test", Title: "tend", At: now,
+		Text: "tend: a test from " + displayName(c.user) + "'s Me page"})
+	s.audit(r, c.user.ID, "webhook.test", resultOf(err))
+	out := map[string]any{"ok": err == nil}
+	var se *sendError
+	switch {
+	case errors.As(err, &se):
+		out["status"] = strconv.Itoa(se.status)
+	case err != nil:
+		out["status"] = "unreachable"
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 // offboard hands a leaving user's work on (user.offboard), then disables them and ends every credential of theirs,

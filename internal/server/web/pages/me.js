@@ -58,6 +58,9 @@ register('me', {
   'me.desk.tokens': ['token、浏览器会话与 webhook', 'Tokens, browser sessions and the webhook'], 'me.desk.look': ['外观与语言', 'Look and language'],
   'me.webhook': ['个人 webhook', 'Personal webhook'], 'me.webhookSave': ['保存', 'Save'],
   'me.webhookNote': ['有事等你或任务结束时 POST 一段带 text 的 JSON；ntfy、Slack、企业微信都能收。留空就不发。', 'When something needs you or a task ends, it receives a JSON POST with a text field, which ntfy, Slack and the like take. Empty sends nothing.'],
+  'me.webhookTest': ['发一条试试', 'Send a test'], 'me.webhookTestNote': ['发到已保存的地址', 'Sent to the saved address'],
+  'me.webhookSent': ['试发的一条送到了', 'The test went through'], 'me.webhookRefused': ['webhook 回了 HTTP %s', 'The webhook answered HTTP %s'],
+  'me.webhookUnreachable': ['连不上这个 webhook', 'The webhook could not be reached'],
   'me.webhookSaved': ['webhook 已保存', 'The webhook is saved'], 'me.webhookGone': ['webhook 已去掉', 'The webhook is removed'],
   'me.logins': ['登录方式', 'Sign-in accounts'], 'me.loginsNote': ['关联后任一种都能登录这个账号', 'Once linked, any of them signs in as you'],
   'me.link': ['关联', 'Link'], 'me.unlinked': ['没关联', 'not linked'], 'me.noLogins': ['这台 server 只用 token 登录', 'This server signs in with tokens only'],
@@ -248,11 +251,19 @@ function Devices({devices, mine, onRemove}) {
 }
 
 function Notices({prefs, notices, webhook, onWebhook, toasts, push, platform, http, ended}) {
-  const {t} = useWords();
+  const w = useWords();
+  const {t, f} = w;
   const on = useSignalValue(prefs.notify);
   const [permission, setPermission] = useState(() => permissionOf(notices));
   const [url, setUrl] = useState(webhook ?? '');
+  const [testing, setTesting] = useState(false);
   useEffect(() => { if (webhook !== null) setUrl(webhook); }, [webhook]);
+  const test = () => {
+    setTesting(true);
+    http.testWebhook().then(v => toasts.show(v.ok ? {text: t('me.webhookSent')}
+      : {text: v.status === 'unreachable' ? t('me.webhookUnreachable') : f('me.webhookRefused', v.status), tone: 'danger'}),
+    e => toasts.show({text: apiText(w, e), tone: 'danger'})).finally(() => setTesting(false));
+  };
   const shown = on && permission === 'granted' ? 'on' : 'off';
   const turn = v => {
     if (v === 'off') { prefs.setNotify(false); return; }
@@ -276,7 +287,8 @@ function Notices({prefs, notices, webhook, onWebhook, toasts, push, platform, ht
       ${pushed === 'on' && devs.mine && html`<${DeviceSets} device=${devs.mine} onPrefs=${p => devs.setPrefs(devs.mine, p)} />`}
       <div class="me-set me-set-top"><span class="me-k">${t('me.webhook')}</span>
         <span class="me-hook"><span class="me-hook-row"><${TextInput} label=${t('me.webhook')} value=${url} onInput=${setUrl} mono placeholder="https://ntfy.sh/…" />
-          <${Button} disabled=${webhook === null || url.trim() === (webhook || '')} onClick=${() => onWebhook(url.trim())}>${t('me.webhookSave')}<//></span>
+          <${Button} disabled=${webhook === null || url.trim() === (webhook || '')} onClick=${() => onWebhook(url.trim())}>${t('me.webhookSave')}<//>
+          <${Button} kind="quiet" disabled=${!webhook || testing || url.trim() !== webhook} title=${t('me.webhookTestNote')} onClick=${test}>${t('me.webhookTest')}<//></span>
           <span class="field-note">${t('me.webhookNote')}</span></span></div>
     </div>
   <//>

@@ -55,6 +55,7 @@ function fakeHTTP({refuse = []} = {}) {
     unlinkIdentity: ({provider, issuer, subject}) => ans('DELETE /api/identities', {provider, issuer, subject}),
     webhook: () => ans('GET /api/me/webhook').then(v => v?.url || ''),
     setWebhook: url => ans('POST /api/me/webhook', {url}),
+    testWebhook: () => ans('POST /api/me/webhook/test'),
     presets: () => ans('GET /theme/presets.json'),
     logout: () => ans('POST /logout'),
   };
@@ -256,7 +257,13 @@ test('the webhook is saved as typed, and removed when emptied', async () => {
   const input = a.el.find('input').find(i => valueOf(i) === 'https://ntfy.example.com/tend-bo');
   const save = () => buttonOf(a.el, words.t('me.webhookSave'));
   ok(save().disabled, 'nothing to save');
+  const test = () => buttonOf(a.el, words.t('me.webhookTest'));
+  await click(test());
+  await settled();
+  eq(a.http.calls.at(-1), ['POST /api/me/webhook/test'], 'a test goes to the saved one');
+  ok(a.el.textContent.includes(words.f('me.webhookRefused', '404')), 'what it answered');
   await type(input, ' https://ntfy.example.com/bo2 ');
+  ok(test().disabled, 'not while an address is unsaved');
   await click(save());
   await settled();
   eq(a.http.calls.at(-1), ['POST /api/me/webhook', {url: 'https://ntfy.example.com/bo2'}], 'saved trimmed');

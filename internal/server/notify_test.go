@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"slices"
 	"testing"
 
@@ -60,5 +61,44 @@ func TestAnAdminOffboardsAMember(t *testing.T) {
 	json.Unmarshal(b, &ms)
 	if i := slices.IndexFunc(ms.Machines, func(m coord.Machine) bool { return m.Name == "cy-box" }); i < 0 || !ms.Machines[i].Retired || ms.Machines[i].Owner != me.ID {
 		t.Fatalf("cy-box retires: %+v", ms.Machines)
+	}
+}
+
+// "Send a test" posts to the saved webhook at once and says how it went: the status a webhook answered, and only
+// "unreachable" for one that never answered.
+func TestAWebhookTestSaysHowItWent(t *testing.T) {
+	r := newRig(t)
+	b := browser(t)
+	if login(t, b, r.url, r.client) != http.StatusNoContent {
+		t.Fatal("signs in")
+	}
+	test := func() (int, map[string]any) {
+		var out map[string]any
+		code := r.api(b, "POST", "/api/me/webhook/test", nil, &out)
+		return code, out
+	}
+	if code, _ := test(); code != http.StatusConflict {
+		t.Fatalf("no webhook: %d", code)
+	}
+	status := http.StatusNoContent
+	var got WebhookPayload
+	hook := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		json.NewDecoder(req.Body).Decode(&got)
+		w.WriteHeader(status)
+	}))
+	defer hook.Close()
+	if code := r.api(b, "POST", "/api/me/webhook", map[string]string{"url": hook.URL}, nil); code != http.StatusNoContent {
+		t.Fatal(code)
+	}
+	if code, out := test(); code != http.StatusOK || out["ok"] != true || got.Event != "test" || got.Text == "" {
+		t.Fatalf("%d %v %+v", code, out, got)
+	}
+	status = http.StatusNotFound
+	if _, out := test(); out["ok"] != false || out["status"] != "404" {
+		t.Fatalf("a 404: %v", out)
+	}
+	hook.Close()
+	if _, out := test(); out["ok"] != false || out["status"] != "unreachable" {
+		t.Fatalf("gone: %v", out)
 	}
 }

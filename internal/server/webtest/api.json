@@ -57,6 +57,7 @@
       "agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1", "last_ip": "100.64.0.9"},
     {"id": "w4", "kind": "web", "name": "device:Android", "owner": "u_b", "created": "2026-09-14T08:00:00Z", "last_used": "2026-09-15T08:00:00Z", "expires": "2026-10-14T08:00:00Z"}
   ],
+  "POST /api/me/webhook/test": {"ok": false, "status": "404"},
   "POST /api/tokens": {"id": "k3", "token": "tend_c_preview0000000000"},
   "GET /api/identities": [
     {"provider": "oidc", "issuer": "https://sso.example.com", "subject": "1042", "username": "bo", "email": "bo@example.com", "email_verified": true,
