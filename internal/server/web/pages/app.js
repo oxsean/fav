@@ -1,6 +1,6 @@
 // App is the signed-in page: the shell around the page the route names, the global actions (going to a page,
 // the palette, the shortcuts, theme, language, density) and the user's menu.
-import {useState, useMemo} from '../vendor/hooks.mjs';
+import {useState, useMemo, useEffect} from '../vendor/hooks.mjs';
 import {signal} from '../vendor/signals-core.mjs';
 import {html, useWords, useSignalValue, useActions, usePhone, NamesContext} from '../ui/base.js';
 import {Shell} from '../ui/shell.js';
@@ -19,6 +19,7 @@ import {createChanges} from '../core/changes.js';
 import {createDrafts} from '../core/drafts.js';
 import {createAgentDefs} from '../core/agents.js';
 import {nowhere} from '../core/platform.js';
+import {noPush} from '../core/push.js';
 import './words.js';
 
 const goes = {home: {page: 'home'}, tasks: {page: 'tasks', view: 'list'}, board: {page: 'tasks', view: 'board'}, runs: {page: 'runs'},
@@ -44,10 +45,11 @@ function finder(store, machines, go) {
 // keeps its filter and draft there); onLogout signs out; changes reads what runs changed (core/changes.js; one over
 // wire when not given); drafts (core/drafts.js) keep what is written to each task's agent and into its send-back
 // notes; agentDefs reads the agents (core/agents.js; likewise); names is a signal of user id → name; notices are the
-// browser's ({Notification, secure}), doc the document, tab the tab's storage (the me page's); copy and download are
-// the clipboard's and a file save's (the tests pass their own).
+// browser's ({Notification, secure}), doc the document, tab the tab's storage (the me page's); platform is where the
+// page runs and push its Web Push (core/push.js), whose notices of what no longer waits close as the inbox changes;
+// copy and download are the clipboard's and a file save's (the tests pass their own).
 export function App({store, commands, toasts, wire, http, router, keys, nav, prefs, session, clock, fetchOutput, storage, onLogout, copy, changes: given, names = null,
-  notices = {}, doc = null, tab = null, agentDefs: givenDefs, download, platform = nowhere}) {
+  notices = {}, doc = null, tab = null, agentDefs: givenDefs, download, platform = nowhere, push = noPush}) {
   const {t, f} = useWords();
   const route = useSignalValue(router.route);
   const machines = useSignalValue(store.machines);
@@ -64,6 +66,7 @@ export function App({store, commands, toasts, wire, http, router, keys, nav, pre
   const go = to => router.go(to);
   const phone = usePhone();
   useNotices({store, prefs, notices, doc, active: !phone, onOpen: task => go({page: 'tasks', task})});
+  useEffect(() => push.clear(inbox), [inbox]);
   const toTasks = kind => { if (route.page !== 'tasks') go({page: 'tasks', view: 'list'}); intent.value = {kind}; };
 
   useActions('global', {
@@ -101,7 +104,7 @@ export function App({store, commands, toasts, wire, http, router, keys, nav, pre
             ? html`<${Machines} store=${store} commands=${commands} toasts=${toasts} session=${session} http=${http} router=${router} storage=${storage}
               clock=${clock} copy=${copy} />`
             : route.page === 'me'
-              ? html`<${Me} session=${session} http=${http} prefs=${prefs} toasts=${toasts} router=${router} notices=${notices} tab=${tab} platform=${platform} clock=${clock}
+              ? html`<${Me} session=${session} http=${http} prefs=${prefs} toasts=${toasts} router=${router} notices=${notices} tab=${tab} platform=${platform} push=${push} clock=${clock}
                 copy=${copy} onLogout=${onLogout} />`
               : route.page === 'agents'
                 ? html`<${Agents} store=${store} commands=${commands} toasts=${toasts} session=${session} wire=${wire} agentDefs=${agentDefs} download=${download} />`

@@ -109,9 +109,19 @@ function browser(permission = 'default', answer = 'granted') {
   return {notices: {Notification, secure: true}, shown};
 }
 
+// fakePush is this browser's push (core/push.js) standing as state, turned on to on (the browser's answer), and
+// fail the error turning it on meets; did is what the page asked of it.
+function fakePush(state = 'none', {on = 'on', fail = null} = {}) {
+  const did = [];
+  return {did, state: async () => state,
+    on: () => { did.push('on'); return fail ? Promise.reject(fail) : Promise.resolve(state = on); },
+    off: () => { did.push('off'); return Promise.resolve(state = 'off'); },
+    clear: inbox => { did.push(['clear', inbox === noInbox ? 'none' : inbox.map(x => x.task)]); }};
+}
+
 // app mounts the signed-in page on the me page with a store no server feeds; its inbox is the test's to set.
 async function app({f = 'desktop', lang = 'zh', session = bo, http = fakeHTTP(), notices = browser().notices, doc = {visibilityState: 'visible'},
-  prefsStore = memory(), tab = memory(), url = '/?page=me', platform = {kind: 'browser', os: 'other', name: 'Mac', secure: true}} = {}) {
+  prefsStore = memory(), tab = memory(), url = '/?page=me', platform = {kind: 'browser', os: 'other', name: 'Mac', secure: true}, push = fakePush()} = {}) {
   const r = rig();
   const keys = createKeys({timers: r.clk});
   const toasts = createToasts({timers: r.clk});
@@ -126,7 +136,7 @@ async function app({f = 'desktop', lang = 'zh', session = bo, http = fakeHTTP(),
   const el = install();
   const props = {store: r.store, commands, toasts, wire: r.wire, http, router, keys, nav: createNav({storage: noStore, width: 1440}), prefs, session,
     names: signal({u_b: 'Bo Lin'}), clock: () => NOW, fetchOutput: () => Promise.resolve({events: []}), storage: memory(),
-    copy: text => { out.copied.push(text); return Promise.resolve(); }, onLogout() { out.logouts++; }, notices, doc, tab, platform};
+    copy: text => { out.copied.push(text); return Promise.resolve(); }, onLogout() { out.logouts++; }, notices, doc, tab, platform, push};
   await act(() => render(html`<${KeysContext.Provider} value=${keys}><${App} ...${props} /><//>`, el));
   await settled();
   return Object.assign(out, {el, r, keys, router, http, prefs, prefsStore, tab, done: async () => {
@@ -366,6 +376,53 @@ test('this device: installing to the home screen, and an address that is not HTT
     eq([...classes].filter(c => !cssClasses.has(c)), [], `${lang} ${f} ${os} ${kind} ${secure}: classes without a rule`);
     await a.done();
   }
+});
+
+test('pushes to this device: on and off in both forms, and why they cannot be had here', async () => {
+  for (const f of ['desktop', 'phone']) {
+    const push = fakePush('off');
+    const a = await app({f, push, platform: {kind: 'pwa', os: 'android', name: 'Android', secure: true}});
+    const onOff = () => a.el.find('[role=radiogroup]').find(g => g.getAttribute('aria-label') === words.t('me.push'));
+    ok(onOff(), `${f}: a switch`);
+    eq(onOff().find('[aria-checked=true]')[0].textContent, words.t('me.off'), `${f}: off`);
+    await click(onOff().find('button').find(b => b.textContent === words.t('me.on')));
+    await settled();
+    eq([push.did.filter(x => typeof x === 'string'), onOff().find('[aria-checked=true]')[0].textContent], [['on'], words.t('me.on')], `${f}: turned on`);
+    await click(onOff().find('button').find(b => b.textContent === words.t('me.off')));
+    await settled();
+    eq(push.did.filter(x => typeof x === 'string'), ['on', 'off'], `${f}: turned off`);
+    await a.done();
+  }
+  const refused = fakePush('off', {on: 'denied'});
+  const r = await app({push: refused});
+  await click(r.el.find('[role=radiogroup]').find(g => g.getAttribute('aria-label') === words.t('me.push')).find('button').find(b => b.textContent === words.t('me.on')));
+  await settled();
+  ok(r.el.textContent.includes(words.t('me.push.denied')), 'the browser refused');
+  await r.done();
+  const nokey = await app({push: fakePush('off', {fail: {status: 503, code: 'push_key'}})});
+  await click(nokey.el.find('[role=radiogroup]').find(g => g.getAttribute('aria-label') === words.t('me.push')).find('button').find(b => b.textContent === words.t('me.on')));
+  await settled();
+  ok(nokey.el.textContent.includes(words.t('api.push_key')), 'a server without a push key');
+  await nokey.done();
+  for (const [state, platform, key] of [['none', {kind: 'browser', os: 'ios', name: 'iPhone', secure: true}, 'me.push.install'],
+    ['none', {kind: 'browser', os: 'other', name: 'Mac', secure: true}, 'me.push.none'], ['denied', {kind: 'browser', os: 'other', name: 'Mac', secure: true}, 'me.push.denied'],
+    ['none', {kind: 'browser', os: 'other', name: 'Mac', secure: false}, 'me.push.insecure']]) {
+    for (const f of ['desktop', 'phone']) {
+      const a = await app({f, push: fakePush(state), platform});
+      ok(a.el.textContent.includes(words.t(key)), `${f}: ${key}`);
+      eq(a.el.find('[role=radiogroup]').filter(g => g.getAttribute('aria-label') === words.t('me.push')).length, 0, `${f} ${key}: no switch`);
+      await a.done();
+    }
+  }
+});
+
+test('the notices of what no longer waits close as the inbox changes', async () => {
+  const push = fakePush('on');
+  const a = await app({push});
+  await act(() => { a.r.store.inbox.value = [item('t1', 'asked', [{id: 'p1', kind: 'question', task: 't1', request: 'q1', version: 1}])]; });
+  await settled();
+  eq(push.did.filter(x => typeof x !== 'string'), [['clear', 'none'], ['clear', ['t1']]], 'cleared by the inbox');
+  await a.done();
 });
 
 await run();

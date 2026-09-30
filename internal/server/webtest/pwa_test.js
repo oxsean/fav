@@ -1,13 +1,18 @@
 // pwa_test runs the service worker as tend-server serves it (the path comes as the first argument) on a fake worker
 // scope: what it keeps when it installs, what it answers from that and what it leaves to the server, dropping older
 // builds, taking over when asked; and platform: which system and form the page runs in, starting the worker only on a
-// secure address with a build, and loading a newer build through the waiting worker.
+// secure address with a build, and loading a newer build through the waiting worker; the pushes the worker shows, what
+// a click on one opens, a subscription the browser renews; and the page's push (core/push.js) on the platform's.
 import {readFileSync} from 'node:fs';
 import vm from 'node:vm';
 import {createPlatform} from '../web/core/platform.js';
+import {createPush} from '../web/core/push.js';
+import {noInbox} from '../web/core/store.js';
 import {test, eq, ok, run} from './check.js';
 
 const script = readFileSync(process.argv[2], 'utf8');
+// ⚠️ The Go test passes the pending kinds (task.Pend*) as the second argument: the worker words each one.
+const kinds = JSON.parse(process.argv[3] || '[]');
 
 // worker runs sw.js in a scope of its own: caches in memory, fetch from the server recorded.
 function worker(stored = {}) {
@@ -161,6 +166,182 @@ test('a newer build loads through the worker waiting for it', async () => {
 
   await plat(fakeSW({waiting: fakeWorker('installed')}, null)).refresh();
   eq(reloads, 4, 'a page no worker controls reloads from the server');
+});
+
+// plain is a value of the worker's realm as one of this one.
+const plain = v => JSON.parse(JSON.stringify(v));
+
+// pusher runs sw.js with what its push handling touches: the notices it shows, the windows of the page open (url,
+// posted, focused), the windows it opens, the subscriptions it makes and the requests it sends.
+function pusher({lang = 'zh-CN', wins = []} = {}) {
+  const on = {}, shown = [], opened = [], sent = [], subscribed = [];
+  const self = {
+    location: {origin: 'https://tend.test'}, navigator: {language: lang},
+    addEventListener: (type, fn) => { on[type] = fn; },
+    registration: {showNotification: async (title, opts) => { shown.push(plain({title, ...opts})); },
+      pushManager: {subscribe: async opt => { subscribed.push({userVisibleOnly: opt.userVisibleOnly, applicationServerKey: opt.applicationServerKey}); return {toJSON: () => ({endpoint: 'https://push.example/new', keys: {}})}; }}},
+    clients: {matchAll: async () => wins, openWindow: async url => { opened.push(url); }},
+  };
+  vm.runInContext(script, vm.createContext({self, URL, Promise, JSON, String, caches: {}, fetch: async (url, opt) => { sent.push({url, ...opt}); return {}; }}));
+  const fire = async (type, data) => {
+    let wait = null;
+    on[type]({...data, waitUntil: p => { wait = p; }});
+    await wait;
+  };
+  const push = m => fire('push', {data: {json: () => (typeof m === 'string' ? JSON.parse(m) : m)}});
+  return {fire, push, shown, opened, sent, subscribed};
+}
+
+const win = url => { const w = {url, posted: [], focused: 0}; w.postMessage = m => w.posted.push(plain(m)); w.focus = async () => { w.focused++; }; return w; };
+const msg = (over = {}) => ({v: 1, server: 'c1', seq: 812, event: 'task.needs_you', task: 't-3f2', item: 'r-1/q1', kind: 'permission',
+  title: '迁移脚本要删表', what: "psql -c 'DROP TABLE orders_old'", n: 1, link: '#task-t-3f2/r-r-1', at: '2026-09-30T12:00:00Z', ...over});
+
+test('a push shows one notice per task, saying what waits', async () => {
+  const w = pusher();
+  await w.push(msg());
+  await w.push(msg({kind: 'question', item: 'r-1/q2', what: undefined, n: 2}));
+  eq(w.shown.map(n => [n.title, n.body, n.tag, n.renotify, n.data]), [
+    ['迁移脚本要删表', "要你允许：psql -c 'DROP TABLE orders_old'", 't-3f2', true, {task: 't-3f2', item: 'r-1/q1', link: '#task-t-3f2/r-r-1'}],
+    ['迁移脚本要删表 · 2 项等你', 'agent 有问题问你', 't-3f2', true, {task: 't-3f2', item: 'r-1/q2', link: '#task-t-3f2/r-r-1'}],
+  ], 'notices');
+  const en = pusher({lang: 'en-US'});
+  await en.push(msg({what: ''}));
+  eq([en.shown[0].title, en.shown[0].body], ['迁移脚本要删表', 'Asks to use a tool'], 'in English, without what it would run');
+});
+
+test('a push the worker cannot read still shows a notice', async () => {
+  const w = pusher();
+  await w.push('{"v":2}');
+  await w.fire('push', {data: {json: () => { throw new Error('not JSON'); }}});
+  eq(w.shown.length, 2, 'shown');
+  ok(w.shown.every(n => n.title === 'tend' && n.body), 'a plain notice');
+});
+
+test('the worker words every kind of pending item in both languages', async () => {
+  ok(kinds.length > 0, 'no kinds from the Go test');
+  const bodies = {};
+  for (const lang of ['zh-CN', 'en']) {
+    const w = pusher({lang});
+    for (const kind of kinds) await w.push(msg({kind, what: 'x'}));
+    bodies[lang] = w.shown.map(n => n.body);
+    eq(new Set(bodies[lang]).size, kinds.length, `${lang}: one text per kind`);
+  }
+  ok(bodies['zh-CN'].every((b, i) => b !== bodies.en[i]), 'a kind worded the same in both languages');
+});
+
+test('clicking a notice brings a window of the page to what it is about', async () => {
+  const open = win('https://tend.test/?page=tasks'), other = win('https://else.example/');
+  const w = pusher({wins: [other, open]});
+  const n = {data: {link: '#task-t-3f2/r-r-1'}, closed: 0, close() { this.closed++; }};
+  await w.fire('notificationclick', {notification: n});
+  eq([n.closed, open.posted, open.focused, other.posted, w.opened], [1, [{open: '#task-t-3f2/r-r-1'}], 1, [], []], 'the open window');
+  const none = pusher();
+  await none.fire('notificationclick', {notification: {data: {link: '#task-t-1'}, close() {}}});
+  eq(none.opened, ['/#task-t-1'], 'a new window');
+});
+
+test('a subscription the browser renews is made again with the same key and registered', async () => {
+  const w = pusher();
+  const key = new Uint8Array([4, 1, 2]);
+  await w.fire('pushsubscriptionchange', {oldSubscription: {options: {applicationServerKey: key}}});
+  eq(w.subscribed, [{userVisibleOnly: true, applicationServerKey: key}], 'subscribed');
+  eq(w.sent.map(r => [r.url, r.method, r.headers['X-Tend'], JSON.parse(r.body).subscription.endpoint]), [['/api/push/device', 'PUT', '1', 'https://push.example/new']], 'registered');
+});
+
+// pushPlatform is a platform whose browser has push: its permission, what asking answers, its subscription and its
+// notices; did is what the page did with them.
+function pushPlatform({permission = 'default', answer = 'granted', sub = null, notices = []} = {}) {
+  const did = [];
+  let current = sub;
+  const reg = {
+    pushManager: {
+      getSubscription: async () => current,
+      subscribe: async opt => { did.push(['subscribe', [...opt.applicationServerKey]]); current = subOf('https://push.example/b', opt.applicationServerKey); return current; },
+    },
+    getNotifications: async () => notices,
+  };
+  const subOf = (endpoint, key) => ({endpoint, options: {applicationServerKey: key.buffer || key},
+    toJSON: () => ({endpoint, keys: {p256dh: 'p', auth: 'a'}}), unsubscribe: async () => { did.push(['unsubscribe', endpoint]); current = null; }});
+  const Notification = {permission, requestPermission: () => { did.push(['ask']); Notification.permission = answer; return Promise.resolve(answer); }};
+  const sw = {ready: Promise.resolve(reg), register: async () => {}, addEventListener: (type, fn) => { sw.on = fn; }};
+  const p = createPlatform({nav: {serviceWorker: sw, userAgent: ua.android}, secure: true, build: 'b1', notices: Notification, pushes: true});
+  return {p, did, sw, subOf, set: s => { current = s; }};
+}
+
+// pushHTTP is the page's http for push: the server's key and what the page registered and dropped.
+function pushHTTP(key = 'BAEC') {
+  const calls = [];
+  return {calls, pushKey: async () => { if (!key) throw Object.assign(new Error('503'), {status: 503, code: 'push_key'}); return key; },
+    putDevice: async (sub, name) => { calls.push(['put', sub.endpoint, name]); }, dropDevice: async e => { calls.push(['drop', e]); }};
+}
+
+test('the platform has push only where the browser has a worker, a PushManager and notices', () => {
+  const sw = {register: async () => {}};
+  const of = o => createPlatform({nav: {serviceWorker: sw}, secure: true, build: 'b1', notices: {}, pushes: true, ...o}).push;
+  ok(of({}), 'all there');
+  for (const o of [{secure: false}, {build: ''}, {pushes: false}, {notices: undefined}]) eq(of(o), null, JSON.stringify(o));
+});
+
+test('turning push on asks first, then subscribes with the server key and registers the device', async () => {
+  const {p, did} = pushPlatform();
+  const http = pushHTTP('BAEC');
+  const push = createPush({http, platform: p});
+  eq(await push.state(), 'off', 'before');
+  eq(await push.on(), 'on', 'after');
+  eq(did, [['ask'], ['subscribe', [4, 1, 2]]], 'asked, then subscribed');
+  eq(http.calls, [['put', 'https://push.example/b', 'Android']], 'registered');
+  eq(await push.off(), 'off', 'off again');
+  eq(http.calls.at(-1), ['drop', 'https://push.example/b'], 'dropped');
+
+  const refused = pushPlatform({answer: 'denied'});
+  const r = createPush({http: pushHTTP(), platform: refused.p});
+  eq(await r.on(), 'denied', 'the browser refused');
+  eq(refused.did, [['ask']], 'did not subscribe');
+  eq(await r.state(), 'denied', 'stays refused');
+
+  const nokey = pushPlatform();
+  let err = null;
+  await createPush({http: pushHTTP(''), platform: nokey.p}).on().catch(e => { err = e; });
+  eq([err?.code, nokey.did], ['push_key', [['ask']]], 'a server without a key');
+  eq(await createPush({http: pushHTTP(), platform: {push: null}}).state(), 'none', 'no push in this browser');
+});
+
+test('the page renews its subscription, made again when the server key changed', async () => {
+  const none = pushPlatform();
+  const h0 = pushHTTP();
+  await createPush({http: h0, platform: none.p}).renew();
+  eq(h0.calls, [], 'nothing to renew');
+
+  const same = pushPlatform({permission: 'granted'});
+  same.set(same.subOf('https://push.example/a', new Uint8Array([4, 1, 2])));
+  const h1 = pushHTTP('BAEC');
+  await createPush({http: h1, platform: same.p}).renew();
+  eq([same.did, h1.calls], [[], [['put', 'https://push.example/a', 'Android']]], 'the same key: renewed as it is');
+
+  const moved = pushPlatform({permission: 'granted'});
+  moved.set(moved.subOf('https://push.example/a', new Uint8Array([4, 9, 9])));
+  const h2 = pushHTTP('BAEC');
+  await createPush({http: h2, platform: moved.p}).renew();
+  eq(moved.did, [['unsubscribe', 'https://push.example/a'], ['subscribe', [4, 1, 2]]], 'subscribed again');
+  eq(h2.calls, [['put', 'https://push.example/b', 'Android']], 'the new one registered');
+});
+
+test('the notices of what no longer waits close, and a clicked one opens its link in the page', async () => {
+  const note = item => ({data: {item}, closed: false, close() { this.closed = true; }});
+  const gone = note('r-1/q1'), still = note('r-1/q2'), other = {closed: false, close() { this.closed = true; }};
+  const {p, sw} = pushPlatform({notices: [gone, still, other]});
+  const push = createPush({http: pushHTTP(), platform: p});
+  push.clear(noInbox);
+  await new Promise(r => setTimeout(r, 0));
+  ok(!gone.closed, 'closed before the inbox came');
+  push.clear([{task: 't1', pending: [{id: 'r-1/q2'}]}, {task: 't2', reason: 'draft'}]);
+  await new Promise(r => setTimeout(r, 0));
+  eq([gone.closed, still.closed, other.closed], [true, false, true], 'closed');
+  const links = [];
+  p.onOpen(l => links.push(l));
+  sw.on({data: {open: '#task-t1'}});
+  sw.on({data: 'skip'});
+  eq(links, ['#task-t1'], 'opened');
 });
 
 run();

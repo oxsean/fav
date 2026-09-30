@@ -41,6 +41,11 @@ export function createHTTP({fetch = (...a) => globalThis.fetch(...a)} = {}) {
       }
     },
     login: token => ask('POST', '/login', {token}, true),
+    // pushKey is the server's Web Push public key, base64url (503 push_key when it has none); putDevice registers or
+    // renews this browser's push subscription (PushSubscription.toJSON()), dropDevice forgets it by its endpoint.
+    pushKey: async () => (await ask('GET', '/api/push/key')).key,
+    putDevice: (subscription, name) => ask('PUT', '/api/push/device', {subscription, name}),
+    dropDevice: endpoint => ask('DELETE', '/api/push/device', {endpoint}),
     logout: () => ask('POST', '/logout', {}, true),
     // logins are the sign-in methods this server offers: [{name, display}].
     logins: async () => (await ask('GET', '/auth/logins')) || [],

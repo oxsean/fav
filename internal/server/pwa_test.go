@@ -12,6 +12,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/oxsean/fav/internal/task"
 )
 
 func get(t *testing.T, url string) (*http.Response, []byte) {
@@ -51,7 +53,8 @@ func TestThePageAndItsWorkerNameTheBuild(t *testing.T) {
 func TestTheServiceWorkerAndThePlatform(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "sw.js")
 	os.WriteFile(path, swJS(), 0o600)
-	runModule(t, "webtest/pwa_test.js", path)
+	kinds, _ := json.Marshal([]string{task.PendPermission, task.PendQuestion, task.PendGate, task.PendContinue, task.PendEnded, task.PendFailed, task.PendWaiting})
+	runModule(t, "webtest/pwa_test.js", path, string(kinds))
 }
 
 // The app installs from the manifest: a standalone app at the root, its colours the default skin's, and icons

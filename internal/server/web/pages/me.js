@@ -1,7 +1,8 @@
 // me is the viewer's own page: who they are, how the page looks in this browser, how they hear that something needs
-// them (browser notices while the page is open, a personal webhook), the sign-in accounts linked to them, their
-// personal tokens and their browser sessions. On a phone it keeps only the account, the ways into the team and agent
-// pages (which only show there), putting tend on the home screen and signing out. Where the address is not HTTPS it
+// them (browser notices while the page is open, pushes to this device, a personal webhook), the sign-in accounts
+// linked to them, their personal tokens and their browser sessions. On a phone it keeps only the account, the ways
+// into the team and agent pages (which only show there), pushes to this device, putting tend on the home screen and
+// signing out. Where the address is not HTTPS it
 // says so, on either form.
 import {useState, useEffect} from '../vendor/hooks.mjs';
 import {html, cx, usePhone, useWords, useSignalValue} from '../ui/base.js';
@@ -15,6 +16,7 @@ import {linkURL} from '../core/http.js';
 import {themes, densities} from '../core/prefs.js';
 import {clock, day} from '../core/format.js';
 import {nowhere} from '../core/platform.js';
+import {noPush} from '../core/push.js';
 import {apiText} from './words.js';
 
 register('me', {
@@ -32,6 +34,12 @@ register('me', {
   'me.browser.denied': ['浏览器拒绝了通知：在浏览器的网站设置里允许 tend 再打开', 'The browser refuses them: allow tend in its site settings, then turn them on'],
   'me.browser.insecure': ['这个地址不是 HTTPS，浏览器不给通知', 'This address is not HTTPS, so the browser gives no notices'],
   'me.browser.none': ['这个浏览器不支持通知', 'This browser has no notices'],
+  'me.push': ['推送到这台设备', 'Pushes to this device'],
+  'me.push.note': ['有事等你、在网页上一会儿没人处理时推到这里，网页关着也收得到', 'When something needs you and the page leaves it a while, it is pushed here, even with the page closed'],
+  'me.push.denied': ['浏览器拒绝了通知：在浏览器的网站设置里允许 tend 再打开', 'The browser refuses notices: allow tend in its site settings, then turn pushes on'],
+  'me.push.none': ['这个浏览器收不到推送', 'This browser receives no pushes'],
+  'me.push.install': ['装到主屏幕、从主屏幕打开 tend 以后才能打开推送', 'Pushes can be turned on once tend is on the home screen and opened from there'],
+  'me.push.insecure': ['这个地址不是 HTTPS，收不到推送', 'This address is not HTTPS, so no pushes come'],
   'me.webhook': ['个人 webhook', 'Personal webhook'], 'me.webhookSave': ['保存', 'Save'],
   'me.webhookNote': ['有事等你或任务结束时 POST 一段带 text 的 JSON；ntfy、Slack、企业微信都能收。留空就不发。', 'When something needs you or a task ends, it receives a JSON POST with a text field, which ntfy, Slack and the like take. Empty sends nothing.'],
   'me.webhookSaved': ['webhook 已保存', 'The webhook is saved'], 'me.webhookGone': ['webhook 已去掉', 'The webhook is removed'],
@@ -128,7 +136,24 @@ function Look({prefs, presets}) {
   <//>`;
 }
 
-function Notices({prefs, notices, webhook, onWebhook, toasts}) {
+// PushSet turns pushes to this device on and off, or says why they cannot be had here: an address that is not HTTPS,
+// an iPhone's Safari before tend is on the home screen, a browser without them, notices refused.
+function PushSet({push, platform, toasts}) {
+  const w = useWords();
+  const {t} = w;
+  const [state, setState] = useState(null);
+  useEffect(() => { push.state().then(setState, () => setState('none')); }, []);
+  const shown = !platform.secure ? 'insecure' : state === 'none' && platform.os === 'ios' && platform.kind !== 'pwa' ? 'install' : state;
+  if (!shown) return null;
+  const turn = v => (v === 'on' ? push.on() : push.off()).then(setState, e => toasts.show({text: apiText(w, e), tone: 'danger'}));
+  const usable = shown === 'on' || shown === 'off';
+  return html`<div class="me-set"><span class="me-k">${t('me.push')}</span>
+    <span class="me-inline">${usable && html`<${Segmented} label=${t('me.push')} value=${shown} onChange=${turn}
+      options=${[{value: 'on', label: t('me.on')}, {value: 'off', label: t('me.off')}]} />`}
+      <span class=${cx(usable ? 't-muted' : 't-warning')}>${t(usable ? 'me.push.note' : 'me.push.' + shown)}</span></span></div>`;
+}
+
+function Notices({prefs, notices, webhook, onWebhook, toasts, push, platform}) {
   const {t} = useWords();
   const on = useSignalValue(prefs.notify);
   const [permission, setPermission] = useState(() => permissionOf(notices));
@@ -151,6 +176,7 @@ function Notices({prefs, notices, webhook, onWebhook, toasts}) {
         <span class="me-inline">${usable && html`<${Segmented} label=${t('me.browser')} value=${shown} onChange=${turn}
           options=${[{value: 'on', label: t('me.on')}, {value: 'off', label: t('me.off')}]} />`}
           <span class=${cx(usable ? 't-muted' : 't-warning')}>${t('me.browser.' + permission)}</span></span></div>
+      <${PushSet} push=${push} platform=${platform} toasts=${toasts} />
       <div class="me-set me-set-top"><span class="me-k">${t('me.webhook')}</span>
         <span class="me-hook"><span class="me-hook-row"><${TextInput} label=${t('me.webhook')} value=${url} onInput=${setUrl} mono placeholder="https://ntfy.sh/…" />
           <${Button} disabled=${webhook === null || url.trim() === (webhook || '')} onClick=${() => onWebhook(url.trim())}>${t('me.webhookSave')}<//></span>
@@ -262,8 +288,9 @@ function Install({platform, phone}) {
 
 // Me: session is who is signed in; http reads and changes their tokens, sessions, accounts and webhook; prefs are this
 // browser's; notices are the browser's notices ({Notification, secure}); tab is the tab's storage (linking an account
-// goes through it); platform is this device's (core/platform.js); clock is now; onLogout signs out; copy is the clipboard's.
-export function Me({session, http, prefs, toasts, router, notices, tab, platform = nowhere, clock: now = () => Date.now(), copy, onLogout}) {
+// goes through it); platform is this device's (core/platform.js), push its Web Push (core/push.js); clock is now;
+// onLogout signs out; copy is the clipboard's.
+export function Me({session, http, prefs, toasts, router, notices, tab, platform = nowhere, push = noPush, clock: now = () => Date.now(), copy, onLogout}) {
   const w = useWords();
   const {t, f} = w;
   const phone = usePhone();
@@ -298,6 +325,7 @@ export function Me({session, http, prefs, toasts, router, notices, tab, platform
         <li><button type="button" class="card-row" onClick=${() => router.go({page: 'agents'})}>
           <span class="card-main"><span class="card-primary">${t('me.agents')}</span><span class="card-secondary">${t('me.agentsNote')}</span></span></button></li>
       </ul>
+      <${Panel} title=${t('me.notices')}><div class="me-sets"><${PushSet} push=${push} platform=${platform} toasts=${toasts} /></div><//>
       <${Install} platform=${platform} phone />
       <${Button} kind="danger" wide onClick=${onLogout}>${t('app.logout')}<//>
     </div>`;
@@ -338,7 +366,7 @@ export function Me({session, http, prefs, toasts, router, notices, tab, platform
     <div class="me-body">
       <div class="me-col">
         <${Look} prefs=${prefs} presets=${presets} />
-        <${Notices} prefs=${prefs} notices=${notices} webhook=${webhook} onWebhook=${saveHook} toasts=${toasts} />
+        <${Notices} prefs=${prefs} notices=${notices} webhook=${webhook} onWebhook=${saveHook} toasts=${toasts} push=${push} platform=${platform} />
       </div>
       <div class="me-col">
         <${Logins} logins=${logins} identities=${identities} onLink=${() => linking(tab, now())} />

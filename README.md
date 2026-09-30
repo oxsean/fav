@@ -593,7 +593,9 @@ browser; skins are made on the server (`/theme/<name>.css`) and keep text at 4.5
 accent.
 On a phone, over HTTPS, the page installs to the home screen (the Account page says how: Share and Add to Home Screen
 in Safari, or Install app in the Android browser's menu); the installed page signs in from another device, where you
-open its link and allow it. On an address that is not HTTPS the Account page says the page cannot install or receive
+open its link and allow it. With Pushes to this device on in the Account page, whatever needs you and is left on the
+page a while (30 seconds for a permission, 60 for the rest) is pushed to that phone or computer, even with the page
+closed, and what was not pushed yet still goes after a server restart. On an address that is not HTTPS the Account page says the page cannot install or receive
 pushes: put the server behind tailscale serve, or give it a certificate with `--tls-cert/--tls-key`.
 
 **The server's database.** `tend-server import` moves a mode 1 journal (`coord/events.jsonl`) into the database, with

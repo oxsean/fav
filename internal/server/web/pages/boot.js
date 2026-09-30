@@ -15,6 +15,7 @@ import {createToasts} from '../core/toasts.js';
 import {createPrefs} from '../core/prefs.js';
 import {form, mac, phoneQuery, narrowQuery, NAV_OPEN_FROM, createNav} from '../core/layout.js';
 import {createPlatform, nowhere} from '../core/platform.js';
+import {createPush, noPush} from '../core/push.js';
 import {words} from '../core/i18n.js';
 import {AuthFrame, Login, Device} from './auth.js';
 import {App} from './app.js';
@@ -43,9 +44,10 @@ function connect({open, location, clock, doc, http, build}) {
 
 // Root is the page once boot has asked who is signed in: the sign-in page, a terminal's sign-in, or the app, on the me
 // page when the tab comes back from linking an account. tab is the tab's storage, notices the browser's notices,
-// platform where the page runs, build the page's own.
+// platform where the page runs, push its Web Push (renewed once signed in, let go of on signing out), build the
+// page's own.
 export function Root({http, router, keys, nav, prefs, first, open, location, history, clock, doc, storage, tab = null, notices = {},
-  platform = nowhere, build = ''}) {
+  platform = nowhere, push = noPush, build = ''}) {
   const [session, setSession] = useState(first);
   const [live, setLive] = useState(null);
   const route = router.route.value;
@@ -55,6 +57,7 @@ export function Root({http, router, keys, nav, prefs, first, open, location, his
     if (!session) return;
     const c = connect({open, location, clock, doc, http, build});
     setLive(c);
+    push.renew().catch(() => {});
     const back = returnedFromLink(auth, tab, clock());
     if (auth && auth.kind !== 'device') dropAuth();
     if (back) { router.go({page: 'me'}); c.toasts.show(back); }
@@ -70,7 +73,8 @@ export function Root({http, router, keys, nav, prefs, first, open, location, his
   }
   if (!live) return null;
   return html`<${App} ...${live} http=${http} router=${router} keys=${keys} nav=${nav} prefs=${prefs} session=${session} storage=${storage}
-    tab=${tab} notices=${notices} doc=${doc} platform=${platform} onLogout=${async () => { try { await http.logout(); } finally { location.assign('/'); } }} />`;
+    tab=${tab} notices=${notices} doc=${doc} platform=${platform} push=${push}
+    onLogout=${async () => { try { await push.off().catch(() => {}); await http.logout(); } finally { location.assign('/'); } }} />`;
 }
 
 // boot: root is where the page draws; open makes the socket (default: a WebSocket); fetch, storage, media (matchMedia)
@@ -108,11 +112,13 @@ export async function boot({root = globalThis.document.getElementById('app'), op
   const router = createRouter({location, history});
   globalThis.addEventListener?.('popstate', () => router.popped());
   const http = createHTTP(fetch ? {fetch} : {});
+  const push = createPush({http, platform});
+  platform.onOpen(link => { history.pushState(null, '', '/' + link); router.popped(); });
   const nav = createNav({storage, width: media(narrowQuery).matches ? 0 : NAV_OPEN_FROM});
   let first = null;
   try { first = await http.session(); } catch {}
   const draw = () => render(html`<${KeysContext.Provider} value=${keys}><${Root} http=${http} router=${router} keys=${keys} nav=${nav}
     prefs=${prefs} first=${first} open=${open} location=${location} history=${history} clock=${clock} doc=${doc} storage=${storage}
-    tab=${tabStore()} notices=${{Notification: globalThis.Notification, secure: !!globalThis.isSecureContext}} platform=${platform} build=${build} /><//>`, root);
+    tab=${tabStore()} notices=${{Notification: globalThis.Notification, secure: !!globalThis.isSecureContext}} platform=${platform} push=${push} build=${build} /><//>`, root);
   effect(() => { void router.route.value; draw(); });
 }
