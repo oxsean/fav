@@ -39,12 +39,14 @@ budget: {usd: 3, minutes: 40}
 
 ## 存放、归属与分享
 
-- **存放**：团队模式是 journal 事件 `agentdef_saved` / `agentdef_removed` / `agentdef_shared`（随 journal 存在 SQLite 里）；`agentdef_saved` 带保存的人（`saved_by`），折叠时记下 `saved_at`，改分享不算保存；模式一是 `<home>/defs/agents/<name>.md`，归这台机器的用户。同名时定义优先于 `config.json` 的档案。
+- **存放**：团队模式是 journal 事件 `agentdef_saved` / `agentdef_removed` / `agentdef_shared` / `agentdef_transferred`（随 journal 存在 SQLite 里）；`agentdef_saved` 带保存的人（`saved_by`），折叠时记下 `saved_at`，改分享不算保存；模式一是 `<home>/defs/agents/<name>.md`，归这台机器的用户。同名时定义优先于 `config.json` 的档案。
 - **归属与分享**：主人是用户，或 `project:<id>`（项目负责人管理，项目参与者使用）。`DefShare{users, projects, all, view}`：分享给人、给项目（该项目的参与者在该项目的任务上用），或给所有人；`view` 决定被分享的人能否看说明书。
   - 管理员能看见和管理所有定义，但不能用没分享给自己的定义。
   - 别人看不见也用不了的定义，报 `not_found`；看得见但这个任务不能用的，报 `unauthorized` 并说明原因。
   - 分享的完整规则见 [team.md](team.md)「共享：agent 和机器默认私有」。
-- 方法：`agentdef.list` / `get` / `save` / `check` / `remove` / `share`；CLI 是 `tend agent defs|import|export|check|rm|share`。
+- 点名分享给你的定义可以不再使用：`agentdef.leave{name}` 发一条把你从 `share.users` 去掉的 `agentdef_shared`；你管的、或经项目 / 所有人分享到的回 `conflict`。
+- 管一个定义的人可以把它转给自己负责的项目（管理员：任何项目）：`agentdef.transfer{name, owner: "project:<id>"}` 记 `agentdef_transferred{name, owner}`，分享设置不变；不是项目的 `owner` 回 `bad_request`，没有的项目 `not_found`，不是负责人 `unauthorized`。两者都只在团队模式。
+- 方法：`agentdef.list` / `get` / `save` / `check` / `remove` / `share` / `leave` / `transfer`；CLI 是 `tend agent defs|import|export|check|rm|share`。
 - `agentdef.check{text, owner?}` 走 `save` 的同一段判断（解析、`defs.Check`、按档案编译、覆盖已有定义要能管它、归到项目要是负责人），不保存、不写日志，回 `{name, errors, warnings, launch}`：文本的问题都列进 `errors`（`save` 会带着它们、用 `; ` 连起来回 `bad_request`），权限的问题照 `save` 回错误（`not_found`、`unauthorized`）；没有 `errors` 时 `warnings`、`launch` 就是保存后定义上的。能读状态的人都能调。CLI 的 `tend agent check <file>` 仍只在本地解析和检查。
 
 ## 编译

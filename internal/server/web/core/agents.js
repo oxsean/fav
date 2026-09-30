@@ -113,7 +113,7 @@ export function usedBy(state, name) {
 export function may(r) {
   const v = r.view;
   return {edit: !!v?.manage && !!v.text, remove: !!v?.manage, share: !!v?.manage, copy: r.kind === 'profile' || (!!v?.text && !v.manage),
-    export: !!v?.text};
+    export: !!v?.text, leave: !!v?.leave, transfer: !!v?.manage};
 }
 
 // ownersFor are where a new definition may go: the viewer ('') and the projects they own, all of them for an admin.
@@ -122,6 +122,10 @@ export function ownersFor(state, session) {
     .sort((a, b) => a.name.localeCompare(b.name));
   return ['', ...ps.map(p => projectOwner + p.id)];
 }
+
+// transferTo are the projects the viewer may give definition r to: those they own (an admin: all), less the one
+// that has it.
+export const transferTo = (state, session, r) => ownersFor(state, session).filter(o => o && o !== r.view?.owner);
 
 const front = /^---[ \t]*\n([\s\S]*?)\n---[ \t]*(?:\n|$)/;
 

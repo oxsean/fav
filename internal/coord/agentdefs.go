@@ -34,6 +34,7 @@ type AgentDefView struct {
 	Owner       string         `json:"owner"`
 	Share       *task.DefShare `json:"share,omitempty"` // to whoever manages it
 	Manage      bool           `json:"manage,omitempty"`
+	Leave       bool           `json:"leave,omitempty"` // it is shared with the caller by name, who may stop using it (agentdef.leave)
 	Text        string         `json:"text,omitempty"`
 	Warnings    []string       `json:"warnings,omitempty"`
 	Require     []string       `json:"require,omitempty"` // the machines it runs on only
@@ -111,6 +112,8 @@ func (c *Coord) defView(p Principal, d *task.AgentDef) AgentDefView {
 	if c.manages(p, d) {
 		share := d.Share
 		v.Share, v.Manage = &share, true
+	} else {
+		v.Leave = slices.Contains(d.Share.Users, p.User)
 	}
 	if c.readsDef(p, d) {
 		v.Text = string(defs.Format(d.AgentDef))
@@ -304,6 +307,58 @@ func (c *Coord) agentDefShare(who Principal, r *wire.Request) (string, []journal
 		return d.Name, nil, nil
 	}
 	return d.Name, []journal.Event{journal.NewEvent(task.EAgentDefShared, p)}, nil
+}
+
+// agentDefLeave is agentdef.leave: who stops using a definition shared with them by name; one they manage, or have
+// through a project or everyone, stays.
+func (c *Coord) agentDefLeave(who Principal, r *wire.Request) (string, []journal.Event, error) {
+	var p task.AgentDefRef
+	if err := r.Decode(&p); err != nil {
+		return "", nil, err
+	}
+	if !c.team() {
+		return "", nil, bad("sharing needs tend-server")
+	}
+	d := c.agentDefs()[p.Name]
+	switch {
+	case d == nil || !c.manages(who, d) && !c.usesDefSomewhere(who, d):
+		return "", nil, notFound("agent " + p.Name)
+	case c.manages(who, d) || !slices.Contains(d.Share.Users, who.User):
+		return "", nil, conflict("agent " + p.Name + " is not shared with you by name")
+	}
+	share := d.Share
+	share.Users = slices.DeleteFunc(slices.Clone(d.Share.Users), func(u string) bool { return u == who.User })
+	return d.Name, []journal.Event{journal.NewEvent(task.EAgentDefShared, task.AgentDefShare{Name: d.Name, Share: share})}, nil
+}
+
+// agentDefTransfer is agentdef.transfer: one who manages a definition gives it to a project they own (an admin: any),
+// its sharing kept.
+func (c *Coord) agentDefTransfer(who Principal, r *wire.Request) (string, []journal.Event, error) {
+	var p task.AgentDefTransfer
+	if err := r.Decode(&p); err != nil {
+		return "", nil, err
+	}
+	if !c.team() {
+		return "", nil, bad("sharing needs tend-server")
+	}
+	d, err := c.managedDef(who, p.Name)
+	if err != nil {
+		return "", nil, err
+	}
+	id, ok := strings.CutPrefix(p.Owner, task.ProjectOwner)
+	if !ok || id == "" {
+		return "", nil, bad("owner")
+	}
+	pr := c.st.Projects[id]
+	switch {
+	case pr == nil || !who.Admin && pr.Role(who.User) == "":
+		return "", nil, notFound(p.Owner)
+	case !who.Admin && pr.Owner != who.User:
+		return "", nil, forbidden(p.Owner)
+	case d.Owner == p.Owner:
+		return d.Name, nil, nil
+	}
+	return d.Name, []journal.Event{journal.NewEvent(task.EAgentDefTransferred, task.AgentDefTransfer{Name: d.Name, Owner: p.Owner})}, nil
 }
 
 // agentFor is the profile who's run of a task of project is frozen with, and what its definition tells the run. A

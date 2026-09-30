@@ -108,7 +108,7 @@ async function opened({fm = 'desktop', session = bo, download} = {}) {
 
 test('where an agent comes from, what it runs as and on, what uses it and what the viewer may do with it', () => {
   const views = [{name: 'a-own', owner: 'u_a', manage: true, text: '---\nname: a-own\nprovider: claude\n---\n', warnings: ['x']},
-    {name: 'b-own', owner: 'u_b', manage: true}, {name: 'p-def', owner: 'project:p1', manage: true, text: 't'}, {name: 'c-view', owner: 'u_c', text: 't'}];
+    {name: 'b-own', owner: 'u_b', manage: true}, {name: 'p-def', owner: 'project:p1', manage: true, text: 't'}, {name: 'c-view', owner: 'u_c', text: 't', leave: true}];
   const picks = [{name: 'claude', provider: 'claude'}, {name: 'a-own', provider: 'claude'}, {name: 'p-def', provider: 'codex', model: 'gpt-6', machine: 'linux'},
     {name: 'c-view', provider: 'claude'}];
   const list = ag.rows(views, picks, 'u_a');
@@ -117,11 +117,14 @@ test('where an agent comes from, what it runs as and on, what uses it and what t
   eq(ag.counts(list), {all: 5, mine: 1, project: 1, shared: 1, others: 1, profile: 1}, 'counts');
   eq(ag.spec(list[4]), {provider: 'codex', model: 'gpt-6', effort: '', permission: '', machine: 'linux', deny: []}, 'what it compiles to');
   eq(list.map(r => ag.may(r)), [
-    {edit: true, remove: true, share: true, copy: false, export: true},
-    {edit: false, remove: true, share: true, copy: false, export: false},
-    {edit: false, remove: false, share: false, copy: true, export: true},
-    {edit: false, remove: false, share: false, copy: true, export: false},
-    {edit: true, remove: true, share: true, copy: false, export: true}], 'what may be done');
+    {edit: true, remove: true, share: true, copy: false, export: true, leave: false, transfer: true},
+    {edit: false, remove: true, share: true, copy: false, export: false, leave: false, transfer: true},
+    {edit: false, remove: false, share: false, copy: true, export: true, leave: true, transfer: false},
+    {edit: false, remove: false, share: false, copy: true, export: false, leave: false, transfer: false},
+    {edit: true, remove: true, share: true, copy: false, export: true, leave: false, transfer: true}], 'what may be done');
+  const projects = {projects: {p1: {id: 'p1', name: 'Shop', owner: 'u_a'}, p2: {id: 'p2', name: 'Docs', owner: 'u_b'}}};
+  eq(ag.transferTo(projects, {id: 'u_b', role: 'member'}, list[1]), ['project:p2'], 'to a project the viewer owns');
+  eq(ag.transferTo(projects, {id: 'u_a', role: 'admin'}, list[4]), ['project:p2'], 'an admin to any, but not the one it is in');
 
   const ms = [{name: 'a', state: 'connected', agents: {claude: {installed: true, auth: 'ok'}, codex: {installed: true, auth: 'missing'}}},
     {name: 'b', state: 'offline', agents: {claude: {installed: true, auth: 'ok'}, codex: {installed: false}}}, {name: 'c', state: 'connected'},
@@ -232,7 +235,7 @@ test('the picked one: its facts, notes, text, command and sharing as far as the 
   await tabTo(root, 'share');
   eq(aside(root).one('.ag-pane').one('.ag-list').find('li').map(x => x.textContent), [t('ag.shareNone')], 'not shared');
   eq(aside(root).find('button').map(labelOf).filter(l => ![t('ag.tab.def'), t('ag.tab.launch'), t('ag.tab.share')].includes(l)),
-    [t('ag.edit'), t('ag.share'), t('ag.export'), t('ag.remove')], 'his own: edited, shared, exported, removed');
+    [t('ag.edit'), t('ag.share'), t('ag.transfer'), t('ag.export'), t('ag.remove')], 'his own: edited, shared, given to his project, exported, removed');
 
   await pick(root, 'cy-docs');
   ok(aside(root).textContent.includes(f('ag.pinned', 'linux')), 'held to linux');
@@ -375,7 +378,7 @@ test('the editor checks the text without saving it: every problem, then its warn
   eq(r.errors, [], 'errors');
 });
 
-test('sharing changed and a definition removed after a confirm, each read again from a new snapshot', async () => {
+test('sharing changed, a definition removed, one shared with him left and his own given to his project, each after a confirm and read again from a new snapshot', async () => {
   const {r, root} = await opened();
   const modal = () => root.one('.modal');
   await r.srv.play('agents-share', {
@@ -410,9 +413,41 @@ test('sharing changed and a definition removed after a confirm, each read again 
       r.flush();
       await settled();
     },
+    async leave() {
+      await settled();
+      ok(!rowNames(root).includes('docs-review'), 'gone');
+      await pick(root, 'docs-quick');
+      eq(aside(root).find('button').filter(b => labelOf(b) === t('ag.leave')).length, 0, 'his own is not left');
+      await pick(root, 'ann-plan');
+      await click(buttonOf(aside(root), t('ag.leave')));
+      ok(modal().textContent.includes(t('ag.leaveNote')), 'what leaving does');
+      await click(buttonOf(modal().one('.modal-foot'), t('ag.leave')));
+    },
+    async left() {
+      await settled();
+      ok(toasts(root).includes(f('ag.leftDone', 'ann-plan')), 'said');
+      r.flush();
+      await settled();
+    },
+    async transfer() {
+      await settled();
+      ok(!rowNames(root).includes('ann-plan'), 'no longer his to use');
+      await pick(root, 'bo-dev');
+      await click(buttonOf(aside(root), t('ag.transfer')));
+      ok(modal().textContent.includes(t('ag.transferNote')), 'what giving it away does');
+      await click(modal().one('.picker-btn'));
+      await click(root.find('[role=option]').find(o => o.textContent.includes('Docs')));
+      await click(buttonOf(modal().one('.modal-foot'), t('ag.transfer')));
+    },
+    async transferred() {
+      await settled();
+      ok(toasts(root).includes(f('ag.transferred', 'bo-dev', 'Docs')), 'said');
+      r.flush();
+      await settled();
+    },
   });
   await settled();
-  ok(!rowNames(root).includes('docs-review'), 'gone');
+  eq(rowOf(root, 'bo-dev')?.textContent.includes(f('ag.from.project', 'Docs')), true, 'Docs\'s now');
   eq(r.errors, [], 'errors');
 });
 

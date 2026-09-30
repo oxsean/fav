@@ -101,12 +101,12 @@
 4. **订阅保持 seq 连续**。
    - 仍然一个 `seq` 一个信封。
    - 信封里的事件按人过滤成子集，子集为空也照发，客户端只推进 `seq`。
-   - 每种事件由 `sees` 按类型判定：任务和 run 的事件（含 `plan_drafted`、`plan_applied`、`task_linked`）跟随任务的读权限，项目和成员事件跟随项目成员身份，`machine_shared` 跟随机器的可见性（见「共享：agent 和机器默认私有」），`agentdef_saved` / `agentdef_shared` 跟随定义的可读性；`agentdef_removed` 和没有规则的事件类型只推给管理员，所以新事件类型要同时在 `sees` 里补一条规则。
+   - 每种事件由 `sees` 按类型判定：任务和 run 的事件（含 `plan_drafted`、`plan_applied`、`task_linked`）跟随任务的读权限，项目和成员事件跟随项目成员身份，`machine_shared` 跟随机器的可见性（见「共享：agent 和机器默认私有」），`agentdef_saved` / `agentdef_shared` / `agentdef_transferred` 跟随定义的可读性；`agentdef_removed` 和没有规则的事件类型只推给管理员，所以新事件类型要同时在 `sees` 里补一条规则。
    - 推送里的 `command` 只留 `id` 和 `method`，结果和 `digest` 只回给调用者本人。
    - 历史补发和实时推送用同一条规则。
    - 事件属于哪个项目，由协调器在推送时按当前状态解析（run → task → project），不靠事件自带；对象从不删除，所以总能解析。
    - 推送里的命令名只发给调用者本人，以及看得到其中某个事件的人。
-   - `member_set`、`project_edited`、`machine_shared`、`agentdef_shared`、`agentdef_removed`、改了项目或负责人的 `task_edited` 不单独推：`state.watch` 在同一个流里推 `reset`，接着推这个人的新快照，丢掉不再可见的数据；续传的那一段里有这些事件时也改给快照（见 [runs/coordinator.md](../runs/coordinator.md)「订阅」）。网页和 TUI 平时自己折叠信封（网页用 `fold.js`，和 Go 的折叠用同一批 Go 生成的信封对照测试），只在 seq 断档或遇到不认识的对象时整量重读。
+   - `member_set`、`project_edited`、`machine_shared`、`agentdef_shared`、`agentdef_removed`、`agentdef_transferred`、改了项目或负责人的 `task_edited` 不单独推：`state.watch` 在同一个流里推 `reset`，接着推这个人的新快照，丢掉不再可见的数据；续传的那一段里有这些事件时也改给快照（见 [runs/coordinator.md](../runs/coordinator.md)「订阅」）。网页和 TUI 平时自己折叠信封（网页用 `fold.js`，和 Go 的折叠用同一批 Go 生成的信封对照测试），只在 seq 断档或遇到不认识的对象时整量重读。
    - 连接上的身份在连上时定下；server 的 `sweep`（每几秒）发现凭据的主人被停用、或管理员身份被授予或撤销时断开这条连接，客户端按新身份重连。
 5. **收据按 `(principal, command_id)` 存**。重放之前先检查当前的读权限；有权就返回第一次的结果。
 6. **原生会话的两条旁路收紧**。

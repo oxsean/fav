@@ -16,6 +16,8 @@ const (
 	EAgentDefSaved   = "agentdef_saved"   // AgentDef
 	EAgentDefRemoved = "agentdef_removed" // AgentDefRef
 	EAgentDefShared  = "agentdef_shared"  // AgentDefShare
+	// EAgentDefTransferred gives a definition to another owner, its sharing kept.
+	EAgentDefTransferred = "agentdef_transferred" // AgentDefTransfer
 )
 
 // ProjectOwner prefixes an owner that is a project: its owner manages the definition, its participants use it.
@@ -42,6 +44,11 @@ type DefShare struct {
 
 type AgentDefRef struct {
 	Name string `json:"name"`
+}
+
+type AgentDefTransfer struct {
+	Name  string `json:"name"`
+	Owner string `json:"owner"`
 }
 
 type AgentDefShare struct {
@@ -103,6 +110,17 @@ func (s *State) applyDefs(e journal.Event, at time.Time) (bool, error) {
 			return true, fmt.Errorf("no agent %s", d.Name)
 		}
 		x.Share, x.UpdatedAt = d.Share, at
+		x.Rev++
+	case EAgentDefTransferred:
+		var d AgentDefTransfer
+		if err := json.Unmarshal(e.Data, &d); err != nil {
+			return true, err
+		}
+		x := s.AgentDefs[d.Name]
+		if x == nil {
+			return true, fmt.Errorf("no agent %s", d.Name)
+		}
+		x.Owner, x.UpdatedAt = d.Owner, at
 		x.Rev++
 	default:
 		return false, nil

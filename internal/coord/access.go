@@ -86,6 +86,8 @@ var methodAccess = map[string]access{
 	MAgentDefCheck:      reader, // agentdef.save's rules, saving nothing (agentDefCheck)
 	MAgentDefRemove:     writer,
 	MAgentDefShare:      writer,
+	MAgentDefLeave:      writer,
+	MAgentDefTransfer:   writer,
 	MInboxList:          reader,
 	MMachinesWatch:      reader,
 	MInboxWatch:         reader,
@@ -333,7 +335,7 @@ func (c *Coord) sees(p Principal, e journal.Event) bool {
 		var d task.TaskStart
 		json.Unmarshal(e.Data, &d)
 		return slices.ContainsFunc(d.IDs, func(id string) bool { return canRead(c.st, p, c.st.Tasks[id]) })
-	case task.EAgentDefSaved, task.EAgentDefShared:
+	case task.EAgentDefSaved, task.EAgentDefShared, task.EAgentDefTransferred:
 		d := c.st.AgentDefs[s.Name]
 		return d != nil && c.readsDef(p, d)
 	case task.EAgentDefRemoved:
@@ -366,7 +368,7 @@ func (c *Coord) visibleEnv(p Principal, env journal.Envelope) journal.Envelope {
 func reshapes(env journal.Envelope) bool {
 	for _, e := range env.Events {
 		switch e.Type {
-		case task.EMemberSet, task.EProjectEdited, task.EMachineShared, task.EAgentDefShared, task.EAgentDefRemoved:
+		case task.EMemberSet, task.EProjectEdited, task.EMachineShared, task.EAgentDefShared, task.EAgentDefRemoved, task.EAgentDefTransferred:
 			return true
 		case task.ETaskEdited:
 			var d task.TaskEdit

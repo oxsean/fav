@@ -220,6 +220,11 @@ function applyEvent(s, e, at, seq) {
       x.share = d.share; x.updated_at = at; x.rev = (x.rev || 0) + 1;
       break;
     }
+    case 'agentdef_transferred': {
+      const x = need(s.agent_defs, d.name, 'agent');
+      x.owner = d.owner; x.updated_at = at; x.rev = (x.rev || 0) + 1;
+      break;
+    }
     case 'machine_shared':
       if (!(d.users || []).length && !(d.projects || []).length) delete s.shares[d.machine];
       else s.shares[d.machine] = d;
@@ -241,7 +246,7 @@ const parts = {
   run_queued: ['runs', 'tasks'], run_observed: ['runs', 'tasks'], run_starting: ['runs'], run_stop_requested: ['runs'],
   run_canceled: ['runs'], run_abandoned: ['runs'], run_answered: ['runs'], run_sent: ['runs'], run_interrupt_requested: ['runs'],
   project_created: ['projects'], project_edited: ['projects'], member_set: ['projects'],
-  agentdef_saved: ['agent_defs'], agentdef_removed: ['agent_defs'], agentdef_shared: ['agent_defs'],
+  agentdef_saved: ['agent_defs'], agentdef_removed: ['agent_defs'], agentdef_shared: ['agent_defs'], agentdef_transferred: ['agent_defs'],
   machine_shared: ['shares'], machine_drained: ['drains', 'tasks'],
 };
 

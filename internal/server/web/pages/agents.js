@@ -33,6 +33,12 @@ register('agents', {
   'ag.foot': ['「档案」来自 config.json，只读；同名时定义优先。✓ 检查通过，! 有警告。', 'Profiles come from config.json and are read-only; a definition of the same name comes first. ✓ passes its check, ! has warnings.'],
   'ag.none': ['还没有 agent', 'No agent yet'], 'ag.noneHere': ['这一类没有 agent', 'No agent of this kind'], 'ag.loading': ['正在读取…', 'Loading…'],
   'ag.rev': ['第 %d 版 · %s 改过', 'Version %d · changed %s'], 'ag.revBy': ['第 %d 版 · %s 在 %s 改过', 'Version %d · changed by %s on %s'],
+  'ag.leave': ['不再使用', 'Stop using it'], 'ag.leaveTitle': ['不再使用 %s？', 'Stop using %s?'],
+  'ag.leaveNote': ['它是点名分享给你的；不再使用后你看不到它，派活时也不能选它，要再用得请主人重新分享。', 'It is shared with you by name. Once you stop, you no longer see it or pick it for a task; its owner would have to share it again.'],
+  'ag.leftDone': ['不再使用 %s', 'No longer using %s'],
+  'ag.transfer': ['转给项目', 'Give to a project'], 'ag.transferTitle': ['把 %s 转给项目', 'Give %s to a project'], 'ag.transferTarget': ['项目', 'Project'],
+  'ag.transferNote': ['转给项目后由项目负责人管理，项目的参与者都能用；分享设置不变。', 'The project\'s owner then manages it and its participants use it; its sharing stays as it is.'],
+  'ag.transferred': ['%s 已转给 %s', '%s now belongs to %s'],
   'ag.require': ['只在这些机器上跑', 'Runs only on'], 'ag.prefer': ['优先的机器', 'Prefers'], 'ag.config': ['config.json 里的档案', 'A profile in config.json'],
   'ag.role': ['角色', 'Role'], 'ag.runsAs': ['provider · 模型', 'Provider · model'], 'ag.permission': ['权限', 'Permissions'],
   'ag.deny': ['不许用的工具', 'Tools denied'], 'ag.usedBy': ['用在', 'Used by'], 'ag.default': ['默认', 'default'],
@@ -354,6 +360,27 @@ function Remove({r, st, onGo, onClose}) {
   <//>`;
 }
 
+// Leave confirms stopping to use a definition shared with the viewer by name.
+function Leave({r, onGo, onClose}) {
+  const {t, f} = useWords();
+  return html`<${Modal} title=${f('ag.leaveTitle', r.name)} onClose=${onClose}
+    actions=${[{label: t('confirm.keep'), onClick: onClose}, {label: t('ag.leave'), kind: 'primary', keyName: 'Mod+Enter', onClick: () => { onClose(); onGo(); }}]}>
+    <p>${t('ag.leaveNote')}</p>
+  <//>`;
+}
+
+// Transfer picks the project a definition goes to; targets are the owners it may go to ('project:<id>').
+function Transfer({r, targets, projects, busy, onGo, onClose}) {
+  const {t, f} = useWords();
+  const [to, setTo] = useState(targets[0] || '');
+  const nameOf = o => projects[ag.projectOf(o)]?.name || ag.projectOf(o);
+  return html`<${Modal} title=${f('ag.transferTitle', r.name)} onClose=${onClose}
+    actions=${[{label: t('home.cancel'), onClick: onClose}, {label: t('ag.transfer'), kind: 'primary', keyName: 'Mod+Enter', disabled: !to || busy, onClick: () => onGo(to, nameOf(to))}]}>
+    <${Picker} label=${t('ag.transferTarget')} value=${to} onChange=${setTo} options=${targets.map(o => ({value: o, label: nameOf(o)}))} />
+    <p class="t-muted ag-p">${t('ag.transferNote')}</p>
+  <//>`;
+}
+
 // Agents: agentDefs reads the two lists (core/agents.js); download gives the viewer a file (a test passes its own);
 // platform hands the page's address on to a computer from a phone.
 export function Agents({store, commands, toasts, session, wire, agentDefs, download = saveFile, platform = nowhere}) {
@@ -400,6 +427,9 @@ export function Agents({store, commands, toasts, session, wire, agentDefs, downl
   };
   const share = p => commands.send('agentdef.share', p, {key: key(p.name)}).then(() => { close(); toasts.show({text: f('ag.sharedDone', p.name)}); }, failed);
   const remove = r => commands.send('agentdef.remove', {name: r.name}, {key: key(r.name)}).then(() => toasts.show({text: f('ag.removed', r.name)}), failed);
+  const leave = r => commands.send('agentdef.leave', {name: r.name}, {key: key(r.name)}).then(() => toasts.show({text: f('ag.leftDone', r.name)}), failed);
+  const transfer = (r, owner, label) => commands.send('agentdef.transfer', {name: r.name, owner}, {key: key(r.name)})
+    .then(() => { close(); toasts.show({text: f('ag.transferred', r.name, label)}); }, failed);
   const edit = r => setModal({kind: 'editor', mode: 'edit', name: r.name, text: r.view.text});
   const copy = r => { const n = ag.copyName(r.name, list.map(x => x.name)); setModal({kind: 'editor', mode: 'copy', name: r.name, text: ag.copied(r, n)}); };
 
@@ -414,6 +444,9 @@ export function Agents({store, commands, toasts, session, wire, agentDefs, downl
     share: () => cur && html`<${Share} r=${list.find(r => r.name === modal.name) || cur} people=${people} projects=${projectOptions}
       busy=${!online || busy(modal.name)} onSave=${share} onClose=${close} />`,
     remove: () => html`<${Remove} r=${modal.r} st=${st} onGo=${() => remove(modal.r)} onClose=${close} />`,
+    leave: () => html`<${Leave} r=${modal.r} onGo=${() => leave(modal.r)} onClose=${close} />`,
+    transfer: () => html`<${Transfer} r=${modal.r} targets=${ag.transferTo(st, session, modal.r)} projects=${st.projects || {}} busy=${!online || busy(modal.r.name)}
+      onGo=${(owner, label) => transfer(modal.r, owner, label)} onClose=${close} />`,
   })[modal.kind]?.();
 
   const chips = html`<${Chips} label=${t('ag.title')}>${ag.sources.filter(s => s === 'all' || count[s] > 0).map(s => html`<${Chip} key=${s} label=${t('ag.src.' + s)}
@@ -478,9 +511,12 @@ export function Agents({store, commands, toasts, session, wire, agentDefs, downl
         <div class="det-acts">
           ${acts.edit && html`<${Button} kind="primary" keyName="Enter" disabled=${!online} onClick=${() => edit(cur)}>${t('ag.edit')}<//>`}
           ${acts.share && html`<${Button} disabled=${!online} onClick=${() => setModal({kind: 'share', name: cur.name})}>${t('ag.share')}<//>`}
+          ${acts.transfer && wire?.has?.('agentdef.transfer') && ag.transferTo(st, session, cur).length > 0 &&
+            html`<${Button} disabled=${!online} onClick=${() => setModal({kind: 'transfer', r: cur})}>${t('ag.transfer')}<//>`}
           ${acts.copy && html`<${Button} disabled=${!online} onClick=${() => copy(cur)}>${t('ag.copy')}<//>`}
           ${acts.export && html`<${Button} kind="quiet" onClick=${() => download(cur.name + '.md', cur.view.text)}>${t('ag.export')}<//>`}
           ${acts.remove && html`<${Button} kind="quiet danger" disabled=${!online} onClick=${() => setModal({kind: 'remove', r: cur})}>${t('ag.remove')}<//>`}
+          ${acts.leave && wire?.has?.('agentdef.leave') && html`<${Button} kind="quiet danger" disabled=${!online} onClick=${() => setModal({kind: 'leave', r: cur})}>${t('ag.leave')}<//>`}
           ${cur.kind === 'profile' && html`<span class="t-muted ag-p">${t('ag.inConfig')}</span>`}
         </div>
       </aside>`}

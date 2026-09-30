@@ -133,3 +133,61 @@ func TestADefinitionSaysWhoLastSavedItAndWhereItRuns(t *testing.T) {
 		t.Fatalf("sharing is no save, and whoever may use it sees who saved it and where it runs: %+v %v", seen, err)
 	}
 }
+
+func TestOneSharedWithADefinitionLeavesItAndItsOwnerGivesItToAProject(t *testing.T) {
+	e := team(t, tend.Config{})
+	e.start()
+	e.project()
+	if err := callAs(e.as(bob), MAgentDefSave, "d1", AgentDefSave{Text: careful}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := callAs(e.as(bob), MAgentDefShare, "s1", task.AgentDefShare{Name: "careful", Share: task.DefShare{Users: []string{cy.User, dee.User}}}, nil); err != nil {
+		t.Fatal(err)
+	}
+	var v AgentDefView
+	if err := callAs(e.as(cy), MAgentDefGet, "", task.AgentDefRef{Name: "careful"}, &v); err != nil || !v.Leave {
+		t.Fatalf("one it is shared with by name may leave it: %+v %v", v, err)
+	}
+	if err := callAs(e.as(cy), MAgentDefLeave, "l1", task.AgentDefRef{Name: "careful"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := callAs(e.as(cy), MAgentDefGet, "", task.AgentDefRef{Name: "careful"}, nil); wire.Code(err) != wire.CodeNotFound {
+		t.Fatalf("gone for cy: %v", err)
+	}
+	var owned AgentDefView
+	if err := callAs(e.as(bob), MAgentDefGet, "", task.AgentDefRef{Name: "careful"}, &owned); err != nil || !slices.Equal(owned.Share.Users, []string{dee.User}) || owned.Leave {
+		t.Fatalf("the others it is shared with keep it: %+v %v", owned, err)
+	}
+	if err := callAs(e.as(cy), MAgentDefLeave, "l2", task.AgentDefRef{Name: "careful"}, nil); wire.Code(err) != wire.CodeNotFound {
+		t.Fatalf("left already: %v", err)
+	}
+	if err := callAs(e.as(bob), MAgentDefLeave, "l3", task.AgentDefRef{Name: "careful"}, nil); wire.Code(err) != wire.CodeConflict {
+		t.Fatalf("its owner does not leave it: %v", err)
+	}
+
+	if err := callAs(e.as(bob), MAgentDefTransfer, "t1", task.AgentDefTransfer{Name: "careful", Owner: "project:p1"}, nil); wire.Code(err) != wire.CodeUnauthorized {
+		t.Fatalf("only to a project its owner owns: %v", err)
+	}
+	if err := callAs(e.as(bob), MAgentDefTransfer, "t2", task.AgentDefTransfer{Name: "careful", Owner: bob.User}, nil); wire.Code(err) != wire.CodeBadRequest {
+		t.Fatalf("to a project only: %v", err)
+	}
+	if err := callAs(e.as(root), MAgentDefTransfer, "t3", task.AgentDefTransfer{Name: "careful", Owner: "project:p9"}, nil); wire.Code(err) != wire.CodeNotFound {
+		t.Fatalf("no such project: %v", err)
+	}
+	var moved AgentDefView
+	if err := callAs(e.as(root), MAgentDefTransfer, "t4", task.AgentDefTransfer{Name: "careful", Owner: "project:p1"}, &moved); err != nil ||
+		moved.Owner != "project:p1" || !slices.Equal(moved.Share.Users, []string{dee.User}) {
+		t.Fatalf("an admin gives it to any project, its sharing kept: %+v %v", moved, err)
+	}
+	var ann1 AgentDefView
+	if err := callAs(e.as(ann), MAgentDefGet, "", task.AgentDefRef{Name: "careful"}, &ann1); err != nil || !ann1.Manage {
+		t.Fatalf("p1's owner manages it now: %+v %v", ann1, err)
+	}
+	if err := callAs(e.as(bob), MAgentDefSave, "d2", AgentDefSave{Text: careful}, nil); wire.Code(err) != wire.CodeUnauthorized {
+		t.Fatalf("and bob, a participant, only uses it: %v", err)
+	}
+	st := e.c.state(true)
+	if st.AgentDefs["careful"].Owner != "project:p1" {
+		t.Fatalf("%+v", st.AgentDefs["careful"])
+	}
+}
