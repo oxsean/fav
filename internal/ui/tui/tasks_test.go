@@ -889,3 +889,70 @@ func TestTheOutputShowsEachEditedFileWithItsCounts(t *testing.T) {
 		}
 	}
 }
+
+// An edit row's counts are coloured; = opens every row on its first hunk and - closes them, a click opens or closes one;
+// every line stays exactly the terminal's width.
+func TestAnEditRowOpensOnItsFirstHunk(t *testing.T) {
+	stat := `"tend":{"edits":[{"path":"internal/a.go","op":"modify","add":1,"del":1,"hunks":2,"preview":["@@ -1 +1 @@","-old line","+new line"]},` +
+		`{"path":"docs/b.md","op":"modify","add":3,"del":0,"hunks":1,"preview":["@@ -4 +4,3 @@","+more words"]}]}`
+	change := `{"method":"item/completed","params":{"item":{"type":"fileChange","id":"f1","changes":[` +
+		`{"path":"internal/a.go","kind":{"type":"update"},"diff":"@@ -1 +1 @@\n-old line\n+new line\n"},` +
+		`{"path":"docs/b.md","kind":{"type":"update"},"diff":"@@ -4 +4,3 @@\n+more words\n"}],"status":"completed"}},` + stat + `}`
+	m, _ := tasksModelWith(t, func(dir string, spec node.Spec) (string, error) {
+		now := time.Now()
+		os.WriteFile(filepath.Join(dir, "output.log"), []byte(change+"\n"), 0o600)
+		return "", writeState(dir, node.State{Rev: 1, State: node.StateExited, ExitCode: new(0), Provider: spec.Provider,
+			Session: spec.Session, StartedAt: &now, EndedAt: &now})
+	})
+	key(m, "5")
+	var tk task.Task
+	if err := m.tasks.cl.CallCommand(t.Context(), coord.MTaskCreate, "c1", coord.TaskCreate{Title: "edits", Dir: t.TempDir(), Agent: "fake"}, &tk); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, m, func() bool { return len(m.tasks.list) == 1 })
+	key(m, "enter")
+	key(m, "enter")
+	key(m, "enter")
+	waitFor(t, m, func() bool {
+		r := m.selectedRun()
+		return r != nil && m.tasks.out[r.ID] != nil && m.tasks.out[r.ID].end
+	})
+	m.Update(tea.WindowSizeMsg{Width: 140, Height: 40})
+	exact := func(what string) {
+		t.Helper()
+		for i, l := range strings.Split(m.screen(), "\n") {
+			if w := ansi.StringWidth(l); w != 140 {
+				t.Fatalf("%s: line %d is %d wide: %q", what, i, w, ansi.Strip(l))
+			}
+		}
+	}
+	s := screenText(m)
+	if !strings.Contains(s, "internal/a.go") || strings.Contains(s, "+new line") {
+		t.Fatalf("closed at first:\n%s", s)
+	}
+	if !strings.Contains(m.screen(), okSty.Render("+1")) || !strings.Contains(m.screen(), errSty.Render("−1")) {
+		t.Fatalf("+a and −d are coloured: %q", m.screen())
+	}
+	exact("closed")
+	key(m, "=")
+	s = screenText(m)
+	if !strings.Contains(s, "  -old line") || !strings.Contains(s, "  +new line") || !strings.Contains(s, "  +more words") ||
+		!strings.Contains(s, i18n.F("tasks.output_more_hunks", 1)) {
+		t.Fatalf("= opens every row on its first hunk:\n%s", s)
+	}
+	if !strings.Contains(m.screen(), okSty.Render("+new line")) || !strings.Contains(m.screen(), errSty.Render("-old line")) {
+		t.Fatalf("its lines are coloured by their marks")
+	}
+	exact("open")
+	key(m, "-")
+	if s = screenText(m); strings.Contains(s, "+new line") {
+		t.Fatalf("- closes them:\n%s", s)
+	}
+	y := slices.IndexFunc(strings.Split(s, "\n"), func(l string) bool { return strings.Contains(l, "docs/b.md") })
+	x := strings.Index(strings.Split(s, "\n")[y], "docs/b.md")
+	m.Update(tea.MouseClickMsg{Button: tea.MouseLeft, X: ansi.StringWidth(strings.Split(s, "\n")[y][:x]), Y: y})
+	if s = screenText(m); !strings.Contains(s, "+more words") || strings.Contains(s, "+new line") {
+		t.Fatalf("a click opens that row alone:\n%s", s)
+	}
+	exact("one open")
+}

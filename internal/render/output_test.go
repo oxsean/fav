@@ -55,7 +55,7 @@ func TestRunOutputLinesReadEvents(t *testing.T) {
 		"$ go test ./... " + i18n.T("tasks.output_running"),
 		"$ make " + i18n.T("tasks.output_running"), "  cc a.c", "  cc b.c", "  ld x",
 	}
-	if got := RunOutputLines(evs, 80); strings.Join(got, "\n") != strings.Join(want, "\n") {
+	if got := texts(RunOutputLines(evs, 80, nil)); strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("got\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
 	}
 }
@@ -80,7 +80,7 @@ func TestRunOutputLinesPutEachEditedFileOnARow(t *testing.T) {
 		{"− gone.txt ", "+0 −4"},
 	}
 	const w = 50
-	got := RunOutputLines(evs, w)
+	got := texts(RunOutputLines(evs, w, nil))
 	if len(got) != len(rows)+1 || got[len(rows)] != "~ b.go +1 −1" {
 		t.Fatalf("a row per file, and the call line while its result has not come:\n%s", strings.Join(got, "\n"))
 	}
@@ -91,7 +91,69 @@ func TestRunOutputLinesPutEachEditedFileOnARow(t *testing.T) {
 	}
 	long := []output.Event{{Kind: output.KindEdit, Family: output.FamilyEdit, Edits: []output.Edit{
 		{Path: "internal/server/web/pages/deep/file.go", Op: "modify", Add: 1, Del: 1, Hunks: 1}}}}
-	if got := RunOutputLines(long, 30); len(got) != 1 || got[0] != "~ …b/pages/deep/file.go  +1 −1" {
+	if got := texts(RunOutputLines(long, 30, nil)); len(got) != 1 || got[0] != "~ …b/pages/deep/file.go  +1 −1" {
 		t.Fatalf("a long path keeps its end: %q", got)
+	}
+}
+
+func texts(lines []OutputLine) []string {
+	var out []string
+	for _, l := range lines {
+		out = append(out, l.Text())
+	}
+	return out
+}
+
+// An edited file's row colours +a and −d; one with a first hunk opens under it: the hunk's lines coloured by their mark,
+// cut to width and to a few, with what is left out said; the rows keep their keys across readings.
+func TestAnEditRowIsColouredAndOpensOnItsFirstHunk(t *testing.T) {
+	hunk := []string{"@@ -1,3 +1,4 @@", " package a", "-\told()", "+\tnew()", "+" + strings.Repeat("x", 90)}
+	for range 10 {
+		hunk = append(hunk, " same")
+	}
+	evs := []output.Event{
+		{Kind: output.KindSay, Text: "done"},
+		{Off: 40, Kind: output.KindEdit, Family: output.FamilyEdit, Edits: []output.Edit{
+			{Path: "a.go", Op: "modify", Add: 2, Del: 1, Hunks: 3, Preview: hunk},
+			{Path: "gone.txt", Op: "delete", Del: 4, Hunks: 1},
+		}},
+	}
+	const w = 40
+	shut := RunOutputLines(evs, w, nil)
+	if len(shut) != 3 || shut[1].Edit == "" || shut[2].Edit != "" {
+		t.Fatalf("a row with a first hunk has a key, one without none: %+v", shut)
+	}
+	var tones []string
+	for _, sp := range shut[1].Spans {
+		if sp.Tone != "" {
+			tones = append(tones, sp.Tone+":"+sp.Text)
+		}
+	}
+	if strings.Join(tones, " ") != ToneAdd+":+2 "+ToneDel+":−1" {
+		t.Fatalf("+a green, −d red: %q", tones)
+	}
+	again := RunOutputLines(evs, w, nil)
+	if again[1].Edit != shut[1].Edit {
+		t.Fatal("the key stays")
+	}
+	open := RunOutputLines(evs, w, func(key string) bool { return key == shut[1].Edit })
+	var got []string
+	for _, l := range open[2 : len(open)-1] {
+		if Width(l.Text()) > w {
+			t.Fatalf("%q is wider than %d", l.Text(), w)
+		}
+		got = append(got, l.Spans[len(l.Spans)-1].Tone+"|"+l.Text())
+	}
+	want := []string{
+		ToneHunk + "|  @@ -1,3 +1,4 @@", "|   package a", ToneDel + "|  -    old()", ToneAdd + "|  +    new()",
+		ToneAdd + "|  +" + strings.Repeat("x", w-4) + "…", "|   same", "|   same", "|   same",
+		ToneDim + "|  " + i18n.F("tasks.output_more_lines", len(hunk)-PreviewRows),
+		ToneDim + "|  " + i18n.F("tasks.output_more_hunks", 2),
+	}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("got\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+	if last := open[len(open)-1]; last.Text() != shut[2].Text() {
+		t.Fatalf("the next file follows: %q", last.Text())
 	}
 }

@@ -439,6 +439,7 @@ func helpLayout() []helpSection {
 			{"help.task_edit", inList, false, []act{actEdit}},
 			{"help.task_done", inList, false, []act{actDone}},
 			{"help.task_stop", inList, false, []act{actCloseTab}},
+			{"help.task_edits", inList, false, []act{actFoldAll, actUnfold, actFold}},
 		}},
 		{"help.group.other", []helpSpec{
 			{"help.palette", inList, false, []act{actPalette}},

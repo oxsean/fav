@@ -186,7 +186,7 @@ Mouse on by default: click tabs, chips, cards, double-click to resume, click an 
 | `t / p / v / d` | tag / project / source / time filter |
 | `s` | status filter: open / active / done / archived / all / trash |
 | `Enter` | on a projects group header: fold / unfold it |
-| `z / - / =` `+` | projects view: toggle fold all, fold all, unfold all |
+| `z / - / =` `+` | projects view: toggle fold all, fold all, unfold all; Tasks view: the same for the edit rows in a run's output, each opening on its first hunk (a click opens one) |
 
 **Open and continue**
 

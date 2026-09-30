@@ -57,6 +57,8 @@ type tasksState struct {
 	askPick    int                 // the home layout's inline answer: the option highlighted for its question
 	askDeny    bool                // it is composing a deny reason
 	askReason  textinput.Model
+	editsOpen  bool            // the output's edit rows show their first hunks
+	openEdits  map[string]bool // edit rows clicked the other way, by run and row key
 }
 
 const tasksWait = 20 * time.Second
@@ -539,6 +541,11 @@ func (m *Model) taskKey(a act) (tea.Cmd, bool) {
 		return m.toggleTaskDone(), true
 	case actCloseTab:
 		m.askStopRun()
+	case actFoldAll:
+		m.setEditsOpen(nil)
+	case actFold, actUnfold:
+		open := a == actUnfold
+		m.setEditsOpen(&open)
 	case actBack:
 		if len(t.marked) > 0 {
 			t.marked, t.anchor = nil, ""
@@ -909,7 +916,7 @@ func (m *Model) tasksBody(y0, h int) []string {
 	listW := m.listWidth()
 	prevW := m.w - listW - 1
 	left := m.taskList(y0, 0, listW, h)
-	right := m.taskDetail(prevW, h)
+	right := m.taskDetail(listW+1, y0, prevW, h)
 	out := make([]string, h)
 	for i := range out {
 		out[i] = fit(at(left, i), listW) + " " + fit(at(right, i), prevW)
@@ -944,20 +951,21 @@ func (m *Model) taskList(y0, x0, w, h int) []string {
 	return m.taskRows(out, y0, x0, w, h)
 }
 
-func (m *Model) taskDetail(w, h int) []string {
+// taskDetail is drawn with its top left corner at x0, y0.
+func (m *Model) taskDetail(x0, y0, w, h int) []string {
 	x := m.selectedTask()
 	if x == nil {
 		return nil
 	}
 	if r := m.watchedRun(); r != nil && h >= 16 && (m.selectedRun() == nil || m.selectedRun().ID != r.ID) {
 		below := h / 2
-		return append(m.taskDetailIn(x, w, h-below), m.watchPanel(r, w, below)...)
+		return append(m.taskDetailIn(x, x0, y0, w, h-below), m.watchPanel(r, x0, y0+h-below, w, below)...)
 	}
-	return m.taskDetailIn(x, w, h)
+	return m.taskDetailIn(x, x0, y0, w, h)
 }
 
 // watchPanel follows the watched run: its task, how it stands and its output.
-func (m *Model) watchPanel(r *task.Run, w, h int) []string {
+func (m *Model) watchPanel(r *task.Run, x0, y0, w, h int) []string {
 	inner := w - 4
 	title := r.Task
 	if x := m.tasks.st.Tasks[r.Task]; x != nil {
@@ -965,7 +973,7 @@ func (m *Model) watchPanel(r *task.Run, w, h int) []string {
 	}
 	body := []string{boldSty.Foreground(cText).Render(render.Truncate(title, inner)), m.runLine(r, inner, false)}
 	if room := h - 2 - len(body); room > 0 {
-		body = append(body, m.outputLines(r, inner, room)...)
+		body = append(body, m.outputLines(r, x0+2, y0+1+len(body), inner, room)...)
 	}
 	return panel(i18n.F("tasks.watching", r.ID), body, w, h)
 }
@@ -977,7 +985,7 @@ func (m *Model) watchedRun() *task.Run {
 	return m.tasks.st.Runs[m.tasks.watch]
 }
 
-func (m *Model) taskDetailIn(x *task.Task, w, h int) []string {
+func (m *Model) taskDetailIn(x *task.Task, x0, y0, w, h int) []string {
 	inner := w - 4
 	var body []string
 	body = append(body, boldSty.Foreground(cText).Render(render.Truncate(x.Title, inner)))
@@ -1007,38 +1015,87 @@ func (m *Model) taskDetailIn(x *task.Task, w, h int) []string {
 		room := h - 2 - len(body) - 2
 		if room > 2 {
 			body = append(body, "", accent.Render(i18n.F("tasks.output", r.ID)))
-			body = append(body, m.outputLines(r, inner, room)...)
+			body = append(body, m.outputLines(r, x0+2, y0+1+len(body), inner, room)...)
 		}
 	}
 	return panel(i18n.T("tasks.detail"), body, w, h)
 }
 
-// outputLines are the last room lines of r's output as render.RunOutputLines reads its events, wrapped to inner.
-func (m *Model) outputLines(r *task.Run, inner, room int) []string {
-	o := m.tasks.out[r.ID]
+// outputLines are the last room lines of r's output as render.RunOutputLines reads its events, wrapped to inner and
+// drawn from x0, y0: an edit row with a first hunk opens or closes on a click.
+func (m *Model) outputLines(r *task.Run, x0, y0, inner, room int) []string {
+	t := &m.tasks
+	o := t.out[r.ID]
 	ok := o != nil && o.loaded
 	var events []output.Event
 	if o != nil {
 		events = o.events
 	}
-	var lines []string
-	for _, l := range render.RunOutputLines(events, inner) {
-		if l = render.Sanitize(l); render.Width(l) <= inner {
-			lines = append(lines, l)
-		} else {
-			lines = append(lines, render.Wrap(l, inner)...)
+	open := func(key string) bool { return t.editsOpen != t.openEdits[r.ID+" "+key] }
+	var lines, keys []string
+	for _, l := range render.RunOutputLines(events, inner, open) {
+		text := render.Sanitize(l.Text())
+		switch {
+		case len(l.Spans) > 1 || l.Spans[0].Tone != "":
+			lines, keys = append(lines, toned(l)), append(keys, l.Edit)
+		case render.Width(text) <= inner:
+			lines, keys = append(lines, text), append(keys, l.Edit)
+		default:
+			for _, w := range render.Wrap(text, inner) {
+				lines, keys = append(lines, w), append(keys, "")
+			}
 		}
 	}
 	switch {
 	case !ok:
-		lines = []string{dimmed.Render(i18n.T("tasks.loading"))}
+		lines, keys = []string{dimmed.Render(i18n.T("tasks.loading"))}, nil
 	case len(lines) == 0:
-		lines = []string{dimmed.Render(i18n.T("tasks.no_output"))}
+		lines, keys = []string{dimmed.Render(i18n.T("tasks.no_output"))}, nil
 	}
 	if len(lines) > room {
 		lines = lines[len(lines)-room:]
+		if keys != nil {
+			keys = keys[len(keys)-room:]
+		}
+	}
+	for i, key := range keys {
+		if key != "" {
+			k := r.ID + " " + key
+			m.mark(y0+i, x0, inner, func(m *Model) {
+				if m.tasks.openEdits == nil {
+					m.tasks.openEdits = map[string]bool{}
+				}
+				m.tasks.openEdits[k] = !m.tasks.openEdits[k]
+			})
+		}
 	}
 	return lines
+}
+
+var toneSty = map[string]*lipgloss.Style{render.ToneAdd: &okSty, render.ToneDel: &errSty, render.ToneHunk: &accent, render.ToneDim: &dimmed}
+
+// toned is l with each span in its tone's colour.
+func toned(l render.OutputLine) string {
+	var b strings.Builder
+	for _, sp := range l.Spans {
+		text := render.Sanitize(sp.Text)
+		if sty := toneSty[sp.Tone]; sty != nil {
+			text = sty.Render(text)
+		}
+		b.WriteString(text)
+	}
+	return b.String()
+}
+
+// setEditsOpen opens (or closes) every edit row of the output shown; nil turns them the other way.
+func (m *Model) setEditsOpen(open *bool) {
+	t := &m.tasks
+	if open == nil {
+		t.editsOpen = !t.editsOpen
+	} else {
+		t.editsOpen = *open
+	}
+	t.openEdits = nil
 }
 
 // tasksStatus replaces the filter chips in the Tasks view: who coordinates and how the machines stand.
