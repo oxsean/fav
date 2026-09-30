@@ -12,8 +12,21 @@ import (
 // "~ " changed files, "? " a question or approval, "- " a warning, an answer or lost output, "= " the result, "! " an error or what a failed
 // call ended with; the agent's words as they are. Thoughts, system lines and a call's result that did not fail are
 // left out. Of what is still being written, a thought is one line saying so, a command still running its last lines.
-func RunOutputLines(evs []output.Event) []string {
+// An edit step with the node's counts (edits: a codex step's own, a claude call's on its result) is a row per file,
+// exactly width wide.
+func RunOutputLines(evs []output.Event, width int) []string {
 	var out []string
+	results := map[string][]output.Edit{}
+	for _, e := range evs {
+		if e.Kind == output.KindToolResult && e.Ref != "" && len(e.Edits) > 0 {
+			results[e.Ref] = e.Edits
+		}
+	}
+	files := func(edits []output.Edit) {
+		for _, x := range edits {
+			out = append(out, editRow(x, width))
+		}
+	}
 	add := func(prefix, text string) {
 		for l := range strings.Lines(text) {
 			if l = strings.TrimRight(l, "\r\n"); strings.TrimSpace(l) != "" {
@@ -52,7 +65,14 @@ func RunOutputLines(evs []output.Event) []string {
 				add("! ", lastLine(e.Output))
 			}
 		case output.KindTool, output.KindEdit, output.KindMCP:
-			add(callLine(e))
+			switch edits := results[e.Call]; {
+			case e.Kind == output.KindEdit && len(e.Edits) > 0:
+				files(e.Edits)
+			case e.Family == output.FamilyEdit && e.Call != "" && len(edits) > 0:
+				files(edits)
+			default:
+				add(callLine(e))
+			}
 			if e.Error && e.Kind != output.KindTool {
 				add("! ", lastLine(e.Output))
 			}
@@ -75,6 +95,47 @@ func RunOutputLines(evs []output.Event) []string {
 		}
 	}
 	return out
+}
+
+var editGlyphs = map[string]string{"add": "+", "modify": "~", "delete": "−", "rename": "→"}
+
+// editRow is one edited file exactly width wide: its glyph and path on the left, the path's start cut when it does not
+// fit, and on the right +a −d with its hunks, or a new file's lines.
+func editRow(x output.Edit, width int) string {
+	glyph := editGlyphs[x.Op]
+	if glyph == "" {
+		glyph = "~"
+	}
+	name := x.Path
+	if x.Op == "rename" && x.From != "" {
+		name = x.From + " → " + x.Path
+	}
+	stat := "+" + strconv.Itoa(x.Add) + " −" + strconv.Itoa(x.Del)
+	switch {
+	case x.Op == "add":
+		stat = i18n.F("tasks.output_new_file", x.Add)
+	case x.Hunks > 1:
+		stat += " · " + i18n.F("tasks.output_hunks", x.Hunks)
+	}
+	room := width - Width(glyph) - 1 - 2 - Width(stat)
+	if room < 4 {
+		return Pad(glyph+" "+name+"  "+stat, width)
+	}
+	return glyph + " " + Pad(cutStart(name, room), room) + "  " + stat
+}
+
+// cutStart keeps the end of s within width, an ellipsis in place of what it drops.
+func cutStart(s string, width int) string {
+	if Width(s) <= width {
+		return s
+	}
+	rs := []rune(s)
+	w, i := 1, len(rs)
+	for i > 0 && w+Width(string(rs[i-1])) <= width {
+		i--
+		w += Width(string(rs[i]))
+	}
+	return "…" + string(rs[i:])
 }
 
 // callLine is a call's prefix and title, with what the title leaves out and a command's exit code.

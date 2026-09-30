@@ -55,7 +55,43 @@ func TestRunOutputLinesReadEvents(t *testing.T) {
 		"$ go test ./... " + i18n.T("tasks.output_running"),
 		"$ make " + i18n.T("tasks.output_running"), "  cc a.c", "  cc b.c", "  ld x",
 	}
-	if got := RunOutputLines(evs); strings.Join(got, "\n") != strings.Join(want, "\n") {
+	if got := RunOutputLines(evs, 80); strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("got\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+}
+
+// An edit step is a row per file it changed, from the node's counts: the path on the left (its start cut when it does
+// not fit), +a −d and the hunks on the right, the row exactly width wide; a claude edit's counts are on its result.
+func TestRunOutputLinesPutEachEditedFileOnARow(t *testing.T) {
+	evs := []output.Event{
+		{Kind: output.KindTool, Tool: "Edit", Family: output.FamilyEdit, Title: "internal/a.go +2 −1", Call: "t9"},
+		{Kind: output.KindToolResult, Ref: "t9", Output: "ok", Edits: []output.Edit{{Path: "internal/a.go", Op: "modify", Add: 2, Del: 1, Hunks: 3}}},
+		{Kind: output.KindEdit, Family: output.FamilyEdit, Title: "docs/new.md +12 −0", More: 2, Edits: []output.Edit{
+			{Path: "docs/new.md", Op: "add", Add: 12, Hunks: 1},
+			{Path: "cmd/tend/main.go", From: "cmd/tend/old.go", Op: "rename"},
+			{Path: "gone.txt", Op: "delete", Del: 4, Hunks: 1},
+		}},
+		{Kind: output.KindTool, Tool: "Edit", Family: output.FamilyEdit, Title: "b.go +1 −1", Call: "t10"},
+	}
+	rows := []struct{ head, tail string }{
+		{"~ internal/a.go ", "+2 −1 · " + i18n.F("tasks.output_hunks", 3)},
+		{"+ docs/new.md ", i18n.F("tasks.output_new_file", 12)},
+		{"→ cmd/tend/old.go → cmd/tend/main.go ", "+0 −0"},
+		{"− gone.txt ", "+0 −4"},
+	}
+	const w = 50
+	got := RunOutputLines(evs, w)
+	if len(got) != len(rows)+1 || got[len(rows)] != "~ b.go +1 −1" {
+		t.Fatalf("a row per file, and the call line while its result has not come:\n%s", strings.Join(got, "\n"))
+	}
+	for i, r := range rows {
+		if l := got[i]; Width(l) != w || !strings.HasPrefix(l, r.head) || !strings.HasSuffix(l, "  "+r.tail) {
+			t.Errorf("row %d is %q (%d wide), want %q … %q", i, l, Width(l), r.head, r.tail)
+		}
+	}
+	long := []output.Event{{Kind: output.KindEdit, Family: output.FamilyEdit, Edits: []output.Edit{
+		{Path: "internal/server/web/pages/deep/file.go", Op: "modify", Add: 1, Del: 1, Hunks: 1}}}}
+	if got := RunOutputLines(long, 30); len(got) != 1 || got[0] != "~ …b/pages/deep/file.go  +1 −1" {
+		t.Fatalf("a long path keeps its end: %q", got)
 	}
 }

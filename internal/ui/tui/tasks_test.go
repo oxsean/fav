@@ -845,3 +845,47 @@ func TestTheRunDialogAddsAWordUnderThisRunsBrief(t *testing.T) {
 		}
 	}
 }
+
+// The watched run's edit steps show a row per file with its counts, and every line of the frame stays the terminal's
+// width however narrow it is (at 80 columns the list has no detail pane).
+func TestTheOutputShowsEachEditedFileWithItsCounts(t *testing.T) {
+	stat := `"tend":{"edits":[{"path":"internal/server/web/pages/tasks.js","op":"modify","add":7,"del":2,"hunks":3},{"path":"docs/notes.md","op":"add","add":12,"hunks":1}]}`
+	change := `{"method":"item/completed","params":{"item":{"type":"fileChange","id":"f1","changes":[` +
+		`{"path":"internal/server/web/pages/tasks.js","kind":{"type":"update"},"diff":"@@ -1 +1 @@\n-a\n+b\n"},` +
+		`{"path":"docs/notes.md","kind":{"type":"add"},"diff":"x\n"}],"status":"completed"}},` + stat + `}`
+	m, _ := tasksModelWith(t, func(dir string, spec node.Spec) (string, error) {
+		now := time.Now()
+		os.WriteFile(filepath.Join(dir, "output.log"), []byte(change+"\n"), 0o600)
+		return "", writeState(dir, node.State{Rev: 1, State: node.StateExited, ExitCode: new(0), Provider: spec.Provider,
+			Session: spec.Session, StartedAt: &now, EndedAt: &now})
+	})
+	key(m, "5")
+	var tk task.Task
+	if err := m.tasks.cl.CallCommand(t.Context(), coord.MTaskCreate, "c1", coord.TaskCreate{Title: "edits", Dir: t.TempDir(), Agent: "fake"}, &tk); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, m, func() bool { return len(m.tasks.list) == 1 })
+	key(m, "enter")
+	key(m, "enter")
+	key(m, "enter")
+	waitFor(t, m, func() bool {
+		r := m.selectedRun()
+		return r != nil && m.tasks.out[r.ID] != nil && m.tasks.out[r.ID].end
+	})
+	hunks, added := "+7 −2 · "+i18n.F("tasks.output_hunks", 3), i18n.F("tasks.output_new_file", 12)
+	for _, size := range []struct {
+		w, h   int
+		detail bool
+	}{{140, 40, true}, {100, 30, true}, {80, 24, false}} {
+		m.Update(tea.WindowSizeMsg{Width: size.w, Height: size.h})
+		s := screenText(m)
+		if size.detail && (!strings.Contains(s, "  "+hunks) || !strings.Contains(s, "notes.md") || !strings.Contains(s, "  "+added)) {
+			t.Fatalf("%dx%d: a row per edited file with its counts:\n%s", size.w, size.h, s)
+		}
+		for i, l := range strings.Split(m.screen(), "\n") {
+			if w := ansi.StringWidth(l); w != size.w {
+				t.Fatalf("%dx%d: line %d is %d wide: %q", size.w, size.h, i, w, ansi.Strip(l))
+			}
+		}
+	}
+}

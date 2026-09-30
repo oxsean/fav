@@ -1022,8 +1022,12 @@ func (m *Model) outputLines(r *task.Run, inner, room int) []string {
 		events = o.events
 	}
 	var lines []string
-	for _, l := range render.RunOutputLines(events) {
-		lines = append(lines, render.Wrap(render.Sanitize(l), inner)...)
+	for _, l := range render.RunOutputLines(events, inner) {
+		if l = render.Sanitize(l); render.Width(l) <= inner {
+			lines = append(lines, l)
+		} else {
+			lines = append(lines, render.Wrap(l, inner)...)
+		}
 	}
 	switch {
 	case !ok:

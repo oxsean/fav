@@ -998,6 +998,8 @@
   "tasks.no_output": "No output yet",
   "tasks.output_more_lines": "(+%d {line|lines})",
   "tasks.output_more_files": "(+%d {file|files})",
+  "tasks.output_hunks": "%d {hunk|hunks}",
+  "tasks.output_new_file": "new file · %d {line|lines}",
   "tasks.output_more_questions": "(+%d {question|questions})",
   "tasks.output_resolved": "Answered",
   "tasks.output_interrupted": "The turn was interrupted",
