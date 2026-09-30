@@ -852,7 +852,7 @@ func (c *Coord) machineView(m *machine) Machine {
 		x.State = MachineConnecting
 	case m.err != nil || m.attached:
 		x.State = MachineOffline
-		if !m.retryAt.IsZero() {
+		if !m.retryAt.IsZero() && !m.attached {
 			at := m.retryAt
 			x.RetryAt = &at
 		}

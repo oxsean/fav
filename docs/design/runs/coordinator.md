@@ -90,7 +90,7 @@ run `state` 转移表（终态单调，重复事件无副作用）：
 - abandoned 的 run 在节点快照成终态之前（节点这次没列出它也算）仍占着目录和 slot，同目录的下一个 run 不派发。
 - 协调器已结束（含 abandoned / canceled）、节点是终态或 unknown 的 run 进 `ack`。
 - 退避期内的机器，`run.tail` / `run.output.page` / `node.call` 直接回 `offline`，`run.output.watch` 回 `gone`，不重拨；只有 `machine.list{connect}` 清退避。
-- 节点连不上：失败后 5 s 起翻倍，最多 5 分钟；`machine.list` 回原因和下次重试时间。
+- 节点连不上：失败后 5 s 起翻倍，最多 5 分钟；`machine.list` 回原因和下次重试时间（`retry_at`）。连入的节点断开时只回原因，没有 `retry_at`：协调器不拨它，它自己重连。
 - 模式一：有未结束 run 的机器保持连接；其余空闲 5 分钟断开。
 - 连上节点后在后台调一次 `node.agents{fresh}`，结果挂在机器上（`machine.list` 的 `agents`，`checked_at` 是节点最近一次重新探测的时间，只在协调器内存里，重启后下次连上就有）；`machine.list{connect}` 也重新探测，`run.preview` 取节点缓存着的结果（不改 `checked_at`）。
 - `machine.check{machine?}`：看得见这台机器（`canSee`）的人让它的节点重新探测各 agent CLI（`node.agents{fresh}`，跳过节点 5 分钟的缓存），先连上（退避期内回 `offline`），等结果，回 `{machines: [Machine]}`；不带 `machine` 是调用者看得见、已连上的每台机器，同时探测，探不了的写进 `failed{机器: 错误码}`，离线的不试。同一台机器的探测还没回来时，后来的检查等它，不再探测一次。节点没有 `node.agents` → `unsupported`；看不见或没有这台 → `not_found`。

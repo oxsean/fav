@@ -449,6 +449,35 @@ func TestAMachineThatCannotBeReachedKeepsItsRunsQueued(t *testing.T) {
 	}
 }
 
+// A node that dialed in and dropped comes back by itself: nobody here retries it, so no retry time is given.
+func TestADroppedNodeThatDialedInHasNoRetryTime(t *testing.T) {
+	f := newFar(t)
+	e := newEnv(t, tend.Config{})
+	e.start()
+	conn, _ := f.dial(tend.Host{Name: "n1"}, e.c.NodeOptions())
+	if err := e.c.Attach("n1", conn, nil); err != nil {
+		t.Fatal(err)
+	}
+	f.cut()
+	var ms Machines
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		e.c.Pass(context.Background())
+		e.must(MMachineList, MachinesParams{}, &ms)
+		i := slices.IndexFunc(ms.Machines, func(m Machine) bool { return m.Name == "n1" })
+		if m := ms.Machines[i]; m.State == MachineOffline && m.Error != "" {
+			if m.RetryAt != nil {
+				t.Fatalf("offline with a retry time: %+v", m)
+			}
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("%+v", ms)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+}
+
 func TestALostConnectionIsReconciledOnReconnect(t *testing.T) {
 	f := newFar(t)
 	e := newEnv(t, tend.Config{Hosts: []tend.Host{{Name: "far", SSH: "far"}}})
