@@ -393,6 +393,8 @@
 .proj-grid3 { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 0 10px; }
 .proj-repo { display: grid; gap: 8px; padding: 10px; border: 1px solid var(--border); border-radius: 8px; }
 .proj-dir { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 3fr) auto; align-items: end; gap: 0 8px; }
+.proj-link { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 3fr) auto; align-items: end; gap: 0 8px; }
+.proj-link-kind { min-width: 4em; }
 .proj-dir-said { grid-column: 1 / -1; font-size: 11px; margin: -4px 0 4px; }
 .proj-state { font-size: 12px; font-weight: 400; }
 .proj-binding { display: grid; gap: 8px; }

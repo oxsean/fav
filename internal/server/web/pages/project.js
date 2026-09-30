@@ -1,4 +1,4 @@
-// project is a project's drawer on the team page: its members, and for its owner or an admin on a computer its
+// project is a project's drawer on the team page: its members and links, and for its owner or an admin on a computer its
 // settings (what every run is told, repositories and where they are checked out, default machine, the agent for each
 // role, workflow, hooks, its own workflows) and its issue sync (a repository bound, how it syncs, the issues it
 // follows and the progress comment each would get).
@@ -27,6 +27,10 @@ register('project', {
   'proj.dirs': ['检出在', 'Checked out at'], 'proj.machine': ['机器', 'Machine'], 'proj.path': ['目录', 'Directory'],
   'proj.addDir': ['加一台机器', 'Add a machine'], 'proj.removeDir': ['去掉 %s 上的目录', 'Remove the directory on %s'],
   'proj.addRepo': ['加仓库', 'Add a repository'], 'proj.removeRepo': ['去掉仓库', 'Remove the repository'], 'proj.noRepos': ['还没有仓库', 'No repository yet'],
+  'proj.links': ['链接', 'Links'], 'proj.linkKind': ['种类', 'Kind'], 'proj.linkURL': ['地址', 'Address'],
+  'proj.linkKindNote': ['tracker、doc…', 'tracker, doc…'],
+  'proj.addLink': ['加链接', 'Add a link'], 'proj.removeLink': ['去掉链接 %s', 'Remove the link %s'], 'proj.noLinks': ['还没有链接', 'No link yet'],
+  'proj.link.tracker': ['工单', 'Issues'], 'proj.link.doc': ['文档', 'Docs'], 'proj.link.link': ['链接', 'Link'],
   'proj.check': ['检查目录', 'Check the directories'], 'proj.noDirs': ['仓库还没写目录', 'No repository lists a directory'],
   'proj.dir.checking': ['检查中', 'checking'], 'proj.dir.git': ['git 仓库', 'a git checkout'], 'proj.dir.plain': ['在，但不是 git 仓库', 'there, but not a git checkout'],
   'proj.dir.missing': ['不在', 'not there'], 'proj.dir.outside': ['这台机器不让运行去这个目录', 'this machine lets no run go there'],
@@ -97,7 +101,29 @@ function Members({project: p, manages, busy, onRole, onAdd, onRemove}) {
           <${Button} kind="quiet danger" disabled=${busy} onClick=${() => onRemove(m)}>${t('team.remove')}<//>` : html`<span class="t-muted">${t('role.' + m.role)}</span>`}
       </li>`)}
     </ul>
+    ${p.links?.length > 0 && html`<h3 class="det-h">${t('proj.links')}</h3>
+      <ul class="team-rows proj-links">${p.links.map((l, i) => {
+        const href = tm.linkHref(l.url);
+        return html`<li class="team-row" key=${i}><span class="t-muted proj-link-kind">${linkWord[l.kind] ? t(linkWord[l.kind]) : l.kind}</span>
+          <span class="team-main mono">${href ? html`<a href=${href} target="_blank" rel="noopener noreferrer">${l.url}</a>` : l.url}</span></li>`;
+      })}</ul>`}
   </section>`;
+}
+
+const linkWord = {tracker: 'proj.link.tracker', doc: 'proj.link.doc', link: 'proj.link.link'};
+
+// Links edits the draft's links: a kind and an address each.
+function Links({links, onChange}) {
+  const {t, f} = useWords();
+  const set = (i, patch) => onChange(links.map((l, j) => (j === i ? {...l, ...patch} : l)));
+  return html`<div class="proj-repos">
+    ${!links.length && html`<p class="t-muted mach-p">${t('proj.noLinks')}</p>`}
+    ${links.map((l, i) => html`<div class="proj-link" key=${i}>
+      <${TextInput} label=${t('proj.linkKind')} value=${l.kind} onInput=${v => set(i, {kind: v})} mono placeholder=${t('proj.linkKindNote')} />
+      <${TextInput} label=${t('proj.linkURL')} value=${l.url} onInput=${v => set(i, {url: v})} mono />
+      <${Button} kind="quiet danger" icon="close" label=${f('proj.removeLink', l.url || '—')} onClick=${() => onChange(links.filter((_, j) => j !== i))} />
+    </div>`)}
+  </div>`;
 }
 
 // AddMember picks someone not in the project yet and their role there.
@@ -211,6 +237,10 @@ function Settings({project: p, machines, wire, commands, toasts, people}) {
       <span class="det-acts">${wire?.has?.('project.dirs') && html`<${Button} kind="quiet" onClick=${check}>${t('proj.check')}<//>`}
         <${Button} kind="quiet" icon="plus" onClick=${() => setD({...d, repos: [...d.repos, {name: '', remote: '', base: '', worktrees: false, dirs: []}]})}>${t('proj.addRepo')}<//></span></h3>
       <${Repos} repos=${d.repos} machines=${machineOptions} checks=${checks} onChange=${repos => setD({...d, repos})} />
+    </section>
+    <section class="det-sec"><h3 class="det-h mach-h">${t('proj.links')}
+      <${Button} kind="quiet" icon="plus" onClick=${() => setD({...d, links: [...d.links, {kind: '', url: ''}]})}>${t('proj.addLink')}<//></h3>
+      <${Links} links=${d.links} onChange=${links => setD({...d, links})} />
     </section>
     <section class="det-sec"><h3 class="det-h">${t('proj.defaults')}</h3>
       <div class="proj-grid2">

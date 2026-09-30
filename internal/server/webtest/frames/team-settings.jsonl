@@ -3,7 +3,7 @@
 {"c":{"type":"req","id":5,"method":"agent.list","params":{}}}
 {"s":{"type":"res","id":5,"result":{"agents":[{"name":"claude","provider":"claude"},{"name":"codex","provider":"codex","model":"gpt-6"}]}}}
 {"step":"save"}
-{"c":{"type":"req","id":6,"method":"project.edit","command_id":"c1","params":{"id":"p1","context":"The shop service: Go, Postgres. Money is in cents.","hooks":{"setup":["make","deps"],"check":["go","test","-race","./..."]}}}}
+{"c":{"type":"req","id":6,"method":"project.edit","command_id":"c1","params":{"id":"p1","context":"The shop service: Go, Postgres. Money is in cents.","links":[{"kind":"tracker","url":"https://git.example.com/shop/shop/issues"},{"kind":"runbook","url":"javascript:alert(1)"},{"kind":"doc","url":"https://docs.example.com/shop"}],"hooks":{"setup":["make","deps"],"check":["go","test","-race","./..."]}}}}
 {"s":{"type":"res","id":6,"result":{"id":"p1","name":"Shop","owner":"u_a","members":{"u_b":"participant","u_c":"reader"},"repos":[{"name":"shop","remote":"git@git.example.com:shop/shop.git","base":"main","dirs":{"mba":"/w/shop","linux":"/srv/shop"},"worktrees":true}],"context":"The shop service: Go, Postgres. Money is in cents.","defaults":{"workflow":"feature","machine":"mba","agent":"claude","roles":{"implement":"claude","review":"codex","planner":"claude"}},"hooks":{"setup":["make","deps"],"check":["go","test","-race","./..."]},"rev":5,"created_at":"2026-09-23T09:00:00Z","updated_at":"2026-09-30T14:32:00Z"}}}
 {"step":"check"}
 {"c":{"type":"req","id":7,"method":"project.dirs","params":{"project":"p1","machine":"mba","path":"/w"}}}

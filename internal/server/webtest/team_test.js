@@ -140,6 +140,16 @@ test('project settings: only what changed is sent; paths, directory checks and w
   eq(tm.projectEditOf(p, {...d, repos}).repos, [{name: 'shop', remote: 'git@x:shop.git', base: 'main', dirs: {mba: '/w/shop', linux: '/srv/shop'}, worktrees: true}],
     'paths trimmed; a row without a machine or a repository without a name left out');
   eq(tm.projectEditOf({id: 'p2', name: 'Docs'}, tm.draftOf({id: 'p2', name: 'Docs'})), null, 'a bare project');
+  const linked = {...p, links: [{kind: 'tracker', url: 'https://git.example.com/team/shop/issues'}]};
+  const ld = tm.draftOf(linked);
+  eq(ld.links, [{kind: 'tracker', url: 'https://git.example.com/team/shop/issues'}], 'links as rows');
+  eq(tm.projectEditOf(linked, ld), null, 'untouched links send nothing');
+  eq(tm.projectEditOf(linked, {...ld, links: [...ld.links, {kind: ' doc ', url: ' https://docs.example.com/shop '}, {kind: 'doc', url: ' '}, {kind: '', url: 'https://x.example.com'}]}).links,
+    [{kind: 'tracker', url: 'https://git.example.com/team/shop/issues'}, {kind: 'doc', url: 'https://docs.example.com/shop'}, {kind: 'link', url: 'https://x.example.com'}],
+    'fields trimmed, a row without an address left out, one without a kind is a plain link');
+  eq(tm.projectEditOf(linked, {...ld, links: []}), {id: 'p1', links: []}, 'every link removed');
+  eq(['https://a.example.com/x', 'HTTP://a.example.com', 'javascript:alert(1)', '/page', 'ftp://a.example.com'].map(tm.linkHref),
+    ['https://a.example.com/x', 'HTTP://a.example.com', null, null, null], 'only a web address opens');
   eq(tm.dirsToCheck({...d, repos}), [{repo: 'shop', machine: 'mba', path: '/w/shop'}, {repo: 'shop', machine: 'linux', path: '/srv/shop'}], 'what to check');
   eq([tm.parentOf('/w/shop'), tm.parentOf('/w/shop/'), tm.parentOf('C:\\w\\shop'), tm.parentOf('/shop')], ['/w', '/w', 'C:\\w', '/'], 'parents');
   eq([tm.baseOf('/w/shop/'), tm.baseOf('C:\\w\\shop')], ['shop', 'shop'], 'names');
@@ -499,6 +509,8 @@ test('team: j and Enter open a project; a member manages the one they own and on
   await act(() => { a.keys.handle(press('Enter')); });
   ok(root.one('.drawer').textContent.includes('Shop'), 'the second project opens');
   eq(root.one('.drawer').find('[role=radio]').length, 0, 'Shop is Ann\'s');
+  eq(root.one('.proj-links').find('.team-row').map(x => [x.one('.proj-link-kind').textContent, x.find('a').map(l => l.getAttribute('href'))]),
+    [[words.t('proj.link.tracker'), ['https://git.example.com/shop/shop/issues']], ['runbook', []]], 'the links, only a web address opening');
   await click(root.one('.drawer').find('button').find(b => b.getAttribute('aria-label') === words.t('ui.close')));
   await click(root.find('.team-project').find(b => b.textContent.includes('Docs')));
   ok(buttonOf(root.one('.drawer'), words.t('team.add')), 'Docs is Bo\'s');
@@ -527,6 +539,10 @@ test('project settings: saved as changed, the checkouts checked, a workflow with
       ok(root.one('.drawer').textContent.includes('gpt-6') || root.one('.drawer').textContent.includes('codex'), 'the agents listed');
       await type(fieldOf(root, words.t('proj.context')), 'The shop service: Go, Postgres. Money is in cents.');
       await type(fieldOf(root, words.t('proj.hook.check')), 'go test -race ./...');
+      await click(buttonOf(root.one('.drawer'), words.t('proj.addLink')));
+      const link = root.find('.proj-link').pop();
+      await type(link.find('input')[0], 'doc');
+      await type(link.find('input')[1], 'https://docs.example.com/shop');
       await click(buttonOf(root.one('.drawer'), words.t('proj.save')));
     },
     async check() {

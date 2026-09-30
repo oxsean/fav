@@ -142,11 +142,12 @@ export const roleNames = ['implement', 'review', 'test', 'planner'];
 
 const argv = text => text.trim().split(/\s+/).filter(Boolean);
 
-// draftOf is project p as its settings form edits it: hooks as one line each, repositories as copies.
+// draftOf is project p as its settings form edits it: hooks as one line each, repositories and links as copies.
 export const draftOf = p => ({
   name: p.name || '', owner: p.owner || '', context: p.context || '',
   repos: (p.repos || []).map(r => ({name: r.name || '', remote: r.remote || '', base: r.base || '', worktrees: !!r.worktrees,
     dirs: Object.entries(r.dirs || {}).map(([machine, path]) => ({machine, path}))})),
+  links: (p.links || []).map(l => ({kind: l.kind || '', url: l.url || ''})),
   machine: p.defaults?.machine || '', workflow: p.defaults?.workflow || '',
   roles: Object.fromEntries(roleNames.map(r => [r, p.defaults?.roles?.[r] || ''])),
   hooks: Object.fromEntries(hookNames.map(h => [h, (p.hooks?.[h] || []).join(' ')])),
@@ -164,6 +165,13 @@ export const reposOf = d => d.repos.filter(r => r.name.trim()).map(r => {
   return out;
 });
 
+// linksOf are the draft's links as a project keeps them: trimmed, a row without an address left out, one without a
+// kind a plain link.
+export const linksOf = d => d.links.filter(l => l.url.trim()).map(l => ({kind: l.kind.trim() || 'link', url: l.url.trim()}));
+
+// linkHref is where a project's link opens: an http(s) address, null for anything else (shown as text).
+export const linkHref = url => (/^https?:\/\/\S+$/i.test(url || '') ? url : null);
+
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 
 // projectEditOf is what project.edit sends for the draft: the project's id and only the fields that changed (the
@@ -175,6 +183,8 @@ export function projectEditOf(p, d) {
   if (d.context !== (p.context || '')) e.context = d.context;
   const repos = reposOf(d);
   if (!same(repos, p.repos || [])) e.repos = repos;
+  const links = linksOf(d);
+  if (!same(links, p.links || [])) e.links = links;
   const roles = Object.fromEntries(Object.entries(d.roles).filter(([, a]) => a));
   const defaults = {...(p.defaults?.agent ? {agent: p.defaults.agent} : {}), ...(d.machine ? {machine: d.machine} : {}),
     ...(Object.keys(roles).length ? {roles} : {}), ...(d.workflow ? {workflow: d.workflow} : {})};
