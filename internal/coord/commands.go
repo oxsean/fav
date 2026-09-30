@@ -39,6 +39,7 @@ type Dispatch struct {
 	Machine  string `json:"machine,omitempty"` // default: the task's, else this machine
 	Agent    string `json:"agent,omitempty"`   // default: the task's, else claude
 	Runner   string `json:"runner,omitempty"`
+	Note     string `json:"note,omitempty"` // added under this run's brief only, as a retry says what changed
 	brief    string // a workflow stage's, in place of the task's
 	planning bool   // a planner's: a task in the backlog may be planned
 }
@@ -626,6 +627,9 @@ func (c *Coord) runDispatch(who Principal, r *wire.Request) (string, []journal.E
 
 // plan is the run who's dispatch would queue; the caller holds mu.
 func (c *Coord) plan(who Principal, p Dispatch) (task.Run, error) {
+	if len(p.Note) > maxBrief {
+		return task.Run{}, bad("note")
+	}
 	t, err := c.writableTask(who, p.Task)
 	if err != nil {
 		return task.Run{}, err
@@ -675,6 +679,9 @@ func (c *Coord) plan(who Principal, p Dispatch) (task.Run, error) {
 	brief := firstOf(p.brief, t.Brief)
 	if strings.TrimSpace(brief) == "" {
 		brief = t.Title
+	}
+	if note := strings.TrimSpace(p.Note); note != "" {
+		brief += "\n\n---\n\n" + note
 	}
 	if def != nil && strings.TrimSpace(def.Body) != "" {
 		brief = def.Body + "\n\n---\n\n" + brief

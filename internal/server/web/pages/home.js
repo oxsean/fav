@@ -11,7 +11,7 @@ import {Icon} from '../ui/icons.js';
 import {ExpandItem} from '../ui/expand.js';
 import {Modal} from '../ui/overlay.js';
 import {Spark, Bars, Timeline, Meter} from '../ui/charts.js';
-import {TextInput} from '../ui/input.js';
+import {TextInput, TextArea} from '../ui/input.js';
 import {useListKeys} from '../ui/table.js';
 import {AnswerForm, quickOf, isPermission, allowsRun} from '../ui/answer.js';
 import * as sel from '../core/select.js';
@@ -69,6 +69,8 @@ export function Home({store, commands, toasts, clock = () => Date.now(), fetchOu
   const [open, setOpen] = useState('');
   const [gone, setGone] = useState({});
   const [confirm, setConfirm] = useState(null);
+  const [confirmNote, setConfirmNote] = useState('');
+  useEffect(() => { setConfirmNote(''); }, [confirm]);
   const st = store.state, now = clock();
 
   const shown = inbox.filter(x => !hidden.has(x.task));
@@ -102,8 +104,9 @@ export function Home({store, commands, toasts, clock = () => Date.now(), fetchOu
   const reply = (v, text) => send('run.continue', {run: v.run.id, text}, {key: 'run:' + v.run.id, hide: v.task.id, until: store.inbox})
     .then(() => toasts.show({text: t('home.answered')}), () => {});
   const askRetry = v => setConfirm({title: t('home.confirmRetry'), note: f('home.confirmRetryNote', v.task.title, v.run?.agent || v.task.agent || '', v.run?.machine || v.task.machine || ''),
-    label: t('home.retry'),
-    go: () => send('run.dispatch', {task: v.task.id, ...(v.run ? {machine: v.run.machine, agent: v.run.agent} : {})}, {key: 'task:' + v.task.id}).catch(() => {})});
+    label: t('home.retry'), noteLabel: t('home.retryNote'),
+    go: note => send('run.dispatch', {task: v.task.id, ...(v.run ? {machine: v.run.machine, agent: v.run.agent} : {}), ...(note.trim() ? {note: note.trim()} : {})},
+      {key: 'task:' + v.task.id}).catch(() => {})});
   const askStop = (run, task) => setConfirm({title: t('home.confirmStop'), note: f('home.confirmStopNote', task?.title || run.task, run.machine),
     label: t('home.stop'), go: () => send('run.stop', {id: run.id}, {key: 'run:' + run.id}).catch(() => {})});
 
@@ -215,7 +218,8 @@ export function Home({store, commands, toasts, clock = () => Date.now(), fetchOu
 
   const dialog = confirm && html`<${Modal} title=${confirm.title} onClose=${() => setConfirm(null)}
     actions=${[{label: t('home.cancel'), onClick: () => setConfirm(null)}, {label: confirm.label, kind: 'primary',
-      keyName: 'Mod+Enter', onClick: () => { setConfirm(null); confirm.go(); }}]}><p>${confirm.note}</p><//>`;
+      keyName: 'Mod+Enter', onClick: () => { setConfirm(null); confirm.go(confirmNote); }}]}><p>${confirm.note}</p>
+    ${confirm.noteLabel && html`<${TextArea} label=${confirm.noteLabel} value=${confirmNote} onInput=${setConfirmNote} rows=${3} note=${t('home.retryNoteHint')} />`}<//>`;
 
   if (phone && wait) {
     const pool = list.some(v => v.x.task === wait) ? list : sel.waits(shown, '').map(viewOf);

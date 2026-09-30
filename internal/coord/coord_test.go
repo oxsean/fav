@@ -240,6 +240,23 @@ func TestATaskRunsOnThisMachineToItsEnd(t *testing.T) {
 	}
 }
 
+func TestADispatchNoteFollowsTheBriefOfThatRunOnly(t *testing.T) {
+	e := newEnv(t, tend.Config{})
+	e.start()
+	tk := e.task("fix the build", "quick")
+	r := e.dispatch(Dispatch{Task: tk.ID, Note: "  the cache dir is read-only now  "})
+	if r.Brief != "fix the build\n\n---\n\nthe cache dir is read-only now" {
+		t.Fatalf("%q", r.Brief)
+	}
+	e.wait(r.ID, ended)
+	if again := e.dispatch(Dispatch{Task: tk.ID}); again.Brief != "fix the build" {
+		t.Fatalf("the next run gets the task's brief alone: %q", again.Brief)
+	}
+	if err := e.call(MRunDispatch, Dispatch{Task: tk.ID, Note: strings.Repeat("x", maxBrief+1)}, nil); wire.Code(err) != wire.CodeBadRequest {
+		t.Fatalf("a note longer than a brief is refused: %v", err)
+	}
+}
+
 func TestACommandIDAnswersItsFirstResult(t *testing.T) {
 	e := newEnv(t, tend.Config{})
 	e.start()

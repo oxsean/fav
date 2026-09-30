@@ -89,6 +89,7 @@ register('pages', {
   'home.done': ['完成', 'Done'], 'home.doneToast': ['「%s」已完成', '%s is done'], 'home.answered': ['已回复', 'Answered'],
   'home.confirmStop': ['停止这个运行？', 'Stop this run?'], 'home.confirmStopNote': ['「%s」在 %s 上的运行会被停下。', 'The run of %s on %s is stopped.'],
   'home.confirmRetry': ['重派这个任务？', 'Dispatch this task again?'], 'home.confirmRetryNote': ['「%s」会用 %s 在 %s 上再跑一次。', '%s runs again with %s on %s.'],
+  'home.retryNote': ['补充一句（可选）', 'A word to add (optional)'], 'home.retryNoteHint': ['只加在这次运行的任务书后面，任务本身不改。', 'Added under this run\'s brief only; the task stays as it is.'],
   'home.perm': ['要执行 %s：%s', 'Wants to run %s: %s'], 'home.whyDetail': ['%s：%s', '%s: %s'],
   'home.slotBusy': ['等机器接手（%d/%d 在用）', 'Waits for its machine (%d/%d in use)'], 'home.g.n': ['%s %d', '%s %d'],
   'home.cancel': ['取消', 'Cancel'], 'home.waited': ['等了 %s', 'waited %s'],

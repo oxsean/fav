@@ -270,6 +270,8 @@ test('the home by keys: done and undo, an answer by digit, a retry and a stop, e
       await k('j'); await k('j');
       await k('d');
       ok(root.find('.modal').length === 1 && root.one('.modal').textContent.includes('Login rate limit'), 'd asks first');
+      const note = root.one('.modal').one('textarea');
+      await act(() => { note.value = ' The limiter moved to redis. '; note.dispatch('input'); });
       await k('Enter', {metaKey: true});
     },
     async stop() {

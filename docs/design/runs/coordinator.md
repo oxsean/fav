@@ -52,6 +52,7 @@ run `state` 转移表（终态单调，重复事件无副作用）：
 
 - 「显示为运行中」= 有 state ∈ {starting, running, unknown} 的 run；task 只存 backlog / todo / done / canceled。
 - 一个 task 同时最多一个未结束 run；同一（机器, 目录）同时最多一个 starting / running run，其余排队；目录比较按目标机器的规则（Windows 不分大小写、`\` 与 `/` 等同）。
+- `run.dispatch` 可带 `note`：只接在这次运行的任务书后面（`---` 隔开），任务的任务书不改；上限和任务书相同（`bad_request note`）。
 - 任务书上限 256 KiB（`bad_request brief`）：它在 journal 里占一行，在 `state.get` 和快照的一批里都要放得下。
 - run 冻结 `from`（任务目录所属的机器，模式一默认本机）；派发时从 `from` 映射到目标机器；`from` 还没握过手就先连它，这一轮不派。
 - `want=stop` 持久化；每次连上节点先发 `run.stop`，直到节点快照是终态。

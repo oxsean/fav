@@ -11,7 +11,7 @@
 {"c":{"type":"req","id":7,"method":"run.answer","command_id":"c3","params":{"run":"r2","request":"q1","allow":true,"answers":{"Which PDF library should the export use?":"wkhtmltopdf"}}}}
 {"s":{"type":"res","id":7,"result":{"id":"r2","task":"t2","machine":"mba","agent":"claude","profile":{"name":"claude","provider":"claude"},"dir":"/w/t2","project":"p1","dispatcher":"u_b","want":"run","seq":20,"state":"running","node_rev":2,"queued_at":"2026-09-30T13:18:00Z","provider":"claude","started_at":"2026-09-30T13:20:00Z","attention":"asked","ask":"Which PDF library should the export use?","last":"Two libraries fit; I need a choice.","usage":{"input":9000,"cache_read":120000,"cache_write":20000,"output":4100,"cost_usd":0.52,"turns":3},"requests":[{"id":"q1","kind":"question","questions":[{"question":"Which PDF library should the export use?","header":"Library","options":["gofpdf","wkhtmltopdf","chromedp"]}],"at":"2026-09-30T14:05:00Z"}],"answers":[{"request":"q1","allow":true,"answers":{"Which PDF library should the export use?":"wkhtmltopdf"}}]}}}
 {"step":"retry"}
-{"c":{"type":"req","id":8,"method":"run.dispatch","command_id":"c4","params":{"task":"t5","machine":"mba","agent":"codex"}}}
+{"c":{"type":"req","id":8,"method":"run.dispatch","command_id":"c4","params":{"task":"t5","machine":"mba","agent":"codex","note":"The limiter moved to redis."}}}
 {"s":{"type":"res","id":8,"result":{"id":"r20","task":"t5","machine":"mba","agent":"codex","profile":{"name":"codex","provider":"codex"},"dir":"/w/t5","project":"p1","dispatcher":"u_b","want":"run","seq":200,"state":"queued","node_rev":2,"queued_at":"2026-09-30T14:32:00Z","provider":"codex"}}}
 {"step":"stop"}
 {"c":{"type":"req","id":9,"method":"run.stop","command_id":"c5","params":{"id":"r1"}}}
