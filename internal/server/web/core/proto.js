@@ -110,6 +110,7 @@ export const methods = Object.freeze([
   'run.output.watch',
   'agent.list',
   'machine.list',
+  'machine.check',
   'state.watch',
   'node.call',
   'run.preview',

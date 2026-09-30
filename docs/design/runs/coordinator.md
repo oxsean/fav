@@ -91,7 +91,8 @@ run `state` 转移表（终态单调，重复事件无副作用）：
 - 退避期内的机器，`run.tail` / `run.output.page` / `node.call` 直接回 `offline`，`run.output.watch` 回 `gone`，不重拨；只有 `machine.list{connect}` 清退避。
 - 节点连不上：失败后 5 s 起翻倍，最多 5 分钟；`machine.list` 回原因和下次重试时间。
 - 模式一：有未结束 run 的机器保持连接；其余空闲 5 分钟断开。
-- 连上节点后在后台调一次 `node.agents`，结果挂在机器上（`machine.list` 的 `agents`）；`machine.list{connect}` 和 `run.preview` 会重新取。
+- 连上节点后在后台调一次 `node.agents{fresh}`，结果挂在机器上（`machine.list` 的 `agents`，`checked_at` 是节点最近一次重新探测的时间，只在协调器内存里，重启后下次连上就有）；`machine.list{connect}` 也重新探测，`run.preview` 取节点缓存着的结果（不改 `checked_at`）。
+- `machine.check{machine?}`：看得见这台机器（`canSee`）的人让它的节点重新探测各 agent CLI（`node.agents{fresh}`，跳过节点 5 分钟的缓存），先连上（退避期内回 `offline`），等结果，回 `{machines: [Machine]}`；不带 `machine` 是调用者看得见、已连上的每台机器，同时探测，探不了的写进 `failed{机器: 错误码}`，离线的不试。同一台机器的探测还没回来时，后来的检查等它，不再探测一次。节点没有 `node.agents` → `unsupported`；看不见或没有这台 → `not_found`。
 - 预检 `run.preview`：先按 dispatch 同样的规则算出 run（错误照样回），再连机器（等拨号结束），给出机器状态、映射后的目录、`blockers`（`cli_missing`、`auth_missing`、`node_outdated`：跑了也会立刻失败）和 `notes`（`offline`、`connecting`、`slots`、`dir_busy`、`auth_unknown`、`unchecked`、`herdr`、`background`、`continues`）。CLI 有 blocker 就不派发（`--force` 例外）；TUI 和 Web 只显示。节点在 `run.start` 里自己再查一次（有 5 分钟缓存，坏结果只缓存 30 s），是最终裁决：没装 → `failed{cli_missing}`，确定没登录 → `failed{auth_missing}`；看不出登录状态不拦。
 
 ## 订阅
@@ -107,7 +108,7 @@ run `state` 转移表（终态单调，重复事件无副作用）：
   - journal 之外的变化也会改动作：机器主人、用户停用（`tend-server` 的 `sweep`）、节点连上换了版本（`hello` 的 feature）。这时调 `Coord.Reaffirm()`，每个流全部重算一遍，只推差异。
   - 客户端这边的折叠是 `coord.StateFold`：`open` 为 snapshot 或收到 `reset` 时开始一份新副本，`live` 时换上，`journal` 按 seq 折进去，`affordances` 的 part 和推送收进 `Aff`；遇到不认识的 part、seq 断档或折叠出错，丢掉副本，不带 `after_seq` 重开。
 - `machines.watch{}` 和 `inbox.watch{}` 是快照型的流（`ClassStream`，`internal/coord/topics.go`）：先推 `open{mode: snapshot}`，然后推整份列表，之后每次都推整份替换，客户端不处理增删，看不见的自然消失。每个订阅记着上次发出的 JSON，重算后一样就不推。
-  - `machines{items}`：和 `machine.list` 同样的 `Machine`，按 `canSee` 过滤。重算的触发：每次提交、开始拨号、连上或断开、`Attach` / `Expect`、退避变化、`node.agents` 回来、调用出错、`Reaffirm`；200 ms 内的合成一次，订阅期间另外每 5 s 兜底重算一次。`retry_at` 照常推，由客户端倒数；立即重连仍是 `machine.list{connect}`。
+  - `machines{items}`：和 `machine.list` 同样的 `Machine`，按 `canSee` 过滤。重算的触发：每次提交、开始拨号、连上或断开、`Attach` / `Expect`、退避变化、`node.agents` 回来、调用出错、`Reaffirm`；200 ms 内的合成一次，订阅期间另外每 5 s 兜底重算一次。`retry_at` 照常推，由客户端倒数；立即重连仍是 `machine.list{connect}`（只有模式一的 ssh 主机有协调器这边的退避；模式二的节点自己重连）。
   - `inbox{items}`：和 `inbox.list` 同样的 `Inbox`，在协调器算（管理员那几项要看机器是否退役，客户端不知道）。每次提交后，只唤醒这次碰到的任务（`touched`，同上：移动时旧父任务和新父任务都算）在提交前后关系到的人（`concerns`，换负责人时新旧两人都算）和管理员；`reshapes` 的提交和 `Reaffirm` 唤醒所有订阅。300 ms 内的合成一次，被唤醒的订阅按自己的人重算整份。
   - 协调器关闭时这两种流以 `gone` 结束，推送用 `PushWait`。模式一的 TUI 不订阅 `inbox.watch`，「等你」在本地由状态推导。
 

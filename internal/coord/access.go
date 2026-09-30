@@ -60,6 +60,7 @@ var methodAccess = map[string]access{
 	MTaskGet:            reader,
 	MAgentList:          reader,
 	MMachineList:        reader,
+	MMachineCheck:       reader, // whoever sees the machine (checkMachines)
 	MStateWatch:         reader,
 	MRunTail:            reader,
 	MRunOutputPage:      reader,

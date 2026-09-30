@@ -243,7 +243,7 @@ func (c *Coord) checksOf(ctx context.Context, m *machine) map[string]agent.Check
 	return out.Agents
 }
 
-// refreshChecks asks every connected machine how its agent CLIs stand.
+// refreshChecks has every connected machine probe its agent CLIs afresh.
 func (c *Coord) refreshChecks(ctx context.Context) {
 	c.mu.Lock()
 	var ms []*machine
@@ -256,7 +256,7 @@ func (c *Coord) refreshChecks(ctx context.Context) {
 	var wg sync.WaitGroup
 	for _, m := range ms {
 		wg.Add(1)
-		go func() { defer wg.Done(); c.checksOf(ctx, m) }()
+		go func() { defer wg.Done(); c.probe(ctx, m) }()
 	}
 	wg.Wait()
 }

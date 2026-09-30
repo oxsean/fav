@@ -48,6 +48,7 @@ const (
 	MProjectDirs        = "project.dirs" // a directory on a machine, for whom may run a project's tasks there (ProjectDirsParams)
 	MAgentList          = "agent.list"
 	MMachineList        = "machine.list"
+	MMachineCheck       = "machine.check" // probe machines' agent CLIs again (MachineCheck)
 	MStateWatch         = "state.watch"
 	MNodeCall           = "node.call"
 	MTaskGet            = "task.get"

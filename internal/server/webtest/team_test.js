@@ -207,6 +207,44 @@ test('machines: its owner changes who else may use it', async () => {
   eq(r.errors, [], 'errors');
 });
 
+test('machines: one is checked again and says when; every connected one is, and one that cannot be is named', async () => {
+  const r = await team();
+  const root = await mount(app(r).vnode());
+  const t = words.t;
+  await click(root.find('.mach-card').find(c => c.one('b').textContent === 'mba'));
+  ok(root.one('.mach-aside').textContent.includes(words.f('mach.checkedAgo', '5m')), 'when it was last checked');
+  await click(root.find('.mach-card').find(c => c.one('b').textContent === 'win'));
+  eq(root.one('.mach-aside').find('button').filter(b => labelOf(b) === t('mach.check')).length, 0, 'an offline machine is not checked');
+  ok(root.one('.mach-aside').textContent.includes(t('mach.redials')), 'an offline node dials in again by itself');
+  await click(root.find('.mach-card').find(c => c.one('b').textContent === 'old-box'));
+  ok(!root.one('.mach-aside').textContent.includes(t('mach.redials')), 'a retired one does not');
+  await click(root.find('.mach-card').find(c => c.one('b').textContent === 'mba'));
+  await r.srv.play('team-check', {
+    async one() { await click(buttonOf(root.one('.mach-aside'), t('mach.check'))); },
+    async checked() {
+      await settled();
+      eq(root.find('.toast-text').map(x => x.textContent), [words.f('mach.checked', 'mba')], 'said');
+      eq(buttonOf(root.one('.mach-aside'), t('mach.check')).getAttribute('disabled'), null, 'the button is back');
+    },
+    async all() {
+      eq(buttonOf(root.one('.mach-head'), t('mach.checkAll')).getAttribute('disabled'), null, 'checking every machine');
+      await click(buttonOf(root.one('.mach-head'), t('mach.checkAll')));
+      ok(buttonOf(root.one('.mach-head'), t('mach.checkAll')).getAttribute('disabled') !== null, 'busy while it checks');
+    },
+    async allChecked() {
+      await settled();
+      const said = root.find('.toast-text').map(x => x.textContent);
+      ok(said.includes(words.f('mach.checkedN', 2)), 'how many: ' + said);
+      ok(said.includes(words.f('mach.checkFailed', 'bo-laptop', t('mach.checkWhy.unsupported'))), 'the one that could not be: ' + said);
+    },
+  });
+  const phone = await mount(app(r).vnode(), 'phone');
+  try {
+    eq(phone.find('button').filter(b => [t('mach.check'), t('mach.checkAll')].includes(labelOf(b))).length, 0, 'a phone checks nothing');
+  } finally { form.value = 'desktop'; }
+  eq(r.errors, [], 'errors');
+});
+
 test('machines: a machine added shows its token once; a node token is moved and revoked after a confirm', async () => {
   const r = await team();
   const http = fakeHTTP();

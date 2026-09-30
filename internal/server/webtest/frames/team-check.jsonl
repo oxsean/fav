@@ -1,0 +1,9 @@
+{"note":"an admin checks mba's agent CLIs again, then every connected machine: bo-laptop's tend has no node.agents, so it is named as unsupported"}
+{"step":"one"}
+{"c":{"type":"req","id":5,"method":"machine.check","params":{"machine":"mba"}}}
+{"s":{"type":"res","id":5,"result":{"machines":[{"name":"mba","owner":"u_a","state":"connected","slots":2,"active":1,"queued":1,"os":"darwin","hostname":"mba.lan","version":"v0.9.0","agents":{"claude":{"installed":true,"version":"2.1.0","auth":"ok"},"codex":{"installed":true,"version":"0.50.0","auth":"ok"}},"checked_at":"2026-09-30T14:32:00Z","via":"dial"}]}}}
+{"step":"checked"}
+{"step":"all"}
+{"c":{"type":"req","id":6,"method":"machine.check","params":{}}}
+{"s":{"type":"res","id":6,"result":{"machines":[{"name":"linux","owner":"u_a","state":"connected","slots":2,"active":0,"queued":0,"os":"linux","hostname":"build-1","version":"v0.9.0","agents":{"claude":{"installed":true,"version":"2.1.0","auth":"ok"},"codex":{"installed":true,"version":"0.50.0","auth":"ok"}},"checked_at":"2026-09-30T14:32:00Z","via":"ssh"},{"name":"mba","owner":"u_a","state":"connected","slots":2,"active":1,"queued":1,"os":"darwin","hostname":"mba.lan","version":"v0.9.0","agents":{"claude":{"installed":true,"version":"2.1.0","auth":"ok"},"codex":{"installed":true,"version":"0.50.0","auth":"ok"}},"checked_at":"2026-09-30T14:32:00Z","via":"dial"}],"failed":{"bo-laptop":"unsupported"}}}}
+{"step":"allChecked"}

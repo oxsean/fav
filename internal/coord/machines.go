@@ -41,17 +41,25 @@ const (
 )
 
 type machine struct {
-	name     string
-	host     *tend.Host // nil: this machine, or a node that dialed in
-	conn     Conn
-	hello    remote.Hello
-	err      error
-	backoff  time.Duration
-	retryAt  time.Time
-	dialing  bool
-	attached bool // mode 2: the node dialed in; never dialed from here
-	busyAt   time.Time
-	checks   map[string]agent.Check // node.agents, when it last answered
+	name      string
+	host      *tend.Host // nil: this machine, or a node that dialed in
+	conn      Conn
+	hello     remote.Hello
+	err       error
+	backoff   time.Duration
+	retryAt   time.Time
+	dialing   bool
+	attached  bool // mode 2: the node dialed in; never dialed from here
+	busyAt    time.Time
+	checks    map[string]agent.Check // node.agents, when it last answered
+	checkedAt time.Time              // when node.agents last probed afresh
+	probing   *probe                 // a fresh node.agents under way
+}
+
+// probe is one fresh node.agents; checks asked meanwhile wait for it.
+type probe struct {
+	done chan struct{}
+	err  error
 }
 
 // machines are this machine and every configured host.
@@ -132,12 +140,12 @@ func (c *Coord) dial(m *machine) {
 	}
 }
 
-// checkSoon asks m's node, in the background, how its agent CLIs stand.
+// checkSoon has m's node probe its agent CLIs, in the background.
 func (c *Coord) checkSoon(m *machine) {
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), callWait)
 		defer cancel()
-		c.checksOf(ctx, m)
+		c.probe(ctx, m)
 	}()
 }
 
@@ -663,10 +671,27 @@ func end(h remote.Hello) pathmap.End {
 func (c *Coord) call(ctx context.Context, name, method string, params, out any) error {
 	c.mu.Lock()
 	m := c.ms[name]
+	c.mu.Unlock()
 	if m == nil {
-		c.mu.Unlock()
 		return notFound("machine " + name)
 	}
+	conn, err := c.reach(ctx, m)
+	if err != nil {
+		if wire.Code(err) == wire.CodeTimeout {
+			err = &wire.Error{Code: wire.CodeTimeout, Detail: method}
+		}
+		return err
+	}
+	err = conn.Call(ctx, method, params, out)
+	if err != nil && transport(err) && wire.Code(err) != wire.CodeTimeout {
+		c.lost(m, conn, err)
+	}
+	return err
+}
+
+// reach is m's connection, dialed first when needed (not while it waits out its backoff).
+func (c *Coord) reach(ctx context.Context, m *machine) (Conn, error) {
+	c.mu.Lock()
 	m.busyAt = time.Now()
 	c.ensure(m)
 	c.mu.Unlock()
@@ -675,21 +700,17 @@ func (c *Coord) call(ctx context.Context, name, method string, params, out any) 
 		conn, dialing, err := m.conn, m.dialing, m.err
 		c.mu.Unlock()
 		if conn != nil {
-			err := conn.Call(ctx, method, params, out)
-			if err != nil && transport(err) && wire.Code(err) != wire.CodeTimeout {
-				c.lost(m, conn, err)
-			}
-			return err
+			return conn, nil
 		}
 		if !dialing {
 			if err == nil {
 				err = &wire.Error{Code: wire.CodeOffline}
 			}
-			return err
+			return nil, err
 		}
 		select {
 		case <-ctx.Done():
-			return &wire.Error{Code: wire.CodeTimeout, Detail: method}
+			return nil, &wire.Error{Code: wire.CodeTimeout}
 		case <-time.After(50 * time.Millisecond):
 		}
 	}

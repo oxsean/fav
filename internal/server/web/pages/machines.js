@@ -37,6 +37,12 @@ register('machines', {
   'mach.version': ['tend', 'tend'], 'mach.queue': ['排队', 'Queued'], 'mach.noQueue': ['没有', 'None'],
   'mach.retryAt': ['%s，%s 重试', '%s; retries at %s'],
   'mach.clis': ['Agent CLI', 'Agent CLIs'], 'mach.noClis': ['还没有检查过', 'Not checked yet'],
+  'mach.check': ['检查', 'Check'], 'mach.checkAll': ['全部检查', 'Check all'], 'mach.checkedAgo': ['%s 前检查', 'checked %s ago'],
+  'mach.checked': ['%s 已检查', '%s is checked'], 'mach.checkedN': ['检查了 %d 台', '%d machines checked'],
+  'mach.checkFailed': ['%s 检查不了：%s', '%s cannot be checked: %s'],
+  'mach.checkWhy.unsupported': ['它的 tend 太旧，没有这个检查', 'its tend is too old for this check'],
+  'mach.checkWhy.offline': ['它不在线', 'it is offline'], 'mach.checkWhy.timeout': ['节点没有及时回答', 'its node did not answer in time'],
+  'mach.redials': ['节点断线后自己重连，最多隔 60 秒', 'its node dials in again by itself, within a minute'],
   'mach.cli.ok': ['已装 · 已登录', 'installed · signed in'], 'mach.cli.auth': ['已装 · 没登录', 'installed · not signed in'],
   'mach.cli.unknown': ['已装', 'installed'], 'mach.cli.missing': ['没装', 'not installed'],
   'mach.shared': ['分享给', 'Shared with'], 'mach.private': ['只有主人和管理员能用', 'Only its owner and admins use it'],
@@ -80,6 +86,10 @@ function noteText(w, n) {
   if (n.kind === 'auth') return w.f('mach.note.auth', n.agents.join(', '));
   return w.f('mach.note.missing', n.features.join(', '));
 }
+// ⚠️ Why machine.check could not check a machine (wire codes), as the page words them; others read as any failure.
+const checkWhys = ['unsupported', 'offline', 'timeout'];
+const checkWhy = (w, code) => (checkWhys.includes(code) ? w.t('mach.checkWhy.' + code) : apiText(w, {code}));
+
 const noteTone = n => (n.kind === 'error' || n.kind === 'retired' ? 'failed' : 'warning');
 
 function SlotBar({m}) {
@@ -101,16 +111,17 @@ function Card({m, picked, onPick}) {
   </button>`;
 }
 
-// Facts is one machine: how it is reached, its room and queue, its agent CLIs, who else may use it and its token.
-// The buttons are there only where their handlers are given.
-function Facts({m, st, creds, now, onShare, onRebind, onRevoke, onRuns}) {
+// Facts is one machine: how it is reached, its room and queue, its agent CLIs and when they were checked, who else may
+// use it and its token. The buttons are there only where their handlers are given.
+function Facts({m, st, creds, now, checking, onCheck, onShare, onRebind, onRevoke, onRuns}) {
   const w = useWords();
   const {t, f} = w;
   const name = useName();
   const share = st.shares?.[m.name];
   const queue = tm.queueOn(st, m.name);
-  const link = [viaWord(w, m), m.state !== 'connected' && m.error ? (m.retry_at ? f('mach.retryAt', m.detail || m.error, clock(m.retry_at)) : m.detail || m.error) : '']
-    .filter(Boolean).join(' · ');
+  const down = m.state !== 'connected';
+  const link = [viaWord(w, m), down && m.error ? (m.retry_at ? f('mach.retryAt', m.detail || m.error, clock(m.retry_at)) : m.detail || m.error) : '',
+    down && m.via === 'dial' && !m.retired ? t('mach.redials') : ''].filter(Boolean).join(' · ');
   const who = [...(share?.users || []).map(u => ({who: name(u), what: share.approve ? t('mach.canApprove') : t('mach.canRun')})),
     ...(share?.projects || []).map(p => ({who: f('mach.inProject', st.projects?.[p]?.name || p), what: share.approve ? t('mach.canApprove') : t('mach.canRun')}))];
   return html`<div class="mach-facts">
@@ -125,7 +136,8 @@ function Facts({m, st, creds, now, onShare, onRebind, onRevoke, onRuns}) {
         <span class="t-muted">${x.why ? why(w, x.why) : duration(now - Date.parse(x.run.queued_at))}</span></li>`)}</ul>` : t('mach.noQueue')}</dd>
     </dl>
     ${tm.machineNotes(m).map(n => html`<p class=${cx('mach-note', 't-' + noteTone(n))}>${noteText(w, n)}</p>`)}
-    <section class="det-sec"><h3 class="det-h">${t('mach.clis')}</h3>
+    <section class="det-sec"><h3 class="det-h mach-h"><span>${t('mach.clis')}${m.checked_at && html`<span class="t-muted mach-when"> · ${f('mach.checkedAgo', duration(now - Date.parse(m.checked_at)))}</span>`}</span>
+      ${onCheck && html`<${Button} kind="quiet" disabled=${checking} onClick=${onCheck}>${t('mach.check')}<//>`}</h3>
       ${tm.agentChecks(m).length ? html`<ul class="mach-clis">${tm.agentChecks(m).map(c => html`<li key=${c.name}>
         <span class=${cx('st', 's-' + ({ok: 'success', auth: 'unknown', unknown: 'muted', missing: 'muted'})[c.state])} aria-hidden="true">${({ok: '✓', auth: '!', unknown: '·', missing: '·'})[c.state]}</span>
         <span class="mono">${c.name}</span><span class="t-muted">${t('mach.cli.' + c.state)}</span><span class="mono t-muted">${c.version}</span></li>`)}</ul>`
@@ -198,7 +210,7 @@ function Confirm({title, note, label, onGo, onClose}) {
 
 // Machines: http reads and ends node tokens (/api/machines); router and storage open the runs page on a machine's runs;
 // copy is the clipboard's (a test passes its own).
-export function Machines({store, commands, toasts, session, http, router, storage, clock: now = () => Date.now(), copy}) {
+export function Machines({store, commands, toasts, session, http, wire, router, storage, clock: now = () => Date.now(), copy}) {
   const w = useWords();
   const {t, f} = w;
   const phone = usePhone();
@@ -212,6 +224,7 @@ export function Machines({store, commands, toasts, session, http, router, storag
   const [modal, setModal] = useState(null);
   const [creds, setCreds] = useState([]);
   const [busy, setBusy] = useState(false);
+  const [checking, setChecking] = useState(null);
   const st = store.state, at = now();
   const me = session?.id || '';
   const readCreds = () => http?.machineCreds().then(setCreds, () => {});
@@ -236,6 +249,14 @@ export function Machines({store, commands, toasts, session, http, router, storag
   };
   const rebind = c => http.rebindMachine(c.id).then(() => { toasts.show({text: f('mach.rebound', c.name)}); readCreds(); }, failed);
   const revoke = c => http.revokeMachine(c.id).then(() => { toasts.show({text: f('mach.revoked', c.name)}); readCreds(); }, failed);
+  const checks = !!wire?.has?.('machine.check');
+  const check = name => {
+    setChecking(name || '*');
+    wire.call('machine.check', name ? {machine: name} : {}).then(res => {
+      toasts.show({text: name ? f('mach.checked', name) : f('mach.checkedN', res?.machines?.length || 0)});
+      for (const [n, code] of Object.entries(res?.failed || {})) toasts.show({text: f('mach.checkFailed', n, checkWhy(w, code)), tone: 'danger'});
+    }, e => toasts.show({text: f('mach.checkFailed', name, checkWhy(w, e?.code)), tone: 'danger'})).finally(() => setChecking(null));
+  };
   const credsOf = m => tm.credsOf(creds, m.name);
   const unmatched = creds.filter(c => !machines.some(m => m.name === c.name));
   const s = tm.machineSummary(machines);
@@ -281,7 +302,9 @@ export function Machines({store, commands, toasts, session, http, router, storag
   return html`<div class="mach">
     <div class="mach-head">
       <h1 class="tasks-title">${t('mach.title')}</h1><span class="t-muted">${summary}</span>
-      <span class="mach-head-acts"><${Button} kind="primary" icon="plus" onClick=${() => setModal({kind: 'add'})}>${t('mach.add')}<//></span>
+      <span class="mach-head-acts">
+        ${checks && machines.some(m => m.state === 'connected') && html`<${Button} disabled=${!!checking} onClick=${() => check('')}>${t('mach.checkAll')}<//>`}
+        <${Button} kind="primary" icon="plus" onClick=${() => setModal({kind: 'add'})}>${t('mach.add')}<//></span>
     </div>
     <div class="mach-body">
       <div class="mach-main">
@@ -302,6 +325,7 @@ export function Machines({store, commands, toasts, session, http, router, storag
       ${cur && html`<aside class="mach-aside panel" aria-label=${cur.name}>
         <header class="mach-aside-head"><${Status} state=${tm.machineState(cur)} /><b class="mono">${cur.name}</b><span class="t-muted">${stateWord(w, cur)}</span></header>
         <${Facts} m=${cur} st=${st} creds=${credsOf(cur)} now=${at} onRuns=${() => toRuns(cur.name)}
+          checking=${!!checking} onCheck=${checks && cur.state === 'connected' && !cur.retired ? () => check(cur.name) : null}
           onShare=${mine(cur) ? () => setModal({kind: 'share', machine: cur.name}) : null}
           onRebind=${cur.retired ? null : c => setModal({kind: 'rebind', cred: c})} onRevoke=${c => setModal({kind: 'revoke', cred: c})} />
       </aside>`}

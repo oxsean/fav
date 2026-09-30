@@ -64,23 +64,35 @@ type MachinesParams struct {
 	Connect bool `json:"connect,omitempty"` // try every machine now and wait for the answers
 }
 
+// MachineCheck is machine.check: Machine's agent CLIs probed again; none: every connected machine the caller sees.
+type MachineCheck struct {
+	Machine string `json:"machine,omitempty"`
+}
+
+// MachineChecks answers machine.check: the machines checked, and the error code of each that could not be.
+type MachineChecks struct {
+	Machines []Machine         `json:"machines"`
+	Failed   map[string]string `json:"failed,omitempty"`
+}
+
 type Machine struct {
-	Name     string                 `json:"name"`
-	Owner    string                 `json:"owner,omitempty"` // team mode: the user who added it
-	State    string                 `json:"state"`           // connected | connecting | offline | idle
-	Error    string                 `json:"error,omitempty"`
-	Detail   string                 `json:"detail,omitempty"`
-	RetryAt  *time.Time             `json:"retry_at,omitzero"`
-	Slots    int                    `json:"slots"`
-	Active   int                    `json:"active"` // starting, running or unknown runs
-	Queued   int                    `json:"queued"`
-	OS       string                 `json:"os,omitempty"`
-	Hostname string                 `json:"hostname,omitempty"`
-	Version  string                 `json:"version,omitempty"`
-	Agents   map[string]agent.Check `json:"agents,omitempty"`  // how each agent CLI stood when last checked
-	Via      string                 `json:"via,omitempty"`     // local | ssh | dial (the node dialed in)
-	Missing  []string               `json:"missing,omitempty"` // node features its build lacks
-	Retired  bool                   `json:"retired,omitempty"` // its owner was disabled: nobody runs anything there again
+	Name      string                 `json:"name"`
+	Owner     string                 `json:"owner,omitempty"` // team mode: the user who added it
+	State     string                 `json:"state"`           // connected | connecting | offline | idle
+	Error     string                 `json:"error,omitempty"`
+	Detail    string                 `json:"detail,omitempty"`
+	RetryAt   *time.Time             `json:"retry_at,omitzero"`
+	Slots     int                    `json:"slots"`
+	Active    int                    `json:"active"` // starting, running or unknown runs
+	Queued    int                    `json:"queued"`
+	OS        string                 `json:"os,omitempty"`
+	Hostname  string                 `json:"hostname,omitempty"`
+	Version   string                 `json:"version,omitempty"`
+	Agents    map[string]agent.Check `json:"agents,omitempty"`    // how each agent CLI stood when last checked
+	CheckedAt *time.Time             `json:"checked_at,omitzero"` // when its node last probed them afresh
+	Via       string                 `json:"via,omitempty"`       // local | ssh | dial (the node dialed in)
+	Missing   []string               `json:"missing,omitempty"`   // node features its build lacks
+	Retired   bool                   `json:"retired,omitempty"`   // its owner was disabled: nobody runs anything there again
 }
 
 // How a machine is reached, in Machine.Via.
@@ -119,7 +131,7 @@ var readMethods = []string{remote.MHello, remote.MList, remote.MMessages, remote
 
 // Methods are the client methods.
 var Methods = []string{MStateGet, MTaskGet, MTaskCreate, MTaskEdit, MTaskStatus, MTaskUndo, MRunDispatch, MRunStop, MRunAbandon, MRunTail, MRunOutputPage, MRunOutputWatch,
-	MAgentList, MMachineList, MStateWatch, MNodeCall, MRunPreview, MRunContinue, MRunAnswer, MRunSend, MRunMessages,
+	MAgentList, MMachineList, MMachineCheck, MStateWatch, MNodeCall, MRunPreview, MRunContinue, MRunAnswer, MRunSend, MRunMessages,
 	MProjectCreate, MProjectEdit, MProjectMember, MMachineShare, MTaskStart, MTaskMove,
 	MAgentDefList, MAgentDefGet, MAgentDefSave, MAgentDefRemove, MAgentDefShare, MInboxList, MUserOffboard, MTaskSync, MTaskLink, MTaskSourceAck, MTaskGate, MTaskMerge, MTaskPlan, MTaskPlanSave, MTaskPlanApply, MTaskMessage, MTaskMessagePreview, MRunInterrupt, MMachinesWatch, MInboxWatch,
 	MRunOutputItem, MRunOutputFind, MRunChanges, MRunDiff, MRunBlob, MProjectDirs}
@@ -195,6 +207,12 @@ func (c *Coord) HandlerFor(p Principal) wire.Handler {
 			ms.Machines = slices.DeleteFunc(ms.Machines, func(m Machine) bool { return !c.canSee(p, m.Name) })
 			c.mu.Unlock()
 			return ms, nil
+		case MMachineCheck:
+			var mp MachineCheck
+			if err := r.Decode(&mp); err != nil {
+				return nil, err
+			}
+			return c.checkMachines(ctx, p, mp.Machine)
 		case MStateWatch:
 			return c.watchState(p, r)
 		case MMachinesWatch:
@@ -800,6 +818,10 @@ func (c *Coord) machineList() []Machine {
 func (c *Coord) machineView(m *machine) Machine {
 	x := Machine{Name: m.name, Slots: c.slots(m.name), OS: m.hello.OS, Hostname: m.hello.Hostname, Version: m.hello.Version,
 		Agents: m.checks, Via: ViaLocal}
+	if !m.checkedAt.IsZero() {
+		at := m.checkedAt
+		x.CheckedAt = &at
+	}
 	switch {
 	case m.attached:
 		x.Via = ViaDial
