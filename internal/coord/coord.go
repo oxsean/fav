@@ -287,9 +287,9 @@ func (c *Coord) commit(actor journal.Actor, cmd *journal.Receipt, events ...jour
 	}
 	before := c.observed(events)
 	ids := c.touched(events)
-	var sits map[string]task.Situation
+	var sits map[string]taskStanding
 	if c.opt.Notice != nil || len(c.opt.Config.NotifyCommand) > 0 {
-		sits = c.situations(ids)
+		sits = c.standings(ids)
 	}
 	inbox := c.watching(PushInbox)
 	concerned := map[string]bool{}

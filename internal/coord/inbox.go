@@ -20,16 +20,17 @@ const (
 
 // Notice is a task that came to need someone, for the people it concerns.
 type Notice struct {
-	Seq     int64     `json:"seq"`
-	Event   string    `json:"event"`
-	Task    string    `json:"task"`
-	Title   string    `json:"title"`
-	Project string    `json:"project,omitempty"`
-	Reason  string    `json:"reason,omitempty"`
-	Run     string    `json:"run,omitempty"`
-	Stage   string    `json:"stage,omitempty"`
-	To      []string  `json:"to"` // user ids
-	At      time.Time `json:"at"`
+	Seq     int64          `json:"seq"`
+	Event   string         `json:"event"`
+	Task    string         `json:"task"`
+	Title   string         `json:"title"`
+	Project string         `json:"project,omitempty"`
+	Reason  string         `json:"reason,omitempty"`
+	Run     string         `json:"run,omitempty"`
+	Stage   string         `json:"stage,omitempty"`
+	Items   []task.Pending `json:"items,omitempty"` // what came to wait: the pending items it did not wait on before
+	To      []string       `json:"to"`              // user ids
+	At      time.Time      `json:"at"`
 }
 
 // InboxItem is a task waiting for the caller.
@@ -138,19 +139,38 @@ func (c *Coord) touched(events []journal.Event) []string {
 	return ids
 }
 
-// situations are how the tasks ids stand now; the caller holds mu.
-func (c *Coord) situations(ids []string) map[string]task.Situation {
-	out := map[string]task.Situation{}
+// taskStanding is how a task stands: its situation and what waits on someone about it.
+type taskStanding struct {
+	sit     task.Situation
+	pending []task.Pending
+}
+
+// standings are how the tasks ids stand now; the caller holds mu.
+func (c *Coord) standings(ids []string) map[string]taskStanding {
+	out := map[string]taskStanding{}
 	for _, id := range ids {
 		if t := c.st.Tasks[id]; t != nil {
-			out[id] = c.st.Situation(t)
+			out[id] = taskStanding{c.st.Situation(t), c.st.Pending(t)}
 		}
 	}
 	return out
 }
 
-// notices are the tasks among before's that came to wait for someone, or got done, in env; the caller holds mu.
-func (c *Coord) notices(env journal.Envelope, before map[string]task.Situation) []Notice {
+// arrived are the items of now that was did not hold: new, in another item's place, or the same one waiting anew
+// (another version) or for another reason.
+func arrived(was, now []task.Pending) []task.Pending {
+	var out []task.Pending
+	for _, p := range now {
+		if !slices.ContainsFunc(was, func(q task.Pending) bool { return q.ID == p.ID && q.Version == p.Version && q.Reason == p.Reason }) {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// notices are the tasks among before's that something new came to wait on someone for, or that got done, in env;
+// the caller holds mu.
+func (c *Coord) notices(env journal.Envelope, before map[string]taskStanding) []Notice {
 	var out []Notice
 	ids := make([]string, 0, len(before))
 	for id := range before {
@@ -183,16 +203,19 @@ func (c *Coord) notices(env journal.Envelope, before map[string]task.Situation) 
 			continue
 		}
 		was, now := before[id], c.st.Situation(t)
+		var items []task.Pending
 		ev := ""
 		switch {
-		case now.Kind == task.SitWaiting && now.Reason != task.WhyDispatch && (was.Kind != now.Kind || was.Reason != now.Reason):
-			ev = NotifyTaskWaiting
-		case now.Kind == task.SitDone && was.Kind != task.SitDone && was.Kind != "":
+		case now.Kind == task.SitWaiting && now.Reason != task.WhyDispatch:
+			if items = arrived(was.pending, c.st.Pending(t)); len(items) > 0 {
+				ev = NotifyTaskWaiting
+			}
+		case now.Kind == task.SitDone && was.sit.Kind != task.SitDone && was.sit.Kind != "":
 			ev = NotifyTaskDone
 		}
 		if ev != "" {
 			out = append(out, Notice{Seq: env.Seq, Event: ev, Task: id, Title: t.Title, Project: t.Project, Reason: now.Reason,
-				Run: now.Run, To: concerns(c.st, t, now), At: env.At})
+				Run: now.Run, Items: items, To: concerns(c.st, t, now), At: env.At})
 		}
 	}
 	return out

@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/oxsean/fav/internal/agent"
+	"github.com/oxsean/fav/internal/journal"
 	"github.com/oxsean/fav/internal/task"
 	"github.com/oxsean/fav/internal/tend"
 )
@@ -96,5 +98,61 @@ func TestATaskWithoutAnApproverIsItsOwnersToAccept(t *testing.T) {
 	}
 	if got := roles(st, named, accept, ann.User); !slices.Equal(got, []string{AsApprover}) {
 		t.Fatalf("the named approver: %v", got)
+	}
+}
+
+// A notice goes when something new waits on someone: a request that comes while another is still open, or one that
+// takes an answered one's place, though the task waits for the same reason all along. What still waits, or waits on
+// in another shape, is not told again.
+func TestANoticeGoesWhenAPendingItemAppearsOrIsReplaced(t *testing.T) {
+	e := team(t, tend.Config{Hosts: []tend.Host{{Name: "far", SSH: "far"}}})
+	e.dial = unreachable
+	var mu sync.Mutex
+	var got []Notice
+	e.notice = func(n Notice) {
+		if n.Event == NotifyTaskWaiting {
+			mu.Lock()
+			got = append(got, n)
+			mu.Unlock()
+		}
+	}
+	e.start()
+	e.project()
+	taken := func() []Notice { mu.Lock(); defer mu.Unlock(); out := got; got = nil; return out }
+	tid, rid := e.scene("running", "p1", bob.User, 1)
+	items := func(n Notice) []string {
+		var out []string
+		for _, p := range n.Items {
+			out = append(out, p.ID)
+		}
+		return out
+	}
+	if ns := taken(); len(ns) != 1 || ns[0].Task != tid || !slices.Equal(items(ns[0]), []string{rid + "/q1", rid + "/q2"}) {
+		t.Fatalf("a run that asks twice: %+v", ns)
+	}
+	observe := func(rev, turn int, reqs ...agent.Request) {
+		t.Helper()
+		e.c.mu.Lock()
+		defer e.c.mu.Unlock()
+		err := e.c.commit(journal.System, nil, journal.NewEvent(task.ERunObserved, task.Observation{ID: rid, State: task.Running, NodeRev: rev, Stream: true,
+			Attention: task.AttentionPermission, Turn: turn, Caps: e.c.st.Runs[rid].Caps, Requests: reqs}))
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	q2 := agent.Request{ID: "q2", Kind: agent.RequestQuestion, Questions: []agent.Question{{Question: "which?", Options: []string{"a", "b"}}}}
+	q3 := agent.Request{ID: "q3", Kind: agent.RequestPermission, Tool: "Bash", Summary: "rm -rf build"}
+	observe(2, 1, q2, q3)
+	if ns := taken(); len(ns) != 1 || !slices.Equal(items(ns[0]), []string{rid + "/q3"}) || !slices.Equal(ns[0].To, []string{bob.User}) {
+		t.Fatalf("q3 in q1's place, the task waiting for a permission all along: %+v", ns)
+	}
+	observe(3, 2, q2, q3)
+	observe(4, 2, q3)
+	if ns := taken(); len(ns) != 0 {
+		t.Fatalf("nothing new waits: %+v", ns)
+	}
+	observe(5, 2, q3, agent.Request{ID: "q4", Kind: agent.RequestPermission, Tool: "Edit"})
+	if ns := taken(); len(ns) != 1 || !slices.Equal(items(ns[0]), []string{rid + "/q4"}) {
+		t.Fatalf("another of the same kind while one is open: %+v", ns)
 	}
 }

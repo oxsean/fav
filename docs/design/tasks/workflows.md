@@ -97,7 +97,7 @@ max_loops: 2
 
 第 1 类是 tend 独有的：「测试在 Linux 机器上跑 gate，不过就自动打回」不需要 agent 配合。
 
-第 3 类：`task.needs_you`（任务进入 `waiting`，`dispatch` 除外）、`task.done`、`task.stage`（进入某阶段）和 `task.rework`（被退回，`stage` 是退回到的阶段）。后两个只发给点名了它们的 `notify_command`，不推个人 webhook：它们不需要人动手。模式一的 `notify_command` 默认只听 `run.*`，任务事件要在 `notify_events` 里点名才发，环境变量多一个 `TEND_TASK`；团队模式走个人 webhook（见 [team.md](team.md)「人在任务里」）。
+第 3 类：`task.needs_you`（任务在 `waiting`、`dispatch` 除外，并且有了新的待处理项）、`task.done`、`task.stage`（进入某阶段）和 `task.rework`（被退回，`stage` 是退回到的阶段）。后两个只发给点名了它们的 `notify_command`，不推个人 webhook：它们不需要人动手。模式一的 `notify_command` 默认只听 `run.*`，任务事件要在 `notify_events` 里点名才发，环境变量多一个 `TEND_TASK`；团队模式走个人 webhook（见 [team.md](team.md)「人在任务里」）。
 
 ## 消息与插话
 

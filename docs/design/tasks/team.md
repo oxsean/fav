@@ -171,7 +171,7 @@
 
 ### 实现
 
-- 通知：协调器在每次提交后比较受影响任务的前后 `Situation`，产生 `task.needs_you` / `task.done`，收件人是负责人、在 `accept` 时加上验收人、以及相关 run 的发起人。`tend-server` 把它们交给个人 webhook（`users.webhook`，「我」页设置，POST 一段带 `text` 的 JSON；配了 `public_url` 时带任务链接 `#task-<id>`），`deliveries` 表按「seq × 收件人 × 事件」去重；收件人在提交那一刻按当时的状态算出，已停用的人不投。
+- 通知：协调器在每次提交后比较受影响任务的前后处境和待处理项（`task.State.Pending`，按 `id`、`version`、`reason` 比）：任务在等人（`dispatch` 除外）并且有了之前没有的待处理项，就产生 `task.needs_you`，`items` 带上新出现的那几项，所以权限请求 A 换成 B、或者旧的还没答又来一个同类的，都会再通知；变成完成产生 `task.done`。收件人是负责人、在 `accept` 时加上验收人、以及相关 run 的发起人。`tend-server` 把它们交给个人 webhook（`users.webhook`，「我」页设置，POST 一段带 `text` 的 JSON；配了 `public_url` 时带任务链接 `#task-<id>`），`deliveries` 表按「seq × 收件人 × 事件」去重；收件人在提交那一刻按当时的状态算出，已停用的人不投。
 - 收件箱：`inbox.list`（跟随用 `inbox.watch`）列出处于 `waiting`（`dispatch` 除外）、与我有关、并且我能写的任务，等得最久的排前面。网页首页有「等你」和计数；电脑上页面开着、在后台，本人在「我」页打开了浏览器通知并且浏览器允许时，等的东西有了新的条目弹浏览器通知（手机上的通知是 Web Push 的事）。
 
 ## 审计与隐私
