@@ -119,6 +119,12 @@ function EditBody({s, density, onItem}) {
   </div>`;
 }
 
+// Files is a fold's or a summary's "changed N files", which lists their edit rows under it.
+function Files({row, onToggle}) {
+  const {f} = useWords();
+  return html`<button type="button" class="out-link out-files" aria-expanded=${row.filesOpen ? 'true' : 'false'} onClick=${() => onToggle(row.filesKey)}>${f('out.files', row.files)}</button>`;
+}
+
 // Counts is an edit's lines added and removed.
 function Counts({e}) {
   return html`<span class="out-counts mono"><span class="t-success">+${e.add}</span> <span class="t-failed">−${e.del}</span></span>`;
@@ -226,16 +232,18 @@ function Row({row, density, onToggle, onMore, onResend, renderAsk, copy, target,
     case 'run':
       return html`<div class=${base} data-key=${row.key} role="separator"><span>${f('out.run', row.n, row.run?.machine || '')}</span></div>`;
     case 'turn': {
-      const bits = [f('out.turn', row.n), row.dur > 0 && f('out.worked', duration(row.dur)), f('out.steps', row.steps), row.files > 0 && f('out.files', row.files)].filter(Boolean);
+      const listed = !row.open && row.files > 0;
+      const bits = [f('out.turn', row.n), row.dur > 0 && f('out.worked', duration(row.dur)), f('out.steps', row.steps), !listed && row.files > 0 && f('out.files', row.files)].filter(Boolean);
       return html`<div class=${base} data-key=${row.key}><button type="button" class="out-line" aria-expanded=${row.open ? 'true' : 'false'} onClick=${() => onToggle(row.key)}>
         <span class="out-chev mono" aria-hidden="true">${row.open ? '▾' : '▸'}</span><span class="out-turn-sum">${bits.join(' · ')}</span>
         ${!row.open && row.last && html`<span class="out-turn-last ell">${row.last}</span>`}${row.failed > 0 && html`<span class="t-failed">${f('out.sum.failed', row.failed)}</span>`}
-      </button></div>`;
+      </button>${listed && html`<${Files} row=${row} onToggle=${onToggle} />`}</div>`;
     }
     case 'summary': {
-      const bits = [row.shell && f('out.sum.shell', row.shell), row.files && f('out.files', row.files), row.reads && f('out.sum.reads', row.reads),
+      const bits = [row.shell && f('out.sum.shell', row.shell), row.reads && f('out.sum.reads', row.reads),
         row.searches && f('out.sum.searches', row.searches), row.other && f('out.sum.other', row.other)].filter(Boolean);
-      return html`<div class=${base} data-key=${row.key}><span class="out-glyph mono t-muted">·</span><span class="t-muted">${bits.join(' · ')}</span></div>`;
+      return html`<div class=${base} data-key=${row.key}><span class="out-glyph mono t-muted">·</span>${bits.length > 0 && html`<span class="t-muted">${bits.join(' · ')}</span>`}
+        ${row.files > 0 && html`<${Files} row=${row} onToggle=${onToggle} />`}</div>`;
     }
     case 'temp':
       if (row.step.kind === 'say') return html`<div class=${base} data-key=${row.key}><span class="out-temp">${row.text}</span></div>`;
@@ -559,9 +567,9 @@ export function Output({bare = false, parts, density = 'standard', onDensity, on
   const toggle = key => {
     const sc = scroller.current, at = sc?.querySelector?.(`[data-key="${cssKey(key)}"]`);
     if (sc && at && f.state.current.mode === 'away') anchor.current = {key, offset: at.offsetTop - sc.scrollTop, pinned: true};
-    const row = latest.find(r => r.key === key);
-    setSelected(key);
-    setOpen(o => { const n = new Map(o); n.set(key, !(row ? row.open : false)); return n; });
+    const row = latest.find(r => r.key === key), lists = latest.find(r => r.filesKey === key);
+    setSelected(lists && !row ? lists.key : key);
+    setOpen(o => { const n = new Map(o); n.set(key, !(row ? row.open : lists?.filesOpen)); return n; });
     if (hit && peek.has(key)) setHit(null);
   };
   const turnOf = key => m.runs.flatMap(r => r.turns).find(tn => tn.steps.some(s => s.key === key)) || m.runs.at(-1)?.turns.at(-1);

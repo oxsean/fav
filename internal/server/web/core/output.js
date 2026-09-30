@@ -227,20 +227,28 @@ export function lay(m, {density = 'standard', filter = 'all', open = new Map(), 
   const rows = [];
   const isOpen = (key, byDefault) => peek.has(key) || (open.has(key) ? open.get(key) : byDefault);
   const lastTurn = [...m.runs].reverse().find(r => r.turns.length)?.turns.at(-1).key;
-  const push = (s, depth) => {
+  const rowsOf = (s, depth) => {
     const o = isOpen(s.key, autoOpen(s) || openByDensity(s, density));
     const clip = s.kind === 'say' && density === 'standard' && !o && lines(s.text).length > table.sayFold;
     const brief = s.kind === 'you' && s.brief && density !== 'detailed' && !o;
-    rows.push({type: 'step', key: s.key, depth, step: s, open: o, auto: autoOpen(s), manual: open.get(s.key) === true || peek.has(s.key), clip, brief});
-    if (s.kind === 'agent' && o) for (const k of s.kids || []) if (passes(k, filter) && shownAt(k, density)) push(k, depth + 1);
+    const out = [{type: 'step', key: s.key, depth, step: s, open: o, auto: autoOpen(s), manual: open.get(s.key) === true || peek.has(s.key), clip, brief}];
+    if (s.kind === 'agent' && o) for (const k of s.kids || []) if (passes(k, filter) && shownAt(k, density)) out.push(...rowsOf(k, depth + 1));
+    return out;
   };
+  const push = (s, depth) => rows.push(...rowsOf(s, depth));
+  // edited: the edit rows of steps, listed under a fold or a summary that names their files, when those are open
+  const edited = (key, steps) => (isOpen(key, false) ? steps.filter(s => s.kind === 'edit').flatMap(s => rowsOf(s, 1)) : []);
   m.runs.forEach((r, i) => {
     if (i === 0 && r.head) rows.push({type: 'head', key: 'head:' + r.id, ...r.head});
     if (i > 0) rows.push({type: 'run', key: 'run:' + r.id, run: r.run, n: i + 1});
     if (i > 0 && r.head?.gone) rows.push({type: 'head', key: 'head:' + r.id, gone: true});
     for (const t of r.turns) {
       if (filter !== 'all') { for (const s of t.steps) if (passes(s, filter)) push(s, 0); continue; }
-      if (t.key !== lastTurn && !isOpen(t.key, false)) { rows.push({type: 'turn', key: t.key, n: t.n, run: r.id, ...foldOf(t)}); continue; }
+      if (t.key !== lastTurn && !isOpen(t.key, false)) {
+        const filesKey = 'files:' + t.key;
+        rows.push({type: 'turn', key: t.key, n: t.n, run: r.id, ...foldOf(t), filesKey, filesOpen: isOpen(filesKey, false)}, ...edited(filesKey, t.steps));
+        continue;
+      }
       if (t.key !== lastTurn) rows.push({type: 'turn', key: t.key, n: t.n, run: r.id, open: true, ...foldOf(t)});
       let summary = null;
       for (const s of t.steps) {
@@ -249,7 +257,11 @@ export function lay(m, {density = 'standard', filter = 'all', open = new Map(), 
         if (!summary) rows.push(summary = {type: 'summary', key: 'sum:' + t.key, steps: []});
         summary.steps.push(s);
       }
-      if (summary) Object.assign(summary, summaryOf(summary.steps));
+      if (summary) {
+        const filesKey = 'files:' + summary.key, steps = summary.steps;
+        Object.assign(summary, summaryOf(steps), {filesKey, filesOpen: isOpen(filesKey, false)});
+        rows.splice(rows.indexOf(summary) + 1, 0, ...edited(filesKey, steps));
+      }
     }
     for (const s of r.temps) {
       if (passes(s, filter) && (shownAt(s, density) || autoOpen(s))) {

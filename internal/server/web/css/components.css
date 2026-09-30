@@ -432,7 +432,9 @@ button.tl-seg:hover { filter: brightness(1.15); }
 .out-newline { padding: 2px 12px; color: var(--accent); animation: out-fade 10s ease-in 1 forwards; }
 .out-newline::before, .out-newline::after { border-color: var(--accent); }
 @keyframes out-fade { 0%, 80% { opacity: 1; } 100% { opacity: 0; } }
-.out-turn .out-line { color: var(--muted); }
+.out-turn { display: flex; align-items: center; gap: 8px; }
+.out-turn .out-line { flex: 1; color: var(--muted); }
+.out-files { flex: none; min-height: 24px; font-size: 12px; white-space: nowrap; }
 .out-turn-sum { flex: none; white-space: nowrap; }
 .out-turn-last { flex: 1; color: var(--text); }
 .out-temp { color: var(--muted); font-style: italic; }

@@ -472,6 +472,43 @@ test('an edit step opens on the first hunk the node wrote and fetches the rest o
   ok(!row().textContent.includes(words.f('out.moreHunks', 2)), 'nothing more to ask');
 });
 
+// two turns, the first changing two files: a folded turn lists its edits in place
+const edited = (off, path) => [{id: `a9:1:${off}:0`, off, kind: 'tool', tool: 'Edit', call: 'c' + off, family: 'edit', title: `${path} +1 −0`, input: {file_path: path}, turn: 1},
+  {id: `a9:1:${off + 1}:0`, off: off + 1, kind: 'tool_result', ref: 'c' + off, output: 'ok', lines: 1, turn: 1,
+    edits: [{path, op: 'modify', add: 1, del: 0, hunks: 1, preview: ['@@ -1 +1,2 @@', ' a', '+b']}]}];
+const twoTurns = [{id: 'a9:1:0:0', off: 0, kind: 'user', text: 'Split the exporter.', turn: 1}, ...edited(10, 'a.go'), ...edited(20, 'b.go'),
+  {id: 'a9:1:30:0', off: 30, kind: 'say', text: 'Split in two.', turn: 1}, {id: 'a9:1:40:0', off: 40, kind: 'user', text: 'Now the docs.', turn: 2},
+  {id: 'a9:1:50:0', off: 50, kind: 'say', text: 'On it.', turn: 2}];
+
+test('a folded turn\'s changed files open in place, under it, and the rest of the turn stays folded', () => {
+  const m = out.model([{run: state.r1, events: twoTurns, head: {start: true}}]);
+  const turn = out.lay(m).find(r => r.type === 'turn');
+  eq([turn.files, turn.filesKey, turn.filesOpen], [2, 'files:' + turn.key, false], 'the fold says how many files, closed');
+  const opened = out.lay(m, {open: new Map([[turn.filesKey, true]])});
+  eq(opened.slice(1, 5).map(r => [r.type === 'step' ? r.step.kind : r.type, r.key, r.depth || 0]),
+    [['turn', turn.key, 0], ['edit', 'a9:1:10:0', 1], ['edit', 'a9:1:20:0', 1], ['you', 'a9:1:40:0', 0]], 'its edit rows under it, then the next turn');
+  eq([opened[1].filesOpen, opened[1].open], [true, undefined], 'the turn itself stays folded');
+
+  const brief = out.lay(m, {density: 'brief', open: new Map([[turn.key, true]])});
+  const sum = brief.find(r => r.type === 'summary');
+  eq([sum.files, sum.filesKey], [2, 'files:' + sum.key], 'a brief turn\'s summary names its files too');
+  const listed = out.lay(m, {density: 'brief', open: new Map([[turn.key, true], [sum.filesKey, true]])});
+  const at = listed.findIndex(r => r.type === 'summary');
+  eq(listed.slice(at + 1, at + 3).map(r => [r.step.kind, r.depth]), [['edit', 1], ['edit', 1]], 'and lists them under it');
+});
+
+test('the changed files of a folded turn open and close by their own button', async () => {
+  const root = await mount(html`<div />`);
+  await act(() => render(html`<${Output} parts=${[{run: {...state.r1, sends: []}, events: twoTurns, head: {start: true}}]} timers=${clock()} />`, root));
+  const files = () => root.one('.out-turn').one('.out-files');
+  eq([files().textContent, files().getAttribute('aria-expanded'), root.find('[data-key=a9:1:10:0]').length], [words.f('out.files', 2), 'false', 0], 'closed');
+  await click(files());
+  eq([files().getAttribute('aria-expanded'), root.find('[data-key=a9:1:10:0]').length, root.find('[data-key=a9:1:20:0]').length,
+    root.one('.out-turn').one('.out-line').getAttribute('aria-expanded')], ['true', 1, 1, 'false'], 'its edit rows, the turn still folded');
+  await click(files());
+  eq(root.find('[data-key=a9:1:10:0]').length, 0, 'closed again');
+});
+
 test('the task page\'s conversation: watched, paged back into the run before, written to, then carried on', async () => {
   const r = await outputs();
   const a = app(r, {url: '/?page=tasks&task=t1'});
