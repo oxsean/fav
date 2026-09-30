@@ -87,11 +87,29 @@ type Delivery struct {
 	At       time.Time
 }
 
+// MaxDevices is how many push devices one person keeps.
+const MaxDevices = 10
+
+// ErrTooMany: the person already keeps MaxDevices devices.
+var ErrTooMany = errors.New("too many devices")
+
 // KeepDevice registers d, or renews the device already registered under hash (a browser's endpoint): it moves to
-// d.User with d's target and name, renewed at now. What was still to go to someone else on it is canceled.
+// d.User with d's target and name, renewed at now. What was still to go to someone else on it is canceled. A browser
+// new to someone keeping MaxDevices already is ErrTooMany.
 func (t *Team) KeepDevice(d PushDevice, hash string, now time.Time) (PushDevice, error) {
 	var id string
 	err := inTx(t.w, func(tx *sql.Tx) error {
+		var others int
+		if err := tx.QueryRow(`SELECT COUNT(*) FROM push_devices WHERE user_id = ? AND target_hash != ?`, d.User, hash).Scan(&others); err != nil {
+			return err
+		}
+		var mine int
+		if err := tx.QueryRow(`SELECT COUNT(*) FROM push_devices WHERE user_id = ? AND target_hash = ?`, d.User, hash).Scan(&mine); err != nil {
+			return err
+		}
+		if mine == 0 && others >= MaxDevices {
+			return ErrTooMany
+		}
 		_, err := tx.Exec(`INSERT INTO push_devices (id, user_id, kind, target, target_hash, name, created_at, renewed_at, credential_id)
 			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 			ON CONFLICT (target_hash) DO UPDATE SET user_id = excluded.user_id, kind = excluded.kind, target = excluded.target,

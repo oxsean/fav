@@ -211,7 +211,7 @@ func newOutbox(t *testing.T) *outbox {
 func (o *outbox) notifier() *Notifier {
 	n := NewNotifier()
 	n.now, n.client = o.clock.now, o.svc.srv.Client()
-	n.attach(NotifyOptions{Team: o.team, Coord: o.coord, Seal: o.seal, Push: o.push, Act: o.act, Base: "https://tend.example/"})
+	n.attach(NotifyOptions{Team: o.team, Coord: o.coord, Seal: o.seal, Push: o.push, Act: o.act, Base: "https://tend.example/", Services: []string{"127.0.0.1"}})
 	return n
 }
 
@@ -322,7 +322,7 @@ func TestAnUndeliveredOutboxGoesOutAfterARestart(t *testing.T) {
 	early.now, early.client = o.clock.now, o.svc.srv.Client()
 	early.Send(needs(813, permission))
 	o.n = early
-	early.attach(NotifyOptions{Team: o.team, Coord: o.coord, Seal: o.seal, Push: o.push})
+	early.attach(NotifyOptions{Team: o.team, Coord: o.coord, Seal: o.seal, Push: o.push, Services: []string{"127.0.0.1"}})
 	o.drain()
 	if got := o.svc.taken(); len(got) != 2 || (got[0].hook == nil) == (got[1].hook == nil) {
 		t.Fatalf("a notice from before the outbox was there, to the webhook and the phone: %+v", got)
@@ -683,5 +683,20 @@ func TestADevicesSettingsShapeItsPushes(t *testing.T) {
 	}
 	if _, ok := paths["/push/plain"]; ok || plain.ID == "" {
 		t.Fatal("a device that does not take it")
+	}
+}
+
+// A device kept before the server narrowed its push services is not pushed to.
+func TestADeviceAtAnUnknownPushServiceIsNotPushedTo(t *testing.T) {
+	o := newOutbox(t)
+	d := o.device(store.LocalUser, "/push/phone")
+	if _, err := o.team.SetDevicePrefs(store.LocalUser, d.ID, store.DevicePrefs{Events: []string{store.EventDone}}); err != nil {
+		t.Fatal(err)
+	}
+	o.n.o.Services = nil
+	o.n.Send(coord.Notice{Seq: 3, Event: coord.NotifyTaskDone, Task: "t_1", Title: "x", To: []string{store.LocalUser}, At: n0})
+	o.drain()
+	if got := o.svc.taken(); len(got) != 0 {
+		t.Fatalf("pushed: %+v", got)
 	}
 }

@@ -176,7 +176,7 @@ func cmdServe(args []string) error {
 	if err != nil {
 		return err
 	}
-	notifier.Start(ctx, server.NotifyOptions{Team: team, Coord: c, Seal: seal, Push: push, Act: act, Base: sc.PublicURL, Dir: dir, Egress: egress})
+	notifier.Start(ctx, server.NotifyOptions{Team: team, Coord: c, Seal: seal, Push: push, Act: act, Base: sc.PublicURL, Dir: dir, Egress: egress, Services: sc.PushServices})
 	syncer := server.NewSyncer(team, c, seal, notifier.Send)
 	syncer.UseClient(egress.Client(server.TrackerTimeout))
 	go syncer.Run(ctx)

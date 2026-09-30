@@ -50,6 +50,8 @@ register('pages', {
   'api.last': ['这是你唯一的登录方式，不能解除', 'It is your only way to sign in, so it stays'],
   'api.bad_request': ['填的内容不对', 'Something filled in is not right'], 'api.project': ['没有这个项目', 'No such project'],
   'api.push_key': ['这台 server 没有推送密钥，推送用不了', 'This server has no push key, so pushes cannot be used'],
+  'api.too_many_devices': ['你已经有 10 台收推送的设备了，先去掉一台', 'You already get pushes on 10 devices: remove one first'],
+  'api.push_service': ['这个浏览器的推送服务不在 server 允许的范围里', 'This browser\'s push service is not one the server allows'],
   'api.offline': ['连不上服务器', 'The server cannot be reached'], 'api.internal': ['服务器出错了', 'The server failed'],
   'api.tracker_auth': ['token 被拒，或者权限不够', 'The token was refused or lacks access'], 'api.tracker_repo': ['找不到这个仓库', 'That repository was not found'],
   'api.tracker_unreachable': ['连不上工单系统', 'The tracker cannot be reached'], 'api.no_sync': ['这台 server 没有开工单同步', 'This server does not sync trackers'],

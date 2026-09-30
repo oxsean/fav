@@ -335,3 +335,27 @@ func TestADevicesSettingsAreItsOwnersAndOutliveItsRenewals(t *testing.T) {
 		t.Fatal("still there")
 	}
 }
+
+// A person keeps at most MaxDevices devices: another browser beyond them is refused, renewing one of them is not, and a
+// browser moving to someone at the bound is refused without leaving its owner.
+func TestSomeoneKeepsAtMostTenDevices(t *testing.T) {
+	tm := openTeam(t)
+	for i := range MaxDevices {
+		if _, err := tm.KeepDevice(PushDevice{User: "u_a", Kind: KindWebPush, Target: []byte("s")}, "h"+strconv.Itoa(i), t0); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := tm.KeepDevice(PushDevice{User: "u_a", Kind: KindWebPush, Target: []byte("s")}, "h-more", t0); err != ErrTooMany {
+		t.Fatalf("one more: %v", err)
+	}
+	if _, err := tm.KeepDevice(PushDevice{User: "u_a", Kind: KindWebPush, Target: []byte("s2")}, "h3", t0.Add(time.Hour)); err != nil {
+		t.Fatalf("renewing one: %v", err)
+	}
+	b, _ := tm.KeepDevice(PushDevice{User: "u_b", Kind: KindWebPush, Target: []byte("s")}, "h-b", t0)
+	if _, err := tm.KeepDevice(PushDevice{User: "u_a", Kind: KindWebPush, Target: []byte("s")}, "h-b", t0); err != ErrTooMany {
+		t.Fatalf("taking over another's browser: %v", err)
+	}
+	if d, ok, _ := tm.Device(b.ID); !ok || d.User != "u_b" {
+		t.Fatalf("the browser stays its owner's: %+v", d)
+	}
+}

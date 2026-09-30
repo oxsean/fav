@@ -53,6 +53,9 @@ type ServerConfig struct {
 	// EgressAllow are the address prefixes (CIDR) beyond the public ones that webhooks, push services and trackers may
 	// be at: a team's own ntfy or Gitea on the LAN.
 	EgressAllow []string `json:"egress_allow,omitempty"`
+	// PushServices are the hosts browsers' push subscriptions may be at, each with its subdomains; nil: the browser
+	// makers' own.
+	PushServices []string `json:"push_services,omitempty"`
 }
 
 // Login is one way to sign in: a GitHub OAuth App, or any OpenID Connect provider (GitLab, Gitea, Keycloak…).

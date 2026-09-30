@@ -10,6 +10,8 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
+	"strings"
 	"time"
 
 	"github.com/oxsean/fav/internal/store"
@@ -58,6 +60,27 @@ func LoadPushKey(team *store.Team, seal *Sealer) (*PushKey, error) {
 // Public is the public key as an uncompressed point, what a browser's applicationServerKey takes.
 func (k *PushKey) Public() []byte { return k.pub }
 
+// ⚠️ The push services of Chrome and Edge (FCM), Safari, Firefox and Windows: every browser subscribes at one of them.
+var browserPushServices = []string{"fcm.googleapis.com", "push.apple.com", "push.services.mozilla.com", "notify.windows.com"}
+
+// knownService: endpoint is at one of services (nil: browserPushServices) or a subdomain of one.
+func knownService(services []string, endpoint string) bool {
+	u, err := url.Parse(endpoint)
+	if err != nil {
+		return false
+	}
+	host := strings.ToLower(u.Hostname())
+	if services == nil {
+		services = browserPushServices
+	}
+	for _, s := range services {
+		if s = strings.ToLower(s); host == s || strings.HasSuffix(host, "."+s) {
+			return true
+		}
+	}
+	return false
+}
+
 // pushKey answers the public key for a page subscribing to push, base64url without padding.
 func (s *Server) pushKey(w http.ResponseWriter, r *http.Request, c caller) {
 	if s.opt.Push == nil {
@@ -92,7 +115,15 @@ func (s *Server) pushDevice(w http.ResponseWriter, r *http.Request, c caller) {
 		apiError(w, http.StatusBadRequest, "bad_request")
 		return
 	}
+	if !knownService(s.opt.Config.PushServices, in.Subscription.Endpoint) {
+		apiError(w, http.StatusBadRequest, "push_service")
+		return
+	}
 	d, err := keepDevice(s.opt.Dir.team, s.opt.Seal, c.user.ID, c.cred.ID, in.Name, in.Subscription, time.Now())
+	if errors.Is(err, store.ErrTooMany) {
+		apiError(w, http.StatusConflict, "too_many_devices")
+		return
+	}
 	if err != nil {
 		apiError(w, http.StatusInternalServerError, "internal")
 		return

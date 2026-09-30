@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -127,6 +128,43 @@ func TestAPageRegistersItsBrowserForPushAndForgetsIt(t *testing.T) {
 	}
 	if ds, _ := r.team.Devices(store.LocalUser); len(ds) != 0 {
 		t.Fatalf("still there: %+v", ds)
+	}
+}
+
+// A person registers at most ten browsers (409 too_many_devices), each at a known push service unless the server
+// names others (400 push_service).
+func TestAPageRegistersOnlySoManyBrowsersAtKnownServices(t *testing.T) {
+	r := newRig(t)
+	c := browser(t)
+	login(t, c, r.url, r.client)
+	sub := func(endpoint string) map[string]any {
+		ua, _ := ecdh.P256().GenerateKey(rand.Reader)
+		return map[string]any{"endpoint": endpoint, "keys": map[string]string{
+			"p256dh": base64.RawURLEncoding.EncodeToString(ua.PublicKey().Bytes()), "auth": base64.RawURLEncoding.EncodeToString(make([]byte, 16))}}
+	}
+	for i := range store.MaxDevices {
+		if got := r.api(c, "PUT", "/api/push/device", map[string]any{"subscription": sub("https://push.example/" + strconv.Itoa(i))}, nil); got != http.StatusOK {
+			t.Fatal(i, got)
+		}
+	}
+	var out map[string]string
+	if got := r.api(c, "PUT", "/api/push/device", map[string]any{"subscription": sub("https://push.example/more")}, &out); got != http.StatusConflict || out["error"] != "too_many_devices" {
+		t.Fatalf("the eleventh: %d %v", got, out)
+	}
+	r.srv.opt.Config.PushServices = nil
+	for endpoint, ok := range map[string]bool{
+		"https://fcm.googleapis.com/fcm/send/x": true, "https://web.push.apple.com/Q": true, "https://updates.push.services.mozilla.com/wpush/v2/x": true,
+		"https://wns2-bl2p.notify.windows.com/w/?token=x": true, "https://push.example/x": false, "https://evilfcm.googleapis.com.example/x": false,
+		"https://notfcm.googleapis.com/x": false,
+	} {
+		ds, _ := r.team.Devices(store.LocalUser)
+		for _, d := range ds {
+			r.team.RemoveDevice(d.ID, "test")
+		}
+		got := r.api(c, "PUT", "/api/push/device", map[string]any{"subscription": sub(endpoint)}, &out)
+		if ok && got != http.StatusOK || !ok && (got != http.StatusBadRequest || out["error"] != "push_service") {
+			t.Errorf("%s: %d %v", endpoint, got, out)
+		}
 	}
 }
 

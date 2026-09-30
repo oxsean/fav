@@ -67,6 +67,8 @@ type NotifyOptions struct {
 	Base   string
 	Dir    *Directory // a device pushes only while its credential is live here
 	Egress *Egress    // nil: public addresses only
+	// Services are the push services a device may be at (server.push_services; nil: the browser makers').
+	Services []string
 }
 
 // Notifier delivers the coordinator's notices through the outbox (the deliveries table): each recipient's webhook at
@@ -568,6 +570,9 @@ func (n *Notifier) webpush(ctx context.Context, user string, dev store.PushDevic
 	}
 	if err != nil {
 		return false, &sendError{status: http.StatusBadRequest}
+	}
+	if !knownService(n.o.Services, sub.Endpoint) {
+		return false, errEgress
 	}
 	m := n.message(user, dev, x, item)
 	b, _ := json.Marshal(m)

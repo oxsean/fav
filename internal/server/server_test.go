@@ -116,7 +116,7 @@ func newRig(t *testing.T, logins ...tend.Login) *rig {
 		t.Fatal(err)
 	}
 	loopback, _ := NewEgress([]string{"127.0.0.0/8", "::1/128"}, "127.0.0.1:0") // the test's webhooks and trackers
-	srv := New(Options{Home: r.home, Coord: r.c, Dir: dir, Config: tend.ServerConfig{Logins: logins}, Push: push, Seal: seal, Act: act, Egress: loopback})
+	srv := New(Options{Home: r.home, Coord: r.c, Dir: dir, Config: tend.ServerConfig{Logins: logins, PushServices: []string{"push.example"}}, Push: push, Seal: seal, Act: act, Egress: loopback})
 	srv.sweep()
 	r.srv = srv
 	hs := httptest.NewServer(srv.Handler())
