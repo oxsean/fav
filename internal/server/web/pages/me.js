@@ -1,7 +1,7 @@
 // me is the viewer's own page: who they are, how the page looks in this browser, how they hear that something needs
 // them (browser notices while the page is open, a personal webhook), the sign-in accounts linked to them, their
-// personal tokens and their browser sessions. On a phone it keeps only the account, the way into the team page (which
-// only shows there) and signing out.
+// personal tokens and their browser sessions. On a phone it keeps only the account, the ways into the team and agent
+// pages (which only show there) and signing out.
 import {useState, useEffect} from '../vendor/hooks.mjs';
 import {html, cx, usePhone, useWords, useSignalValue} from '../ui/base.js';
 import {Panel} from '../ui/panel.js';
@@ -55,6 +55,7 @@ register('me', {
   'me.endOthersTitle': ['退出其他 %d 个会话？', 'Sign out the %d other sessions?'], 'me.endOthersNote': ['只留下这个浏览器。', 'Only this browser stays signed in.'],
   'me.endedN': ['已退出 %d 个会话', '%d sessions signed out'],
   'me.team': ['团队', 'Team'], 'me.teamNote': ['成员和项目，在手机上只看', 'People and projects; a phone only shows them'],
+  'me.agents': ['Agent', 'Agents'], 'me.agentsNote': ['定义和能跑的机器，在手机上只看', 'Definitions and where they run; a phone only shows them'],
 });
 
 // ⚠️ Where this tab remembers, across the sign-in's round trip, that it went to link an account (sessionStorage), and
@@ -260,6 +261,8 @@ export function Me({session, http, prefs, toasts, router, notices, tab, clock: n
           <span class="card-main"><span class="card-primary">${session?.name}</span><span class="card-secondary">${sub}</span></span></div></li>
         <li><button type="button" class="card-row" onClick=${() => router.go({page: 'team'})}>
           <span class="card-main"><span class="card-primary">${t('me.team')}</span><span class="card-secondary">${t('me.teamNote')}</span></span></button></li>
+        <li><button type="button" class="card-row" onClick=${() => router.go({page: 'agents'})}>
+          <span class="card-main"><span class="card-primary">${t('me.agents')}</span><span class="card-secondary">${t('me.agentsNote')}</span></span></button></li>
       </ul>
       <${Button} kind="danger" wide onClick=${onLogout}>${t('app.logout')}<//>
     </div>`;

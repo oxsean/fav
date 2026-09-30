@@ -5,7 +5,6 @@ import {signal} from '../vendor/signals-core.mjs';
 import {html, useWords, useSignalValue, useActions, usePhone, NamesContext} from '../ui/base.js';
 import {Shell} from '../ui/shell.js';
 import {Palette, Help} from '../ui/palette.js';
-import {Panel} from '../ui/panel.js';
 import {runnable} from '../core/actions.js';
 import * as sel from '../core/select.js';
 import {Home} from './home.js';
@@ -14,18 +13,14 @@ import {Runs} from './runs.js';
 import {Machines} from './machines.js';
 import {Team} from './team.js';
 import {Me} from './me.js';
+import {Agents} from './agents.js';
 import {useNotices} from './notify.js';
 import {createChanges} from '../core/changes.js';
+import {createAgentDefs} from '../core/agents.js';
 import './words.js';
 
 const goes = {home: {page: 'home'}, tasks: {page: 'tasks', view: 'list'}, board: {page: 'tasks', view: 'board'}, runs: {page: 'runs'},
   machines: {page: 'machines'}, agents: {page: 'agents'}, team: {page: 'team'}, me: {page: 'me'}};
-
-// Soon stands for a page the new interface does not have yet.
-function Soon({page}) {
-  const {t} = useWords();
-  return html`<${Panel} title=${t('nav.' + page)}><p class="empty">${t('app.soon')}</p><p class="empty t-muted">${t('app.soonNote')}</p><//>`;
-}
 
 // find is the palette's own hits for q: tasks by title or id, runs by id, machines by name.
 function finder(store, machines, go) {
@@ -45,10 +40,11 @@ function finder(store, machines, go) {
 // App: router, keys, nav and toasts are core's; prefs core/prefs.js's; session is who signed in; fetchOutput(run) the
 // last events of a run; http is core/http.js's (the pages read /api there); storage is the browser's (the task page
 // keeps its filter and draft there); onLogout signs out; changes reads what runs changed (core/changes.js; one over
-// wire when not given); names is a signal of user id → name; notices are the browser's ({Notification, secure}), doc
-// the document, tab the tab's storage (the me page's).
+// wire when not given); agentDefs reads the agents (core/agents.js; likewise); names is a signal of user id → name;
+// notices are the browser's ({Notification, secure}), doc the document, tab the tab's storage (the me page's); copy and
+// download are the clipboard's and a file save's (the tests pass their own).
 export function App({store, commands, toasts, wire, http, router, keys, nav, prefs, session, clock, fetchOutput, storage, onLogout, copy, changes: given, names = null,
-  notices = {}, doc = null, tab = null}) {
+  notices = {}, doc = null, tab = null, agentDefs: givenDefs, download}) {
   const {t, f} = useWords();
   const route = useSignalValue(router.route);
   const machines = useSignalValue(store.machines);
@@ -60,6 +56,7 @@ export function App({store, commands, toasts, wire, http, router, keys, nav, pre
   // intent is what the task page is asked to do once it is up: open a new task or its search.
   const intent = useMemo(() => signal(null), []);
   const changes = useMemo(() => given || createChanges({wire}), [wire, given]);
+  const agentDefs = useMemo(() => givenDefs || createAgentDefs({wire}), [wire, givenDefs]);
   const go = to => router.go(to);
   const phone = usePhone();
   useNotices({store, prefs, notices, doc, active: !phone, onOpen: task => go({page: 'tasks', task})});
@@ -102,7 +99,9 @@ export function App({store, commands, toasts, wire, http, router, keys, nav, pre
             : route.page === 'me'
               ? html`<${Me} session=${session} http=${http} prefs=${prefs} toasts=${toasts} router=${router} notices=${notices} tab=${tab} clock=${clock}
                 copy=${copy} onLogout=${onLogout} />`
-              : html`<${Soon} page=${route.page} />`;
+              : route.page === 'agents'
+                ? html`<${Agents} store=${store} commands=${commands} toasts=${toasts} session=${session} wire=${wire} agentDefs=${agentDefs} download=${download} />`
+                : null;
 
   return html`<${NamesContext.Provider} value=${names}><${Shell} keys=${keys} wire=${wire} nav=${nav} toasts=${toasts} page=${route.page} onNavigate=${onNavigate}
     counts=${counts} spent=${{tokens: day.tokens, usd: day.usd}} user=${session} userMenu=${userMenu}

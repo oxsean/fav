@@ -25,6 +25,10 @@ export const tasks = steps => played((r, s) => r.srv.play('tasks-state', s), ste
 // team is a rig that has played team-state, the machines and team pages' data as an admin sees it.
 export const team = steps => played((r, s) => r.srv.play('team-state', s), steps);
 
+// agents is a rig that has played agents-state, the agent page's data as Bo (a member) sees it: steps.mount draws the
+// page, which reads its lists then, and steps.read runs once they are in.
+export const agents = (steps = {}) => played((r, s) => r.srv.play('agents-state', {...s, mount: () => steps.mount?.(r), read: () => steps.read?.(r)}), steps);
+
 async function played(play, steps = {}) {
   const r = rig();
   await play(r, {start() { r.store.start(); }, live() { r.flush(); steps.live?.(r); }, journal() { r.flush(); steps.journal?.(r); }});

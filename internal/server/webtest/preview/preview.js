@@ -2,7 +2,8 @@
 // files by method, a fetch that answers the sign-in and device calls, and the clock of the home frames. ?frames=tasks
 // plays the task pages' frames instead of the home's, ?frames=output a conversation's and its changes (open
 // ?page=tasks&task=t1), ?frames=carry that conversation carried on into a third run, ?frames=gone with its question
-// answered by someone else first, ?frames=team the machines and team pages' data (?as=admin signs in as its admin).
+// answered by someone else first, ?frames=team the machines and team pages' data (?as=admin signs in as its admin),
+// ?frames=agents the agent page's (open ?page=agents).
 // /api/* answers come from webtest/api.json by method and path; a write it has no answer for succeeds empty.
 import {boot} from '../../web/pages/boot.js';
 
@@ -19,7 +20,8 @@ const sets = {home: ['home-state', 'output-page', 'home-commands', 'changes-gone
   output: ['output-state', 'output-conv', 'output-send', 'output-answer', 'changes-list'],
   carry: ['output-state', 'output-conv', 'output-send', 'output-carry', 'changes-list'],
   gone: ['output-state', 'output-conv', 'output-answer-gone', 'changes-list'],
-  team: ['team-state', 'team-share', 'team-project', 'team-settings']};
+  team: ['team-state', 'team-share', 'team-project', 'team-settings'],
+  agents: ['agents-state', 'agents-edit', 'agents-share']};
 // joins are the files whose pushes on a stream an earlier file opened go on that stream, after what it pushed there.
 const joins = new Set(['output-send', 'output-carry']);
 const keyOf = (f, run = true) => [f.method, run && f.params?.run, f.params?.after, f.params?.path].filter(Boolean).join(' ');

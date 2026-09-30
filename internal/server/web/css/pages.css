@@ -272,6 +272,33 @@
 .mach-phone .card-secondary.t-failed { color: var(--failed); }
 .mach-phone .card-secondary.t-warning { color: var(--warning); }
 
+/* Agents */
+.ag { display: grid; gap: 12px; align-content: start; min-width: 0; }
+.ag-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 12px; font-size: 12px; }
+.ag-head-acts { margin-left: auto; display: flex; gap: 8px; }
+.ag-head .chips { flex-basis: 100%; }
+.ag-body { display: grid; grid-template-columns: minmax(0, 1fr) 380px; gap: 16px; align-items: start; }
+.ag-main { display: grid; gap: 8px; min-width: 0; }
+.ag-name { display: grid; min-width: 0; line-height: 1.3; }
+.ag-foot { margin: 0; font-size: 11px; }
+.ag-aside { position: sticky; top: 0; display: grid; gap: 12px; padding: 12px var(--pad); align-content: start; max-height: calc(100vh - 120px); overflow-y: auto; }
+.ag-aside-head { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 14px; }
+.ag-aside-head .chip { font-size: 11px; }
+.ag-meta { margin-top: -8px; font-size: 11px; }
+.ag-p { margin: 0; font-size: 12px; }
+.ag-facts { display: grid; gap: 14px; min-width: 0; }
+.ag-list, .ag-on, .ag-checks { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; font-size: 12px; }
+.ag-on li { display: grid; grid-template-columns: auto auto 1fr; align-items: center; gap: 6px; }
+.ag-checks li { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 6px; }
+.ag-body-tabs { display: grid; gap: 8px; min-width: 0; }
+.ag-pane { display: grid; gap: 8px; min-width: 0; }
+.ag-text { max-height: 360px; }
+.ag-file-row { display: flex; }
+.ag-file { display: none; }
+.ag-phone { gap: 10px; }
+.ag-phone-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; font-size: 12px; }
+@media (max-width: 1100px) { .ag-body { grid-template-columns: minmax(0, 1fr); } .ag-aside { position: static; max-height: none; } }
+
 /* Team */
 .team { display: grid; gap: 12px; align-content: start; min-width: 0; }
 .team-body { display: grid; grid-template-columns: minmax(0, 1fr) 400px; gap: 16px; align-items: start; }

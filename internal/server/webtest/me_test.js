@@ -1,8 +1,8 @@
 // me_test draws the me page in both forms and both languages from the /api answers in api.json, and drives it in a
 // fake document: returning from linking a sign-in account, the look chosen and kept, browser notices turned on and
 // shown only for what is new while the page is hidden, the webhook saved, a token made and shown once, a token
-// revoked and a session ended after asking, every other session ended, and a phone showing the account, the team's
-// way in and signing out.
+// revoked and a session ended after asking, every other session ended, and a phone showing the account, the ways
+// into the team and agent pages and signing out.
 process.env.TZ = 'UTC';
 import {readFileSync} from 'node:fs';
 import {render} from '../web/vendor/preact.mjs';
@@ -145,7 +145,8 @@ test('the page draws in both forms and both languages, styled and worded', async
     eq(a.el.textContent.match(/\bme\.[a-zA-Z.]+\b/g), null, `${f}/${lang}: words not found`);
     const text = a.el.textContent;
     if (f === 'phone') {
-      ok(text.includes('Bo Lin') && text.includes(words.t('me.team')) && text.includes(words.t('app.logout')), `${lang}: the account, the team and signing out`);
+      ok(text.includes('Bo Lin') && text.includes(words.t('me.team')) && text.includes(words.t('me.agentsNote')) && text.includes(words.t('app.logout')),
+        `${lang}: the account, the team, the agents and signing out`);
       ok(!text.includes(words.t('me.tokens')) && !text.includes(words.t('me.look')), `${lang}: nothing managed on a computer`);
       eq(a.http.calls, [], `${lang}: a phone reads nothing of its own`);
     } else {
@@ -302,10 +303,13 @@ test('linking an account goes to the server and remembers it in this tab', async
   await a.done();
 });
 
-test('a phone: the account, the team page and signing out', async () => {
+test('a phone: the account, the team and agent pages and signing out', async () => {
   const a = await app({f: 'phone'});
   await click(a.el.find('.card-row').find(b => b.textContent.includes(words.t('me.team'))));
   eq(a.router.route.value.page, 'team', 'the team page');
+  await act(() => a.router.go({page: 'me'}));
+  await click(a.el.find('.card-row').find(b => b.textContent.includes(words.t('me.agentsNote'))));
+  eq(a.router.route.value.page, 'agents', 'the agent page');
   await act(() => a.router.go({page: 'me'}));
   await click(buttonOf(a.el, words.t('app.logout')));
   eq(a.logouts, 1, 'signed out');
