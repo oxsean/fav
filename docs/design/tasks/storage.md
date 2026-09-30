@@ -38,7 +38,7 @@
 | 团队实体 | `users`（含内置 `local`）、`identities`（`(provider, issuer, subject)` 唯一）、`admits`、`invites`、`credentials`（`web / token / node`，只存 sha256，节点名在未吊销的凭据里唯一）、`audit`：迁移 `0002_team.sql` |
 | 团队实体 | `deliveries`（通知投递，0003，0009 起是发件箱）；`trackers`、`tracker_issues`、`tracker_deliveries`（工单绑定、每个 issue 的回写状态、webhook 去重，0004） |
 | 加列 | `tracker_issues.parent`、`pr`（子 issue 和 PR 链接，0005）；`invites.project`、`access`（邀请带项目，0006）；`tracker_issues.synced`（任务级同步状态，0007）；`tracker_issues.applied`（tend 自己做的关单或标签，任务重开时撤回，0010） |
-| server 自己的密钥 | `secrets`（`name` 主键、`value`、`at`，0008）：值是 `seal.go` 封存过的，密钥是 `server.key` 或 `TEND_SERVER_KEY`，不在库里；先写的赢（`KeepSecret`）。现在只有 Web Push 的密钥对 `vapid` |
+| server 自己的密钥 | `secrets`（`name` 主键、`value`、`at`，0008）：值是 `seal.go` 封存过的，密钥是 `server.key` 或 `TEND_SERVER_KEY`，不在库里；先写的赢（`KeepSecret`）。有 Web Push 的密钥对 `vapid` 和推送按钮令牌的签名密钥 `act` |
 | 推送设备与发件箱 | `push_devices`（0009）：`id`、`user_id`、`kind`（现在只有 `webpush`）、`target`（`seal.go` 封存的 endpoint + `p256dh` + `auth`）、`target_hash`（endpoint 的 sha256，唯一，续期时凭它认出同一个浏览器）、`name`、`created_at`、`renewed_at`、`last_ok_at`、`failures`。`deliveries` 在 0009 重建成发件箱（SQLite 改不了主键，拷表）：`id`（rowid）、`seq, user_id, event, device_id`（空是个人 webhook）、`status`（`pending` / `ok` / `gone` / `failed` / `canceled`）、`attempts`、`next_at`、`notice`（通知的 JSON，不含收件人）、`result`（最后一次的 HTTP 码或错误）、`at`；`(seq, user_id, event, device_id)` 在 `seq > 0` 时唯一（server 自己的通知 seq 是 0，每次都投）；0009 之前的行照拷，2xx 记 `ok`，其余记 `failed`，都不再投。App 设备要的 `credential_id` 和每台设备的设置 `prefs` 等用到它们的功能再加列 |
 | 团队实体（未实现） | `comments, inbox_reads`；agent 定义、项目、成员和分享是事件，不另建表 |
 

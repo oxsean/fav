@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -35,10 +36,20 @@ type waits struct {
 	items  map[string]coord.InboxItem // user + " " + task
 	hidden map[string]bool            // user + " " + task they may no longer see
 	asks   map[string]agent.Request   // run + "/" + request
+	denies map[string]bool            // user + " " + item they may deny from a notice
 }
 
 func newWaits() *waits {
-	return &waits{items: map[string]coord.InboxItem{}, hidden: map[string]bool{}, asks: map[string]agent.Request{}}
+	return &waits{items: map[string]coord.InboxItem{}, hidden: map[string]bool{}, asks: map[string]agent.Request{}, denies: map[string]bool{}}
+}
+
+func (f *waits) NoticeActs(user, id string, item task.Pending) []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.denies[user+" "+item.ID] {
+		return []string{coord.ActDeny}
+	}
+	return nil
 }
 
 func (f *waits) ID() string { return "c_test" }
@@ -166,6 +177,7 @@ type outbox struct {
 	team  *store.Team
 	seal  *Sealer
 	push  *PushKey
+	act   *ActKey
 	coord *waits
 	clock *clock
 	svc   *services
@@ -181,6 +193,9 @@ func newOutbox(t *testing.T) *outbox {
 	if o.push, err = LoadPushKey(o.team, o.seal); err != nil {
 		t.Fatal(err)
 	}
+	if o.act, err = LoadActKey(o.team, o.seal); err != nil {
+		t.Fatal(err)
+	}
 	o.n = o.notifier()
 	return o
 }
@@ -189,7 +204,7 @@ func newOutbox(t *testing.T) *outbox {
 func (o *outbox) notifier() *Notifier {
 	n := NewNotifier()
 	n.now, n.client = o.clock.now, o.svc.srv.Client()
-	n.attach(NotifyOptions{Team: o.team, Coord: o.coord, Seal: o.seal, Push: o.push, Base: "https://tend.example/"})
+	n.attach(NotifyOptions{Team: o.team, Coord: o.coord, Seal: o.seal, Push: o.push, Act: o.act, Base: "https://tend.example/"})
 	return n
 }
 
@@ -273,7 +288,7 @@ func TestAnUndeliveredOutboxGoesOutAfterARestart(t *testing.T) {
 	m, h := got[0].msg, got[0].headers
 	want := PushMessage{V: 1, Server: "c_test", Seq: 812, Event: coord.NotifyTaskWaiting, Task: "t_1", Item: "r_1/q1", Kind: task.PendPermission,
 		Title: "drop the old table", What: "psql -c 'DROP TABLE orders_old'", Project: "infra", N: 1, Link: "#task-t_1/r-r_1", At: n0}
-	if m != want {
+	if !reflect.DeepEqual(m, want) {
 		t.Fatalf("the message\n got %+v\nwant %+v", m, want)
 	}
 	if h.Get("Content-Encoding") != "aes128gcm" || h.Get("TTL") != "86400" || h.Get("Urgency") != "high" || h.Get("Topic") != "t_1" ||
@@ -471,5 +486,38 @@ func TestNoticesStopForSomeoneGone(t *testing.T) {
 	o.drain()
 	if got := o.svc.taken(); len(got) != 0 {
 		t.Fatalf("about a task out of sight: %+v", got)
+	}
+}
+
+// A push about a permission its recipient may deny carries a button for it, whose token names them, the item at its
+// version and the device; anything else carries none.
+func TestAPushCarriesADenyOnlyForWhoMayDeny(t *testing.T) {
+	o := newOutbox(t)
+	dev := o.device(store.LocalUser, "/push/phone")
+	o.coord.wait(store.LocalUser, "t_1", permission, question)
+	o.n.Send(needs(5, question))
+	o.clock.set(n0.Add(time.Minute))
+	o.drain()
+	o.coord.wait(store.LocalUser, "t_1", permission)
+	o.n.Send(needs(6, permission))
+	o.clock.set(n0.Add(2 * time.Minute))
+	o.drain()
+	o.coord.denies[store.LocalUser+" "+permission.ID] = true
+	o.n.Send(needs(7, permission))
+	o.clock.set(n0.Add(3 * time.Minute))
+	o.drain()
+	got := o.svc.taken()
+	if len(got) != 3 || len(got[0].msg.Actions) != 0 || len(got[1].msg.Actions) != 0 {
+		t.Fatalf("a question, a permission they may not deny: %+v", got)
+	}
+	acts := got[2].msg.Actions
+	if len(acts) != 1 || acts[0].Action != "reject" {
+		t.Fatalf("%+v", acts)
+	}
+	c, err := o.act.open(acts[0].Token, o.clock.now())
+	want := actClaim{User: store.LocalUser, Task: "t_1", Item: permission.ID, Version: permission.Version, Action: coord.ActDeny, Seq: 7, Device: dev.ID,
+		Until: n0.Add(3*time.Minute + actLife).Unix()}
+	if err != nil || c != want {
+		t.Fatalf("the token\n got %+v %v\nwant %+v", c, err, want)
 	}
 }

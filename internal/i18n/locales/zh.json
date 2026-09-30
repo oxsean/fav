@@ -1067,6 +1067,7 @@
   "cli.server.flag_tls_cert": "TLS 证书文件",
   "cli.server.flag_tls_key": "TLS 私钥文件",
   "cli.server.no_push": "tend-server：没有 Web Push：%s（库里的密钥原样保留）\n",
+  "cli.server.no_act": "tend-server：推送上没有能直接执行的按钮：%s（库里的密钥原样保留）\n",
   "cli.server.started": "server %s 在 %s 监听；Ctrl+C 结束\n",
   "cli.server.token_added": "%s %s 的 token 在上面，只显示这一次\n",
   "cli.server.token_exists": "已有名为 %s 的 token，先删掉它",

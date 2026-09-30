@@ -76,6 +76,7 @@ type Options struct {
 	Syncer  *Syncer  // nil: no tracker sync
 	Push    *PushKey // nil: no Web Push
 	Seal    *Sealer  // opens and seals what the database keeps sealed (push devices)
+	Act     *ActKey  // nil: pushes carry no buttons that act
 }
 
 // Server serves the coordinator over HTTP.
@@ -88,11 +89,12 @@ type Server struct {
 	devices map[string]*deviceAuth
 	limit   *limiter
 	syncer  *Syncer
+	acts    actor
 }
 
 func New(opt Options) *Server {
 	s := &Server{opt: opt, logins: map[string]*auth.Provider{}, conns: map[*wire.Conn]held{}, flows: map[string]flow{},
-		devices: map[string]*deviceAuth{}, limit: newLimiter(), syncer: opt.Syncer}
+		devices: map[string]*deviceAuth{}, limit: newLimiter(), syncer: opt.Syncer, acts: opt.Coord}
 	for _, l := range opt.Config.Logins {
 		p, err := auth.New(l)
 		if err != nil {

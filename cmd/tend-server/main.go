@@ -153,12 +153,16 @@ func cmdServe(args []string) error {
 	if err != nil {
 		fmt.Fprint(os.Stderr, i18n.F("cli.server.no_push", err))
 	}
-	notifier.Start(ctx, server.NotifyOptions{Team: team, Coord: c, Seal: seal, Push: push, Base: sc.PublicURL})
+	act, err := server.LoadActKey(team, seal)
+	if err != nil {
+		fmt.Fprint(os.Stderr, i18n.F("cli.server.no_act", err))
+	}
+	notifier.Start(ctx, server.NotifyOptions{Team: team, Coord: c, Seal: seal, Push: push, Act: act, Base: sc.PublicURL})
 	syncer := server.NewSyncer(team, c, seal, notifier.Send)
 	go syncer.Run(ctx)
 	fmt.Fprint(os.Stderr, i18n.F("cli.server.started", c.ID(), *listen))
 	return server.New(server.Options{Home: home, Coord: c, Dir: dir, Config: sc, Listen: *listen, TLSCert: *cert, TLSKey: *key,
-		Syncer: syncer, Push: push, Seal: seal}).Serve(ctx)
+		Syncer: syncer, Push: push, Seal: seal, Act: act}).Serve(ctx)
 }
 
 func openTeam() (*store.Team, error) { return store.OpenTeam(dbPath(tend.Home())) }

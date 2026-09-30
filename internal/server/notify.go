@@ -50,16 +50,18 @@ type notifyCoord interface {
 	Waiting(user, task string) (coord.InboxItem, bool)
 	Sees(user, task string) bool
 	Request(run, id string) (agent.Request, bool)
+	NoticeActs(user, task string, item task.Pending) []string
 }
 
 // NotifyOptions: Team keeps the outbox and the devices, Seal opens the devices' targets, Push signs to push services
-// (nil: no Web Push), Base is the web page's address ("" leaves links out of webhooks) and names the server to push
-// services when it is https.
+// (nil: no Web Push), Act signs the tokens of a push's buttons (nil: none), Base is the web page's address ("" leaves
+// links out of webhooks) and names the server to push services when it is https.
 type NotifyOptions struct {
 	Team  *store.Team
 	Coord notifyCoord
 	Seal  *Sealer
 	Push  *PushKey
+	Act   *ActKey
 	Base  string
 }
 
@@ -288,7 +290,7 @@ func (n *Notifier) deliver(ctx context.Context, d store.Delivery, dev store.Push
 		}
 		err = errors.Join(herr, n.webhook(ctx, hook, x))
 	} else {
-		gone, err = n.webpush(ctx, dev, x, item)
+		gone, err = n.webpush(ctx, d.User, dev, x, item)
 	}
 	n.settle(d, dev, gone, err)
 }
@@ -431,23 +433,34 @@ func (n *Notifier) webhook(ctx context.Context, hook string, x noticeRow) error 
 // PushMessage is what a push to a browser carries (encrypted end to end): what waits on its recipient now about a
 // task, for the service worker to show.
 type PushMessage struct {
-	V       int       `json:"v"`
-	Server  string    `json:"server"`
-	Seq     int64     `json:"seq"`
-	Event   string    `json:"event"`
-	Task    string    `json:"task"`
-	Item    string    `json:"item"`
-	Kind    string    `json:"kind"`
-	Title   string    `json:"title"`
-	What    string    `json:"what,omitempty"` // what a permission would do: its command or file
-	Project string    `json:"project,omitempty"`
-	N       int       `json:"n"` // how many things of the task wait on them
-	Link    string    `json:"link"`
-	At      time.Time `json:"at"`
+	V       int          `json:"v"`
+	Server  string       `json:"server"`
+	Seq     int64        `json:"seq"`
+	Event   string       `json:"event"`
+	Task    string       `json:"task"`
+	Item    string       `json:"item"`
+	Kind    string       `json:"kind"`
+	Title   string       `json:"title"`
+	What    string       `json:"what,omitempty"` // what a permission would do: its command or file
+	Project string       `json:"project,omitempty"`
+	N       int          `json:"n"` // how many things of the task wait on them
+	Link    string       `json:"link"`
+	At      time.Time    `json:"at"`
+	Actions []PushAction `json:"actions,omitempty"` // the buttons that act, besides the one that opens the page
 }
 
-// message is what a push about x says now that item is how the task waits on its recipient.
-func (n *Notifier) message(x noticeRow, item coord.InboxItem) PushMessage {
+// PushAction is a button of a push: the service worker sends its token to /api/act.
+type PushAction struct {
+	Action string `json:"action"`
+	Token  string `json:"token"`
+}
+
+// ⚠️ The service worker's name for the button that denies a permission.
+const pushReject = "reject"
+
+// message is what a push about x says to user on device dev now that item is how the task waits on them: a
+// permission they may deny gets a button for it.
+func (n *Notifier) message(user, dev string, x noticeRow, item coord.InboxItem) PushMessage {
 	m := PushMessage{V: 1, Server: n.o.Coord.ID(), Seq: x.Seq, Event: x.Event, Task: x.Task, Title: clipRunes(item.Title, 200),
 		Project: item.Project, N: len(item.Pending), Link: "#task-" + x.Task, At: x.At}
 	for _, p := range x.Items {
@@ -464,6 +477,11 @@ func (n *Notifier) message(x noticeRow, item coord.InboxItem) PushMessage {
 			if r, ok := n.o.Coord.Request(p.Run, p.Request); ok {
 				m.What = clipRunes(cmp.Or(r.Summary, r.Tool), 300)
 			}
+		}
+		if n.o.Act != nil && slices.Contains(n.o.Coord.NoticeActs(user, x.Task, p), coord.ActDeny) {
+			tok := n.o.Act.mint(actClaim{User: user, Task: x.Task, Item: p.ID, Version: p.Version, Action: coord.ActDeny, Seq: x.Seq, Device: dev,
+				Until: n.now().Add(actLife).Unix()})
+			m.Actions = []PushAction{{Action: pushReject, Token: tok}}
 		}
 		break
 	}
@@ -487,7 +505,7 @@ func (o *NotifyOptions) subject() string {
 
 // webpush sends what waits (item) to the browser dev, encrypted for it; a push service that no longer knows the
 // subscription (404, 410) says the device is gone.
-func (n *Notifier) webpush(ctx context.Context, dev store.PushDevice, x noticeRow, item coord.InboxItem) (bool, error) {
+func (n *Notifier) webpush(ctx context.Context, user string, dev store.PushDevice, x noticeRow, item coord.InboxItem) (bool, error) {
 	plain, err := n.o.Seal.Open(dev.Target)
 	var sub webSubscription
 	if err == nil {
@@ -496,7 +514,7 @@ func (n *Notifier) webpush(ctx context.Context, dev store.PushDevice, x noticeRo
 	if err != nil {
 		return false, &sendError{status: http.StatusBadRequest}
 	}
-	m := n.message(x, item)
+	m := n.message(user, dev.ID, x, item)
 	b, _ := json.Marshal(m)
 	body, err := sealPush(sub, b)
 	if err != nil {

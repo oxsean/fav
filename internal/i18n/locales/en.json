@@ -1067,6 +1067,7 @@
   "cli.server.flag_tls_cert": "TLS certificate file",
   "cli.server.flag_tls_key": "TLS key file",
   "cli.server.no_push": "tend-server: no Web Push: %s (the key in the database stays as it is)\n",
+  "cli.server.no_act": "tend-server: pushes carry no buttons that act: %s (the key in the database stays as it is)\n",
   "cli.server.started": "server %s listening on %s; Ctrl+C ends it\n",
   "cli.server.token_added": "token for %s %s printed above; it is not shown again\n",
   "cli.server.token_exists": "a token named %s exists; remove it first",

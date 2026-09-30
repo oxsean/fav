@@ -79,6 +79,7 @@ func (s *Server) apiRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/push/key", s.api(s.pushKey))
 	mux.HandleFunc("PUT /api/push/device", s.api(s.pushDevice))
 	mux.HandleFunc("DELETE /api/push/device", s.api(s.dropPushDevice))
+	mux.HandleFunc("POST /api/act", s.api(s.act))
 	mux.HandleFunc("POST /api/tokens", s.api(s.addToken))
 	mux.HandleFunc("DELETE /api/tokens", s.api(s.revokeToken))
 	mux.HandleFunc("GET /api/machines", s.api(s.listMachines))
