@@ -1,13 +1,19 @@
-// changes is what a run changed, for the changes tab: its files (run.changes, read in pages of the node's size) and a
-// file's first hunk (run.diff), and how the tab lays them out. A running run's list is compared against its workspace
-// as it is (a snapshot); when that moves between two pages the list is taken again from its start. An ended run's
-// changes do not change, so they are kept.
+// changes is what a run changed, for the changes tab: its files (run.changes, read in pages of the node's size), a
+// file's diff in pages of hunks (run.diff), and how the tab lays them out: line numbers and side by side. A running
+// run's list is compared against its workspace as it is (a snapshot); when that moves between two pages the list is
+// taken again from its start. An ended run's changes do not change, so they are kept; a running run's pages are kept
+// by their snapshot.
 import {code} from './proto.js';
 
-// ⚠️ A file's preview is at most this many lines of its first hunk (the design draft's §4.6).
-export const PREVIEW_LINES = 40;
 // ⚠️ How many times a list is taken again from its start before its snapshot_changed is given up to.
 export const RESTARTS = 3;
+// ⚠️ Hunks asked for in one run.diff page (the node also stops a page at 256 KiB).
+export const HUNKS = 10;
+// ⚠️ The lines of context the node gives by default, and how many more each ask for context adds.
+export const CONTEXT = 3;
+export const MORE_CONTEXT = 20;
+// ⚠️ run.diff pages kept at most, the oldest let go first.
+export const KEPT_PAGES = 200;
 
 export const filters = ['all', 'agent', 'generated'];
 
@@ -39,18 +45,67 @@ export const counts = files => ({all: files.length, agent: files.filter(f => f.a
 // folded: a file that starts folded (a big change, a generated file, a binary one).
 export const folded = f => !!(f.big || f.generated || f.binary);
 
-// preview is the first hunk of a run.diff page cut to PREVIEW_LINES: {at, lines, cut, more}, cut being the lines left
-// out and more the hunks after it; null when there is none.
-export function preview(page) {
-  const h = page?.hunks?.[0];
-  if (!h) return null;
-  const lines = h.lines || [];
-  return {at: h.at || '', lines: lines.slice(0, PREVIEW_LINES), cut: Math.max(0, lines.length - PREVIEW_LINES), more: Math.max(0, (page.of || page.hunks.length) - 1)};
+const head = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/;
+
+// rowsOf is a file's hunks as rows: each hunk's head, then its lines, each {kind, text, old?, new?, h}: kind is ctx,
+// add, del or note (git's "\\ No newline…"), old and new its line numbers on each side, h its hunk.
+export function rowsOf(hunks) {
+  const rows = [];
+  hunks.forEach((x, h) => {
+    rows.push({kind: 'hunk', text: x.at || '', h});
+    const m = head.exec(x.at || '');
+    let o = m ? Number(m[1]) : 0, n = m ? Number(m[2]) : 0;
+    for (const text of x.lines || []) {
+      const c = text[0];
+      if (c === '+') rows.push({kind: 'add', text, new: n++, h});
+      else if (c === '-') rows.push({kind: 'del', text, old: o++, h});
+      else if (c === '\\') rows.push({kind: 'note', text, h});
+      else rows.push({kind: 'ctx', text, old: o++, new: n++, h});
+    }
+  });
+  return rows;
+}
+
+// joined is a file's pages ({from: {hunk, line?}, page}, in order) as one: its hunks, a page that starts inside a
+// hunk adding to it; of, the file's hunks in all; next, where a page after them starts (null past the last).
+export function joined(pages) {
+  const hunks = [];
+  let of = 0, next = null;
+  for (const {from, page} of pages) {
+    const got = (page.hunks || []).map(x => ({at: x.at, lines: [...(x.lines || [])]}));
+    if (from.line > 0 && hunks.length && got.length) hunks.at(-1).lines.push(...got.shift().lines);
+    hunks.push(...got);
+    of = page.of || 0;
+    next = page.next || null;
+  }
+  return {hunks, of, next};
+}
+
+// sides pairs rows for side by side: {l, r} the row shown on the left and on the right (-1 for none). A run of removed lines goes beside the added ones after it; a hunk's head and context lines
+// are on both sides; a note stays with the side of the line before it.
+export function sides(rows) {
+  const out = [];
+  let i = 0;
+  while (i < rows.length) {
+    const k = rows[i].kind;
+    if (k === 'del' || k === 'add') {
+      const dels = [], adds = [];
+      while (i < rows.length && (rows[i].kind === 'del' || (rows[i].kind === 'note' && !adds.length && dels.length))) dels.push(i++);
+      while (i < rows.length && (rows[i].kind === 'add' || (rows[i].kind === 'note' && adds.length))) adds.push(i++);
+      for (let j = 0; j < Math.max(dels.length, adds.length); j++) {
+        out.push({l: dels[j] ?? -1, r: adds[j] ?? -1});
+      }
+    } else {
+      out.push({l: i, r: i});
+      i++;
+    }
+  }
+  return out;
 }
 
 // createChanges reads changes over wire; now gives the time a list was taken (ms).
 export function createChanges({wire, now = () => Date.now()}) {
-  const kept = new Map(), hunks = new Map();
+  const kept = new Map(), pages = new Map();
 
   async function read(run) {
     let files = [], head = null, after = '';
@@ -79,12 +134,15 @@ export function createChanges({wire, now = () => Date.now()}) {
         }
       }
     },
-    // diff is the first hunk of a file in the snapshot its list was taken at ('' outside git).
-    async diff(run, path, snapshot) {
-      const k = run + '\n' + snapshot + '\n' + path;
-      if (hunks.has(k)) return hunks.get(k);
-      const got = await wire.call('run.diff', {run, path, ...(snapshot ? {snapshot} : {}), hunk: 0, n: 1});
-      hunks.set(k, got);
+    // diff is a page of a file's hunks in the snapshot its list was taken at ('' outside git): from hunk (its line
+    // on), with context lines around each change (the node's own when not given).
+    async diff(run, path, snapshot, {hunk = 0, line = 0, context = CONTEXT} = {}) {
+      const k = [run, snapshot, path, hunk, line, context].join('\n');
+      if (pages.has(k)) return pages.get(k);
+      const got = await wire.call('run.diff', {run, path, ...(snapshot ? {snapshot} : {}), hunk, ...(line ? {line} : {}), n: HUNKS,
+        ...(context !== CONTEXT ? {context} : {})});
+      pages.set(k, got);
+      if (pages.size > KEPT_PAGES) pages.delete(pages.keys().next().value);
       return got;
     },
   };

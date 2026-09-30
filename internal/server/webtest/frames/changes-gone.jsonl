@@ -7,5 +7,5 @@
 {"c":{"type":"req","id":7,"method":"run.changes","params":{"run":"r8"}}}
 {"s":{"type":"res","id":7,"error":{"code":"gone"}}}
 {"step":"diff"}
-{"c":{"type":"req","id":8,"method":"run.diff","params":{"run":"r4","path":"notes.txt","hunk":0,"n":1}}}
+{"c":{"type":"req","id":8,"method":"run.diff","params":{"run":"r4","path":"notes.txt","hunk":0,"n":10}}}
 {"s":{"type":"res","id":8,"error":{"code":"gone"}}}

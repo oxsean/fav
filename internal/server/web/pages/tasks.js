@@ -224,7 +224,7 @@ export function Tasks({store, commands, toasts, wire, router, session, clock = (
   const conv = () => task && prefs && html`<${Conversation} store=${store} commands=${commands} toasts=${toasts} prefs=${prefs} task=${task}
     run=${runOf} target=${route.event || ''} copy=${copy} />`;
   const showRun = id => router.go({page: 'tasks', view: route.view || 'list', task: picked, run: id}, {replace: !phone});
-  const taskChanges = changes && task && (() => html`<${RunChanges} changes=${changes} runs=${tk.runsOf(st, task.id)} />`);
+  const taskChanges = changes && task && (() => html`<${RunChanges} changes=${changes} runs=${tk.runsOf(st, task.id)} prefs=${prefs} />`);
   const detail = picked && html`<${Task} store=${store} task=${task} now=${now} busy=${busy(task)} offline=${!online} onAct=${act} onGo=${id => go(id, {push: phone})}
     output=${prefs ? conv : null} changes=${taskChanges} onRun=${prefs ? showRun : null} run=${runOf} pane=${runOf && pane === 'overview' ? 'output' : pane} onPane=${setPane} onClose=${phone || view === 'board' ? undefined : () => go('')} />`;
   const nav = phone && picked && html`<span class="det-nav">

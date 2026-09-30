@@ -147,7 +147,7 @@ export function RunPage({store, commands, toasts, prefs, copy, changes, run, now
   const task = store.state.tasks[run.task];
   const tabs = ['output', ...(changes ? ['changes'] : []), 'facts'].map(id => ({id, label: t('runs.tab.' + id)}));
   const open = sel.openStates.includes(run.state);
-  const pane = tab === 'changes' ? html`<div class="run-scroll"><${RunChanges} changes=${changes} runs=${[run]} /></div>`
+  const pane = tab === 'changes' ? html`<div class="run-scroll"><${RunChanges} changes=${changes} runs=${[run]} prefs=${prefs} /></div>`
     : tab === 'facts' ? html`<div class="run-scroll"><${Facts} store=${store} run=${run} now=${now} onTask=${onTask} /></div>`
     : task && prefs ? html`<${Conversation} store=${store} commands=${commands} toasts=${toasts} prefs=${prefs} task=${task} run=${run.id} target=${target} copy=${copy} />`
     : html`<p class="empty">${t('runs.noTask')}</p>`;

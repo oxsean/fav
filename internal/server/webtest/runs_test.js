@@ -1,7 +1,8 @@
 // runs_test draws the runs page and a run's own page in both forms and both languages from the home frames, and drives
 // them in a fake document: the filters kept in this browser, the picked run's preview, Enter opening a run and x asking
 // before it stops; a phone's run with the previous and next at hand; and the changes tab of a task and of a run, their
-// files opening on their first hunk, filtered, and a running run's list read again on asking.
+// files opening on their first page of hunks, the next page and more context on asking, filtered, and a running run's
+// list read again on asking.
 process.env.TZ = 'UTC';
 import {readFileSync} from 'node:fs';
 import {render} from '../web/vendor/preact.mjs';
@@ -41,13 +42,16 @@ function fakeHistory(url) {
   return {location: loc, history: {pushState: (_, __, u) => set(u), replaceState: (_, __, u) => set(u)}};
 }
 
-// changesOf is a changes reader over fixed lists: lists[run] is what list gives (an Error with a code rejects), every
-// file's first hunk a two-line diff; asked records the calls.
+// changesOf is a changes reader over fixed lists: lists[run] is what list gives (an Error with a code rejects); every
+// file has two hunks, a page each, and one hunk with more context; asked records the calls.
 function changesOf(lists) {
   const asked = [];
+  const page = (path, {hunk = 0, context = 3} = {}) => (context > 3 ? {hunks: [{at: '@@ -1,12 +1,12 @@', lines: [' a', '-old ' + path, '+new ' + path, ' b', '-x', '+y']}], of: 1}
+    : hunk === 0 ? {hunks: [{at: '@@ -1,2 +1,2 @@', lines: ['-old ' + path, '+new ' + path]}], of: 2, next: {hunk: 1}}
+    : {hunks: [{at: '@@ -9 +9 @@', lines: ['-x', '+y']}], of: 2});
   return {asked, can: () => true,
     list: (run, o) => { asked.push(['list', run, !!o?.ended]); const x = lists[run]; return x instanceof Error ? Promise.reject(x) : Promise.resolve(x); },
-    diff: (run, path, snap) => { asked.push(['diff', run, path, snap]); return Promise.resolve({hunks: [{at: '@@ -1,2 +1,2 @@', lines: ['-old ' + path, '+new ' + path]}], of: 2}); }};
+    diff: (run, path, snap, o) => { asked.push(['diff', run, path, snap, o]); return Promise.resolve(page(path, o)); }};
 }
 
 function app(r, {url = '/?page=runs', storage = memory(), changes} = {}) {
@@ -179,7 +183,7 @@ const files = [
 ];
 const list = snapshot => ({files, total: {files: 4, add: 3324, del: 1108}, snapshot, git: true, hidden: 0, at: NOW});
 
-test('a task\'s changes tab: its latest run\'s files, the unfolded ones open on their first hunk, filtered, read again, another run picked', async () => {
+test('a task\'s changes tab: its latest run\'s files, the unfolded ones open on their first page, filtered, read again, another run picked', async () => {
   const r = await outputs();
   const ch = changesOf({r2: list('w-1'), r1: list('t-9a1')});
   const a = app(r, {url: '/?page=tasks&task=t1', storage: memory({[PANE_KEY]: 'changes'}), changes: ch});
@@ -188,7 +192,7 @@ test('a task\'s changes tab: its latest run\'s files, the unfolded ones open on 
   await until(() => ch.asked.filter(x => x[0] === 'diff').length === 2 && root.find('.chg').length && text().includes('+new internal/receipt/pdf.go'), 'the unfolded files drawn');
   eq(ch.asked[0], ['list', 'r2', false], 'the latest run, still running');
   eq(ch.asked.filter(x => x[0] === 'diff').map(x => x[2]).sort(), ['internal/receipt/pdf.go', 'internal/receipt/pdf_test.go'], 'the unfolded open on their own');
-  ok(text().includes('+new internal/receipt/pdf.go') && text().includes('还有 1 处'), 'the first hunk and what is left');
+  ok(text().includes('+new internal/receipt/pdf.go') && text().includes('显示了 1 / 2 处'), 'the first page and what is left');
   ok(text().includes('改动很大：+3,200 −1,100'), 'the big one folded');
   const row = path => root.find('.chg-row').find(b => b.textContent.includes(path));
   await click(row('golden.txt'));
@@ -202,6 +206,26 @@ test('a task\'s changes tab: its latest run\'s files, the unfolded ones open on 
   await click(root.find('button').find(b => b.textContent.trim() === 'r1'));
   await until(() => ch.asked.some(x => x[0] === 'list' && x[1] === 'r1'), 'r1 listed');
   eq(ch.asked.filter(x => x[0] === 'list').at(-1), ['list', 'r1', true], 'an ended run, kept');
+  eq(r.errors, [], 'errors');
+});
+
+const fileOf = (root, path) => root.find('.chg-file').find(li => li.textContent.includes(path));
+
+test('a file\'s next page and more context on asking', async () => {
+  const r = await outputs();
+  const ch = changesOf({r2: list('w-1')});
+  const a = app(r, {url: '/?page=tasks&task=t1', storage: memory({[PANE_KEY]: 'changes'}), changes: ch});
+  const root = await mount(a.vnode());
+  const pdf = 'internal/receipt/pdf.go';
+  await until(() => fileOf(root, pdf)?.textContent.includes('+new ' + pdf), 'pdf.go drawn');
+  await click(buttonOf(fileOf(root, pdf), '显示后面 1 处'));
+  await until(() => fileOf(root, pdf).textContent.includes('@@ -9 +9 @@'), 'the next page');
+  eq(ch.asked.filter(x => x[0] === 'diff' && x[2] === pdf).map(x => x[4]), [{hunk: 0, context: 3}, {hunk: 1, context: 3}], 'from where the first page ended');
+  ok(!fileOf(root, pdf).textContent.includes('显示后面'), 'the last page');
+  await click(buttonOf(fileOf(root, pdf), '多看上下文'));
+  await until(() => fileOf(root, pdf).textContent.includes('上下文 23 行'), 'more context');
+  eq(ch.asked.filter(x => x[0] === 'diff' && x[2] === pdf).at(-1)[4], {hunk: 0, context: 23}, 'from the start, 20 lines more');
+  ok(!fileOf(root, pdf).textContent.includes('@@ -9 +9 @@'), 'the hunks as they are now');
   eq(r.errors, [], 'errors');
 });
 

@@ -14,9 +14,10 @@ const lines = async name => (await (await fetch(`webtest/frames/${name}.jsonl`))
 
 // answers maps each request method of the frame files to what the server sent for it: the result, then the pushes on
 // its stream, remapped to the ids the page uses; a method asked of a run is answered per run, and
-// a run the files do not ask of as the first one they do (with the same page or path).
+// a run the files do not ask of as the first one they do (with the same page or path, and a diff's same hunk, line and
+// context).
 const sets = {home: ['home-state', 'output-page', 'home-commands', 'changes-gone'],
-  tasks: ['tasks-state', 'tasks-create', 'tasks-dispatch', 'tasks-plan', 'tasks-acts', 'tasks-board'],
+  tasks: ['tasks-state', 'tasks-create', 'tasks-dispatch', 'tasks-plan', 'tasks-acts', 'tasks-board', 'changes-list'],
   output: ['output-state', 'output-conv', 'output-send', 'output-answer', 'changes-list'],
   carry: ['output-state', 'output-conv', 'output-send', 'output-carry', 'changes-list'],
   gone: ['output-state', 'output-conv', 'output-answer-gone', 'changes-list'],
@@ -24,7 +25,8 @@ const sets = {home: ['home-state', 'output-page', 'home-commands', 'changes-gone
   agents: ['agents-state', 'agents-edit', 'agents-share']};
 // joins are the files whose pushes on a stream an earlier file opened go on that stream, after what it pushed there.
 const joins = new Set(['output-send', 'output-carry']);
-const keyOf = (f, run = true) => [f.method, run && f.params?.run, f.params?.after, f.params?.path].filter(Boolean).join(' ');
+const keyOf = (f, run = true) => [f.method, run && f.params?.run, f.params?.after, f.params?.path, ...['hunk', 'line', 'context'].map(k => f.params?.[k] && k + f.params[k])]
+  .filter(Boolean).join(' ');
 
 async function answers(names) {
   const out = {}, opened = {};

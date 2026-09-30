@@ -1,4 +1,5 @@
-// prefs are how this viewer wants the page: language, theme, density, skin and browser notices, kept in this browser.
+// prefs are how this viewer wants the page: language, theme, density, skin, browser notices, the output's density and
+// the changes tab's layout, kept in this browser.
 import {signal, computed} from '../vendor/signals-core.mjs';
 import {pick} from './i18n.js';
 import {density as output} from './proto.js';
@@ -12,6 +13,9 @@ export const langs = ['zh', 'en', 'auto'];
 const keys = {lang: 'tend-lang', theme: 'tend-theme', look: 'tend-look', notify: 'tend-notify'};
 // ⚠️ Where this browser keeps the output's density (proto.js), a setting of its own apart from the page's.
 export const OUTPUT_KEY = 'tend-output-density';
+// ⚠️ Where this browser keeps the changes tab's layout: unified or side by side (split).
+export const DIFF_KEY = 'tend-diff-view';
+export const diffViews = ['unified', 'split'];
 
 const skinName = /^[a-z]+$/;
 const hex = /^[0-9a-f]{6}$/;
@@ -32,6 +36,7 @@ export function createPrefs({storage, asked = ''} = {}) {
   // look is the skin: a preset's name, an accent of its own (rrggbb, '' for the preset's) and the high contrast.
   const look = signal({skin: skinName.test(saved.skin || '') ? saved.skin : 'tend', accent: hex.test(saved.accent || '') ? saved.accent : '', high: !!saved.high});
   const notify = signal(read(keys.notify) !== 'off');
+  const diff = signal(diffViews.includes(read(DIFF_KEY)) ? read(DIFF_KEY) : 'unified');
   const keepLook = () => write(keys.look, JSON.stringify({...saved, density: density.value, ...look.value}));
   const next = (list, v) => list[(list.indexOf(v) + 1) % list.length];
   const setLang = v => {
@@ -43,8 +48,9 @@ export function createPrefs({storage, asked = ''} = {}) {
   const setTheme = v => { if (!themes.includes(v)) return; theme.value = v; write(keys.theme, v); };
   const setDensity = v => { if (!densities.includes(v)) return; density.value = v; keepLook(); };
   return {
-    lang, langChoice, theme, density, look, notify, output: shown,
+    lang, langChoice, theme, density, look, notify, output: shown, diff,
     setOutput(v) { if (!output.names.includes(v)) return; shown.value = v; write(OUTPUT_KEY, v); },
+    setDiff(v) { if (!diffViews.includes(v)) return; diff.value = v; write(DIFF_KEY, v); },
     // skin is the stylesheet's name, /theme/<skin>.css.
     skin: computed(() => look.value.skin + (look.value.accent ? '-' + look.value.accent : '') + (look.value.high ? '-high' : '')),
     setLang, setTheme, setDensity,

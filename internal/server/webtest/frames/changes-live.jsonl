@@ -10,5 +10,5 @@
 {"c":{"type":"req","id":8,"method":"run.changes","params":{"run":"r2"}}}
 {"s":{"type":"res","id":8,"result":{"files":[{"path":"internal/receipt/pdf.go","op":"modify","add":48,"del":6,"bytes":6120,"agent":true},{"path":"internal/receipt/pdf_test.go","op":"add","add":62,"del":0,"bytes":1840,"agent":true}],"total":{"files":2,"add":110,"del":6},"snapshot":"w-3","git":true}}}
 {"step":"diff"}
-{"c":{"type":"req","id":9,"method":"run.diff","params":{"run":"r2","path":"internal/receipt/pdf_test.go","snapshot":"w-3","hunk":0,"n":1}}}
+{"c":{"type":"req","id":9,"method":"run.diff","params":{"run":"r2","path":"internal/receipt/pdf_test.go","snapshot":"w-3","hunk":0,"n":10}}}
 {"s":{"type":"res","id":9,"error":{"code":"snapshot_changed"}}}

@@ -1,7 +1,7 @@
 // changes_test checks the changes tab's core: a run's files read in pages (run.changes) and taken again from the start
-// when its workspace moves between them, an ended run's list kept, a file's first hunk (run.diff), the files in
-// directory order, the filters, what starts folded, and the first hunk cut to its preview; then the changes page itself
-// in both forms and both languages.
+// when its workspace moves between them, an ended run's list kept, a file's diff in pages of hunks (run.diff) joined
+// with its line numbers, more context, the files in directory order, the filters, what starts folded, side by side;
+// then the changes page itself in both forms and both languages.
 process.env.TZ = 'UTC';
 import {readFileSync} from 'node:fs';
 import renderToString from './vendor/render-to-string.mjs';
@@ -9,7 +9,7 @@ import * as ch from '../web/core/changes.js';
 import {form} from '../web/core/layout.js';
 import {words} from '../web/core/i18n.js';
 import {html} from '../web/ui/base.js';
-import {Changes} from '../web/pages/changes.js';
+import {Changes, DiffLines} from '../web/pages/changes.js';
 import {Diff} from '../web/ui/output.js';
 import {outputs, home} from './rig.js';
 import {test, eq, ok, throws, run} from './check.js';
@@ -42,31 +42,67 @@ test('the filters: all, the agent tools\' own, generated; big, generated and bin
   eq(['add', 'modify', 'delete', 'rename', 'nope'].map(ch.glyph), ['+', '~', '−', '→', '~']);
 });
 
-test('a file\'s first hunk is cut to the preview, saying how much more there is', () => {
-  const lines = Array.from({length: 50}, (_, i) => '+' + i);
-  eq(ch.preview({hunks: [{at: '@@ -1 +1,50 @@', lines}], of: 3}), {at: '@@ -1 +1,50 @@', lines: lines.slice(0, ch.PREVIEW_LINES), cut: 10, more: 2});
-  eq(ch.preview({hunks: [{at: '@@ -1 +1 @@', lines: ['-a', '+b']}], of: 1}), {at: '@@ -1 +1 @@', lines: ['-a', '+b'], cut: 0, more: 0});
-  eq(ch.preview({hunks: []}), null);
+test('a diff\'s rows carry the old and new line numbers its hunk heads give', () => {
+  const rows = ch.rowsOf([{at: '@@ -40,3 +40,4 @@ func Render() {', lines: [' a', '-b', '+c', '+d', ' e', '\\ No newline at end of file']},
+    {at: '@@ -0,0 +1 @@', lines: ['+new']}]);
+  eq(rows.map(r => [r.kind, r.old || 0, r.new || 0, r.h]), [
+    ['hunk', 0, 0, 0], ['ctx', 40, 40, 0], ['del', 41, 0, 0], ['add', 0, 41, 0], ['add', 0, 42, 0], ['ctx', 42, 43, 0], ['note', 0, 0, 0],
+    ['hunk', 0, 0, 1], ['add', 0, 1, 1]]);
+  eq(rows[0].text, '@@ -40,3 +40,4 @@ func Render() {');
+  eq(rows[2].text, '-b');
 });
 
-test('an ended run\'s changes are read in pages once, then kept; its first hunk is fetched once', async () => {
+test('pages join into hunks: a page that goes on inside a hunk adds to it', () => {
+  const got = ch.joined([
+    {from: {hunk: 0}, page: {hunks: [{at: '@@ -1,2 +1,2 @@', lines: ['-a', '+b']}, {at: '@@ -9,3 +9,3 @@', lines: [' x']}], of: 3, next: {hunk: 1, line: 1}}},
+    {from: {hunk: 1, line: 1}, page: {hunks: [{at: '@@ -9,3 +9,3 @@', lines: ['-y', '+z']}, {at: '@@ -20 +20 @@', lines: ['-p']}], of: 3}},
+  ]);
+  eq(got, {hunks: [{at: '@@ -1,2 +1,2 @@', lines: ['-a', '+b']}, {at: '@@ -9,3 +9,3 @@', lines: [' x', '-y', '+z']}, {at: '@@ -20 +20 @@', lines: ['-p']}], of: 3, next: null});
+  eq(ch.joined([{from: {hunk: 0}, page: {hunks: [], of: 0}}]), {hunks: [], of: 0, next: null});
+  eq(ch.joined([{from: {hunk: 0}, page: {hunks: [{at: '@@ -1 +1 @@', lines: ['-a']}], of: 12, next: {hunk: 1}}}]).next, {hunk: 1}, 'where the next page starts');
+});
+
+test('side by side pairs a run of removed lines with the added lines after it', () => {
+  const rows = ch.rowsOf([{at: '@@ -1,4 +1,3 @@', lines: [' a', '-b', '-c', '-d', '+B', '+C', ' e', '+f', '\\ No newline at end of file']}]);
+  eq(ch.sides(rows).map(p => [p.l, p.r]), [[0, 0], [1, 1], [2, 5], [3, 6], [4, -1], [7, 7], [-1, 8], [-1, 9]]);
+  eq(ch.sides(ch.rowsOf([{at: '@@ -1 +1 @@', lines: ['-a', '\\ No newline at end of file', '+b']}])).map(p => [p.l, p.r]), [[0, 0], [1, 3], [2, -1]],
+    'a note after a removed line stays on the left');
+});
+
+test('an ended run\'s changes are read in pages once, then kept; a file\'s diff in pages of hunks, each fetched once', async () => {
   const r = await outputs();
   const c = ch.createChanges({wire: r.wire, now: () => 1000});
   ok(c.can(), 'the server has run.changes');
+  const pdf = 'internal/receipt/pdf.go', golden = 'internal/receipt/testdata/golden.txt';
   let got;
+  const pages = {};
   await r.srv.play('changes-list', {
     list: () => { c.list('r1', {ended: true}).then(x => { got = x; }); },
     diff: () => {
-      eq(got.files.map(x => x.path), ['go.sum', 'internal/receipt/pdf.go', 'internal/receipt/pdf_test.go', 'assets/fonts/Inter.ttf',
-        'internal/receipt/render.go', 'internal/receipt/testdata/golden.txt'], 'both pages');
+      eq(got.files.map(x => x.path), ['go.sum', pdf, 'internal/receipt/pdf_test.go', 'assets/fonts/Inter.ttf',
+        'internal/receipt/render.go', golden], 'both pages');
       eq([got.total, got.snapshot, got.git, got.hidden, got.at], [{files: 6, add: 3327, del: 1111}, 't-9a1', true, 0, 1000], 'the head');
-      c.diff('r1', 'internal/receipt/pdf.go', 't-9a1').then(x => { got.diff = x; });
+      c.diff('r1', pdf, 't-9a1').then(x => { pages.first = x; });
+    },
+    more: () => {
+      eq([pages.first.hunks.length, pages.first.of, pages.first.next], [10, 12, {hunk: 10}], 'the first page');
+      c.diff('r1', pdf, 't-9a1', pages.first.next).then(x => { pages.second = x; });
+    },
+    big: () => {
+      const all = ch.joined([{from: {hunk: 0}, page: pages.first}, {from: {hunk: 10}, page: pages.second}]);
+      eq([all.hunks.length, all.next], [12, null], 'every hunk');
+      c.diff('r1', golden, 't-9a1').then(one => c.diff('r1', golden, 't-9a1', one.next)
+        .then(two => { pages.golden = ch.joined([{from: {hunk: 0}, page: one}, {from: one.next, page: two}]); }));
+    },
+    context: () => {
+      eq(pages.golden.hunks.map(x => x.lines.length), [6], 'a hunk past a page goes on inside it');
+      c.diff('r1', pdf, 't-9a1', {context: ch.CONTEXT + ch.MORE_CONTEXT}).then(x => { pages.wide = x; });
     },
     again: async () => {
-      eq(got.diff.of, 3, 'the hunks');
+      eq(pages.wide.of, 2, 'more context, fewer hunks');
       const again = await c.list('r1', {ended: true});
       ok(again === got, 'kept');
-      ok((await c.diff('r1', 'internal/receipt/pdf.go', 't-9a1')) === got.diff, 'the hunk kept');
+      ok((await c.diff('r1', pdf, 't-9a1')) === pages.first, 'the page kept');
     },
   });
 });
@@ -122,8 +158,13 @@ test('a diff draws one line per line and nothing else when nothing is left out',
 
 test('the changes page draws in both forms and both languages, styled and worded', () => {
   const none = () => {};
+  const hunks = [{at: '@@ -40,7 +40,8 @@ func Render(r Receipt) ([]byte, error) {', lines: [' \tpdf := gofpdf.New()', '-\tpdf.SetFont("Arial")', '+\tpdf.AddUTF8Font("Inter")', '+\tpdf.SetFont("Inter")', ' \tpdf.AddPage()']}];
+  const shown = {'internal/receipt/pdf.go': {hunks, of: 3, next: {hunk: 1}, context: 3}};
+  const open = new Set(['internal/receipt/pdf.go']);
   const states = {
-    list: {data: sample, open: new Set(['internal/receipt/pdf.go']), previews: {'internal/receipt/pdf.go': {at: '@@ -40,7 +40,12 @@', lines: ['-a', '+b', ' c'], cut: 0, more: 2}}},
+    list: {data: sample, open, diffs: shown},
+    split: {data: sample, open, diffs: shown, wide: true, view: 'split'},
+    goesOn: {data: sample, open, diffs: {'internal/receipt/pdf.go': {hunks, of: 1, next: {hunk: 0, line: 5}, context: 23}}},
     running: {data: sample, running: true},
     outside: {data: {...sample, git: false, snapshot: ''}},
     hidden: {data: {...sample, hidden: 4}},
@@ -133,18 +174,34 @@ test('the changes page draws in both forms and both languages, styled and worded
   for (const [name, p] of Object.entries(states)) for (const f of ['desktop', 'phone']) for (const lang of ['zh', 'en']) {
     const s = drawn(html`<${Changes} ...${p} onToggle=${none} onRefresh=${none} />`, f, lang);
     eq([...classesOf(s)].filter(c => !cssClasses.has(c)), [], `${name} ${f}/${lang}: classes without a rule`);
-    eq(s.match(/\bchg\.[a-zA-Z]+/g), null, `${name} ${f}/${lang}: words not found`);
-    if (f === 'desktop') (lang === 'zh' ? zh : en)[name] = s;
+    eq(s.match(/\bchg\.[a-zA-Z.]+/g), null, `${name} ${f}/${lang}: words not found`);
+    (lang === 'zh' ? zh : en)[name + (f === 'phone' ? '/phone' : '')] = s;
   }
   for (const want of ['6 个文件', '+3,327', '−1,111', '只看 agent 用工具改的', '生成的文件', 'internal/receipt', 'internal/receipt/draw.go → internal/receipt/render.go',
-    '二进制 · 12 KB → 14 KB', '改动很大：+3,200 −1,100', '@@ -40,7 +40,12 @@', '还有 2 处', '按处翻页以后再做']) ok(zh.list.includes(want), `zh list: no ${want}`);
+    '二进制 · 12 KB → 14 KB', '改动很大：+3,200 −1,100', '@@ -40,7 +40,8 @@', '显示了 1 / 3 处', '显示后面 2 处', '多看上下文', '上下文 3 行'])
+    ok(zh.list.includes(want), `zh list: no ${want}`);
+  ok(zh.list.includes('<span class="dv-n">41</span><span class="dv-n"></span>'), 'a removed line: its old number only');
+  ok(zh.list.includes('<span class="dv-n"></span><span class="dv-n">42</span>'), 'an added line: its new number only');
+  ok(!zh.list.includes('左右对照') && !zh['list/phone'].includes('左右对照'), 'side by side only where wide');
+  ok(zh.split.includes('左右对照') && zh.split.includes('dv-split') && !zh['split/phone'].includes('dv-split'), 'side by side on a wide desktop, never on a phone');
+  ok(zh.goesOn.includes('这一处没显示完，接着显示') && zh.goesOn.includes('上下文 23 行') && !zh.goesOn.includes('显示了'), 'a hunk that goes on');
   ok(zh.running.includes('截至 14:20') && zh.running.includes('刷新'), 'a running run says when it was taken');
   ok(zh.outside.includes('只包含 agent 用工具改的，命令改的看不到'), 'outside git');
   ok(zh.hidden.includes('这段时间这个目录里还有 4 个文件变了，只有机器主人能看'), 'only the owner');
   ok(zh.gone.includes('这次运行的改动已经清理'), 'cleared');
   ok(zh.unsupported.includes('这台 server 还不能看改动'), 'an older server');
   ok(zh.empty.includes('没有改动'), 'nothing changed');
-  for (const want of ['Files: 6', 'Only the agent\'s tools', 'Binary · 12 KB → 14 KB', 'Large change: +3,200 −1,100', '2 more hunks']) ok(en.list.includes(want), `en list: no ${want}`);
+  for (const want of ['Files: 6', 'Only the agent\'s tools', 'Binary · 12 KB → 14 KB', 'Large change: +3,200 −1,100', 'Showing 1 of 3 hunks', 'Show the next 2 hunks',
+    'More context']) ok(en.list.includes(want), `en list: no ${want}`);
+  ok(en.split.includes('Side by side'), 'en side by side');
+});
+
+test('side by side keeps both sides level: one row a side for every pair', () => {
+  const rows = ch.rowsOf([{at: '@@ -1,3 +1,2 @@', lines: ['-a', '-b', '+A', ' c', '\\ No newline at end of file']}]);
+  const s = drawn(html`<${DiffLines} rows=${rows} split />`, 'desktop', 'zh');
+  const cols = s.split('<div class="dv-col">').slice(1);
+  eq(cols.map(c => (c.match(/class="dv-row/g) || []).length), [5, 5], 'as many rows a side');
+  ok(cols[1].includes('dv-row dv-none'), 'the right side fills in where nothing was added');
 });
 
 run();
