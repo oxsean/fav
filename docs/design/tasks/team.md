@@ -42,7 +42,7 @@
   - **判定顺序**：已关联的身份 → 邀请 → 邮箱、域名、`provider:username` 规则。一个已验证邮箱若已属于某个用户，不会自动关联，要那个用户登录后在「我」页「关联」（`/auth/<provider>/start?link=1`）。
   - 内置用户 `local`：server 主机本身，管理员；从 `tokens.json` 迁进来的客户端 token 和 `tend-server` 命令行都以它的身份。
   - 登录和回调按 IP 限流：每分钟补 20 次，突发 20 次。
-  - 请求的来源地址：对端是 loopback 时当作本机上的反向代理（tailscale serve），取 `X-Forwarded-For` 的最后一个地址；别的对端带来的这个头不认，用 `RemoteAddr`。限流、设备码的按地址上限和审计的 IP 都用它。
+  - 请求的来源地址：对端在 `server.trusted_proxies`（CIDR 名单，默认 `127.0.0.0/8`、`::1/128`，即本机上的反向代理如 tailscale serve）里时当作代理，从 `X-Forwarded-For` 的最右边往左跳过可信代理的地址，第一个不是的就是来源（都是就取最左边那个）；别的对端带来的这个头不认，用 `RemoteAddr`。限流、设备码的按地址上限和审计的 IP 都用它。容器前面有转发时，转发器是从容器网络的地址连进来的，要把这个网段（docker 默认 `172.16.0.0/12`）写进名单，否则所有人都算同一个地址，按地址的上限变成全团队共用；转发器本身要是会写 `X-Forwarded-For` 的 HTTP 代理，只转 TCP 的转发器带不来原地址。名单里的网段上的任何机器都能自称替别人转发，所以只写代理所在的那一段。
 - **会话**：
   - 网页的 cookie 里只存服务端会话 id（HttpOnly、SameSite=Strict、公网下 Secure），可以轮换，也可以单独吊销。用户能看到自己登录过的设备。
   - 浏览器会话本身就是一条凭据（`kind: web`，30 天），cookie `tend_session`。用 token 登录网页时，另建一条名为 `token:<id>` 的网页会话，随那个 token 一起失效。

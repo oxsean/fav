@@ -44,7 +44,7 @@
 ### 常驻部署的做法
 
 - 直接装在一台机器上（不进容器，省掉转发）：macOS 上用 LaunchAgent `dev.tend.server` 跑 `tend-server --listen <tailnet 地址>:<端口>`，由 `tend hosts install <host> --server` 装；数据目录单独一个（`~/.agent/tend-server`），不和那台机器自己的节点混用；那台机器的节点用 `tend node install-service` 连它，`allow_dirs` 只开一个工作目录。
-- 在容器里跑时 server 的 home 挂 volume：容器内 `--listen 0.0.0.0:<端口> --plain`，宿主上的转发只绑 tailnet 地址（`scripts/tend-e2e-server.sh` 就这样部署）。
+- 在容器里跑时 server 的 home 挂 volume：容器内 `--listen 0.0.0.0:<端口> --plain`，宿主上的转发只绑 tailnet 地址（`scripts/tend-e2e-server.sh` 就这样部署）；转发器从容器网络连进来，`server.trusted_proxies` 写上这个网段（docker 默认 `172.16.0.0/12`），限流和设备码才按真实来源地址算（要转发器写 `X-Forwarded-For`，见 [tasks/team.md](../tasks/team.md)「团队与权限」的「来源地址」）。
 - 手机装到主屏幕和推送都要 HTTPS 地址（浏览器只在安全上下文里给 service worker 和推送；`localhost` 也算）。tailnet 里用 tailscale serve 把 server 放到 `*.ts.net` 的 HTTPS 地址上，或用 tailscale cert 取这个名字的证书交给 `--tls-cert` / `--tls-key`；公网部署直接 `--tls-cert` / `--tls-key`。不是 HTTPS 时网页照常能用，「我」页写明装不了、收不到推送和这两种办法（见 [clients.md](clients.md)「我页」）。
 
 ## 安全

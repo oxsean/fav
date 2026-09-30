@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -89,13 +90,14 @@ type Server struct {
 	flows   map[string]flow     // sign-ins in progress, by state
 	devices map[string]*deviceAuth
 	limit   *limiter
+	proxies []netip.Prefix
 	syncer  *Syncer
 	acts    actor
 }
 
 func New(opt Options) *Server {
 	s := &Server{opt: opt, logins: map[string]*auth.Provider{}, conns: map[*wire.Conn]held{}, flows: map[string]flow{},
-		devices: map[string]*deviceAuth{}, limit: newLimiter(), syncer: opt.Syncer, acts: opt.Coord}
+		devices: map[string]*deviceAuth{}, limit: newLimiter(), proxies: trustedProxies(opt.Config.TrustedProxies), syncer: opt.Syncer, acts: opt.Coord}
 	for _, l := range opt.Config.Logins {
 		p, err := auth.New(l)
 		if err != nil {
@@ -182,29 +184,61 @@ func (s *Server) untrack(c *wire.Conn) {
 
 const keepalive = dial.Keepalive
 
-// clientIP is the address r came from: a peer on a loopback address is a proxy on this host (tailscale serve), and the
-// last address it put in X-Forwarded-For is the one it took the request from; any other peer's header is ignored.
-func clientIP(r *http.Request) string {
+// ⚠️ The proxies believed when server.trusted_proxies is not set: one on this host (tailscale serve).
+var loopbackProxies = []string{"127.0.0.0/8", "::1/128"}
+
+// trustedProxies parses server.trusted_proxies (nil: loopbackProxies); a prefix it cannot read is left out.
+func trustedProxies(list []string) []netip.Prefix {
+	if list == nil {
+		list = loopbackProxies
+	}
+	var out []netip.Prefix
+	for _, s := range list {
+		p, err := netip.ParsePrefix(s)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "tend-server: server.trusted_proxies: %q: %v\n", s, err)
+			continue
+		}
+		out = append(out, p.Masked())
+	}
+	return out
+}
+
+func (s *Server) trusted(a netip.Addr) bool {
+	return slices.ContainsFunc(s.proxies, func(p netip.Prefix) bool { return p.Contains(a.Unmap()) })
+}
+
+// clientIP is the address r came from: a peer among the trusted proxies forwarded it, and the address is the last one
+// in X-Forwarded-For that is not a trusted proxy's (the one the first of them took the request from); any other
+// peer's header is ignored.
+func (s *Server) clientIP(r *http.Request) string {
 	host, _, _ := net.SplitHostPort(r.RemoteAddr)
 	peer, err := netip.ParseAddr(host)
-	if err != nil || !peer.IsLoopback() {
+	if err != nil || !s.trusted(peer) {
 		return host
 	}
-	hops := r.Header.Values("X-Forwarded-For")
-	if len(hops) == 0 {
-		return host
+	var hops []string
+	for _, h := range r.Header.Values("X-Forwarded-For") {
+		hops = append(hops, strings.Split(h, ",")...)
 	}
-	parts := strings.Split(hops[len(hops)-1], ",")
-	if a, err := netip.ParseAddr(strings.TrimSpace(parts[len(parts)-1])); err == nil {
-		return a.Unmap().String()
+	from := peer
+	for i := len(hops) - 1; i >= 0; i-- {
+		a, err := netip.ParseAddr(strings.TrimSpace(hops[i]))
+		if err != nil {
+			break
+		}
+		from = a.Unmap()
+		if !s.trusted(from) {
+			break
+		}
 	}
-	return host
+	return from.String()
 }
 
 func (s *Server) audit(r *http.Request, actor, kind, detail string) {
 	ip := ""
 	if r != nil {
-		ip = clientIP(r)
+		ip = s.clientIP(r)
 	}
 	s.team().Audit(store.AuditEntry{Actor: actor, Kind: kind, Detail: detail, IP: ip})
 }
@@ -226,7 +260,7 @@ func (s *Server) handleNode(w http.ResponseWriter, r *http.Request) {
 	c := wire.New(websocket.NetConn(r.Context(), ws, websocket.MessageText), opt)
 	s.track(c, held{cred: cred.ID})
 	defer s.untrack(c)
-	s.team().Touch(cred.ID, clientIP(r))
+	s.team().Touch(cred.ID, s.clientIP(r))
 	err = s.opt.Coord.Attach(cred.Name, c, func(h remote.Hello) error {
 		if h.NodeID == "" {
 			return &wire.Error{Code: wire.CodeUnauthorized, Detail: "node identity"}
@@ -255,7 +289,7 @@ func (s *Server) handleClient(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ws.SetReadLimit(wire.MaxFrame + 1)
-	s.team().Touch(cred.ID, clientIP(r))
+	s.team().Touch(cred.ID, s.clientIP(r))
 	c := wire.New(websocket.NetConn(r.Context(), ws, websocket.MessageText), wire.Options{Handler: s.audited(r, u, s.opt.Coord.HandlerFor(principal(u))), Bulk: coord.Bulk, Keepalive: keepalive})
 	s.track(c, held{cred: cred.ID, client: true, as: principal(u)})
 	defer s.untrack(c)

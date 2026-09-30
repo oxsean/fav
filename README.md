@@ -610,6 +610,8 @@ directory. People, their sign-in accounts and credentials (only hashes) and the 
 
 A client token or a signed-in browser can run agents on every machine shared with its user, within that node's limits:
 keep the server inside a tailnet, or put it behind TLS (`--tls-cert/--tls-key`, or `--plain` behind a TLS proxy).
+A proxy that is not on the server's host (one in front of a container) goes in `server.trusted_proxies` (`["172.16.0.0/12"]`),
+so sign-in limits count each person's own address.
 
 ## Query syntax
 

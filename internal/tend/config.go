@@ -56,6 +56,9 @@ type ServerConfig struct {
 	// PushServices are the hosts browsers' push subscriptions may be at, each with its subdomains; nil: the browser
 	// makers' own.
 	PushServices []string `json:"push_services,omitempty"`
+	// TrustedProxies are the peers (CIDR) whose X-Forwarded-For is believed; nil: loopback alone. A forwarder in front
+	// of a container comes from the container network.
+	TrustedProxies []string `json:"trusted_proxies,omitempty"`
 }
 
 // Login is one way to sign in: a GitHub OAuth App, or any OpenID Connect provider (GitLab, Gitea, Keycloak…).

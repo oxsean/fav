@@ -31,7 +31,8 @@ cexec() { ssh mba "$docker exec -i tend-linux $*"; }
 
 server_home=$r/server
 cexec mkdir -p "$server_home"
-printf '{"agents": [{"name": "gated", "provider": "fake", "args": ["--steps", "8", "--every", "1s", "--permission", "Bash:srv e2e deploy"]}]}' |
+# the forwarder reaches the container from the docker network: its X-Forwarded-For is believed (this TCP one sends none)
+printf '{"server": {"trusted_proxies": ["172.16.0.0/12"]}, "agents": [{"name": "gated", "provider": "fake", "args": ["--steps", "8", "--every", "1s", "--permission", "Bash:srv e2e deploy"]}]}' |
 	cexec tee "$server_home/config.json" >/dev/null
 token() { cexec env TEND_HOME=$server_home /root/.local/bin/tend-server token add "$@" 2>/dev/null; }
 [ $# -gt 0 ] || set -- mba linux win

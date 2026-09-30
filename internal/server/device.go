@@ -124,7 +124,7 @@ func (s *Server) deviceStart(w http.ResponseWriter, r *http.Request) {
 		apiError(w, http.StatusForbidden, "csrf")
 		return
 	}
-	ip := clientIP(r)
+	ip := s.clientIP(r)
 	s.mu.Lock()
 	s.expireDevicesLocked()
 	if len(s.devices) >= maxDevices || s.devicesFromLocked(ip) >= maxDevicesPerIP {

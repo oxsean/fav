@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/oxsean/fav/internal/tend"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -404,7 +405,7 @@ func TestTheAddressBehindAProxyOnThisHostIsTheOneItForwarded(t *testing.T) {
 		if c.xff != "" {
 			req.Header.Set("X-Forwarded-For", c.xff)
 		}
-		if got := clientIP(req); got != c.want {
+		if got := New(Options{}).clientIP(req); got != c.want {
 			t.Errorf("%s with X-Forwarded-For %q: %q, want %q", c.remote, c.xff, got, c.want)
 		}
 	}
@@ -425,5 +426,30 @@ func TestTheAddressBehindAProxyOnThisHostIsTheOneItForwarded(t *testing.T) {
 	}
 	if got := start("100.64.0.10"); got != http.StatusOK {
 		t.Fatalf("another address behind the same proxy: %d", got)
+	}
+}
+
+// A forwarder in front of a container reaches it from the container network's address: with that network among
+// server.trusted_proxies, the address is the one it forwarded, past every hop of a trusted proxy; without it, the
+// forwarder's own; and a trusted list leaves loopback out unless it names it.
+func TestTheTrustedProxiesAreTheConfiguredOnes(t *testing.T) {
+	bridge := New(Options{Config: tend.ServerConfig{TrustedProxies: []string{"172.16.0.0/12", "127.0.0.1/32"}}})
+	for _, c := range []struct {
+		s                 *Server
+		remote, xff, want string
+	}{
+		{bridge, "172.17.0.1:5000", "100.64.0.9", "100.64.0.9"},
+		{bridge, "172.17.0.1:5000", "198.51.100.1, 100.64.0.9, 172.17.0.5", "100.64.0.9"},
+		{bridge, "127.0.0.1:5000", "100.64.0.9, 172.17.0.1", "100.64.0.9"},
+		{bridge, "172.17.0.1:5000", "172.17.0.2, 172.17.0.3", "172.17.0.2"},
+		{bridge, "[::1]:5000", "100.64.0.9", "::1"},
+		{New(Options{}), "172.17.0.1:5000", "100.64.0.9", "172.17.0.1"},
+	} {
+		req := httptest.NewRequest("GET", "/", nil)
+		req.RemoteAddr = c.remote
+		req.Header.Set("X-Forwarded-For", c.xff)
+		if got := c.s.clientIP(req); got != c.want {
+			t.Errorf("%s with X-Forwarded-For %q: %q, want %q", c.remote, c.xff, got, c.want)
+		}
 	}
 }

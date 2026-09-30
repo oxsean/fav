@@ -422,7 +422,7 @@ func (l *limiter) allow(addr string) bool {
 
 func (s *Server) limited(h http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		ip := clientIP(r)
+		ip := s.clientIP(r)
 		if !s.limit.allow(ip) {
 			w.Header().Set("Retry-After", "60")
 			http.Error(w, "", http.StatusTooManyRequests)

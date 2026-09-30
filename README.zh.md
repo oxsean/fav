@@ -543,6 +543,7 @@ issue 改了，需求会停下来等人选「采用新版本」或「维持本�
 
 client token 或已登录的浏览器可以在分享给这个用户的每台机器上运行 agent（受各节点的限制）：server 只部署在 tailnet 内，
 或放在 TLS 后面（`--tls-cert/--tls-key`，或在终止 TLS 的反代后面用 `--plain`）。
+不在 server 这台机器上的代理（比如容器前面的转发）写进 `server.trusted_proxies`（`["172.16.0.0/12"]`），登录限流才按每个人自己的地址算。
 
 ## 查询语法
 
