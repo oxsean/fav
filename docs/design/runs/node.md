@@ -61,7 +61,7 @@
   - 一条的文字超过 16 KiB 只留最后 16 KiB，前面加 `…`。
 - 轮次：`rolling` 每写完一行，就照 `internal/output` 的 `Parse` 数轮次（读的是 `clipLine` 送出的样子，所以和协调器翻页时读到的一样；只送开头的行不算），轮次变了就在 `marks.jsonl` 记一条 `turn`。
 - 送出的行（`run.tail{clip}`）：不超过 16 KiB 的原样；更长的 JSON 行不超过 1 MiB 时解开，每个超过 16 KiB 的字符串截到 16 KiB 并以 `…` 结尾，再编回 JSON（不转义 `<>&`），带上原行长 `size`；其余的只送前 16 KiB，标 `head`。文件里是原文（瘦身移出的字段在 blob 里或 git 里，见「瘦身」）。
-- 账号、套餐用量和 agent 自己配置所在的路径不写进 `output.log`：整行丢掉的有 claude 对 `initialize` 的回应（`request_id` 为 `init`，里面有 email、organization 和订阅类型）、claude 的 `rate_limit_event`、codex 的 `account/rateLimits/updated` 和 `hook/*`（hook 的 id 里也有配置文件的路径）；去掉字段再写的有 codex 回应里的 `codexHome`、`instructionSources`、`thread.path`（rollout 文件），`thread/started` 的 `thread.path`，claude `system init` 的 `memory_paths`。超过 32 MiB 的行只按开头的 32 MiB 预筛，可能要改写就整行不写；判断先按字节预筛，JSON 字符串里的引号一定带转义，只是提到这些词的文字不会误中；`output.log` 轮转改名失败（Windows 上有读者开着）就继续追加，下次再轮转。
+- 账号、套餐用量和 agent 自己配置所在的路径不写进 `output.log`：整行丢掉的有 claude 对 `initialize` 的回应（`request_id` 为 `init`，里面有 email、organization 和订阅类型）、claude 的 `rate_limit_event`、codex 的 `account/rateLimits/updated` 和 `hook/*`（hook 的 id 里也有配置文件的路径）；去掉字段再写的有 codex 回应里的 `codexHome`、`instructionSources`、`thread.path`（rollout 文件），`thread/started` 的 `thread.path`，claude `system init` 的 `memory_paths` 和 `plugins` 里每一项的 `path`（名字留着）。超过 32 MiB 的行只按开头的 32 MiB 预筛，可能要改写就整行不写；判断先按字节预筛，JSON 字符串里的引号一定带转义，只是提到这些词的文字不会误中；`output.log` 轮转改名失败（Windows 上有读者开着）就继续追加，下次再轮转。
 
 runner 方式：
 

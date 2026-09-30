@@ -704,10 +704,12 @@ var (
 	// limits, codex's rate limits (the plan and its use) and hooks (their files, in their ids too).
 	dropPatterns = [][]byte{[]byte(`"request_id":"` + initRequest + `"`), []byte(`"type":"rate_limit_event"`),
 		[]byte(`"method":"account/rateLimits/updated"`), []byte(`"method":"hook/`)}
-	// cuts are fields left out of the lines they appear in: where the agent keeps its configuration and sessions.
+	// cuts are fields left out of the lines they appear in: where the agent keeps its configuration, sessions and
+	// plugins ("[]": in each element of an array).
 	cuts = [][]string{{"result", "codexHome"}, {"result", "instructionSources"}, {"result", "thread", "path"},
-		{"params", "thread", "path"}, {"memory_paths"}}
-	cutPatterns = [][]byte{[]byte(`"codexHome"`), []byte(`"instructionSources"`), []byte(`"thread":{`), []byte(`"memory_paths"`)}
+		{"params", "thread", "path"}, {"memory_paths"}, {"plugins", "[]", "path"}}
+	cutPatterns = [][]byte{[]byte(`"codexHome"`), []byte(`"instructionSources"`), []byte(`"thread":{`), []byte(`"memory_paths"`),
+		[]byte(`"plugins":[`)}
 )
 
 // mayScrub tells a line scrub might change; a quote inside a JSON string is always escaped, so text that only
@@ -769,6 +771,22 @@ func cut(m map[string]json.RawMessage, path []string) bool {
 	}
 	if len(path) == 1 {
 		delete(m, path[0])
+		return true
+	}
+	if path[1] == "[]" {
+		var items []map[string]json.RawMessage
+		if json.Unmarshal(v, &items) != nil {
+			return false
+		}
+		changed := false
+		for _, it := range items {
+			changed = it != nil && cut(it, path[2:]) || changed
+		}
+		b, err := json.Marshal(items)
+		if !changed || err != nil {
+			return false
+		}
+		m[path[0]] = b
 		return true
 	}
 	var inner map[string]json.RawMessage

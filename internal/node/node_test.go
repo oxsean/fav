@@ -392,7 +392,7 @@ func TestTheAgentsAccountStaysOutOfTheLog(t *testing.T) {
 func TestTheAgentsConfigPathsStayOutOfTheLog(t *testing.T) {
 	home := "/home/someone"
 	limits := `{"type":"rate_limit_event","rate_limit_info":{"status":"allowed","overageDisabledReason":"org_level_disabled","unifiedWindows":{"five_hour":{"utilization":0.34}}},"uuid":"u1"}`
-	initLine := `{"type":"system","subtype":"init","cwd":"/work","session_id":"s1","memory_paths":{"auto":"` + home + `/.claude/projects/-work/memory/"}}`
+	initLine := `{"type":"system","subtype":"init","cwd":"/work","session_id":"s1","memory_paths":{"auto":"` + home + `/.claude/projects/-work/memory/"},"plugins":[{"name":"p1","path":"` + home + `/.claude/plugins/cache/p1"}]}`
 	start := `{"id":2,"result":{"thread":{"id":"th-1","path":"` + home + `/.codex/sessions/rollout-1.jsonl","cwd":"/work"},"instructionSources":["` + home + `/.codex/AGENTS.md"]}}`
 	resumed := `{"id":3,"result":{"thread":{"id":"th-2","path":"` + home + `/.codex/sessions/rollout-2.jsonl","turns":["` + strings.Repeat("t", 200<<10) + `"]}}}`
 	started := `{"method":"thread/started","params":{"thread":{"id":"th-1","path":"` + home + `/.codex/sessions/rollout-1.jsonl"}}}`
@@ -406,7 +406,7 @@ func TestTheAgentsConfigPathsStayOutOfTheLog(t *testing.T) {
 	if strings.Contains(logged, home) || strings.Contains(logged, "rate_limit") || len(lines) != 5 || lines[4] != said {
 		t.Fatalf("logged %d lines: %.800q", len(lines), logged)
 	}
-	for _, want := range []string{`"cwd":"/work"`, `"session_id":"s1"`, `"id":"th-1"`, `"id":"th-2"`, strings.Repeat("t", 200<<10)} {
+	for _, want := range []string{`"cwd":"/work"`, `"session_id":"s1"`, `"plugins":[{"name":"p1"}]`, `"id":"th-1"`, `"id":"th-2"`, strings.Repeat("t", 200<<10)} {
 		if !strings.Contains(logged, want) {
 			t.Errorf("the rest of the lines stays: %s missing", want[:min(len(want), 40)])
 		}
