@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -392,7 +393,18 @@ func resultOf(err error) string {
 	if errors.As(err, &se) {
 		return se.Error()
 	}
+	var ue *url.Error
+	if errors.As(err, &ue) {
+		if ue.Timeout() {
+			return ue.Op + ": timeout"
+		}
+		err = ue.Err // ue names the endpoint, whose path is the device's secret
+	}
 	s := err.Error()
+	var oe *net.OpError
+	if errors.As(err, &oe) {
+		s = oe.Op + ": " + oe.Err.Error()
+	}
 	if len(s) > 200 {
 		s = s[:200]
 	}

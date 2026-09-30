@@ -224,10 +224,16 @@ func (o *outbox) device(user, path string) store.PushDevice {
 // deviceVia is device, registered through the session cred.
 func (o *outbox) deviceVia(user, path, cred string) store.PushDevice {
 	o.t.Helper()
+	return o.deviceAt(user, o.svc.srv.URL, path, cred)
+}
+
+// deviceAt is deviceVia with its push service at base.
+func (o *outbox) deviceAt(user, base, path, cred string) store.PushDevice {
+	o.t.Helper()
 	ua, _ := ecdh.P256().GenerateKey(rand.Reader)
 	auth := make([]byte, 16)
 	rand.Read(auth)
-	sub := webSubscription{Endpoint: o.svc.srv.URL + path}
+	sub := webSubscription{Endpoint: base + path}
 	sub.Keys.P256dh = base64.RawURLEncoding.EncodeToString(ua.PublicKey().Bytes())
 	sub.Keys.Auth = base64.RawURLEncoding.EncodeToString(auth)
 	o.svc.mu.Lock()
@@ -403,6 +409,23 @@ func TestAFailedPushIsTriedAgainLaterAndThenGivenUp(t *testing.T) {
 	o.drain()
 	if _, ok := o.rows()[dev.ID]; ok {
 		t.Fatal("a message refused for good is tried again")
+	}
+}
+
+// A push service that cannot be reached leaves its reason, never the endpoint, whose path is the device's secret.
+func TestAnUnreachablePushServiceLeavesNoEndpointBehind(t *testing.T) {
+	o := newOutbox(t)
+	gone := httptest.NewTLSServer(http.NotFoundHandler())
+	gone.Close()
+	dev := o.deviceAt(store.LocalUser, gone.URL, "/push/s3cret-subscription", "")
+	o.coord.wait(store.LocalUser, "t_1", question)
+	o.n.Send(needs(5, question))
+	o.clock.set(n0.Add(time.Minute))
+	o.drain()
+	d := o.rows()[dev.ID]
+	if d.Status != store.DeliveryPending || d.Attempts != 1 || d.Result == "" ||
+		strings.Contains(d.Result, "s3cret") || strings.Contains(d.Result, strings.TrimPrefix(gone.URL, "https://")) {
+		t.Fatalf("%+v", d)
 	}
 }
 

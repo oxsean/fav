@@ -1,8 +1,11 @@
 package store
 
 import (
+	"database/sql"
 	"path/filepath"
 	"reflect"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 )
@@ -214,6 +217,63 @@ func TestADeviceTakenOverDropsWhatWasStillToGoToItsLastOwner(t *testing.T) {
 
 // A device's notice settings start as the defaults, are its owner's alone to change or to remove the device by, and
 // stay through its renewals; a database from before them gives every device the defaults.
+// What a delivery recorded before 0011 names the address it went to, whose path is a push device's secret (or a
+// webhook's): the upgrade leaves the error's class in its place and keeps every row as it was otherwise.
+func TestUpgradingForgetsTheAddressesDeliveriesRecorded(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, File)
+	tm, err := OpenTeam(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tm.Close()
+	before0011(t, path)
+	setVersion(t, path, 10)
+	cut := `Post "https://fcm.googleapis.com/fcm/send/` + strings.Repeat("x", 200)
+	was := map[int]string{
+		1: `Post "https://fcm.googleapis.com/fcm/send/dQw4-s3cret:APA91b": dial tcp 142.250.74.10:443: connect: connection refused`,
+		2: `Post "https://updates.push.services.mozilla.com/wpush/v2/gAAAAs3cret": context deadline exceeded (Client.Timeout exceeded while awaiting headers)`,
+		3: `Post "https://ntfy.example/s3cret-topic": dial tcp: lookup ntfy.example: no such host`,
+		4: cut[:200],
+		5: "503",
+		6: "ok",
+		7: "another owner",
+	}
+	for id, r := range was {
+		exec(t, path, `INSERT INTO deliveries (id, seq, user_id, event, device_id, status, attempts, next_at, notice, result, at)
+			VALUES (`+strconv.Itoa(id)+`, `+strconv.Itoa(id)+`, 'local', 'task.needs_you', 'd_`+strconv.Itoa(id)+`', 'failed', 4, 0, '{}', '`+strings.ReplaceAll(r, "'", "''")+`', 1)`)
+	}
+	if tm, err = OpenTeam(path); err != nil {
+		t.Fatal(err)
+	}
+	tm.Close()
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	rows, err := db.Query(`SELECT id, status, attempts, result FROM deliveries ORDER BY id`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	got := map[int]string{}
+	for rows.Next() {
+		var id, attempts int
+		var status, result string
+		must(t, rows.Scan(&id, &status, &attempts, &result))
+		if status != "failed" || attempts != 4 {
+			t.Fatalf("row %d changed: %s %d", id, status, attempts)
+		}
+		got[id] = result
+	}
+	want := map[int]string{1: "dial: connect: connection refused", 2: "Post: timeout", 3: "dial: no such host", 4: "Post: unreachable",
+		5: "503", 6: "ok", 7: "another owner"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("%v", got)
+	}
+}
+
 func TestADevicesSettingsAreItsOwnersAndOutliveItsRenewals(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, File)
