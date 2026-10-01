@@ -17,10 +17,10 @@ const (
 )
 
 // sessionRefs are the session reads that name one session.
-var sessionRefs = map[string]bool{remote.MMessages: true, remote.MText: true, remote.MSteps: true, remote.MPulse: true}
+var sessionRefs = map[string]bool{remote.MMessages: true, remote.MText: true, remote.MSteps: true, remote.MPulse: true, remote.MChecks: true}
 
-// shareSessions answers a session read under share: a list keeps its runs' sessions, a read of another session is
-// refused. Even a server that forwards every read can then reach only the runs' sessions.
+// shareSessions answers a session read under share: a list and who is running keep its runs' sessions, a read of
+// another session is refused. Even a server that forwards every read can then reach only the runs' sessions.
 func shareSessions(ctx context.Context, share string, sessions remote.Handler, method string, params json.RawMessage) (any, error) {
 	if share == "" || share == ShareAll {
 		return sessions.Handle(ctx, method, params)
@@ -46,6 +46,19 @@ func shareSessions(ctx context.Context, share string, sessions remote.Handler, m
 				}
 			}
 			l.Sessions = kept
+			return l, nil
+		}
+		return res, err
+	case method == remote.MLive:
+		res, err := sessions.Handle(ctx, method, params)
+		if l, ok := res.(remote.Live); ok && err == nil {
+			kept := map[string]capture.Live{}
+			for id, x := range l.Live {
+				if _, ok := runs[id]; ok {
+					kept[id] = x
+				}
+			}
+			l.Live = kept
 			return l, nil
 		}
 		return res, err

@@ -116,7 +116,7 @@
    - `run.continue{session, …}`（续任意会话）只给机器主人。
    - 项目成员新建任务时查机器上的目录用 `project.dirs{project, machine, path?}`：要是这个项目的参与者（管理员也算），并且这台机器是他的或分享给了他（`canUse`；不带项目时只看分享给本人的）。协调器转问节点的 `node.dirs`，回 `{path, exists, outside?, parent?, dirs}`：没有这个目录是 `exists: false`，不在节点允许的目录里再加 `outside: true`；不带 `path` 列出节点允许的根目录。看不到的项目或机器回 `not_found`，只读成员和没拿到分享的回 `unauthorized`。
    - 项目成员用两个方法：`run.messages{run, before, n}` 和 `run.continue{run}`。服务端根据 run 找到机器、provider 和会话，再按项目权限判断。客户端声明的项目不作数。
-7. **节点侧的纵深防御**：节点配置 `share_sessions: runs | all | none`，模式二默认 `runs`。节点只回答 run 目录里或 `node/sessions.jsonl` 登记过的会话。这样即使 server 被攻破，别人的原生会话也读不到。
+7. **节点侧的纵深防御**：节点配置 `share_sessions: runs | all | none`，模式二默认 `runs`。节点只回答 run 目录里或 `node/sessions.jsonl` 登记过的会话：列表（`list`）和谁在跑（`live`）只留这些，读一个会话的方法（`messages`、`text`、`steps`、`pulse`、`checks`）对别的会话回 `unauthorized`。这样即使 server 被攻破，别人的原生会话也读不到。
 8. **没有项目也没有创建人的任务**只有管理员看得到，不当作公共数据。
 
 ## 共享：agent 和机器默认私有

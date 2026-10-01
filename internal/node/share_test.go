@@ -50,3 +50,35 @@ func TestANodeSharingRunsAnswersOnlyItsRunsSessions(t *testing.T) {
 		t.Fatalf("all: %v", err)
 	}
 }
+
+type liveSessions struct{ twoSessions }
+
+func (l liveSessions) Handle(ctx context.Context, method string, params json.RawMessage) (any, error) {
+	if method == remote.MLive {
+		return remote.Live{Live: map[string]capture.Live{"s-run": {Run: "r_1"}, "s-mine": {Title: "private", Cwd: "/home/me/secret"}}}, nil
+	}
+	return l.twoSessions.Handle(ctx, method, params)
+}
+
+func TestANodeSharingRunsTellsOnlyItsRunsSessionsLiveOrChecked(t *testing.T) {
+	dir := filepath.Join(tend.Home(), "node")
+	os.MkdirAll(dir, 0o700)
+	if err := capture.KeepRunSession(dir, "s-run", capture.RunSession{Run: "r_1"}); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	res, err := shareSessions(ctx, ShareRuns, liveSessions{}, remote.MLive, nil)
+	if l, ok := res.(remote.Live); err != nil || !ok || len(l.Live) != 1 || l.Live["s-run"].Run != "r_1" {
+		t.Fatalf("live under runs: %+v %v", res, err)
+	}
+	if res, err := shareSessions(ctx, ShareNone, liveSessions{}, remote.MLive, nil); err != nil || len(res.(remote.Live).Live) != 0 {
+		t.Fatalf("live under none: %+v %v", res, err)
+	}
+	if res, err := shareSessions(ctx, ShareAll, liveSessions{}, remote.MLive, nil); err != nil || len(res.(remote.Live).Live) != 2 {
+		t.Fatalf("live under all: %+v %v", res, err)
+	}
+	b, _ := json.Marshal(remote.Ref{SessionID: "s-mine"})
+	if _, err := shareSessions(ctx, ShareRuns, liveSessions{}, remote.MChecks, b); wire.Code(err) != wire.CodeUnauthorized {
+		t.Fatalf("checks of a session no run left: %v", err)
+	}
+}
