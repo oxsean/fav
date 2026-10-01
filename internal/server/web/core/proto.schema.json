@@ -342,6 +342,9 @@
         "sep": {
           "type": "string"
         },
+        "share_sessions": {
+          "type": "string"
+        },
         "version": {
           "type": "string"
         },

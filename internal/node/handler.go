@@ -1,6 +1,7 @@
 package node
 
 import (
+	"cmp"
 	"context"
 	"os"
 	"path/filepath"
@@ -146,6 +147,7 @@ func (n *Node) Handler(sessions remote.Handler) wire.Handler {
 			h.Methods = append(append([]string(nil), h.Methods...), Methods...)
 			h.Features = append(append([]string(nil), h.Features...), Features...)
 			h.NodeID = n.ID()
+			h.Share = cmp.Or(n.Limits.ShareSessions, ShareAll)
 			return h, nil
 		}
 		return res, err

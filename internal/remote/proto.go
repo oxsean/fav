@@ -48,7 +48,9 @@ type Hello struct {
 	// the other lacks refuses rather than lets it be ignored.
 	Features []string `json:"features,omitempty"`
 	NodeID   string   `json:"node_id,omitempty"` // a node's lasting identity (node.ID), which a server binds its token to
-	Role     string   `json:"role,omitempty"`
+	// Share: which of its sessions a node answers (node.share_sessions as it applies them: all | runs | none).
+	Share string `json:"share_sessions,omitempty"`
+	Role  string `json:"role,omitempty"`
 	// Build: tend-server's Web UI, a hash of its files; a page that loaded other files reloads.
 	Build string `json:"build,omitempty"`
 }

@@ -90,11 +90,12 @@ type Machine struct {
 	OS        string                 `json:"os,omitempty"`
 	Hostname  string                 `json:"hostname,omitempty"`
 	Version   string                 `json:"version,omitempty"`
-	Agents    map[string]agent.Check `json:"agents,omitempty"`    // how each agent CLI stood when last checked
-	CheckedAt *time.Time             `json:"checked_at,omitzero"` // when its node last probed them afresh
-	Via       string                 `json:"via,omitempty"`       // local | ssh | dial (the node dialed in)
-	Missing   []string               `json:"missing,omitempty"`   // node features its build lacks
-	Retired   bool                   `json:"retired,omitempty"`   // its owner was disabled: nobody runs anything there again
+	Agents    map[string]agent.Check `json:"agents,omitempty"`         // how each agent CLI stood when last checked
+	CheckedAt *time.Time             `json:"checked_at,omitzero"`      // when its node last probed them afresh
+	Via       string                 `json:"via,omitempty"`            // local | ssh | dial (the node dialed in)
+	Missing   []string               `json:"missing,omitempty"`        // node features its build lacks
+	Retired   bool                   `json:"retired,omitempty"`        // its owner was disabled: nobody runs anything there again
+	Share     string                 `json:"share_sessions,omitempty"` // which of its sessions its node answers (all | runs | none); empty: not told
 }
 
 // How a machine is reached, in Machine.Via.
@@ -846,7 +847,7 @@ func (c *Coord) machineList() []Machine {
 
 // machineView is how m stands; the caller holds mu.
 func (c *Coord) machineView(m *machine) Machine {
-	x := Machine{Name: m.name, Slots: c.slots(m.name), OS: m.hello.OS, Hostname: m.hello.Hostname, Version: m.hello.Version,
+	x := Machine{Name: m.name, Slots: c.slots(m.name), OS: m.hello.OS, Hostname: m.hello.Hostname, Version: m.hello.Version, Share: m.hello.Share,
 		Agents: m.checks, Via: ViaLocal}
 	if !m.checkedAt.IsZero() {
 		at := m.checkedAt

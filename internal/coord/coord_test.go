@@ -1066,3 +1066,16 @@ func TestATaskKeepsItsProject(t *testing.T) {
 		t.Fatalf("a project name has a bound: %v", err)
 	}
 }
+
+func TestAMachineSaysWhichOfItsSessionsItsNodeAnswers(t *testing.T) {
+	f := newFar(t)
+	e := newEnv(t, tend.Config{Hosts: []tend.Host{{Name: "far", SSH: "far"}}})
+	e.dial = f.dial
+	e.start()
+	var ms Machines
+	e.must(MMachineList, MachinesParams{Connect: true}, &ms)
+	i := slices.IndexFunc(ms.Machines, func(m Machine) bool { return m.Name == "far" })
+	if i < 0 || ms.Machines[i].Share != node.ShareAll {
+		t.Fatalf("a node without share_sessions answers all: %+v", ms.Machines)
+	}
+}
