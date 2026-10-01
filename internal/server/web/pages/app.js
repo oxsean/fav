@@ -11,6 +11,8 @@ import {Home} from './home.js';
 import {Tasks} from './tasks.js';
 import {Runs} from './runs.js';
 import {Machines} from './machines.js';
+import {Sessions} from './sessions.js';
+import {mayRead} from '../core/team.js';
 import {Team} from './team.js';
 import {Me} from './me.js';
 import {Agents} from './agents.js';
@@ -103,6 +105,9 @@ export function App({store, commands, toasts, wire, http, router, keys, nav, pre
         ? html`<${Runs} store=${store} commands=${commands} toasts=${toasts} router=${router} prefs=${prefs} copy=${copy} changes=${changes} drafts=${drafts} storage=${storage} clock=${clock} />`
         : route.page === 'team'
           ? html`<${Team} store=${store} commands=${commands} toasts=${toasts} platform=${platform} session=${session} http=${http} wire=${wire} clock=${clock} copy=${copy} />`
+          : route.page === 'machines' && route.sessions
+            ? html`<${Sessions} key=${route.sessions} store=${store} wire=${wire} router=${router} toasts=${toasts} machine=${route.sessions} open=${route.session || ''}
+              may=${mayRead(session, machines.find(m => m.name === route.sessions) || {})} copy=${copy} clock=${clock} />`
           : route.page === 'machines'
             ? html`<${Machines} store=${store} commands=${commands} toasts=${toasts} platform=${platform} session=${session} http=${http} wire=${wire} router=${router} storage=${storage}
               clock=${clock} copy=${copy} />`

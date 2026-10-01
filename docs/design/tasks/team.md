@@ -112,7 +112,7 @@
    - 连接上的身份在连上时定下；server 的 `sweep`（每几秒）发现凭据的主人被停用、或管理员身份被授予或撤销时断开这条连接，客户端按新身份重连。
 5. **收据按 `(principal, command_id)` 存**。重放之前先检查当前的读权限；有权就返回第一次的结果。
 6. **原生会话的两条旁路收紧**。
-   - `node.call`（读会话列表、对话、全文，以及建项目时列目录的 `node.dirs`）只给机器主人和管理员。
+   - `node.call`（读会话列表、谁在跑、对话、全文，以及建项目时列目录的 `node.dirs`）只给机器主人和管理员；网页的会话页（[runs/clients.md](../runs/clients.md)「会话页」）只对他们给入口。
    - `run.continue{session, …}`（续任意会话）只给机器主人。
    - 项目成员新建任务时查机器上的目录用 `project.dirs{project, machine, path?}`：要是这个项目的参与者（管理员也算），并且这台机器是他的或分享给了他（`canUse`；不带项目时只看分享给本人的）。协调器转问节点的 `node.dirs`，回 `{path, exists, outside?, parent?, dirs}`：没有这个目录是 `exists: false`，不在节点允许的目录里再加 `outside: true`；不带 `path` 列出节点允许的根目录。看不到的项目或机器回 `not_found`，只读成员和没拿到分享的回 `unauthorized`。
    - 项目成员用两个方法：`run.messages{run, before, n}` 和 `run.continue{run}`。服务端根据 run 找到机器、provider 和会话，再按项目权限判断。客户端声明的项目不作数。

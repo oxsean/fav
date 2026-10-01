@@ -15,10 +15,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/oxsean/fav/internal/capture"
 	"github.com/oxsean/fav/internal/coord"
 	"github.com/oxsean/fav/internal/journal"
 	"github.com/oxsean/fav/internal/node"
 	"github.com/oxsean/fav/internal/output"
+	"github.com/oxsean/fav/internal/remote"
+	"github.com/oxsean/fav/internal/shell"
 	"github.com/oxsean/fav/internal/skin"
 	"github.com/oxsean/fav/internal/store"
 	"github.com/oxsean/fav/internal/task"
@@ -75,6 +78,30 @@ func TestTheChangesOfARunInPagesAndOnTheTab(t *testing.T) { runModule(t, "webtes
 func TestTheRunsPageAndARunsOwn(t *testing.T) { runModule(t, "webtest/runs_test.js") }
 
 func TestTheMachinesPage(t *testing.T) { runModule(t, "webtest/team_test.js") }
+
+// The sessions page's resume lines are what internal/shell types: POSIX sh, and PowerShell on Windows.
+func TestTheSessionsPageAndItsResumeLines(t *testing.T) {
+	cases := runModule(t, "webtest/sessions_test.js")
+	var lines [][]json.RawMessage
+	if err := json.Unmarshal(cases["resume lines"].Data, &lines); err != nil || len(lines) < 10 {
+		t.Fatalf("%d lines: %v", len(lines), err)
+	}
+	for _, l := range lines {
+		var os, dir, got string
+		var argv []string
+		json.Unmarshal(l[0], &os)
+		json.Unmarshal(l[1], &dir)
+		json.Unmarshal(l[2], &argv)
+		json.Unmarshal(l[3], &got)
+		kind := shell.POSIX
+		if os == "windows" {
+			kind = shell.PowerShell
+		}
+		if want := kind.Line(dir, argv); got != want {
+			t.Errorf("%s %q %q: the page writes %s, the shell %s", os, dir, argv, got, want)
+		}
+	}
+}
 
 func TestTheMePage(t *testing.T) { runModule(t, "webtest/me_test.js") }
 
@@ -462,8 +489,13 @@ func TestFrameWritesAndListsAreTheCoordinatorsShapes(t *testing.T) {
 		coord.MProjectDirs: func() any { return new(coord.ProjectDirs) }, coord.MAgentDefList: func() any { return new(coord.AgentDefList) },
 		coord.MAgentDefSave: func() any { return new(coord.AgentDefView) }, coord.MAgentDefShare: func() any { return new(coord.AgentDefView) },
 		coord.MMachineCheck: func() any { return new(coord.MachineChecks) }, coord.MMachineDrain: func() any { return new(task.Drain) },
-		coord.MAgentDefCheck: func() any { return new(coord.AgentDefCheck) },
+		coord.MAgentDefCheck:        func() any { return new(coord.AgentDefCheck) },
+		"node.call:" + remote.MList: func() any { return new(remote.List) }, "node.call:" + remote.MLive: func() any { return new(remote.Live) },
+		"node.call:" + remote.MMessages: func() any { return new(capture.Page) }, "node.call:" + remote.MText: func() any { return new(remote.Text) },
 	}
+	// node.call's params by the method it forwards; nil: that method takes none.
+	forwarded := map[string]func() any{remote.MList: nil, remote.MLive: nil,
+		remote.MMessages: func() any { return new(remote.MessagesParams) }, remote.MText: func() any { return new(remote.TextParams) }}
 	files, _ := filepath.Glob(filepath.Join("webtest", "frames", "*.jsonl"))
 	seen := map[string]int{}
 	for _, f := range files {
@@ -472,6 +504,20 @@ func TestFrameWritesAndListsAreTheCoordinatorsShapes(t *testing.T) {
 		for i, l := range frameLines(t, name) {
 			at := name + ".jsonl:" + strconv.Itoa(i+1)
 			switch {
+			case l.C != nil && l.C.Type == "req" && l.C.Method == coord.MNodeCall:
+				var np coord.NodeCall
+				strictDecode(t, at, l.C.Params, &np)
+				mk, ok := forwarded[np.Method]
+				switch {
+				case !ok:
+					t.Errorf("%s: node.call forwards %q, which no test reads", at, np.Method)
+				case mk == nil && np.Params != nil:
+					t.Errorf("%s: %s takes no params: %s", at, np.Method, np.Params)
+				case mk != nil:
+					strictDecode(t, at, np.Params, mk())
+				}
+				asked[l.C.ID] = "node.call:" + np.Method
+				seen[asked[l.C.ID]]++
 			case l.C != nil && l.C.Type == "req":
 				asked[l.C.ID] = l.C.Method
 				if mk := params[l.C.Method]; mk != nil {
@@ -507,7 +553,8 @@ func TestFrameWritesAndListsAreTheCoordinatorsShapes(t *testing.T) {
 	for _, m := range []string{coord.MTaskStatus, coord.MRunDispatch, coord.MRunStop, coord.MRunAnswer, coord.MRunOutputPage, coord.MTaskCreate,
 		coord.MTaskStart, coord.MTaskMerge, coord.MTaskMove, coord.MTaskPlanSave, coord.MTaskPlanApply, coord.MTaskGate, coord.MTaskSourceAck,
 		coord.MRunPreview, coord.MAgentList, coord.MTaskMessage, coord.MRunInterrupt, coord.MRunChanges, coord.MRunDiff, coord.MRunOutputItem, coord.MMachineShare, coord.MProjectCreate, coord.MProjectMember, coord.MProjectEdit, coord.MProjectDirs,
-		coord.MAgentDefList, coord.MAgentDefSave, coord.MAgentDefShare, coord.MAgentDefRemove, coord.MMachineCheck, coord.MMachineDrain, coord.MAgentDefCheck, "machines", "inbox", coord.PushAffordances, "affordances part"} {
+		coord.MAgentDefList, coord.MAgentDefSave, coord.MAgentDefShare, coord.MAgentDefRemove, coord.MMachineCheck, coord.MMachineDrain, coord.MAgentDefCheck, "machines", "inbox",
+		"node.call:" + remote.MList, "node.call:" + remote.MLive, "node.call:" + remote.MMessages, "node.call:" + remote.MText, coord.PushAffordances, "affordances part"} {
 		if seen[m] == 0 {
 			t.Errorf("no frame file has %s", m)
 		}

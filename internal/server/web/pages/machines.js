@@ -1,8 +1,8 @@
 // machines is the machines page: every machine the viewer sees, grouped as theirs, shared with them and everyone
 // else's, each with its state, room, agent CLIs and what is wrong with it; the picked one's day, what waits for it,
 // who else may use it and its node token. Its owner or an admin changes who else may use it and ends or moves its
-// token; anyone adds a machine of their own and gets its token once. On a phone the page only shows: a list of the
-// machines, each opening its facts.
+// token; anyone adds a machine of their own and gets its token once. Its owner and admins open its own sessions
+// (pages/sessions.js). On a phone the page only shows: a list of the machines, each opening its facts.
 import {useState, useEffect} from '../vendor/hooks.mjs';
 import {html, cx, usePhone, useWords, useSignalValue, useName, useNames} from '../ui/base.js';
 import {Panel} from '../ui/panel.js';
@@ -37,7 +37,8 @@ register('machines', {
   'mach.note.missing': ['它的 tend 缺 %s，要用这些的运行不会派到这里；在协调器上运行 tend hosts install 更新', 'Its tend lacks %s, so runs needing it do not go here; update it with tend hosts install'],
   'mach.today': ['%s 今天', '%s today'], 'mach.todayNote': ['每行一个运行位', 'A row per slot'],
   'mach.owner': ['主人', 'Owner'], 'mach.link': ['连接', 'Connection'], 'mach.host': ['主机名', 'Hostname'], 'mach.os': ['系统', 'System'],
-  'mach.version': ['tend', 'tend'], 'mach.queue': ['排队', 'Queued'], 'mach.noQueue': ['没有', 'None'],
+  'mach.version': ['tend', 'tend'], 'mach.shareSessions': ['会话共享', 'Sessions shared'],
+  'mach.share.all': ['全部', 'all'], 'mach.share.runs': ['只有 tend 运行的', 'only those of tend runs'], 'mach.share.none': ['不共享', 'none'], 'mach.queue': ['排队', 'Queued'], 'mach.noQueue': ['没有', 'None'],
   'mach.retryAt': ['%s，%s 重试', '%s; retries at %s'],
   'mach.clis': ['Agent CLI', 'Agent CLIs'], 'mach.noClis': ['还没有检查过', 'Not checked yet'],
   'mach.check': ['检查', 'Check'], 'mach.checkAll': ['全部检查', 'Check all'], 'mach.checkedAgo': ['%s 前检查', 'checked %s ago'],
@@ -61,7 +62,7 @@ register('machines', {
   'mach.trust': ['这台机器跑在主人的账号下：派来的 agent 能读主人 home 下的文件，用主人的 claude / codex 额度，提交的 committer 是主人（作者记为派发人）。要长期共享，给它单独开一个 OS 用户或容器，登录团队自己的 CLI 账号。',
     'This machine runs under its owner\'s account: agents sent here read files in the owner\'s home, spend the owner\'s claude / codex quota and commit as the owner (the dispatcher is the author). To share it for long, give it its own OS user or container signed in to the team\'s CLI accounts.'],
   'mach.sharedDone': ['%s 的分享已保存', 'Who may use %s is saved'],
-  'mach.runs': ['看这台的运行', 'Its runs'],
+  'mach.runs': ['看这台的运行', 'Its runs'], 'mach.sessions': ['看这台的会话', 'Its sessions'],
   'mach.add': ['添加机器', 'Add a machine'], 'mach.name': ['机器名', 'Machine name'],
   'mach.nameNote': ['字母、数字、- _ .；节点用这个名字连上来。', 'Letters, digits, - _ .; the node connects under this name.'],
   'mach.addGo': ['生成 token', 'Make its token'], 'mach.added': ['%s 已添加', '%s is added'],
@@ -101,6 +102,9 @@ function noteText(w, n, name) {
 const checkWhys = ['unsupported', 'offline', 'timeout'];
 const checkWhy = (w, code) => (checkWhys.includes(code) ? w.t('mach.checkWhy.' + code) : apiText(w, {code}));
 
+// ⚠️ node.share_sessions as a node reports it.
+const shareWords = ['all', 'runs', 'none'];
+
 const noteTone = n => (n.kind === 'error' || n.kind === 'retired' ? 'failed' : 'warning');
 
 function SlotBar({m}) {
@@ -125,7 +129,7 @@ function Card({m, drain, picked, now, onPick}) {
 
 // Facts is one machine: how it is reached, its room and queue, its agent CLIs and when they were checked, who else may
 // use it and its token. The buttons are there only where their handlers are given.
-function Facts({m, st, creds, now, checking, onCheck, draining, onDrain, onShare, onRebind, onRevoke, onRuns}) {
+function Facts({m, st, creds, now, checking, onCheck, draining, onDrain, onShare, onRebind, onRevoke, onRuns, onSessions}) {
   const w = useWords();
   const {t, f} = w;
   const name = useName();
@@ -143,6 +147,7 @@ function Facts({m, st, creds, now, checking, onCheck, draining, onDrain, onShare
       ${m.hostname && html`<dt>${t('mach.host')}</dt><dd class="mono">${m.hostname}</dd>`}
       ${m.os && html`<dt>${t('mach.os')}</dt><dd class="mono">${m.os}</dd>`}
       ${m.version && html`<dt>${t('mach.version')}</dt><dd class="mono">${m.version}</dd>`}
+      ${shareWords.includes(m.share_sessions) && html`<dt>${t('mach.shareSessions')}</dt><dd>${t('mach.share.' + m.share_sessions)}</dd>`}
       <dt>${t('mach.slots')}</dt><dd class="mono">${f('mach.slotsOf', m.active || 0, m.slots || 0)}</dd>
       <dt>${t('mach.queue')}</dt><dd>${queue.length ? html`<ul class="mach-queue">${queue.map(x => html`<li key=${x.run.id}><span class="ell">${x.task?.title || x.run.task}</span>
         <span class="t-muted">${x.why ? why(w, x.why) : duration(now - Date.parse(x.run.queued_at))}</span></li>`)}</ul>` : t('mach.noQueue')}</dd>
@@ -162,8 +167,9 @@ function Facts({m, st, creds, now, checking, onCheck, draining, onDrain, onShare
     ${creds.length > 0 && html`<section class="det-sec"><h3 class="det-h">${t('mach.cred')}</h3>
       ${creds.map(c => html`<${Cred} key=${c.id} c=${c} onRebind=${onRebind} onRevoke=${onRevoke} />`)}
     </section>`}
-    ${(onRuns || onDrain) && html`<div class="det-acts">
+    ${(onRuns || onDrain || onSessions) && html`<div class="det-acts">
       ${onDrain && html`<${Button} disabled=${draining} onClick=${onDrain}>${st.drains?.[m.name] ? t('mach.undrain') : t('mach.drain')}<//>`}
+      ${onSessions && html`<${Button} onClick=${onSessions}>${t('mach.sessions')}<//>`}
       ${onRuns && html`<${Button} keyName="Enter" onClick=${onRuns}>${t('mach.runs')}<//>`}</div>`}
   </div>`;
 }
@@ -253,6 +259,7 @@ export function Machines({store, commands, toasts, session, http, wire, router, 
   const cur = machines.find(m => m.name === picked) || machines.find(m => m.name === ids[0]);
   const close = () => setModal(null);
   const toRuns = name => { showMachine(storage, name); router?.go({page: 'runs'}); };
+  const sessionsOf = m => (wire?.has?.('node.call') && tm.mayRead(session, m) ? () => router?.go({page: 'machines', sessions: m.name}) : null);
   const failed = e => toasts.show({text: apiText(w, e), tone: 'danger'});
   useListKeys({ids, selected: cur?.name, onSelect: setPicked, onOpen: phone ? null : toRuns, active: !modal && !(phone && picked)});
 
@@ -313,7 +320,7 @@ export function Machines({store, commands, toasts, session, http, wire, router, 
       <${OnDesktop} platform=${platform} toasts=${toasts} page="machines" note=${t('mach.desktop')} />
       ${open && html`<${Drawer} title=${open.name} onClose=${() => setPicked('')}>
         <div class="mach-phone-head"><${Status} state=${tm.machineState(open)} word label=${stateWord(w, open, at)} /></div>
-        <${Facts} m=${open} st=${st} creds=${[]} now=${at} />
+        <${Facts} m=${open} st=${st} creds=${[]} now=${at} onSessions=${sessionsOf(open)} />
       <//>`}
     </div>`;
   }
@@ -345,7 +352,7 @@ export function Machines({store, commands, toasts, session, http, wire, router, 
       </div>
       ${cur && html`<aside class="mach-aside panel" aria-label=${cur.name}>
         <header class="mach-aside-head"><${Status} state=${tm.machineState(cur)} /><b class="mono">${cur.name}</b><span class="t-muted">${stateWord(w, cur, at)}</span></header>
-        <${Facts} m=${cur} st=${st} creds=${credsOf(cur)} now=${at} onRuns=${() => toRuns(cur.name)}
+        <${Facts} m=${cur} st=${st} creds=${credsOf(cur)} now=${at} onRuns=${() => toRuns(cur.name)} onSessions=${sessionsOf(cur)}
           draining=${commands.state('drain:' + cur.name) === 'pending'} onDrain=${mine(cur) ? () => drain(cur) : null}
           checking=${!!checking} onCheck=${checks && cur.state === 'connected' && !cur.retired ? () => check(cur.name) : null}
           onShare=${mine(cur) ? () => setModal({kind: 'share', machine: cur.name}) : null}

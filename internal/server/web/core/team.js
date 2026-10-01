@@ -60,6 +60,9 @@ export function machineNotes(m, drain) {
 // mayShare: session may change who else uses m (its owner or an admin; nobody once it is retired or has no owner).
 export const mayShare = (session, m) => !m.retired && !!m.owner && (isAdmin(session) || m.owner === session?.id);
 
+// mayRead: session may read m's own sessions (node.call: its owner or an admin).
+export const mayRead = (session, m) => isAdmin(session) || (!!m.owner && m.owner === session?.id);
+
 // queueOn is what waits for the machine: its queued runs, first queued first, each with its task and why it waits.
 export const queueOn = (state, name) => sel.openRuns(state).filter(x => x.run.state === 'queued' && x.run.machine === name);
 
