@@ -97,6 +97,7 @@ export function App({store, commands, toasts, wire, http, router, keys, nav, pre
   // leave the page's old section behind when a notice opened it early on the me page.
   const page = route.page === 'home'
     ? html`<${Home} key=${phone && route.wait ? 'wait' : 'list'} store=${store} commands=${commands} toasts=${toasts} clock=${clock} fetchOutput=${fetchOutput} changes=${changes} onOpen=${onOpen} onNavigate=${onNavigate}
+      wire=${wire} session=${session} onSessions=${machine => go({page: 'machines', sessions: machine})}
       wait=${route.wait || ''} onWait=${(task, o) => go(task ? {page: 'home', wait: task} : {page: 'home'}, o)} onBack=${() => router.back({page: 'home'})} storage=${storage} />`
     : route.page === 'tasks'
       ? html`<${Tasks} store=${store} commands=${commands} toasts=${toasts} wire=${wire} router=${router} session=${session} clock=${clock} storage=${storage}

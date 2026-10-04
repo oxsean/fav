@@ -259,7 +259,7 @@ export function Machines({store, commands, toasts, session, http, wire, router, 
   const cur = machines.find(m => m.name === picked) || machines.find(m => m.name === ids[0]);
   const close = () => setModal(null);
   const toRuns = name => { showMachine(storage, name); router?.go({page: 'runs'}); };
-  const sessionsOf = m => (wire?.has?.('node.call') && tm.mayRead(session, m) ? () => router?.go({page: 'machines', sessions: m.name}) : null);
+  const sessionsOf = m => (tm.opensSessions(wire, session, m) ? () => router?.go({page: 'machines', sessions: m.name}) : null);
   const failed = e => toasts.show({text: apiText(w, e), tone: 'danger'});
   useListKeys({ids, selected: cur?.name, onSelect: setPicked, onOpen: phone ? null : toRuns, active: !modal && !(phone && picked)});
 

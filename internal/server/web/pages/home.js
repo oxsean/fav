@@ -1,7 +1,7 @@
 // Home is where the day is seen at a glance: what waits on the viewer (to answer, to accept, what failed), what runs
 // and waits for a machine, what ended, each machine's day and the last seven days. On a phone it keeps what waits, each
-// item a card row with one quick action, and a short list of what runs; a row opens the item's own page, where it is
-// answered and the next one follows. The figures stay on the desktop.
+// item a card row with one quick action, a short list of what runs and the machines whose own sessions the viewer may
+// open; a row opens the item's own page, where it is answered and the next one follows. The figures stay on the desktop.
 import {useState, useEffect, useRef} from '../vendor/hooks.mjs';
 import {html, cx, usePhone, useWords, useSignalValue, useActions} from '../ui/base.js';
 import {Panel, Stat} from '../ui/panel.js';
@@ -19,6 +19,7 @@ import {tokens, money, duration, clock as hhmm, usageTokens} from '../core/forma
 import {unsure} from '../core/commands.js';
 import {code} from '../core/proto.js';
 import {noInbox} from '../core/store.js';
+import {opensSessions, machineState} from '../core/team.js';
 import {why} from './words.js';
 
 // ⚠️ An item's waiting bar is full after two hours.
@@ -50,9 +51,9 @@ const keepAs = (storage, v) => { try { v ? storage?.setItem(asKey, v) : storage?
 // Home: clock gives now in ms; fetchOutput(run) the last events of a run (run.output.page); changes is core/changes.js's
 // (a phone shows what a run to accept changed); onOpen(task) goes to it. wait is the task whose item has the page to
 // itself (the route's); onWait(task, {replace}) goes to one ('' to the list), onBack() leaves it; storage keeps the
-// roles shown.
+// roles shown. wire and session tell which machines' own sessions the viewer may open; onSessions(machine) opens them.
 export function Home({store, commands, toasts, clock = () => Date.now(), fetchOutput, changes, onOpen, onNavigate, wait = '', onWait = () => {},
-  onBack = () => onWait(''), storage = null}) {
+  onBack = () => onWait(''), storage = null, wire = null, session = null, onSessions = () => {}}) {
   const w = useWords();
   const {t, f} = w;
   const phone = usePhone();
@@ -252,6 +253,7 @@ export function Home({store, commands, toasts, clock = () => Date.now(), fetchOu
 
   if (phone) {
     const running = going.filter(g => g.run.state !== 'queued');
+    const readable = machines.filter(m => !m.retired && opensSessions(wire, session, m)).sort((a, b) => a.name.localeCompare(b.name));
     return html`<div class="home">
       <div class="home-head"><h1>${t('home.waiting')}</h1><span class="mono t-muted">${shown.length}</span><span class="lbl home-hint">${t('home.hint')}</span></div>
       ${chips}
@@ -263,6 +265,12 @@ export function Home({store, commands, toasts, clock = () => Date.now(), fetchOu
           <span class="mono t-muted">${duration(now - Date.parse(run.started_at || run.queued_at))}</span>
         </button>`) : html`<p class="empty">${t('home.nothingRuns')}</p>`}</div>
       </section>
+      ${readable.length > 0 && html`<section class="home-sess" aria-labelledby="home-sess-head">
+        <h2 id="home-sess-head" class="home-sess-head">${t('home.sessions')}</h2>
+        <div class="home-sess-list">${readable.map(m => html`<button type="button" class="going-row" key=${m.name} onClick=${() => onSessions(m.name)}>
+          <span class="home-sess-name mono ell">${m.name}</span><${Status} state=${machineState(m)} word /><span class="t-muted" aria-hidden="true">›</span>
+        </button>`)}</div>
+      </section>`}
       ${dialog}
     </div>`;
   }

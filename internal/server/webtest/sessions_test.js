@@ -1,8 +1,8 @@
 // sessions_test draws a machine's own sessions page in both forms and both languages from the sessions frames over the
 // team frames, and drives it in a fake document: the list with who runs and its filter, a conversation read from the
 // newest with the earlier page and a message's full text, the resume line copied, a machine sharing only its runs'
-// sessions and a file that changed under a page; the machines page's way in for who may read them. Its last case
-// hands the resume lines to the Go test, which types them with internal/shell.
+// sessions and a file that changed under a page; the machines page's and the phone home's ways in for who may read
+// them. Its last case hands the resume lines to the Go test, which types them with internal/shell.
 process.env.TZ = 'UTC';
 import {readFileSync} from 'node:fs';
 import {render} from '../web/vendor/preact.mjs';
@@ -38,7 +38,7 @@ function fakeHistory(url) {
 }
 
 // app is the signed-in page at url; copied keeps what the page put on the clipboard.
-function app(r, {url = '/?page=machines&sessions=mba', session = admin} = {}) {
+function app(r, {url = '/?page=machines&sessions=mba', session = admin, wire = r.wire} = {}) {
   const keys = createKeys({timers: r.clk});
   const toasts = createToasts({timers: r.clk});
   const commands = createCommands({wire: r.wire, newID: () => 'c1'});
@@ -46,7 +46,7 @@ function app(r, {url = '/?page=machines&sessions=mba', session = admin} = {}) {
   const router = createRouter({location, history});
   const copied = [];
   const http = {machineCreds: () => Promise.resolve([])};
-  const props = {store: r.store, commands, toasts, wire: r.wire, http, router, keys, nav: createNav({storage: noStore, width: 1440}),
+  const props = {store: r.store, commands, toasts, wire, http, router, keys, nav: createNav({storage: noStore, width: 1440}),
     prefs: createPrefs({storage: noStore, asked: 'zh'}), session, clock: () => NOW, fetchOutput: () => Promise.resolve({events: []}),
     storage: noStore, copy: text => { copied.push(text); return Promise.resolve(); }, onLogout() {}};
   return {...props, copied, vnode: () => html`<${KeysContext.Provider} value=${keys}><${App} ...${props} /><//>`};
@@ -180,6 +180,43 @@ test('the machines page opens a machine\'s sessions for its owner and admins onl
     const phone = await mount(app(r, {url: '/?page=machines'}).vnode(), 'phone');
     await click(phone.find('.card-row').find(x => x.textContent.includes('linux')));
     ok(buttonOf(phone, words.t('mach.sessions')), 'a phone opens them from a machine\'s facts');
+  } finally { form.value = 'desktop'; }
+});
+
+// homeRows are the phone home's machine rows: each machine's name and the word of its state.
+const homeRows = root => root.find('.home-sess-list').flatMap(l => l.find('button'))
+  .map(b => [b.one('.home-sess-name').textContent, b.one('.status-word').textContent]);
+
+for (const lang of ['zh', 'en']) {
+  test(`the phone home in ${lang} has a row per machine whose sessions the viewer opens, leading to them`, async () => {
+    const r = await team();
+    words.lang.value = lang;
+    try {
+      const a = app(r, {url: '/'});
+      const root = await mount(a.vnode(), 'phone');
+      styled(root, `home/${lang}`);
+      eq(root.one('.home-sess-head').textContent, words.t('home.sessions'), 'headed');
+      eq(homeRows(root), [['bo-laptop', words.t('status.online')], ['linux', words.t('status.online')], ['mba', words.t('status.online')],
+        ['win', words.t('status.offline')]], 'an admin\'s: every machine but the retired one, by name, with its state');
+      await click(root.one('.home-sess-list').find('button')[2]);
+      eq(a.router.route.value, {page: 'machines', sessions: 'mba'}, 'a row opens its sessions');
+      eq([root.find('.sess-phone').length, root.find('.home-sess').length], [1, 0], 'the sessions page in its place');
+      const b = await mount(app(r, {url: '/', session: bo}).vnode(), 'phone');
+      eq(homeRows(b), [['bo-laptop', words.t('status.online')]], 'Bo\'s: only Bo\'s own, not one shared with Bo');
+    } finally { form.value = 'desktop'; words.lang.value = 'zh'; }
+  });
+}
+
+test('the phone home has no machine rows for a viewer who reads none, nor without node.call; the desktop has none', async () => {
+  const r = await team();
+  try {
+    const carol = await mount(app(r, {url: '/', session: {id: 'u_c', name: 'Cy', role: 'member'}}).vnode(), 'phone');
+    eq([carol.find('.home-going').length, carol.find('.home-sess').length], [1, 0], 'a member owning no machine');
+    const wire = {...r.wire, has: m => m !== 'node.call' && r.wire.has(m)};
+    const old = await mount(app(r, {url: '/', wire}).vnode(), 'phone');
+    eq([old.find('.home-going').length, old.find('.home-sess').length], [1, 0], 'a server without node.call');
+    const desk = await mount(app(r, {url: '/'}).vnode(), 'desktop');
+    eq(desk.find('.home-sess').length, 0, 'the desktop');
   } finally { form.value = 'desktop'; }
 });
 

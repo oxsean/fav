@@ -63,6 +63,9 @@ export const mayShare = (session, m) => !m.retired && !!m.owner && (isAdmin(sess
 // mayRead: session may read m's own sessions (node.call: its owner or an admin).
 export const mayRead = (session, m) => isAdmin(session) || (!!m.owner && m.owner === session?.id);
 
+// opensSessions: the viewer may open m's own sessions page: the server forwards node.call and session may read them.
+export const opensSessions = (wire, session, m) => !!wire?.has?.('node.call') && mayRead(session, m);
+
 // queueOn is what waits for the machine: its queued runs, first queued first, each with its task and why it waits.
 export const queueOn = (state, name) => sel.openRuns(state).filter(x => x.run.state === 'queued' && x.run.machine === name);
 
