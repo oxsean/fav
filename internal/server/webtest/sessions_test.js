@@ -2,7 +2,7 @@
 // team frames, and drives it in a fake document: the list with who runs and its filter, a conversation read from the
 // newest with the earlier page and a message's full text, the resume line copied, a machine sharing only its runs'
 // sessions and a file that changed under a page; the machines page's and the phone home's ways in for who may read
-// them. Its last case hands the resume lines to the Go test, which types them with internal/shell.
+// them, and where its back goes. Its last case hands the resume lines to the Go test, which types them with internal/shell.
 process.env.TZ = 'UTC';
 import {readFileSync} from 'node:fs';
 import {render} from '../web/vendor/preact.mjs';
@@ -30,11 +30,20 @@ const admin = {id: 'u_a', name: 'Ann Lee', role: 'admin'};
 const bo = {id: 'u_b', name: 'Bo Lin', role: 'member'};
 const noStore = {getItem: () => null, setItem() {}};
 
+// fakeHistory keeps the page's entries; back() steps to the one before and tells popped, as the browser's popstate does.
 function fakeHistory(url) {
   const loc = {pathname: '/', search: '', hash: ''};
   const set = u => { const x = new URL(u, 'http://tend.test'); loc.pathname = x.pathname; loc.search = x.search; loc.hash = x.hash; };
+  const entries = [{state: null, url}];
+  const history = {
+    get state() { return entries.at(-1).state; },
+    get length() { return entries.length; },
+    pushState(state, _, u) { entries.push({state, url: u}); set(u); },
+    replaceState(state, _, u) { entries[entries.length - 1] = {state, url: u}; set(u); },
+    back() { entries.pop(); set(entries.at(-1).url); history.popped?.(); },
+  };
   set(url);
-  return {location: loc, history: {state: null, pushState: (_, __, u) => set(u), replaceState: (_, __, u) => set(u)}};
+  return {location: loc, history};
 }
 
 // app is the signed-in page at url; copied keeps what the page put on the clipboard.
@@ -44,12 +53,13 @@ function app(r, {url = '/?page=machines&sessions=mba', session = admin, wire = r
   const commands = createCommands({wire: r.wire, newID: () => 'c1'});
   const {location, history} = fakeHistory(url);
   const router = createRouter({location, history});
+  history.popped = () => router.popped();
   const copied = [];
   const http = {machineCreds: () => Promise.resolve([])};
   const props = {store: r.store, commands, toasts, wire, http, router, keys, nav: createNav({storage: noStore, width: 1440}),
     prefs: createPrefs({storage: noStore, asked: 'zh'}), session, clock: () => NOW, fetchOutput: () => Promise.resolve({events: []}),
     storage: noStore, copy: text => { copied.push(text); return Promise.resolve(); }, onLogout() {}};
-  return {...props, copied, vnode: () => html`<${KeysContext.Provider} value=${keys}><${App} ...${props} /><//>`};
+  return {...props, copied, history, vnode: () => html`<${KeysContext.Provider} value=${keys}><${App} ...${props} /><//>`};
 }
 
 async function mount(vnode, f) {
@@ -206,6 +216,46 @@ for (const lang of ['zh', 'en']) {
     } finally { form.value = 'desktop'; words.lang.value = 'zh'; }
   });
 }
+
+test('the sessions page goes back where it came from: a phone to its home, a desktop past the session it picked, an address to the machines', async () => {
+  const r = await team();
+  try {
+    let d, desk;
+    await r.srv.play('sessions', {
+      async mount() {
+        d = app(r, {url: '/?page=machines'});
+        desk = await mount(d.vnode(), 'desktop');
+        await click(desk.find('.mach-card').find(c => c.one('b').textContent === 'mba'));
+        await click(buttonOf(desk.one('.mach-aside'), words.t('mach.sessions')));
+      },
+      async listed() { await act(() => settle()); },
+      async open() { await click(desk.find('.tr')[1]); },
+      async opened() {
+        eq(d.router.route.value, {page: 'machines', sessions: 'mba', session: 'claude:c-fix'}, 'one picked');
+        eq(d.history.length, 2, 'picking a session on a desktop replaces the address');
+      },
+      async earlier() { await click(buttonOf(desk, words.t('sess.earlier'))); },
+      async older() {},
+      async full() { await click(buttonOf(desk, words.t('sess.full'))); },
+      async fulled() {
+        await click(buttonOf(desk, words.t('ui.back')));
+        eq(d.router.route.value, {page: 'machines'}, 'back past the session picked');
+      },
+    });
+    eq(r.errors, [], 'errors');
+    const a = app(r, {url: '/'});
+    const root = await mount(a.vnode(), 'phone');
+    await click(root.one('.home-sess-list').find('button')[2]);
+    eq(a.router.route.value, {page: 'machines', sessions: 'mba'}, 'the list');
+    await click(buttonOf(root, words.t('ui.back')));
+    eq(a.router.route.value, {page: 'home'}, 'its back goes to the home it came from');
+    eq(root.find('.home-sess').length, 1, 'the home again');
+    const e = app(r);
+    const typed = await mount(e.vnode(), 'desktop');
+    await click(buttonOf(typed, words.t('ui.back')));
+    eq(e.router.route.value, {page: 'machines'}, 'an address typed in goes back to the machines');
+  } finally { form.value = 'desktop'; }
+});
 
 test('the phone home has no machine rows for a viewer who reads none, nor without node.call; the desktop has none', async () => {
   const r = await team();

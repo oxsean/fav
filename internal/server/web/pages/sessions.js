@@ -20,7 +20,7 @@ import {code} from '../core/proto.js';
 import {apiText} from './words.js';
 
 register('sessions', {
-  'sess.title': ['%s 的会话', 'Sessions on %s'], 'sess.back': ['机器', 'Machines'], 'sess.refresh': ['刷新', 'Refresh'],
+  'sess.title': ['%s 的会话', 'Sessions on %s'], 'sess.refresh': ['刷新', 'Refresh'],
   'sess.filter': ['筛选会话', 'Filter the sessions'], 'sess.filterHint': ['标题、目录、agent、分支', 'Title, directory, agent, branch'],
   'sess.summary': ['%d 个会话 · %d 个在跑', '%d {session|sessions} · %d running'], 'sess.shown': ['显示 %d 个', '%d shown'],
   'sess.loading': ['正在读…', 'Reading…'], 'sess.none': ['这台机器上没有可看的会话', 'No sessions to read on this machine'],
@@ -160,7 +160,7 @@ export function Sessions({store, wire, router, toasts, machine, open = '', may =
   const shown = rows ? ss.matches(rows, q) : [];
   const row = rows?.find(r => r.key === open);
   const go = (key, replace) => router.go({page: 'machines', sessions: machine, ...(key ? {session: key} : {})}, {replace});
-  const back = () => router.go({page: 'machines'});
+  const back = () => router.back({page: 'machines'});
   const share = m?.share_sessions === 'runs' || m?.share_sessions === 'none';
   const running = (rows || []).filter(r => r.live).length;
 
@@ -174,7 +174,7 @@ export function Sessions({store, wire, router, toasts, machine, open = '', may =
   ];
   const head = html`<div class=${cx('sess-head', phone && 'sess-head-phone')}>
     <span class="sess-head-row">
-      <${Button} kind="quiet" icon="back" onClick=${back}>${t('sess.back')}<//>
+      <${Button} kind="quiet" icon="back" onClick=${back}>${t('ui.back')}<//>
       <h1 class="tasks-title ell">${f('sess.title', machine)}</h1>
       ${rows && html`<span class="t-muted">${f('sess.summary', rows.length, running)}${q && rows.length !== shown.length ? ' · ' + f('sess.shown', shown.length) : ''}</span>`}
       <span class="sess-head-acts"><${Button} disabled=${may && !rows && !error} onClick=${() => setRev(n => n + 1)}>${t('sess.refresh')}<//></span>
@@ -186,7 +186,7 @@ export function Sessions({store, wire, router, toasts, machine, open = '', may =
     : error ? html`<p class="sess-note t-failed">${why(w, machine, error)}</p>`
     : !rows ? html`<p class="empty">${t('sess.loading')}</p>`
     : html`<${Table} label=${f('sess.title', machine)} columns=${columns} rows=${shown} rowKey=${r => r.key} selected=${row?.key || ''}
-        onSelect=${phone ? null : k => go(k, !!open)} onOpen=${k => go(k, !phone && !!open)} active=${!(phone && row)}
+        onSelect=${phone ? null : k => go(k, true)} onOpen=${k => go(k, !phone)} active=${!(phone && row)}
         empty=${rows.length ? t('sess.noMatch') : t('sess.none')} />`;
   const conv = row && html`<${Conversation} key=${row.key} wire=${wire} machine=${machine} row=${row} os=${m?.os || ''} copy=${copy} toasts=${toasts} now=${at} />`;
 
