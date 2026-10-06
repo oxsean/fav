@@ -83,9 +83,10 @@ export function useActions(level, impls, options) {
 const arrows = {ArrowUp: '↑', ArrowDown: '↓', ArrowLeft: '←', ArrowRight: '→'};
 
 // keyParts spells a key as its caps show it: "Mod+K" is ⌘K on a Mac and Ctrl+K elsewhere, "Shift+ArrowDown" Shift+↓;
-// "g h" is two caps.
+// "g h" is two caps; Mod+Backspace is ⌘⌫ on a Mac.
 export function keyParts(key, onMac = mac.peek()) {
-  return key.split(' ').map(k => k.replace(/^Mod\+/, onMac ? '⌘' : 'Ctrl+').replace(/Arrow(Up|Down|Left|Right)$/, a => arrows[a]));
+  return key.split(' ').map(k => k.replace(/^Mod\+/, onMac ? '⌘' : 'Ctrl+').replace(/Arrow(Up|Down|Left|Right)$/, a => arrows[a])
+    .replace(/^⌘Backspace$/, '⌘⌫'));
 }
 
 export function useMac() {

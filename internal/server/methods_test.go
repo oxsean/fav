@@ -18,7 +18,7 @@ var comingMethods = map[string]string{}
 
 // leavingMethods are methods the Web UI still calls after the coordinator dropped them (it asks has() first), each with
 // the card that removes the call; that card removes its line.
-var leavingMethods = map[string]string{"sessions.list": "B6-4"}
+var leavingMethods = map[string]string{}
 
 var methodCall = regexp.MustCompile(`\b(?:call|watch|has|send)\(\s*'([a-z_]+(?:\.[a-z_]+)+)'`)
 

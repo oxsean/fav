@@ -2,8 +2,9 @@
 // files by method, a fetch that answers the sign-in and device calls, and the clock of the home frames. ?frames=tasks
 // plays the task pages' frames instead of the home's, ?frames=output a conversation's and its changes (open
 // ?page=tasks&task=t1), ?frames=carry that conversation carried on into a third run, ?frames=gone with its question
-// answered by someone else first, ?frames=team the machines, team and mba's sessions pages' data (?as=admin signs in as its admin),
-// ?frames=agents the agent page's (open ?page=agents).
+// answered by someone else first, ?frames=team the machines and team pages' data (?as=admin signs in as its admin),
+// ?frames=agents the agent page's (open ?page=agents). The sessions page's calls go to tools/webpreview's fake
+// (POST fake/call), which answers as Ann (?as=admin) or Bo from made-up sessions: open ?frames=team&page=sessions.
 // /api/* answers come from webtest/api.json by method and path; a write it has no answer for succeeds empty.
 import {boot} from '../../web/pages/boot.js';
 import {sets, answers, socket} from './answer.js';
@@ -38,4 +39,8 @@ const text = async name => (await fetch(`webtest/frames/${name}.jsonl`)).text();
 const table = await answers(sets[query.get('frames')] || sets.home, text);
 const api = await (await fetch('webtest/api.json')).json();
 const as = query.get('as');
-boot({open: () => socket(table), fetch: fakeFetch(as === 'signedout' ? null : people[as] || people.member, api), clock: () => NOW});
+// ⚠️ The calls tools/webpreview answers: the sessions page's.
+const faked = new Set(['sessions.query', 'sessions.grep', 'people.names']), node = new Set(['put', 'trash', 'restore', 'messages', 'hits', 'text']);
+const asked = f => (faked.has(f.method) || f.method === 'node.call' && node.has(f.params?.method) ? fetch(`fake/call?as=${as === 'admin' ? 'admin' : 'member'}`, {method: 'POST', body: JSON.stringify({method: f.method, params: f.params})})
+  .then(r => r.json()) : null);
+boot({open: () => socket(table, asked), fetch: fakeFetch(as === 'signedout' ? null : people[as] || people.member, api), clock: () => NOW});

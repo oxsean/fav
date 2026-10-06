@@ -93,13 +93,13 @@ func TestTheSessionsQueryFrameIsCurrent(t *testing.T) {
 		"one running, a project), linux bob's shared with her (read only), old a tend without query (read only, no task made), slow " +
 		"too late, gone offline; the first page, the names of the machines' owners, the next page"})
 	var first SessionsPage
-	call("mount", "listed", MSessionsQuery, SessionsQuery{Limit: 3}, &first)
+	call("mount", "listed", MSessionsQuery, SessionsQuery{All: true, Limit: 3}, &first)
 	if first.Next == nil || len(first.Rows) != 3 {
 		t.Fatalf("the first page: %+v", first)
 	}
 	call("names", "named", MPeopleNames, PeopleParams{IDs: []string{ann.User, bob.User}}, new(People))
 	var next SessionsPage
-	call("more", "paged", MSessionsQuery, SessionsQuery{Limit: 3, After: first.Next}, &next)
+	call("more", "paged", MSessionsQuery, SessionsQuery{All: true, Limit: 3, After: first.Next}, &next)
 	if next.Next != nil || len(next.Rows) != 3 {
 		t.Fatalf("the next page: %+v", next)
 	}

@@ -421,8 +421,9 @@ test('the palette finds actions by either name and the page\'s own things; ? lis
   await key(a.keys, 'g'); await key(a.keys, 'h');
   eq(a.router.route.value.page, 'home', 'g h');
   await key(a.keys, '?', {shiftKey: true});
-  eq(root.find('.help-group').length, 6, 'the groups');
+  eq(root.find('.help-group').length, 7, 'the groups');
   ok(root.one('.help').textContent.includes(words.t('act.unfold')), 'even what no page binds yet');
+  ok(root.one('.help').textContent.includes(words.t('act.trash')), 'delete, by its key');
   await key(a.keys, 'Escape');
   await key(a.keys, 'T', {shiftKey: true});
   eq(a.prefs.theme.value, 'light', 'Shift+T');

@@ -5,10 +5,12 @@ import {register} from './i18n.js';
 
 // ⚠️ Letters act at once and can be taken back; Shift+letter is a confirmed or whole-page change; "g x" moves to a
 // page; starting or stopping an agent only opens its confirmation. level is the key scope the action is bound in;
-// bar puts it in the key bar; aliases are further keys that do the same and are not shown.
+// bar puts it in the key bar; aliases are further keys that do the same and are not shown. An action without keys is
+// found in the palette alone (starting a task from a session; hits, whose n and N are taken).
 export const actions = [
   {id: 'home', keys: ['g h'], level: 'global', group: 'go'},
   {id: 'tasks', keys: ['g t'], level: 'global', group: 'go'},
+  {id: 'sessions', keys: ['g c'], level: 'global', group: 'go'},
   {id: 'board', keys: ['g b'], level: 'global', group: 'go'},
   {id: 'runs', keys: ['g r'], level: 'global', group: 'go'},
   {id: 'machines', keys: ['g m'], level: 'global', group: 'go'},
@@ -30,6 +32,17 @@ export const actions = [
   {id: 'stop', keys: ['x'], level: 'page', group: 'work', bar: true},
   {id: 'done', keys: ['Shift+D'], level: 'page', group: 'work', bar: true},
   {id: 'pause', keys: ['p'], level: 'page', group: 'work'},
+  {id: 'favorite', keys: ['f'], level: 'page', group: 'sessions', bar: true},
+  {id: 'archive', keys: ['a'], level: 'page', group: 'sessions', bar: true},
+  {id: 'msgSearch', keys: ['>'], level: 'page', group: 'sessions', bar: true},
+  {id: 'filters', keys: [';'], level: 'page', group: 'sessions', bar: true},
+  {id: 'machine', keys: ['m'], level: 'page', group: 'sessions'},
+  {id: 'tags', keys: ['t'], level: 'page', group: 'sessions'},
+  {id: 'state', keys: ['s'], level: 'page', group: 'sessions'},
+  {id: 'trash', keys: ['Mod+Backspace'], aliases: ['Delete'], level: 'page', group: 'sessions'},
+  {id: 'makeTask', keys: [], level: 'page', group: 'sessions'},
+  {id: 'hitPrev', keys: [], level: 'page', group: 'sessions'},
+  {id: 'hitNext', keys: [], level: 'page', group: 'sessions'},
   {id: 'next', keys: ['j'], aliases: ['ArrowDown'], level: 'list', group: 'list', bar: true, hint: 'act.move', palette: false},
   {id: 'prev', keys: ['k'], aliases: ['ArrowUp'], level: 'list', group: 'list', bar: true, hint: 'act.move', palette: false},
   {id: 'pick', keys: ['1', '2', '3', '4', '5', '6', '7', '8', '9'], level: 'list', group: 'list', bar: true, palette: false},
@@ -44,25 +57,29 @@ export const actions = [
   {id: 'unpick', keys: ['Esc'], level: 'list', group: 'changes', palette: false},
 ];
 
-export const groups = ['go', 'general', 'work', 'list', 'output', 'changes'];
+export const groups = ['go', 'general', 'work', 'sessions', 'list', 'output', 'changes'];
 
 export const byID = Object.fromEntries(actions.map(a => [a.id, a]));
 
 register('actions', {
-  'act.home': ['去首页', 'Go home'], 'act.tasks': ['去任务列表', 'Go to the task list'], 'act.board': ['去看板', 'Go to the board'],
+  'act.home': ['去首页', 'Go home'], 'act.tasks': ['去任务列表', 'Go to the task list'], 'act.sessions': ['去会话', 'Go to sessions'], 'act.board': ['去看板', 'Go to the board'],
   'act.runs': ['去运行', 'Go to the runs'], 'act.machines': ['去机器', 'Go to machines'], 'act.agents': ['去 Agent', 'Go to agents'],
   'act.team': ['去团队', 'Go to the team'], 'act.me': ['去「我」', 'Go to your page'],
   'act.palette': ['全部命令', 'All commands'], 'act.help': ['快捷键', 'Keyboard shortcuts'], 'act.search': ['搜索任务', 'Search tasks'],
   'act.new': ['新建', 'New task'], 'act.nav': ['收起或展开菜单', 'Collapse or expand the menu'], 'act.undo': ['撤销', 'Undo'],
   'act.theme': ['切换主题', 'Switch theme'], 'act.lang': ['切换语言', 'Switch language'], 'act.density': ['切换密度', 'Switch density'],
   'act.view': ['切换视图', 'Switch view'], 'act.dispatch': ['派发', 'Dispatch'], 'act.edit': ['编辑', 'Edit'], 'act.stop': ['停止', 'Stop'],
-  'act.done': ['完成', 'Mark done'], 'act.pause': ['暂停或恢复派发', 'Pause or resume dispatch'], 'act.next': ['下一条', 'Next'], 'act.prev': ['上一条', 'Previous'], 'act.move': ['上下一条', 'Next / previous'],
+  'act.done': ['完成', 'Mark done'], 'act.pause': ['暂停或恢复派发', 'Pause or resume dispatch'],
+  'act.favorite': ['收藏 / 取消收藏', 'Favorite / unfavorite'], 'act.archive': ['归档 / 取消归档', 'Archive / unarchive'],
+  'act.msgSearch': ['搜消息', 'Search messages'], 'act.filters': ['筛选行', 'Filters'], 'act.machine': ['选机器', 'Pick a machine'],
+  'act.tags': ['选标签', 'Pick a tag'], 'act.state': ['换状态', 'Next state'], 'act.trash': ['删除 / 还原', 'Delete / restore'], 'act.makeTask': ['把这个会话建成任务', 'Make a task from this session'],
+  'act.hitPrev': ['上一处命中', 'Previous hit'], 'act.hitNext': ['下一处命中', 'Next hit'], 'act.next': ['下一条', 'Next'], 'act.prev': ['上一条', 'Previous'], 'act.move': ['上下一条', 'Next / previous'],
   'act.pick': ['选择', 'Pick'], 'act.toggle': ['展开', 'Expand'], 'act.open': ['打开', 'Open'],
   'act.end': ['跳到最新', 'Jump to the latest'], 'act.start': ['跳到开头', 'Jump to the start'], 'act.unfold': ['全部展开', 'Unfold all'],
   'act.find': ['在输出里查找', 'Find in the output'],
   'act.reachDown': ['往下多选一行', 'Pick one more line below'], 'act.reachUp': ['往上多选一行', 'Pick one more line above'],
   'act.reach': ['往上下多选一行', 'Pick one more line above / below'], 'act.unpick': ['取消选中的行', 'Let go of the picked lines'],
-  'group.go': ['去往', 'Go to'], 'group.general': ['常用', 'General'], 'group.work': ['任务', 'Tasks'], 'group.list': ['列表', 'Lists'],
+  'group.go': ['去往', 'Go to'], 'group.general': ['常用', 'General'], 'group.work': ['任务', 'Tasks'], 'group.sessions': ['会话', 'Sessions'], 'group.list': ['列表', 'Lists'],
   'group.output': ['输出', 'Output'], 'group.changes': ['改动', 'Changes'],
 });
 
@@ -74,6 +91,7 @@ export function bindingsFor(impls) {
     if (!a) throw new Error(`actions: no action ${id}`);
     if (!impl) return [];
     const b = key => ({key, id, label: impl.label || a.hint || 'act.' + id, run: e => impl.run(key, e), when: impl.when});
+    if (!a.keys.length) return [{...b(''), palette: true}];
     return [...a.keys.map(k => ({...b(k), bar: !!a.bar, palette: a.palette !== false})), ...(a.aliases || []).map(k => ({...b(k), alias: true}))];
   });
 }
@@ -82,7 +100,7 @@ export function bindingsFor(impls) {
 export function runnable(bindings) {
   const seen = new Set();
   return bindings.filter(b => b.id && b.palette && !seen.has(b.id) && seen.add(b.id))
-    .map(b => ({id: b.id, key: byID[b.id].keys[0], label: 'act.' + b.id, run: b.run}));
+    .map(b => ({id: b.id, key: byID[b.id].keys[0] || '', label: 'act.' + b.id, run: b.run}));
 }
 
 // rank orders items [{words: [...], …}] for query q: a word that starts with it first, then one that holds it; no

@@ -593,10 +593,15 @@ with a token; the browser session lasts 30 days, and signing out or revoking it 
 runs; creates, edits and dispatches tasks; previews a dispatch; follows a run's output and conversation; shows why a run
 ended or what it asks and takes a reply; stops or abandons runs; marks tasks done, reopens or cancels them; shows task
 trees and starts them; lists what needs you; edits and shares agent definitions and project settings; shows the
-machines (state, slots, agent CLIs, queue and the day's runs), who owns them and whom they are shared with; lets a
-machine's owner, and whom the owner lets read them (admins too only when named), read its own Claude / Codex sessions (filter, page back through a conversation, copy the
-resume command; a node shares every session only with `"share_sessions": "all"` under `node`); adds a
-machine and shows its node token once, and moves or revokes a node token; manages projects and members; makes personal tokens for the CLI
+machines (state, slots, agent CLIs, queue and the day's runs), who owns them and whom they are shared with; lists on
+its **Sessions** page (`g c`) the Claude / Codex sessions of every machine you may read (a machine's owner, and whom the
+owner lets read them; admins too only when named) in one list, filtered with the TUI's query syntax (`#tag`,
+`project:`, `host:`, `status:`, `last:7d` …) or the chips under it, where on your own machines you favorite (`f`), mark
+done (`Shift+D`), archive (`a`) or edit (`e`) a session, each with undo, make it a task, or delete it (`Mod+Backspace`,
+confirmed; it goes into that machine's trash, undo restores it, and the Trash state lists and restores what was deleted;
+emptying the trash stays `tend trash --purge`), while a machine shared with you stays read only; a query starting with `>` searches the messages of every machine on Enter and opens a session at
+its hits; a conversation pages back and shows its resume command (a node shares every session only with
+`"share_sessions": "all"` under `node`); adds a machine and shows its node token once, and moves or revokes a node token; manages projects and members; makes personal tokens for the CLI
 and TUI on the Account page, or confirms one from `tend login` on a terminal-authorization page (the code, the client's
 name, source address and time, Allow or Deny); and, for admins, users, admission rules, invitations and the audit log. It
 follows the
@@ -605,7 +610,7 @@ right there to answer, allow or deny, then what runs and on which machines, each
 board, 7 days of tokens and cost, and the latest sessions. Tasks show as a list or as a board by where they stand, filtered by status,
 machine, project, stage and run; the view, filters, selected task and tab are in the address, so a reload or a shared
 link shows the same thing. `⌘K` (`Ctrl+K`) opens a command palette that finds any action or task by its Chinese
-or English name; every action also has a key (`?` lists them: `n` new task, `g h` home, `g b` board, `d` dispatch, `p` pause or resume a task tree, …).
+or English name; every action also has a key (`?` lists them: `n` new task, `g h` home, `g c` sessions, `g b` board, `d` dispatch, `p` pause or resume a task tree, …).
 **Needs you** says why each item is yours (you own it, accept it or dispatched it), filters by kind and role, and
 answers in place: `1` allows, `2` denies with an optional reason, a digit picks an option, or give your own words.
 **Runs** (`g r`) lists every run by state and machine with a preview of its latest output. A task's detail shows its

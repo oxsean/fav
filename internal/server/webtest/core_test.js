@@ -13,8 +13,8 @@ test('keyName spells presses as the table does', () => {
     keyName(press('n')), keyName(press('D', {shiftKey: true})), keyName(press('k', {metaKey: true})), keyName(press('k', {ctrlKey: true})),
     keyName(press('?', {shiftKey: true})), keyName(press('Escape')), keyName(press(' ')), keyName(press('Enter', {metaKey: true})),
     keyName(press('Tab', {shiftKey: true})), keyName(press('x', {altKey: true})), keyName(press('Shift')),
-    keyName(press('；')), keyName(press('，')), keyName(press('？')), keyName(press('、')),
-  ], ['n', 'Shift+D', 'Mod+K', 'Mod+K', '?', 'Esc', 'Space', 'Mod+Enter', 'Shift+Tab', '', '', ';', ',', '?', '/'], 'names');
+    keyName(press('；')), keyName(press('，')), keyName(press('？')), keyName(press('、')), keyName(press('>', {shiftKey: true})), keyName(press('》')),
+  ], ['n', 'Shift+D', 'Mod+K', 'Mod+K', '?', 'Esc', 'Space', 'Mod+Enter', 'Shift+Tab', '', '', ';', ',', '?', '/', '>', '>'], 'names');
 });
 
 test('the first scope with the key runs it, modal before page before global', () => {
@@ -84,6 +84,14 @@ test('the router maps addresses to routes and back', () => {
     ['?page=runs', '', {page: 'runs'}, '?page=runs'],
     ['?page=runs&run=r2', '', {page: 'runs', run: 'r2'}, '?page=runs&run=r2'],
     ['?page=machines', '', {page: 'machines'}, '?page=machines'],
+    ['?page=sessions', '', {page: 'sessions'}, '?page=sessions'],
+    ['?page=sessions&q=%23docs+host%3Amba&fav=1&sort=turns&open=mba%2Fclaude%3Ac1', '', {page: 'sessions', q: '#docs host:mba', fav: true, sort: 'turns', open: 'mba/claude:c1'},
+      '?page=sessions&q=%23docs+host%3Amba&fav=1&sort=turns&open=mba%2Fclaude%3Ac1'],
+    ['?page=sessions&sort=active&fav=0', '', {page: 'sessions'}, '?page=sessions'],
+    ['?page=sessions&sort=nope', '', {page: 'sessions'}, '?page=sessions'],
+    ['?page=machines&sessions=mba', '', {page: 'sessions', q: 'host:mba'}, '?page=sessions&q=host%3Amba'],
+    ['?page=machines&sessions=mba&project=none&session=claude%3Ac1&fav=1', '', {page: 'sessions', q: 'host:mba project:none', fav: true, open: 'mba/claude:c1'},
+      '?page=sessions&q=host%3Amba+project%3Anone&fav=1&open=mba%2Fclaude%3Ac1'],
     ['?page=nope', '', {page: 'home'}, '/'],
     ['?page=inbox', '', {page: 'home'}, '/'],
     ['?page=settings', '', {page: 'me'}, '?page=me'],

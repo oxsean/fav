@@ -11,12 +11,13 @@ export function Kbd({k}) {
   return keyParts(k, onMac).map((p, i) => html`${i > 0 ? ' ' : ''}<kbd>${p}</kbd>`);
 }
 
-// Button: kind is primary, quiet or danger; on marks a pressed toggle; keyName shows its key; icon alone needs a label.
-export function Button({kind = '', on = false, keyName = '', icon = '', label = '', children, onClick, disabled = false, title, type = 'button', wide = false}) {
+// Button: kind is primary, quiet or danger; on marks a pressed toggle; keyName shows its key; icon alone needs a label;
+// first takes the focus when its dialog opens.
+export function Button({kind = '', on = false, keyName = '', icon = '', label = '', children, onClick, disabled = false, title, type = 'button', wide = false, first = false}) {
   const text = children ?? (icon ? '' : label);
   const only = icon && (text === '' || text === undefined || text === null);
   return html`<button type=${type} class=${cx('btn', kind, on && 'on', wide && 'wide', only && 'icon-only')} onClick=${onClick}
-    disabled=${disabled} aria-pressed=${on ? 'true' : undefined} aria-label=${only ? label || title : undefined} title=${title ?? (only ? label : undefined)}>
+    disabled=${disabled} data-first=${first ? '' : undefined} aria-pressed=${on ? 'true' : undefined} aria-label=${only ? label || title : undefined} title=${title ?? (only ? label : undefined)}>
     ${icon && html`<${Icon} name=${icon} />`}${!only && text}<${Kbd} k=${keyName} />
   </button>`;
 }

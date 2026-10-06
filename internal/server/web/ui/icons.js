@@ -24,10 +24,19 @@ const paths = {
   people: 'M9 11a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7zM2 20a7 7 0 0 1 14 0M16 4.5a3.5 3.5 0 0 1 0 6.5M18 13.5a7 7 0 0 1 4 6.5',
   eye: 'M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12zm10 3a3 3 0 1 0 0-6 3 3 0 0 0 0 6z',
   star: 'm12 3.5 2.6 5.3 5.9.9-4.3 4.1 1 5.8L12 16.8l-5.2 2.8 1-5.8-4.3-4.1 5.9-.9z',
+  sessions: 'M4 5h16v10H8l-4 4zM8 9h8M8 12h5',
+  help: 'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM9.5 9a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .9-1 1.7M12 17h.01',
+  more: 'M5 12a1.5 1.5 0 1 0 3 0 1.5 1.5 0 1 0-3 0M10.5 12a1.5 1.5 0 1 0 3 0 1.5 1.5 0 1 0-3 0M16 12a1.5 1.5 0 1 0 3 0 1.5 1.5 0 1 0-3 0',
+  edit: 'M4 20h4L19 9l-4-4L4 16zM14 6l4 4',
+  archive: 'M3 5h18v4H3zM5 9v10h14V9M10 13h4',
+  trash: 'M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 11v6M14 11v6',
+  check: 'm5 12 5 5 9-10',
+  filter: 'M4 5h16l-6 7v6l-4 2v-8z',
 };
 
 export const iconNames = Object.keys(paths);
 
-export function Icon({name, size = 16}) {
-  return html`<svg class="icon" viewBox="0 0 24 24" width=${size} height=${size} aria-hidden="true" focusable="false"><path d=${paths[name]}></path></svg>`;
+// Icon: fill fills the shape where a rule asks (a favorite's star).
+export function Icon({name, size = 16, fill = false}) {
+  return html`<svg class=${fill ? 'icon icon-fill' : 'icon'} viewBox="0 0 24 24" width=${size} height=${size} aria-hidden="true" focusable="false"><path d=${paths[name]}></path></svg>`;
 }

@@ -1,13 +1,17 @@
-// sessions_test draws a machine's own sessions page in both forms and both languages from the sessions frames over the
-// team frames, and drives it in a fake document: the list with who runs and its filter, a conversation read from the
-// newest with the earlier page and a message's full text, the resume line copied, favorites, tags, summaries and
-// archived sessions in the list and over a conversation, the favorites-only switch kept in the address, a machine
-// sharing only its runs' sessions and a file that changed under a page, a machine shared with the viewer read only and
-// taken back while read; the machines page's and the phone home's ways in for who may read
-// them, and where its back goes. Its last case hands the resume lines to the Go test, which types them with internal/shell.
+// sessions_test draws the sessions page (?page=sessions) in both forms and both languages from the sessions frames over
+// the team frames, and drives it in a fake document: the page the coordinator's own frame answers (machines that did
+// not answer, shared and outdated ones read only, owners named once people.names answers, the next page near the
+// end); the viewer's own sessions changed from keys and from buttons (at once, then as the machine answers, undo, a row
+// that no longer fits staying dimmed, an edit that met a change made elsewhere), a shared machine's conversation read
+// only, a records_rev push reading the list again, a task made from a session, a query's tokens drawn as chips; message
+// search with its marks, a hit opened at its place and the way between hits; the side menu's, the machines page's and
+// the phone home's ways in, old addresses, and where back goes; delete (only where the machine has a trash, confirmed,
+// undone by restore, refused while running) and the trash view (dated by deletion, restored without asking).
+// core/sessions.js is tested on its own. Its last case hands the resume lines to the Go test, which types them with
+// internal/shell.
 process.env.TZ = 'UTC';
 import {readFileSync} from 'node:fs';
-import {render} from '../web/vendor/preact.mjs';
+import {render, options} from '../web/vendor/preact.mjs';
 import {signal} from '../web/vendor/signals-core.mjs';
 import {act} from './vendor/test-utils.mjs';
 import {createKeys} from '../web/core/keys.js';
@@ -17,29 +21,28 @@ import {createToasts} from '../web/core/toasts.js';
 import {createCommands} from '../web/core/commands.js';
 import {createPrefs} from '../web/core/prefs.js';
 import {words} from '../web/core/i18n.js';
+import {duration} from '../web/core/format.js';
 import {html, KeysContext} from '../web/ui/base.js';
 import {App} from '../web/pages/app.js';
-import {ROW} from '../web/pages/sessions.js';
-import {windowOf, VIRTUAL_ABOVE} from '../web/ui/table.js';
 import * as ss from '../web/core/sessions.js';
-import {parse, format} from '../web/core/router.js';
+import {when} from '../web/pages/sessionview.js';
 import {install} from './dom.js';
 import {settle} from './fake.js';
 import {NOW, team} from './rig.js';
-import {test, eq, ok, run, until} from './check.js';
+import {test, eq, ok, run} from './check.js';
+
+// ⚠️ Effects that follow an answer or a push run after the next paint, which Preact waits for up to 35 ms of real time
+// outside act; the frames go on without real time passing, so here they run once the render the answer caused is done.
+options.requestAnimationFrame = fn => queueMicrotask(fn);
 
 const css = ['base.css', 'components.css', 'pages.css'].map(f => readFileSync(new URL(`../web/css/${f}`, import.meta.url), 'utf8')).join('\n');
 const cssClasses = new Set([...css.matchAll(/\.([a-zA-Z][\w-]*)/g)].map(m => m[1]));
-const wordsLeft = s => s.match(/\b(sess|mach|secret|api|app|ui|status|home)\.[a-zA-Z_]+\b/g);
+const wordsLeft = s => s.match(/\b(sess|mach|secret|api|app|ui|status|home|act|nav|picker)\.[a-zA-Z_]+\b/g);
 
 const admin = {id: 'u_a', name: 'Ann Lee', role: 'admin'};
-const bo = {id: 'u_b', name: 'Bo Lin', role: 'member'};
+const ann = {id: 'u_ann', name: 'ann', role: 'member'};
 const noStore = {getItem: () => null, setItem() {}};
-const names = signal({u_a: 'Ann Lee', u_b: 'Bo Lin'});
-
-// seenBy gives r's machines as the coordinator tells who of them (team-state is the admin's): no machine's sessions
-// are shared there, so each reads their own alone.
-const seenBy = (r, who) => { r.store.machines.value = r.store.machines.value.map(m => ({...m, sessions: m.owner === who.id})); };
+const known = () => signal({u_a: 'Ann Lee', u_b: 'Bo Lin'});
 
 // fakeHistory keeps the page's entries; back() steps to the one before and tells popped, as the browser's popstate does.
 function fakeHistory(url) {
@@ -57,8 +60,9 @@ function fakeHistory(url) {
   return {location: loc, history};
 }
 
-// app is the signed-in page at url; copied keeps what the page put on the clipboard.
-function app(r, {url = '/?page=machines&sessions=mba', session = admin, wire = r.wire} = {}) {
+// app is the signed-in page at url; rows is a page of the sessions list; copied keeps what the page put on the
+// clipboard.
+function app(r, {url = '/?page=sessions', session = admin, names = known(), rows} = {}) {
   const keys = createKeys({timers: r.clk});
   const toasts = createToasts({timers: r.clk});
   const commands = createCommands({wire: r.wire, newID: () => 'c1'});
@@ -67,9 +71,9 @@ function app(r, {url = '/?page=machines&sessions=mba', session = admin, wire = r
   history.popped = () => router.popped();
   const copied = [];
   const http = {machineCreds: () => Promise.resolve([])};
-  const props = {store: r.store, commands, toasts, wire, http, router, keys, nav: createNav({storage: noStore, width: 1440}),
+  const props = {store: r.store, commands, toasts, wire: r.wire, http, router, keys, nav: createNav({storage: noStore, width: 1440}),
     prefs: createPrefs({storage: noStore, asked: 'zh'}), session, names, clock: () => NOW, fetchOutput: () => Promise.resolve({events: []}),
-    storage: noStore, copy: text => { copied.push(text); return Promise.resolve(); }, onLogout() {}};
+    storage: noStore, copy: text => { copied.push(text); return Promise.resolve(); }, onLogout() {}, timers: r.clk, sessionRows: rows};
   return {...props, copied, history, vnode: () => html`<${KeysContext.Provider} value=${keys}><${App} ...${props} /><//>`};
 }
 
@@ -81,6 +85,7 @@ async function mount(vnode, f) {
 }
 const click = el => act(() => el.dispatch('click'));
 const type = (el, text) => act(() => { el.value = text; el.dispatch('input'); });
+const key = (a, k, more = {}) => act(() => { a.keys.handle({key: k, target: globalThis.document?.body, preventDefault() {}, ...more}); });
 const labelOf = b => b.textContent.slice(0, b.textContent.length - b.find('kbd').map(k => k.textContent).join('').length).trim();
 const buttonOf = (root, label) => {
   const got = root.find('button').filter(b => labelOf(b) === label);
@@ -92,501 +97,625 @@ const styled = (root, what) => {
   eq([...classes].filter(c => !cssClasses.has(c)), [], `${what}: classes without a rule`);
   eq(wordsLeft(root.textContent), null, `${what}: words not found`);
 };
-// rows are the titles listed: a desktop's table rows or a phone's cards.
-const rowsOf = root => root.find('.tr').map(x => x.find('.td')[1].find('.ell')[0].textContent)
-  .concat(root.find('.card-row').map(x => x.one('.card-primary').find('.ell')[0].textContent));
-// labels are the task labels listed, by the title of their row.
-const labelsOf = root => Object.fromEntries([...root.find('.tr').map(x => x.find('.td')[1]), ...root.find('.card-row').map(x => x.one('.card-primary'))]
-  .filter(c => c.find('.sess-task').length).map(c => [c.find('.ell')[0].textContent, c.one('.sess-task').textContent]));
+const classesOf = el => el.className.split(' ');
+// valueOf is an input's value: Preact writes it as an attribute until something has set the property.
+const valueOf = el => ('value' in el ? el.value : el.getAttribute('value'));
+// rows are what is listed: a desktop's table rows or a phone's cards; titles their titles.
+const rowsOf = root => [...root.find('.tr'), ...root.find('.card-row')];
+const titlesOf = root => root.find('.sess-titled').map(x => x.find('.ell')[0].textContent);
+const starredOf = root => rowsOf(root).map(x => x.find('.sess-star').length === 1);
+const linesOf = root => root.find('.sv-mline').map(l => l.one('.msg').textContent);
 const msgsOf = root => root.find('.sess-msg').map(m => m.one('.sess-text').textContent);
-// marksOf is each listed row by its title: starred, its tag chips as drawn (+N for the rest), its summary, dimmed.
-const marksOf = root => Object.fromEntries([...root.find('.tr').map(x => [x, x.find('.td')[1]]), ...root.find('.card-row').map(x => [x, x])]
-  .map(([row, c]) => [c.find('.ell')[0].textContent, {star: c.find('.sess-star').length === 1,
-    tags: c.find('.sess-tags').flatMap(t => t.find('.chip')).map(x => x.textContent),
-    sum: c.find('.sess-sum').map(x => x.textContent).join(''), archived: row.className.split(' ').includes('sess-archived')}]));
-const BACKUP = 'Investigate why the nightly backup on old-box skips the uploads folder when the disk is nearly full';
-const favSwitch = root => root.one('.sess-tools').find('button').at(-1);
-// projectsOf is each listed row's project as drawn, by its title.
-const projectsOf = root => Object.fromEntries([...root.find('.tr').map(x => x.find('.td')[1]), ...root.find('.card-row').map(x => x.one('.card-primary'))]
-  .map(c => [c.find('.ell')[0].textContent, c.parentNode.find('.sess-proj').map(x => x.textContent).join('')]));
-// pickProject opens the project picker and picks the option labelled label.
-const pickProject = async (root, label) => {
-  await click(root.one('.sess-pfield').one('.picker-btn'));
-  await click(root.find('[role=option]').find(o => o.one('.pk-label').textContent === label));
-};
-const projectOptions = root => root.find('[role=option]').map(o => [o.one('.pk-label').textContent, o.find('.pk-sub').map(x => x.textContent).join(''), o.find('.pk-note').map(x => x.textContent).join('')]);
+const toastsOf = root => root.find('.toast-text').map(x => x.textContent);
+const markedOf = el => el.find('mark').map(x => x.textContent);
+// overOf is the topmost of what covers the page: a phone's full page or sheet, a desktop's dialog.
+const overOf = root => root.all(e => ['modal', 'sheet', 'page-over'].some(c => classesOf(e).includes(c))).at(-1);
+// back leaves a phone's full page as its back button does.
+const back = root => click(root.find('.page-over').at(-1).one('.back'));
+const optionOf = (root, label) => root.find('[role=option]').find(o => o.one('.pk-label').textContent === label);
+const LONG = 'The notes group the merged PRs by area. '.repeat(20);
+
+test('core/sessions: the tokens Go read are dropped, replaced and read back whole, never parsed', () => {
+  const tok = (kind, text, value) => ({kind, text, value});
+  const toks = [tok('tag', '#docs', 'docs'), tok('project', 'p:shop', 'shop'), tok('word', 'notes', 'notes'), tok('unknown', 'owner:bo', 'owner:bo'),
+    tok('status', 'status:done', 'done'), tok('tag', '#Ops', 'ops')];
+  const q = '#docs p:shop notes  owner:bo status:done #Ops';
+  eq(ss.chosen(toks), {tags: ['docs', 'ops'], unknown: ['owner:bo'], project: toks[1], status: toks[4]}, 'what they pick');
+  eq(ss.replaced(q, toks, [ss.kind.project], ['project:none']), '#docs notes owner:bo status:done #Ops project:none', 'a kind replaced, as Go spelled it');
+  eq(ss.replaced(q, toks, [ss.kind.tag]), 'p:shop notes owner:bo status:done', 'every tag dropped');
+  eq(ss.replaced('> total #docs', [toks[0]], [ss.kind.tag], ['#ops']), '> total #ops', 'a message search keeps its >');
+  eq(ss.dropped('notes notes #docs', toks[2]), 'notes #docs', 'one token, not its twin');
+  eq([ss.stateOf(toks), ss.stateOf([]), ss.stateOf([], true)], ['done', 'open', 'all'], 'the state: status:, else open, else all for a message search');
+  eq([ss.stateToken('open'), ss.stateToken('archived')], [[], ['status:archived']], 'open is written by no token');
+  eq(ss.times(NOW).map(x => x.token), ['last:2026-09-30', 'last:7d', 'last:30d', 'last:2026-01-01'], 'today and this year as local dates');
+  eq([ss.searching('> x'), ss.searching(' 》x'), ss.searching('x > y'), ss.searchText(' >  chekout total')], [true, true, false, 'chekout total'], '> or 》 first');
+  eq([ss.refOf('mba/claude:c-1:x'), ss.refOf('nope'), ss.refOf('/claude:x'), ss.keyOf({machine: 'mba', provider: 'codex', session_id: 'x'})],
+    [{machine: 'mba', provider: 'claude', session_id: 'c-1:x'}, null, null, 'mba/codex:x'], 'a row in the address');
+});
+
+test('core/sessions: a switch\'s patch, its undo and the row until its machine answers, as tend.Patch has them', () => {
+  const at = '2026-09-30T11:00:00Z', iso = new Date(NOW).toISOString();
+  const row = {machine: 'mba', writable: true, task: {id: 't1', title: 'T'}, make: {agents: ['claude']}, project_id: 'p1', provider: 'claude', session_id: 'c',
+    title: 'T', favorited_at: at, tags: ['a'], status: 'doing'};
+  const plain = {provider: 'claude', session_id: 'c'};
+  eq([ss.toggles.favorite(row), ss.toggles.favorite(plain), ss.toggles.archive(row), ss.toggles.done(row), ss.toggles.done({...row, status: 'done'})],
+    [{favorite: false}, {favorite: true}, {archived: true}, {status: 'done'}, {status: 'doing'}], 'set, not toggle; done goes back to doing');
+  eq(ss.applied(row, {favorite: false}, NOW).favorited_at, undefined, 'unfavorited at once');
+  eq([ss.applied(plain, {favorite: true}, NOW).favorited_at, ss.applied(plain, {favorite: true, favorited_at: at}, NOW).favorited_at, ss.applied(row, {favorite: true}, NOW).favorited_at],
+    [iso, at, at], 'favorited now, at the time an undo gives, or since it was');
+  eq([ss.applied(plain, {archived: true}, NOW).archived_at, ss.applied({...row, archived_at: at}, {archived: false}, NOW).archived_at], [iso, undefined], 'archived');
+  const edited = ss.applied(row, {title: '  New  ', tags: ['#B', 'b', ' ', 'A'], summary: ' '}, NOW);
+  eq([edited.title, edited.tags, 'summary' in edited], ['New', ['b', 'a'], false], 'trimmed, tags normalized, a blank left out');
+  eq(ss.undoOf(row, {favorite: false}), {favorite: true, favorited_at: at}, 'a favorite back from when it was');
+  eq(ss.undoOf(row, {archived: true, status: 'done', title: 'x', tags: [], summary: 's'}), {archived: false, status: 'doing', title: 'T', tags: ['a'], summary: ''}, 'each field it set');
+  const got = {provider: 'claude', session_id: 'c', title: 'T2', updated_at: at};
+  eq(ss.merged(row, got), {...got, machine: 'mba', writable: true, task: row.task, make: row.make, project_id: 'p1'}, 'the answer, with the coordinator\'s parts and the project kept');
+  const tk = (kind, value) => ({kind, text: kind + ':' + value, value});
+  const arch = {...row, archived_at: at};
+  eq([ss.fits(row, [], true), ss.fits(arch, [], true), ss.fits(arch, [tk('status', 'archived')], true), ss.fits(row, [tk('status', 'archived')], true),
+    ss.fits({...row, status: 'done'}, [tk('status', 'active')], true), ss.fits(plain, [], false), ss.fits(row, [tk('tag', 'b')], true), ss.fits(arch, [tk('status', 'all')], true)],
+  [true, false, true, false, false, false, false, true], 'whether a row changed in place still fits the query');
+});
+
+test('core/sessions: what may be deleted and restored, and how many days a deleted session has left', () => {
+  const mba = {name: 'mba', trash: true, trash_days: 30}, mini = {name: 'mini', writable: true};
+  const mine = {machine: 'mba', writable: true}, shared = {machine: 'mba'};
+  eq([ss.deletable(mine, mba), ss.deletable(shared, mba), ss.deletable({machine: 'mini', writable: true}, mini), ss.deletable(mine, undefined)],
+    [true, false, false, false], 'a row its machine\'s trash takes and the viewer may change');
+  eq([ss.restorable(shared, mba), ss.restorable(shared, mini)], [true, false], 'a trashed row by its machine alone');
+  const day = 864e5;
+  eq([ss.purgeIn(new Date(NOW - 60e3).toISOString(), 30, NOW), ss.purgeIn(new Date(NOW - 16.2 * day).toISOString(), 30, NOW),
+    ss.purgeIn(new Date(NOW - 40 * day).toISOString(), 30, NOW), ss.purgeIn(new Date(NOW + 60e3).toISOString(), 30, NOW), ss.purgeIn(new Date(NOW).toISOString(), 0, NOW)],
+  [30, 14, 1, 30, 0], 'days left, at least one while it is there, never more than the trash keeps; 0 for a trash that keeps');
+  eq(ss.states.at(-1), 'trash', 'the trash is the last state');
+});
+
+test('core/sessions: marks cut text at the byte spans Go gives, CJK too', () => {
+  const s = '结账的 total 少了一分：checkout 在加总前';
+  const span = w => { const from = Buffer.byteLength(s.slice(0, s.indexOf(w))); return [from, from + Buffer.byteLength(w)]; };
+  eq(ss.marks(s, [span('checkout'), span('total')]), [['结账的 ', false], ['total', true], [' 少了一分：', false], ['checkout', true], [' 在加总前', false]], 'in order, whatever order given');
+  eq(ss.marks(s, [span('结账')]), [['结账', true], ['的 total 少了一分：checkout 在加总前', false]], 'a CJK word');
+  eq(ss.marks('abc', [[1, 99]]), [['a', false], ['bc', true]], 'a span past the end stops there');
+  eq(ss.marks('abc', [[0, 2], [1, 3]]), [['ab', true], ['c', true]], 'overlapping spans repeat nothing');
+  eq([ss.marks('abc'), ss.marks('', [[0, 1]])], [[['abc', false]], []], 'no spans, no text');
+});
+
+test('core/sessions: what it asks the coordinator and the nodes', async () => {
+  const sent = [];
+  const wire = {call: (m, p) => { sent.push([m, p]); return Promise.resolve({text: 'whole'}); }};
+  const row = {machine: 'mba', provider: 'claude', session_id: 'c', title: 'x'};
+  ss.query(wire, {q: '#a', all: true, sort: 'turns', after: {key: 'k'}, fresh: true});
+  ss.query(wire, {sort: 'active'});
+  ss.grep(wire, {q: '> chekout total', all: true});
+  ss.put(wire, row, {favorite: true});
+  ss.put(wire, row, {title: 'y'}, 'T1');
+  ss.hits(wire, row, '》 total');
+  ss.readPage(wire, 'mba', row);
+  ss.readPage(wire, 'mba', row, {before: 1201, file: 'f', find: '> total'});
+  ss.trash(wire, row);
+  ss.restore(wire, row);
+  eq(await ss.readText(wire, 'mba', row, 120, 'f'), 'whole', 'a message\'s full text');
+  const node = (method, params) => ['node.call', {machine: 'mba', method, params: {provider: 'claude', session_id: 'c', ...params}}];
+  eq(sent, [
+    ['sessions.query', {q: '#a', all: true, sort: 'turns', limit: 100, after: {key: 'k'}, fresh: true}],
+    ['sessions.query', {q: '', limit: 100}],
+    ['sessions.grep', {q: 'chekout total', all: true}],
+    node('put', {patch: {favorite: true}}), node('put', {patch: {title: 'y'}, expect: 'T1'}),
+    node('hits', {q: 'total', limit: 500}),
+    node('messages', {before: -1, n: 40}), node('messages', {before: 1201, n: 40, file: 'f', find: 'total'}),
+    node('trash'), node('restore'), node('text', {off: 120, file: 'f'}),
+  ], 'the default sort and empty parts left out, the > left out of what is searched');
+});
+
+test('core/sessions: owners\' names are asked once a connection, again after a reset, never of a server without people.names', async () => {
+  const sent = [];
+  const status = signal('open'), phase = signal('live');
+  let has = true, fail = false;
+  const wire = {status, has: () => has, call: (m, p) => {
+    sent.push(p.ids);
+    return fail ? Promise.reject(new Error('no')) : Promise.resolve({names: Object.fromEntries(p.ids.map(i => [i, i.toUpperCase()]))});
+  }};
+  const p = ss.createPeople({wire, phase});
+  await p.ask(['u_b', 'u_a', 'u_b', '']);
+  await p.ask(['u_a', 'u_c']);
+  eq([sent, p.names.value], [[['u_a', 'u_b'], ['u_c']], {u_a: 'U_A', u_b: 'U_B', u_c: 'U_C'}], 'each once');
+  status.value = 'connecting';
+  eq(p.names.value, {}, 'a new connection forgets them');
+  await p.ask(['u_a']);
+  phase.value = 'snapshot';
+  await p.ask(['u_a']);
+  eq(sent.length, 4, 'asked again after each');
+  fail = true;
+  await p.ask(['u_d']);
+  fail = false;
+  await p.ask(['u_d']);
+  eq(sent.slice(4), [['u_d'], ['u_d']], 'one that failed is asked again');
+  has = false;
+  await p.ask(['u_e']);
+  eq(sent.length, 6, 'not without the method');
+});
 
 for (const f of ['desktop', 'phone']) for (const lang of ['zh', 'en']) {
-  test(`a machine's sessions on a ${f} in ${lang}: listed, filtered, one read from the newest, earlier and in full, its resume line copied`, async () => {
+  test(`every machine's sessions on a ${f} in ${lang}, as the coordinator answers: what did not answer, what is read only, owners named, the next page`, async () => {
     const r = await team();
     let a, root;
     words.lang.value = lang;
+    const desk = f === 'desktop';
     try {
-      await r.srv.play('sessions', {
-        async mount() { a = app(r); root = await mount(a.vnode(), f); },
+      await r.srv.play('sessions-query', {
+        async mount() { a = app(r, {session: ann, names: signal({}), rows: 3}); root = await mount(a.vnode(), f); },
         async listed() {
           await act(() => settle());
-          eq(rowsOf(root), ['Draft the release notes', 'Fix the checkout total', 'Port the importer', BACKUP, 'Tidy the README'], 'newest first');
-          ok(root.textContent.includes(words.f('sess.summary', 5, 2)), 'how many and how many run');
-          eq(marksOf(root), {
-            'Draft the release notes': {star: true, tags: ['#release', '#docs'], sum: 'Group the merged PRs since v0.9 by area and draft the notes; waits on the importer change.', archived: false},
-            'Fix the checkout total': {star: false, tags: [], sum: '', archived: false},
-            'Port the importer': {star: true, tags: ['#importer', '#csv', '+1'], sum: 'CSV 导入改成流式读取，内存从 1.2 GB 降到 80 MB；Windows 换行还没测。', archived: false},
-            [BACKUP]: {star: true, tags: ['#backup', '#ops', '+3'], sum: 'The retry path checks free space before it mounts the share, so it sees the wrong disk and gives up quietly.', archived: false},
-            'Tidy the README': {star: true, tags: ['#docs'], sum: 'Rewrote the install section.', archived: true},
-          }, 'a star for a favorite, two tags and the count of the rest, one summary line, an archived one dimmed');
-          eq(root.find('.sess-star').map(x => x.getAttribute('aria-label')), Array(4).fill(words.t('sess.favorited')), 'a star says what it means');
-          eq(root.find('.sess-archived').map(x => x.find('.chip').some(c => c.textContent === words.t('sess.archived'))), [true], 'and an archived one says so');
-          eq(root.find('.sess-star').filter(x => x.localName === 'button').length, 0, 'read only: a star is no button');
-          eq(favSwitch(root).getAttribute('aria-pressed'), 'false', 'the favorites-only switch is off');
-          ok(favSwitch(root).textContent.includes(words.t('sess.favOnly')) && favSwitch(root).textContent.includes('4'), 'and counts them');
-          await click(favSwitch(root));
-          eq(a.router.route.value, {page: 'machines', sessions: 'mba', fav: true}, 'kept in the address');
-          eq(a.history.length, 1, 'in place of the address before');
-          eq(rowsOf(root), ['Draft the release notes', 'Port the importer', BACKUP, 'Tidy the README'], 'only the favorites, the archived one too');
-          ok(root.textContent.includes(words.f('sess.favSummary', 4, 5)), 'how many of how many');
-          eq(favSwitch(root).getAttribute('aria-pressed'), 'true', 'on');
-          await type(root.one('input'), 'shop fix');
-          eq(rowsOf(root), [], 'the filter within the favorites');
-          ok(root.textContent.includes(words.t('sess.noMatch')), 'none match');
-          await type(root.one('input'), '');
-          await click(favSwitch(root));
-          eq(a.router.route.value, {page: 'machines', sessions: 'mba'}, 'off again');
-          eq(rowsOf(root).length, 5, 'all of them');
-          const none = f === 'phone' ? words.t('sess.projectNone') : '—';
-          eq(projectsOf(root), {'Draft the release notes': 'Shop', 'Fix the checkout total': 'Shop', 'Port the importer': none, [BACKUP]: 'Docs', 'Tidy the README': 'Docs'},
-            'each row\'s project as sessions.list tells it');
-          await click(root.one('.sess-pfield').one('.picker-btn'));
-          eq(projectOptions(root), [[words.t('sess.projectAll'), '', '5'], ['Docs', words.f('sess.projectTeam', 'Bo Lin'), '2'], ['Shop', words.f('sess.projectTeam', 'Ann Lee'), '2'],
-            ['side', words.t('sess.projectPersonal'), '0'], [words.t('sess.projectNone'), words.t('sess.projectNoneSub'), '1']], 'every project seen, with its sessions here');
-          await click(root.find('[role=option]').find(o => o.one('.pk-label').textContent === 'Shop'));
-          eq(a.router.route.value, {page: 'machines', sessions: 'mba', project: 'p1'}, 'the project in the address');
-          eq(rowsOf(root), ['Draft the release notes', 'Fix the checkout total'], 'its sessions only');
-          ok(root.textContent.includes(words.f('sess.projectSummary', 'Shop', 2, 5)), 'how many of how many');
-          await click(favSwitch(root));
-          eq(a.router.route.value, {page: 'machines', sessions: 'mba', project: 'p1', fav: true}, 'with favorites only too');
-          eq(rowsOf(root), ['Draft the release notes'], 'its favorites');
-          await click(favSwitch(root));
-          await pickProject(root, words.t('sess.projectNone'));
-          eq([a.router.route.value.project, rowsOf(root)], ['none', ['Port the importer']], 'in no project');
-          await pickProject(root, 'side');
-          eq(rowsOf(root), [], 'side has none here');
-          ok(root.textContent.includes(words.f('sess.projectEmpty', 'side', 'mba')) && root.textContent.includes(words.f('sess.projectEmptyWhy', 'side', 'mba')), 'and says why');
-          await pickProject(root, words.t('sess.projectAll'));
-          eq(a.router.route.value, {page: 'machines', sessions: 'mba'}, 'all again');
-          eq(root.find('.sess-share').length, 0, 'a machine sharing all says nothing of it');
-          eq(labelsOf(root), {'Draft the release notes': 't1 Refund emails', 'Fix the checkout total': 't2 Cart totals'}, 'the tasks whose runs used them');
+          eq(titlesOf(root), ['Fix the checkout total', 'Roll out the cache', 'Back up the photos'], 'the first page, every machine\'s');
+          ok(root.textContent.includes(words.f('sess.counts', 6, 6, 1)), 'how many, how many match and run, over the machines that answered');
+          const gone = words.f('sess.ago', duration(NOW - Date.parse('2026-09-30T06:00:00Z')));
+          eq(linesOf(root), [words.f('sess.m.offline', 'gone', gone), words.f('sess.m.shared', 'linux', 'u_bob'),
+            desk ? words.f('sess.m.old', 'old', '—', 'old') : words.f('sess.m.oldShort', 'old'), words.f('sess.m.timeout', 'slow', 5)],
+          'a line for each machine offline, shared, outdated or late, the owner by id until named');
+          ok(buttonOf(root.one('.sv-machines'), words.t('sess.m.retry')), 'one late is asked again');
+          eq(starredOf(root), [true, true, true], 'favorites starred');
+          if (desk) {
+            eq(root.find('.tr').map(x => x.one('.sv-rowact').find('button').length), [2, 0, 0], 'a star and ⋯ on her own, nothing on a shared or an outdated machine\'s');
+            eq(root.find('.tr').map(x => x.one('.sv-rowact').getAttribute('title')), [null, words.f('sess.readOnlyKey', 'u_bob', 'linux'), words.f('sess.m.oldShort', 'old')], 'a lock says why');
+            eq(root.find('.tr')[0].one('.sess-task').getAttribute('aria-label'), words.f('sess.openTask', 't-1'), 'a row\'s task is a button');
+          } else {
+            eq(root.find('.card-row').flatMap(c => c.find('button')).length, 0, 'a card is one button');
+            eq(root.find('.sv-rowact').length, 0, 'switches only over a conversation');
+          }
+          eq(root.find('.sv-mach').map(x => classesOf(x).includes('shared')), [false, true, false], 'a shared machine says so');
           styled(root, `${f}/${lang} list`);
-          await type(root.one('input'), 'shop fix');
-          eq(rowsOf(root), ['Fix the checkout total'], 'every word of the filter');
-          await type(root.one('input'), 'codex');
-          eq(rowsOf(root), ['Port the importer'], 'by agent');
-          await type(root.one('input'), 'cart totals');
-          eq(rowsOf(root), ['Fix the checkout total'], 'by its task\'s title');
-          await type(root.one('input'), 'T1');
-          eq(rowsOf(root), ['Draft the release notes'], 'by its task\'s id');
-          await type(root.one('input'), '#ops');
-          eq(rowsOf(root), [BACKUP], 'by a tag, its # left out');
-          await type(root.one('input'), 'perf');
-          eq(rowsOf(root), ['Port the importer'], 'by a tag the row folds away');
-          await type(root.one('input'), 'install section');
-          eq(rowsOf(root), ['Tidy the README'], 'by its summary');
-          await type(root.one('input'), '');
         },
-        async open() {
-          const row = f === 'phone' ? root.find('.card-row')[1] : root.find('.tr')[1];
-          await click(row);
-          eq(a.router.route.value, {page: 'machines', sessions: 'mba', session: 'claude:c-fix'}, 'the address');
-        },
-        async opened() {
+        async names() {},
+        async named() {
           await act(() => settle());
-          eq(msgsOf(root).length, 3, 'the newest page, oldest at the top');
-          ok(msgsOf(root)[0].startsWith('I read the cart code'), 'oldest first');
-          ok(root.textContent.includes(words.f('sess.steps', 2, 'Read · Bash')), 'its steps folded');
-          await click(root.one('.sess-steps'));
-          ok(root.one('.sess-step-list').textContent.includes('go test ./internal/cart'), 'its steps open');
-          const resume = root.one('.secret');
-          eq(resume.one('.secret-value').textContent, 'cd /Users/ann/dev/shop && claude --resume c-fix', 'the resume line');
-          ok(resume.textContent.includes(words.f('sess.resume', 'mba')), 'where it resumes');
-          await click(resume.one('button'));
-          eq(a.copied, ['cd /Users/ann/dev/shop && claude --resume c-fix'], 'copied');
-          eq(root.one('.sess-conv-task').textContent, 't2 Cart totals', 'its task over the conversation');
-          eq([root.find('.sess-conv-meta').length, root.find('.sess-conv-sum').length], [0, 0], 'no favorite, tags or summary to tell');
-          eq(root.one('.sess-conv-proj').textContent, words.f('sess.projectVia', 'Shop', '/Users/ann/dev/shop'), 'its project and the directory that puts it there');
-          styled(root, `${f}/${lang} conversation`);
+          eq(linesOf(root)[1], words.f('sess.m.shared', 'linux', 'bob'), 'the owner by name once people.names answers');
+          eq(root.find('.sv-mach')[1].getAttribute('title'), words.f('sess.sharedRO', 'bob'), 'on the row too');
         },
-        async earlier() { await click(buttonOf(root, words.t('sess.earlier'))); },
-        async older() {
-          await act(() => settle());
-          eq(msgsOf(root)[0], 'Why is the checkout total off by a cent?', 'the earlier page above');
-          ok(root.textContent.includes(words.t('sess.start')), 'the head reached');
-          eq(root.find('button').filter(b => labelOf(b) === words.t('sess.earlier')).length, 0, 'nothing earlier');
+        async more() {
+          const list = root.one(desk ? '.tbody' : '.cards-view');
+          Object.assign(list, {clientHeight: 480, scrollHeight: 3 * (desk ? 50 : 100), scrollTop: 0});
+          await act(() => list.dispatch('scroll'));
         },
-        async full() { await click(buttonOf(root, words.t('sess.full'))); },
-        async fulled() {
+        async paged() {
           await act(() => settle());
-          const last = root.find('.sess-msg').at(-1);
-          eq(last.find('li').map(x => x.textContent), ['the tax is added per line', 'it is rounded once at the end'], 'the full text as Markdown');
-          ok(buttonOf(root, words.t('sess.fold')), 'and folds again');
+          eq(titlesOf(root), ['Fix the checkout total', 'Roll out the cache', 'Back up the photos', 'Port the importer', 'Draft the release notes', 'Size the cache'],
+            'the next page after it');
+          styled(root, `${f}/${lang} paged`);
         },
       });
       eq(r.errors, [], 'errors');
+      await click(desk ? root.find('.tr')[0].one('.sess-task') : root.find('.card-row')[0]);
+      if (desk) eq(a.router.route.value, {page: 'tasks', view: 'list', task: 't-1'}, 'a row\'s task opens the task, not the row');
+      else {
+        await act(() => settle());
+        await click(root.one('.sess-conv-task').one('button'));
+        eq(a.router.route.value, {page: 'tasks', view: 'list', task: 't-1'}, 'on a phone the conversation\'s task does');
+      }
     } finally { form.value = 'desktop'; words.lang.value = 'zh'; }
   });
 }
 
-test('a machine sharing only its runs\' sessions says how to share them all; a page of a changed file is read again', async () => {
-  const r = await team();
-  seenBy(r, bo);
-  let a, root;
-  await r.srv.play('sessions-share', {
-    async mount() {
-      a = app(r, {url: '/?page=machines&sessions=bo-laptop&session=claude:c-run&fav=1', session: bo, wire: {...r.wire, has: m => m !== 'sessions.list' && r.wire.has(m)}});
-      root = await mount(a.vnode(), 'desktop');
-    },
-    async listed() {
-      await act(() => settle());
-      eq(rowsOf(root), [], 'favorites only, from the address');
-      ok(root.one('.sess-list').textContent.includes(words.f('sess.favNone', 'bo-laptop')), 'none favorited');
-      ok(root.textContent.includes(words.f('sess.favSummary', 0, 1)), 'none of one');
-      await click(buttonOf(root, words.t('sess.showAll')));
-      eq(a.router.route.value, {page: 'machines', sessions: 'bo-laptop', session: 'claude:c-run'}, 'show all turns the switch off');
-      eq(rowsOf(root), ['Add the search box'], 'listed though its tend is too old for live');
-      eq([root.find('.sess-pfield').length, root.find('.sess-proj').length], [0, 0], 'a server without sessions.list reads the node itself and has no projects');
-      ok(root.one('.sess-share').textContent.includes('"share_sessions": "all"'), 'how to share them all');
-      eq(root.one('.sess-share').textContent, words.f('sess.shareRuns', 'bo-laptop'), 'the hint');
-    },
-    async open() { await until(() => r.srv.current().sent.length > 0, 'the newest page asked'); },
-    async opened() { await act(() => settle()); eq(msgsOf(root), ['The search box is in.'], 'opened from the address'); },
-    async earlier() { await click(buttonOf(root, words.t('sess.earlier'))); },
-    async stale() { await until(() => r.srv.current().sent.length > 0, 'the newest page asked again'); },
-    async reread() {
-      await act(() => settle());
-      eq(msgsOf(root), ['Add the search box.', 'The search box is in, with tests.'], 'read again from the newest');
-      ok(root.textContent.includes(words.t('sess.reread')), 'and says so');
-      ok(root.find('.sess-owner').length === 0 && root.find('.secret').length === 1, 'his own: no read-only line, the resume line');
-    },
-    async shared() {
-      a = app(r, {url: '/?page=machines&sessions=bo-laptop&session=claude:c-run'});
-      root = await mount(a.vnode(), 'desktop');
-    },
-    async sharedListed() { await until(() => r.srv.current().sent.length > 0, 'the newest page asked'); },
-    async readonly() {
-      await act(() => settle());
-      const t = words.t;
-      eq(root.one('.sess-owner').textContent, words.f('sess.sharedBy', 'Bo Lin', 'bo-laptop') + t('sess.sharedNote'), 'whose, shared with Ann, read only');
-      eq(root.one('.sess-share').textContent, words.f('sess.shareRunsShared', 'bo-laptop', 'Bo Lin'), 'the node\'s own setting, only its owner changes it');
-      eq(marksOf(root)['Add the search box'], {star: true, tags: ['#docs', '#search'], sum: 'Search box on the docs site, with tests; the index rebuild is still slow.', archived: false}, 'favorite, tags and summary as for the owner');
-      eq(msgsOf(root), ['Add the search box.', 'The search box is in, with tests.'], 'the conversation');
-      eq([root.find('.secret').length, root.one('.sess-readonly').textContent], [0, t('sess.readonly')], 'no resume line, a word why');
-      styled(root, 'shared');
-    },
-    async revoked() {
-      await act(() => settle());
-      const gone = root.one('.sess-gone');
-      eq(gone.find('p').map(x => x.textContent), [words.f('sess.cannot', 'bo-laptop'), words.f('sess.cannotWhy', 'Bo Lin')], 'taken back while read');
-      eq([root.find('.sess-msg').length, root.find('.tr').length], [0, 0], 'what was on the screen goes with it');
-      await click(buttonOf(gone, words.t('sess.backToMachines')));
-      eq(a.router.route.value, {page: 'machines'}, 'back to the machines');
-    },
-  });
-  eq(r.errors, [], 'errors');
-});
-
-test('a shared machine\'s conversation on a phone says read only under its title', async () => {
-  const r = await team();
-  try {
-    const a = app(r, {url: '/?page=machines&sessions=bo-laptop&session=claude:c-fix', wire: listOnly(r)});
-    const root = await mount(a.vnode(), 'phone');
-    await act(() => settle());
-    eq(root.find('.sess-owner').map(x => x.textContent), [words.f('sess.sharedBy', 'Bo Lin', 'bo-laptop') + words.t('sess.sharedNote'), words.f('sess.readonlyShort', 'Bo Lin', 'bo-laptop')], 'the page and the conversation');
-    styled(root, 'phone shared');
-  } finally { form.value = 'desktop'; }
-});
-
-// listOnly answers a sessions page from the sessions frames' list and live, and never a conversation.
-function listOnly(r) {
-  const frames = readFileSync(new URL('./frames/sessions.jsonl', import.meta.url), 'utf8').split('\n').filter(Boolean).map(l => JSON.parse(l));
-  const answer = id => frames.find(x => x.s?.id === id).s.result;
-  return {...r.wire, call: (method, p) => (method === 'sessions.list' ? Promise.resolve(answer(5)) : method !== 'node.call' ? r.wire.call(method, p)
-    : new Promise(() => {}))};
-}
-
 for (const f of ['desktop', 'phone']) {
-  test(`a favorite's conversation on a ${f} is headed by its star, when it was favorited, every tag and the whole summary`, async () => {
-    const r = await team();
-    try {
-      const a = app(r, {url: '/?page=machines&sessions=mba&session=codex:x-port&fav=1', wire: listOnly(r)});
-      const root = await mount(a.vnode(), f);
-      await act(() => settle());
-      eq(favSwitch(root).getAttribute('aria-pressed'), 'true', 'favorites only, from the address');
-      eq(rowsOf(root).length, 4, 'the favorites');
-      const meta = root.one('.sess-conv-meta');
-      eq(meta.find('.sess-star').length, 1, 'starred');
-      ok(meta.textContent.includes(words.f('sess.favoritedAt', '9-29')), 'when');
-      eq(meta.find('.sess-tag').map(x => x.textContent), ['#importer', '#csv', '#perf'], 'every tag');
-      eq(root.one('.sess-conv-sum').textContent, 'CSV 导入改成流式读取，内存从 1.2 GB 降到 80 MB；Windows 换行还没测。', 'the whole summary');
-      styled(root, `${f} favorite`);
-      if (f === 'phone') await act(() => a.router.back({page: 'machines', sessions: 'mba', fav: true}));
-      await act(() => a.router.go({page: 'machines', sessions: 'mba', session: 'claude:c-docs', fav: true}, {replace: true}));
-      eq(root.one('.sess-conv-meta').find('.chip').map(x => x.textContent), ['#docs', words.t('sess.archived')], 'an archived one says so over its conversation');
-      eq(root.find('.sess-conv-meta').length, 1, 'one conversation');
-    } finally { form.value = 'desktop'; }
-  });
-}
-
-// many answers a sessions page with n sessions, every other one with a summary and tags, none running.
-function many(r, n) {
-  const sessions = Array.from({length: n}, (_, i) => ({provider: 'claude', session_id: `s${i}`, title: `Session ${i}`, cwd: '/w',
-    last_at: new Date(NOW - i * 60000).toISOString(), ...(i % 2 ? {summary: `Summary ${i}`, tags: ['ops', 'db', 'x']} : {})}));
-  return {...r.wire, call: (method, p) => (method === 'sessions.list' ? Promise.resolve({sessions, live: {}, projects: {}}) : method !== 'node.call' ? r.wire.call(method, p)
-    : new Promise(() => {}))};
-}
-const press = k => ({key: k, target: globalThis.document?.body, preventDefault() {}});
-
-test(`over ${VIRTUAL_ABOVE} sessions the list is drawn in windows of the page's own row height, and j keeps the last in view`, async () => {
-  const r = await team();
-  const n = VIRTUAL_ABOVE + 50;
-  try {
-    for (const [sel, h] of [['.sess-list .tr', ROW.desktop], ['.sess-phone .card-row', ROW.phone - 1]]) {
-      ok(new RegExp(`${sel.replace(/\./g, '\\.')} \\{[^}]*\\bheight: ${h}px`).test(css), `${sel} is ${h}px tall in the CSS`);
-    }
-    const a = app(r, {wire: many(r, n)});
-    const root = await mount(a.vnode(), 'desktop');
-    await act(() => settle());
-    const top = windowOf({count: n, rowHeight: ROW.desktop, top: 0, height: 480});
-    eq(root.find('.tr').length, top.end - top.start, 'the window at the top');
-    eq(root.find('.spacer').map(x => x.style.height), [top.after + 'px'], 'the space below, by the sessions\' row height');
-    for (let i = 0; i < n; i++) await act(() => { a.keys.handle(press('j')); });
-    eq(a.router.route.value.session, `claude:s${n - 1}`, 'the last selected');
-    const body = root.one('.tbody');
-    eq(body.scrollTop, n * ROW.desktop - 480, 'scrolled so the last row shows at the bottom');
-    const end = windowOf({count: n, rowHeight: ROW.desktop, top: body.scrollTop, height: 480});
-    eq(root.find('.spacer').map(x => x.style.height), [end.before + 'px'], 'the space above');
-    eq(root.find('.tr').at(-1).getAttribute('aria-selected'), 'true', 'the last row is drawn, selected');
-    const phone = await mount(app(r, {wire: many(r, n)}).vnode(), 'phone');
-    await act(() => settle());
-    const card = windowOf({count: n, rowHeight: ROW.phone, top: 0, height: 480});
-    eq([phone.find('.card-row').length, phone.find('.spacer').map(x => x.style.height)], [card.end - card.start, [card.after + 'px']], 'a phone\'s cards by theirs');
-  } finally { form.value = 'desktop'; }
-});
-
-test('the machines page opens a machine\'s sessions for whom the coordinator says reads them', async () => {
-  const r = await team();
-  const a = app(r, {url: '/?page=machines'});
-  const root = await mount(a.vnode(), 'desktop');
-  await click(root.find('.mach-card').find(c => c.one('b').textContent === 'mba'));
-  ok(root.one('.mach-aside').textContent.includes(words.t('mach.share.all')), 'what it shares');
-  await click(buttonOf(root.one('.mach-aside'), words.t('mach.sessions')));
-  eq(a.router.route.value, {page: 'machines', sessions: 'mba'}, 'its owner opens them');
-  seenBy(r, bo);
-  const b = app(r, {url: '/?page=machines', session: bo});
-  const other = await mount(b.vnode(), 'desktop');
-  await click(other.find('.mach-card').find(c => c.one('b').textContent === 'mba'));
-  eq(other.one('.mach-aside').find('button').filter(x => labelOf(x) === words.t('mach.sessions')).length, 0, 'a machine shared with Bo is not his to read');
-  await click(other.find('.mach-card').find(c => c.one('b').textContent === 'bo-laptop'));
-  ok(other.one('.mach-aside').textContent.includes(words.t('mach.share.runs')), 'his shares only its runs');
-  ok(buttonOf(other.one('.mach-aside'), words.t('mach.sessions')), 'his own he reads');
-  const c = app(r, {url: '/?page=machines&sessions=mba', session: bo});
-  const refused = await mount(c.vnode(), 'desktop');
-  ok(refused.textContent.includes(words.f('sess.cannot', 'mba')), 'the address of another\'s machine reads nothing');
-  seenBy(r, admin);
-  try {
-    const phone = await mount(app(r, {url: '/?page=machines'}).vnode(), 'phone');
-    await click(phone.find('.card-row').find(x => x.textContent.includes('linux')));
-    ok(buttonOf(phone, words.t('mach.sessions')), 'a phone opens them from a machine\'s facts');
-  } finally { form.value = 'desktop'; }
-});
-
-// homeRows are the phone home's machine rows: each machine's name, whose it is when another's, and the word of its state.
-const homeRows = root => root.find('.home-sess-list').flatMap(l => l.find('button'))
-  .map(b => [b.one('.home-sess-name').textContent, b.find('.home-sess-who').map(x => x.textContent).join(''), b.one('.status-word').textContent]);
-
-for (const lang of ['zh', 'en']) {
-  test(`the phone home in ${lang} has a row per machine whose sessions the viewer opens, leading to them`, async () => {
-    const r = await team();
-    words.lang.value = lang;
-    try {
-      const a = app(r, {url: '/'});
-      const root = await mount(a.vnode(), 'phone');
-      styled(root, `home/${lang}`);
-      eq(root.one('.home-sess-head').textContent, words.t('home.sessions'), 'headed');
-      eq(homeRows(root), [['bo-laptop', words.f('home.sessShared', 'Bo Lin'), words.t('status.online')], ['linux', '', words.t('status.online')],
-        ['mba', '', words.t('status.online')], ['win', '', words.t('status.offline')]], 'Ann\'s: her own and the one Bo shares with her, by name, with their state');
-      await click(root.one('.home-sess-list').find('button')[2]);
-      eq(a.router.route.value, {page: 'machines', sessions: 'mba'}, 'a row opens its sessions');
-      eq([root.find('.sess-phone').length, root.find('.home-sess').length], [1, 0], 'the sessions page in its place');
-      seenBy(r, bo);
-      const b = await mount(app(r, {url: '/', session: bo}).vnode(), 'phone');
-      eq(homeRows(b), [['bo-laptop', '', words.t('status.online')]], 'Bo\'s: only Bo\'s own, no other shared with Bo');
-      r.store.machines.value = r.store.machines.value.map(m => ({...m, sessions: m.owner === 'u_b' || m.name === 'win'}));
-      const c = await mount(app(r, {url: '/', session: bo}).vnode(), 'phone');
-      eq(homeRows(c), [['bo-laptop', '', words.t('status.online')], ['win', words.f('home.sessShared', 'Ann Lee'), words.t('status.offline')]], 'and once Ann shares win with him');
-    } finally { form.value = 'desktop'; words.lang.value = 'zh'; }
-  });
-}
-
-test('the sessions page goes back where it came from: a phone to its home, a desktop past the session it picked, an address to the machines', async () => {
-  const r = await team();
-  try {
-    let d, desk;
-    await r.srv.play('sessions', {
-      async mount() {
-        d = app(r, {url: '/?page=machines'});
-        desk = await mount(d.vnode(), 'desktop');
-        await click(desk.find('.mach-card').find(c => c.one('b').textContent === 'mba'));
-        await click(buttonOf(desk.one('.mach-aside'), words.t('mach.sessions')));
-      },
-      async listed() { await act(() => settle()); },
-      async open() { await click(desk.find('.tr')[1]); },
-      async opened() {
-        eq(d.router.route.value, {page: 'machines', sessions: 'mba', session: 'claude:c-fix'}, 'one picked');
-        eq(d.history.length, 2, 'picking a session on a desktop replaces the address');
-      },
-      async earlier() { await click(buttonOf(desk, words.t('sess.earlier'))); },
-      async older() {},
-      async full() { await click(buttonOf(desk, words.t('sess.full'))); },
-      async fulled() {
-        await click(buttonOf(desk, words.t('ui.back')));
-        eq(d.router.route.value, {page: 'machines'}, 'back past the session picked');
-      },
-    });
-    eq(r.errors, [], 'errors');
-    const a = app(r, {url: '/'});
-    const root = await mount(a.vnode(), 'phone');
-    await click(root.one('.home-sess-list').find('button')[2]);
-    eq(a.router.route.value, {page: 'machines', sessions: 'mba'}, 'the list');
-    await click(buttonOf(root, words.t('ui.back')));
-    eq(a.router.route.value, {page: 'home'}, 'its back goes to the home it came from');
-    eq(root.find('.home-sess').length, 1, 'the home again');
-    const e = app(r);
-    const typed = await mount(e.vnode(), 'desktop');
-    await click(buttonOf(typed, words.t('ui.back')));
-    eq(e.router.route.value, {page: 'machines'}, 'an address typed in goes back to the machines');
-  } finally { form.value = 'desktop'; }
-});
-
-for (const f of ['desktop', 'phone']) {
-  test(`a session's task label on a ${f} opens the task`, async () => {
+  test(`her own sessions on a ${f} change in place from keys and buttons, a shared one is read only, a push reads them again, one becomes a task, a query is chips`, async () => {
     const r = await team();
     let a, root;
+    const desk = f === 'desktop';
+    const conv = () => root.one('.sess-conv');
+    const acts = label => buttonOf(root.one(desk ? '.sv-acts' : '.sv-phone-acts'), label);
+    const linux = r.store.machines.value.find(m => m.name === 'linux')?.version || '—';
+    const typed = '#docs project:p1 notes owner:bo status:all';
     try {
-      await r.srv.play('sessions', {
+      await r.srv.play('sessions-share', {
         async mount() { a = app(r); root = await mount(a.vnode(), f); },
         async listed() {
           await act(() => settle());
-          if (f === 'phone') eq(root.find('.card-row').flatMap(c => c.find('button')).length, 0, 'a card is one button: its label is text');
-          else eq(root.find('.tr')[1].one('.sess-task').localName, 'button', 'a row\'s label is a button');
+          eq(titlesOf(root), ['Draft the release notes', 'Fix the checkout total', 'Port the importer', 'Add the search box', 'Back up the photos'], 'hers and Bo\'s');
+          eq(linesOf(root), [words.f('sess.m.sharedRuns', 'bo-laptop', 'Bo Lin'),
+            desk ? words.f('sess.m.old', 'linux', linux, 'linux') : words.f('sess.m.oldShort', 'linux'), words.f('sess.m.offline', 'win', words.f('sess.ago', duration(12 * 60e3)))],
+          'Bo shares only his runs\' sessions; linux is outdated, win offline');
+          if (desk) eq(root.find('.tr').map(x => x.one('.sv-rowact').find('button').length), [2, 2, 2, 0, 0], 'her mba\'s rows change');
+          styled(root, `${f} share list`);
         },
-        async open() { await click(f === 'phone' ? root.find('.card-row')[1] : root.find('.tr')[1]); },
+        async open() { await click(rowsOf(root)[0]); },
         async opened() {
           await act(() => settle());
-          eq(root.one('.sess-conv-task').one('button').getAttribute('aria-label'), words.f('sess.openTask', 't2'), 'named for what it does');
+          eq(a.router.route.value, {page: 'sessions', open: 'mba/claude:c-notes'}, 'one open');
+          eq(a.history.length, desk ? 1 : 2, desk ? 'a desktop picks in place' : 'a phone opens it over the list');
+          eq(msgsOf(root), ['Draft the release notes.', LONG.slice(0, 600)], 'the newest page, oldest first');
+          ok(conv().textContent.includes(words.f('sess.resume', 'mba')), 'her own resumes');
+          eq(conv().one('.sess-conv-proj').textContent, words.f('sess.inProject', 'mba', 'Shop'), 'where it is');
         },
-        async earlier() { await click(buttonOf(root, words.t('sess.earlier'))); },
-        async older() {},
         async full() { await click(buttonOf(root, words.t('sess.full'))); },
-        async fulled() { await act(() => settle()); },
+        async unfavorite() {
+          await act(() => settle());
+          eq(msgsOf(root)[1].trim(), LONG.trim(), 'the full text');
+          if (desk) await key(a, 'f');
+          else await click(acts(words.t('sess.a.faved')));
+        },
+        async pending() {
+          eq(starredOf(root)[0], false, 'the star goes at once');
+          ok(classesOf(rowsOf(root)[0]).includes('sv-pending'), 'while its machine has not answered');
+          eq(acts(words.t('sess.a.fav')).getAttribute('aria-pressed'), 'false', 'and from the conversation');
+        },
+        async unfavorited() {
+          await act(() => settle());
+          ok(!classesOf(rowsOf(root)[0]).includes('sv-pending'), 'answered');
+          eq(toastsOf(root), [words.f('sess.toast.unfav', 'Draft the release notes')], 'said, with undo');
+          if (desk) await click(buttonOf(root.one('.toasts'), words.t('ui.undo')));
+          else await key(a, 'z', {metaKey: true});
+        },
+        async undone() {
+          await act(() => settle());
+          eq(starredOf(root)[0], true, 'undo favorites it again, since it was');
+          await click(acts(words.t('sess.a.archive')));
+        },
+        async archived() {
+          await act(() => settle());
+          eq(titlesOf(root)[0], 'Draft the release notes', 'archived, it stays where it was');
+          ok(classesOf(rowsOf(root)[0]).includes('sess-archived'), 'dimmed: the list is of unarchived ones');
+          eq(acts(words.t('sess.a.archived')).getAttribute('aria-pressed'), 'true', 'the switch is on');
+          if (desk) await key(a, 'D', {shiftKey: true});
+          else await click(acts(words.t('sess.a.done')));
+        },
+        async done() {
+          await act(() => settle());
+          eq(acts(words.t('sess.a.doneOn')).getAttribute('aria-pressed'), 'true', 'done');
+          if (desk) await key(a, 'e');
+          else await click(acts(words.t('sess.a.edit')));
+          const box = overOf(root);
+          eq(valueOf(box.find('input')[0]), 'Draft the release notes', 'the edit dialog');
+          styled(root, `${f} edit`);
+          await type(box.find('input')[0], 'Draft the v1.0 release notes');
+          await click(buttonOf(box, words.t('sess.edit.save')));
+        },
+        async stale() {
+          await act(() => settle());
+          const box = overOf(root);
+          eq(box.one('.sv-stale').textContent, words.t('sess.edit.stale'), 'changed elsewhere: the dialog stays and says so');
+          eq([valueOf(box.find('input')[0]), box.one('.sv-tagin').find('.chip').map(x => x.textContent)], ['Draft the 1.0 notes', ['#release ×', '#docs ×', '#v1 ×']],
+            'with what it is now');
+          await type(box.find('input')[0], 'Draft the v1.0 release notes');
+          await click(buttonOf(box, words.t('sess.edit.save')));
+        },
+        async edited() {
+          await act(() => settle());
+          eq(root.find('.sv-stale').length, 0, 'saved and closed');
+          eq(titlesOf(root)[0], 'Draft the v1.0 release notes', 'the answer in its place');
+          ok(toastsOf(root).includes(words.f('sess.toast.edited', 'Draft the v1.0 release notes')), 'said');
+          if (!desk) {
+            await back(root);
+            eq([a.router.route.value, a.history.length], [{page: 'sessions'}, 1], 'back closes the conversation');
+          }
+        },
+        async shared() { await click(rowsOf(root)[3]); },
+        async readonly() {
+          await act(() => settle());
+          eq(conv().one('.sv-ro').textContent, words.f('sess.readOnly', 'Bo Lin', 'bo-laptop'), 'a line instead of the switches');
+          eq([root.find('.sv-acts').length, root.find('.sv-phone-acts').length], [0, 0], 'no switches');
+          ok(!conv().textContent.includes(words.f('sess.resume', 'bo-laptop')), 'nor its resume line');
+          await key(a, 'f');
+          ok(toastsOf(root).includes(words.f('sess.readOnlyKey', 'Bo Lin', 'bo-laptop')), 'a key says why it does nothing');
+          await click(buttonOf(root, words.t('sess.earlier')));
+        },
+        async reread() {
+          await act(() => settle());
+          ok(toastsOf(root).includes(words.t('sess.reread')), 'its file changed: read again from the newest');
+          eq(msgsOf(root), ['Add the search box.', 'The search box is in, with tests.'], 'the newest');
+          styled(root, `${f} shared conversation`);
+          if (!desk) await back(root);
+        },
+        async rev() {},
+        async again() {
+          await act(() => settle());
+          eq(titlesOf(root)[0], 'Draft the v1.0 release notes', 'read again once mba says its records changed');
+          if (desk) eq(rowsOf(root)[0].one('.sess-tags').find('.chip').map(x => x.textContent), ['#release', '#docs', '+1'], 'as it is now');
+        },
+        async port() { await click(rowsOf(root)[2]); },
+        async make() {
+          await act(() => settle());
+          if (desk) {
+            ok(a.keys.active().some(b => b.id === 'makeTask' && !b.key), 'the palette makes it a task');
+            await click(rowsOf(root)[2].one('.sv-rowact').find('button')[1]);
+          } else await click(overOf(root).one('.page-head').one('.menu-wrap').one('button'));
+          await click(root.find('[role=menuitem]').find(x => x.textContent === words.t('sess.make')));
+          const box = overOf(root);
+          eq(box.find('.t-muted')[0].textContent, words.f('sess.makeSub', 'Port the importer', 'mba', 'Codex'), 'what it goes on with');
+          styled(root, `${f} make`);
+          await type(box.one('textarea'), 'Add a test for Windows line endings');
+          await click(box.find('.picker-btn')[1]);
+          await click(optionOf(root, 'Shop'));
+          await click(buttonOf(box, words.t('sess.make')));
+        },
+        async made() {
+          await act(() => settle());
+          ok(toastsOf(root).includes(words.f('sess.made', 'mba')), 'made, going on on mba');
+          ok(buttonOf(root.one('.toasts'), words.t('sess.madeGo')), 'with a way to it');
+          if (!desk) await back(root);
+        },
+        async typed() {
+          await type(root.one('.sv-q').one('input'), typed);
+          await act(() => r.clk.advance(250));
+        },
+        async chips() {
+          await act(() => settle());
+          eq(a.router.route.value.q, typed, 'the query in the address');
+          eq(root.one('.sv-unknown').textContent, words.f('sess.unknown', 'owner:bo'), 'what Go did not understand');
+          const set = root.find('.sv-chip').filter(c => classesOf(c).includes('set')).map(labelOf);
+          if (desk) {
+            eq(set, [words.t('sess.f.project') + 'Shop', words.t('sess.f.tag') + '#docs'], 'the chips show Go\'s tokens');
+            eq(root.one('.seg').find('[role=radio]').filter(x => x.getAttribute('aria-checked') === 'true').map(x => x.textContent), [words.t('sess.st.all')], 'the state');
+            await click(root.find('.sv-chip').find(c => c.one('.k').textContent === words.t('sess.f.project')));
+            await click(optionOf(root, words.t('sess.f.any')));
+          } else {
+            eq(set, [words.t('sess.f.state') + words.t('sess.st.all'), words.t('sess.moreFilters')], 'the chips show Go\'s tokens');
+            await click(buttonOf(root, words.t('sess.moreFilters')));
+            await click(overOf(root).one('.sv-filters').find('.sv-opt').find(o => o.find('span')[0].textContent === words.t('sess.f.any')));
+          }
+        },
+        async dropped() {
+          await act(() => settle());
+          eq(valueOf(root.one('.sv-q').one('input')), '#docs notes owner:bo status:all', 'a choice drops its token');
+          eq(titlesOf(root).slice(0, 2), ['Draft the v1.0 release notes', 'Add the search box'], 'and reads again');
+        },
       });
       eq(r.errors, [], 'errors');
-      await click(f === 'phone' ? root.one('.sess-conv-task').one('button') : root.find('.tr')[1].one('.sess-task'));
-      eq(a.router.route.value, {page: 'tasks', view: 'list', task: 't2'}, f === 'phone' ? 'the conversation\'s label opens it' : 'the row\'s label opens it, not the row');
-      ok(root.find('.sess').length === 0 && root.textContent.includes('Cart totals'), 'the task page in its place');
     } finally { form.value = 'desktop'; }
   });
 }
 
-test('the phone home has no machine rows for a viewer who reads none, nor without node.call; the desktop has none', async () => {
+for (const f of ['desktop', 'phone']) {
+  test(`message search on a ${f}: on Enter only, every machine, marked; a hit opens at its place with a way between hits`, async () => {
+    const r = await team();
+    let a, root;
+    const desk = f === 'desktop';
+    const nav = () => root.one('.sv-hitnav');
+    const linux = r.store.machines.value.find(m => m.name === 'linux')?.version || '—';
+    words.lang.value = desk ? 'zh' : 'en';
+    try {
+      await r.srv.play('sessions-grep', {
+        async mount() { a = app(r); root = await mount(a.vnode(), f); },
+        async listed() { await act(() => settle()); eq(titlesOf(root), ['Draft the release notes', 'Fix the checkout total'], 'the list first'); },
+        async search() {
+          const input = root.one('.sv-q').one('input');
+          if (desk) await key(a, '>', {shiftKey: true});
+          else await click(buttonOf(root, words.t('sess.msgSearch')));
+          eq(valueOf(input), '> ', 'a message search starts');
+          await type(input, '> chekout total');
+          await act(() => r.clk.advance(1000));
+          await act(() => input.dispatch('keydown', {key: 'Enter'}));
+        },
+        async found() {
+          await act(() => settle());
+          eq(a.router.route.value, {page: 'sessions', q: '> chekout total'}, 'in the address');
+          ok(root.textContent.includes(words.f('sess.msgHead', 2, 4)), 'how many sessions and hits');
+          eq(root.find('.sv-hit').map(h => h.one('.sess-titled').find('.ell')[0].textContent), ['Fix the checkout total', 'Port the importer'], 'the best first');
+          eq(root.find('.sv-snip').map(markedOf), [['total', 'checkout'], ['checkout']], 'snippets marked at Go\'s spans');
+          eq(linesOf(root), [desk ? words.f('sess.m.oldNoSearch', 'linux', linux, 'linux') : words.f('sess.m.oldShort', 'linux'),
+            words.f('sess.m.building', 'mba', 120, 400), words.f('sess.fixes', 'checkout')], 'not searched, still building, and a spelling also searched');
+          styled(root, `${f} hits`);
+        },
+        async open() { await click(rowsOf(root)[0]); },
+        async at() {
+          await act(() => settle());
+          eq(root.one('.sv-at').getAttribute('data-off'), '1200', 'open at the best hit');
+          eq(root.find('.sess-msg').map(markedOf), [['checkout', 'total'], ['Checkout', 'total']], 'its words marked');
+          eq(nav().find('span')[0].textContent, words.f('sess.hitNav', 2, 3), 'which of its hits');
+          await click(nav().find('button')[1]);
+        },
+        async next() {
+          await act(() => settle());
+          eq([root.one('.sv-at').getAttribute('data-off'), nav().find('span')[0].textContent], ['2000', words.f('sess.hitNav', 3, 3)], 'the next, read from a page ending on it');
+          eq(nav().find('button')[1].disabled, true, 'the last');
+          await click(nav().find('button')[0]);
+        },
+        async back() {
+          await act(() => settle());
+          eq([root.one('.sv-at').getAttribute('data-off'), nav().find('span')[0].textContent], ['1200', words.f('sess.hitNav', 2, 3)], 'one already read is marked in place');
+          styled(root, `${f} hit`);
+          if (!desk) await back(root);
+        },
+        async other() { await click(rowsOf(root)[1]); },
+        async unseen() {
+          await act(() => settle());
+          eq(root.one('.sv-stale').textContent, words.t('sess.unseen'), 'a hit in the file before the session went on is not shown');
+          eq([msgsOf(root), root.find('.sv-at').length], [['The import streams now.'], 0], 'the newest part is');
+          if (!desk) await back(root);
+          await click(buttonOf(root.one('.sv-machines'), words.t('sess.m.searchAgain')));
+        },
+        async again() {
+          await act(() => settle());
+          eq(linesOf(root).length, 2, 'built: no line for it');
+        },
+      });
+      eq(r.errors, [], 'errors');
+    } finally { form.value = 'desktop'; words.lang.value = 'zh'; }
+  });
+}
+
+// homeRows are the phone home's session rows: the first for every machine, then one a machine.
+const homeRows = root => root.one('.home-sess-list').find('button');
+
+for (const f of ['desktop', 'phone']) for (const lang of ['zh', 'en']) {
+  test(`delete and the trash on a ${f} in ${lang}: only where the machine has a trash, confirmed, undone by restore, refused while running; the trash view restores`, async () => {
+    const r = await team();
+    let a, root;
+    words.lang.value = lang;
+    const desk = f === 'desktop';
+    const t = words.t, w = words.f;
+    const conv = () => root.one('.sess-conv');
+    const menuOf = async row => {
+      if (desk) await click(rowsOf(root)[row].one('.sv-rowact').find('button')[1]);
+      else await click(overOf(root).one('.page-head').one('.menu-wrap').one('button'));
+      return root.find('[role=menuitem]');
+    };
+    const askDelete = async row => click((await menuOf(row)).find(x => labelOf(x) === t('sess.del')));
+    const dialog = () => root.all(e => classesOf(e).includes('sv-del'))[0];
+    const deleteKey = () => key(a, 'Backspace', {metaKey: true});
+    const writes = ['favorite', 'archive', 'done', 'edit', 'makeTask'];
+    const bound = () => a.keys.active().map(b => b.id);
+    const port = 'Port the importer', regex = 'Scratch: regex for log lines';
+    try {
+      await r.srv.play('sessions-trash', {
+        async mount() { a = app(r); root = await mount(a.vnode(), f); },
+        async listed() {
+          await act(() => settle());
+          eq(titlesOf(root), ['Draft the release notes', 'Fix the checkout total', port, 'Add the search box', 'Rename the cart helpers', 'Back up the photos'], 'listed');
+          ok(root.textContent.includes(w('sess.counts', 6, 6, 1)), 'counted');
+          if (desk) {
+            await click(rowsOf(root)[4].one('.sv-rowact').find('button')[1]);
+            eq(root.find('[role=menuitem]').map(labelOf), [t('sess.a.archive'), t('sess.a.edit'), t('sess.make')], 'mini has no trash: no delete in its menu');
+            await key(a, 'Escape');
+          }
+          styled(root, `${f}/${lang} trash list`);
+        },
+        async open() { await click(rowsOf(root)[2]); },
+        async ask() {
+          await act(() => settle());
+          const items = await menuOf(2);
+          eq(items.map(labelOf), desk ? [t('sess.a.archive'), t('sess.a.edit'), t('sess.make'), t('sess.del')] : [t('sess.make'), t('sess.del')], 'delete in the menu, last');
+          await click(items.find(x => labelOf(x) === t('sess.del')));
+          const box = overOf(root);
+          eq(box.one('h2').textContent, t('sess.delTitle'), 'confirmed first');
+          eq(dialog().find('p').map(x => x.textContent), [w('sess.delBody', port, 'mba'), w('sess.delNote', 30)], 'where it goes and when it is purged');
+          const del = buttonOf(box, t('sess.delBtn'));
+          ok(classesOf(del).includes('primary') && classesOf(del).includes('danger-fill'), 'a danger primary');
+          eq(globalThis.document.activeElement, del, 'which Enter presses');
+          styled(root, `${f}/${lang} delete dialog`);
+          await key(a, 'Escape');
+          eq(dialog(), undefined, 'Esc cancels');
+          if (desk) await deleteKey();
+          else await askDelete(2);
+          ok(dialog(), desk ? 'the key asks too' : 'asked again');
+          if (desk) await key(a, 'Enter', {metaKey: true});
+          else await click(buttonOf(overOf(root), t('sess.delBtn')));
+        },
+        async pending() {
+          eq(dialog(), undefined, 'the dialog closes');
+          ok(classesOf(rowsOf(root)[2]).includes('sv-pending'), 'the row waits for its machine');
+        },
+        async deleted() {
+          await act(() => settle());
+          eq(titlesOf(root).includes(port), false, 'it leaves the list at once');
+          ok(root.textContent.includes(w('sess.counts', 5, 5, 1)), 'and the counts');
+          eq(a.router.route.value, {page: 'sessions'}, 'its conversation closes');
+          eq(root.find('.page-over').length, 0, 'on a phone too');
+          eq(toastsOf(root), [w('sess.deleted', port, 'mba')], 'said, with undo');
+          if (desk) await click(buttonOf(root.one('.toasts'), t('ui.undo')));
+          else await key(a, 'z', {metaKey: true});
+        },
+        async undone() {
+          await act(() => settle());
+          eq(titlesOf(root)[2], port, 'undo restores it and reads the list again');
+          await click(rowsOf(root)[1]);
+        },
+        async fix() {
+          await act(() => settle());
+          if (desk) await deleteKey();
+          else await askDelete(1);
+          await click(buttonOf(overOf(root), t('sess.delBtn')));
+        },
+        async busy() {
+          await act(() => settle());
+          ok(toastsOf(root).includes(t('sess.delBusy')), 'a running session is not deleted');
+          eq(titlesOf(root)[1], 'Fix the checkout total', 'and stays');
+          if (!desk) await back(root);
+          await click(rowsOf(root)[3]);
+        },
+        async shared() {
+          await act(() => settle());
+          eq((desk ? conv() : overOf(root).one('.page-head')).find('.menu-wrap').length, 0, 'Bo\'s session has no ⋯');
+          await deleteKey();
+          ok(toastsOf(root).includes(w('sess.readOnlyKey', 'Bo Lin', 'bo-laptop')), 'the key says why it does nothing');
+          if (!desk) await back(root);
+        },
+        async toTrash() {
+          if (desk) await click(root.one('.seg').find('[role=radio]').find(x => x.textContent === t('sess.st.trash')));
+          else {
+            await click(root.find('.sv-chip').find(c => c.find('.k')[0]?.textContent === t('sess.f.state')));
+            await click(optionOf(root, t('sess.st.trash')));
+          }
+        },
+        async trash() {
+          await act(() => settle());
+          eq(a.router.route.value.q, 'status:trash', 'the trash is status:trash');
+          eq(titlesOf(root), [port, regex], 'what was deleted');
+          ok(root.textContent.includes(w('sess.trashHead', 2)), 'counted');
+          eq(linesOf(root), [w('sess.m.sharedRuns', 'bo-laptop', 'Bo Lin'), w('sess.m.oldTrash', 'linux'), w('sess.m.oldTrash', 'mini')], 'an outdated machine\'s trash is in its TUI');
+          eq(rowsOf(root).map(x => x.textContent.includes(w('sess.deletedAt', ['14:31', '9-14'][rowsOf(root).indexOf(x)]))), [true, true], 'dated by deletion: the clock today, else the date');
+          if (desk) eq(rowsOf(root).map(x => x.one('.sv-rowact').find('button').map(labelOf)), [[t('sess.restore')], [t('sess.restore')]], 'only restore at the row\'s end');
+          styled(root, `${f}/${lang} trash view`);
+          await click(rowsOf(root)[0]);
+        },
+        async trashOpen() {
+          await act(() => settle());
+          const bar = conv().one('.sv-trash');
+          ok(bar.textContent.includes(w('sess.inTrash', 'mba', when('2026-09-30T14:31:00Z', NOW), 30)), 'in the trash, since when, purged when');
+          eq([conv().find('.sv-acts').length, conv().find('.sv-phone-acts').length, conv().find('.sv-ro').length], [0, 0, 0], 'no favorite, done, archive or edit');
+          ok(!conv().textContent.includes(w('sess.resume', 'mba')), 'no resume line');
+          if (!desk) eq(overOf(root).one('.page-head').find('.menu-wrap').length, 0, 'no ⋯');
+          eq(bound().filter(id => writes.includes(id)), [], 'nor their keys');
+          ok(bound().includes('trash'), 'the delete key restores');
+          styled(root, `${f}/${lang} trash conversation`);
+          await click(desk ? rowsOf(root)[0].one('.sv-rowact').one('button') : buttonOf(bar, t('sess.restore')));
+        },
+        async restored() {
+          await act(() => settle());
+          ok(toastsOf(root).includes(w('sess.restored', port)), 'restored, without asking');
+          eq(titlesOf(root), [regex], 'it leaves the trash');
+          ok(root.textContent.includes(w('sess.trashHead', 1)), 'counted');
+          eq([a.router.route.value.open, root.find('.page-over').length], [undefined, 0], 'its conversation closes');
+          await click(rowsOf(root)[0]);
+        },
+        async regex() {
+          await act(() => settle());
+          ok(conv().one('.sv-trash').textContent.includes(w('sess.inTrash', 'mba', when('2026-09-14T10:00:00Z', NOW), 14)), 'purged in what is left of 30 days');
+          await deleteKey();
+        },
+        async emptied() {
+          await act(() => settle());
+          const box = root.one('.sv-empty');
+          eq(box.find('p').map(x => x.textContent), [t('sess.e.trash'), w('sess.e.trashSub', 30)], 'an empty trash says how long it keeps');
+          ok(buttonOf(box, t('sess.e.open')), 'and leads back');
+          styled(root, `${f}/${lang} empty trash`);
+        },
+      });
+      eq(r.errors, [], 'errors');
+    } finally { form.value = 'desktop'; words.lang.value = 'zh'; }
+  });
+}
+
+test('the side menu, g c, the machines page and the phone home lead to the sessions page; old addresses become its query', async () => {
   const r = await team();
   try {
-    const cy = {id: 'u_c', name: 'Cy', role: 'member'};
-    seenBy(r, cy);
-    const carol = await mount(app(r, {url: '/', session: cy}).vnode(), 'phone');
-    eq([carol.find('.home-going').length, carol.find('.home-sess').length], [1, 0], 'a member owning no machine');
-    seenBy(r, admin);
-    const wire = {...r.wire, has: m => m !== 'node.call' && r.wire.has(m)};
-    const old = await mount(app(r, {url: '/', wire}).vnode(), 'phone');
-    eq([old.find('.home-going').length, old.find('.home-sess').length], [1, 0], 'a server without node.call');
-    const desk = await mount(app(r, {url: '/'}).vnode(), 'desktop');
-    eq(desk.find('.home-sess').length, 0, 'the desktop');
+    const a = app(r, {url: '/'});
+    const root = await mount(a.vnode(), 'desktop');
+    eq(root.find('.nav-item').map(x => x.getAttribute('href')).slice(0, 3), ['/', '?page=tasks', '?page=sessions'], 'after the tasks');
+    await click(root.find('.nav-item')[2]);
+    eq(a.router.route.value, {page: 'sessions'}, 'the menu');
+    eq(root.find('.sess').length, 1, 'the page');
+    await key(a, 'g'); await key(a, 'h');
+    await key(a, 'g'); await key(a, 'c');
+    eq(a.router.route.value, {page: 'sessions'}, 'g c');
+    const m = app(r, {url: '/?page=machines'});
+    const machines = await mount(m.vnode(), 'desktop');
+    await click(machines.find('.mach-card').find(c => c.one('b').textContent === 'mba'));
+    await click(buttonOf(machines.one('.mach-aside'), words.t('mach.sessions')));
+    eq(m.router.route.value, {page: 'sessions', q: 'host:mba'}, 'a machine\'s: the page with its host:');
+    eq(valueOf(machines.one('.sv-q').one('input')), 'host:mba', 'written in the query');
+    for (const [i, want] of [[0, {page: 'sessions'}], [3, {page: 'sessions', q: 'host:mba'}]]) {
+      const h = app(r, {url: '/'});
+      const home = await mount(h.vnode(), 'phone');
+      eq(labelOf(homeRows(home)[0]).startsWith(words.t('home.sessAll')), true, 'the phone home\'s first row is every machine');
+      await click(homeRows(home)[i]);
+      eq(h.router.route.value, want, i ? 'then one a machine' : 'all');
+      eq(h.history.length, 2, 'over the home');
+      await act(() => h.history.back());
+      eq(h.router.route.value, {page: 'home'}, 'back is the home');
+    }
+    const old = app(r, {url: '/?page=machines&sessions=mba&session=claude:c-fix&project=none&fav=1'});
+    await mount(old.vnode(), 'desktop');
+    eq(old.router.route.value, {page: 'sessions', q: 'host:mba project:none', fav: true, open: 'mba/claude:c-fix'}, 'an old address');
   } finally { form.value = 'desktop'; }
-});
-
-test('the list merges who runs and filters by every word', () => {
-  const rows = ss.rowsOf({sessions: [{provider: 'claude', session_id: 'a', title: 'One', cwd: '/w/a', last_at: '2026-09-30T10:00:00Z'},
-    {provider: 'codex', session_id: 'b', title: 'Two', cwd: '/w/b', last_at: '2026-09-30T12:00:00Z'}]},
-  {a: {Status: 'blocked', Agent: 'claude'}, c: {Agent: 'claude', Title: 'Three', Cwd: '/w/c', Since: '2026-09-30T11:00:00Z'}, d: {Title: 'no agent'}});
-  eq(rows.map(r => [r.key, !!r.live]), [['codex:b', false], ['claude:c', true], ['claude:a', true]], 'newest first; live only with an agent');
-  eq(ss.matches(rows, 'W/A one').map(r => r.key), ['claude:a'], 'case and every word');
-  eq(ss.older([{Off: 9}], {Msgs: [{Off: 5}, {Off: 1}]}).map(m => m.Off), [1, 5, 9], 'an earlier page goes above, oldest first');
-  eq([ss.cut({Text: 'abc', Chars: 3}), ss.cut({Text: 'ab', Chars: 9})], [false, true], 'a shortened text');
-  eq(ss.refOf('claude:x:y'), {provider: 'claude', session_id: 'x:y'}, 'a key back to its ref');
-});
-
-test('the favorites-only switch keeps the favorites, archived ones too; the filter finds tags with or without #', () => {
-  const rows = [{key: 'a', title: 'One', favorited_at: '2026-09-30T10:00:00Z', tags: ['ops', 'db']}, {key: 'b', title: 'Two', tags: ['ops']},
-    {key: 'c', title: 'Three', favorited_at: '2026-09-29T10:00:00Z', archived_at: '2026-09-30T08:00:00Z'}, {key: 'd', title: 'Four', favorited_at: ''}];
-  eq(ss.favorites(rows).map(r => r.key), ['a', 'c'], 'favorited, archived or not');
-  eq(ss.matches(rows, 'OPS').map(r => r.key), ['a', 'b'], 'a tag, any case');
-  eq(ss.matches(rows, '#db one').map(r => r.key), ['a'], 'a #tag and a word');
-  eq(ss.matches(rows, '#').map(r => r.key), ['a', 'b', 'c', 'd'], 'a lone # is no word');
-  eq(ss.tagsShown(['a', 'b', 'c', 'd']), {shown: ['a', 'b'], more: 2}, 'two tags, the rest counted');
-  eq(ss.tagsShown(undefined), {shown: [], more: 0}, 'none');
-  const placed = ss.rowsOf({sessions: [{provider: 'claude', session_id: 'a'}, {provider: 'codex', session_id: 'b'}]}, {c: {Agent: 'claude'}}, {'claude:a': 'p1', 'claude:c': 'p2'});
-  eq(placed.map(r => [r.key, r.project]), [['claude:a', 'p1'], ['codex:b', ''], ['claude:c', 'p2']].sort(), 'each row\'s project by provider:id, a running one too');
-  eq(['', 'p1', 'none', 'p9'].map(p => ss.inProject(placed, p).map(r => r.key).sort()), [['claude:a', 'claude:c', 'codex:b'], ['claude:a'], ['codex:b'], []], 'all, one project, none, one not seen');
-  for (const [url, route] of [['?page=machines&sessions=mba&fav=1', {page: 'machines', sessions: 'mba', fav: true}],
-    ['?page=machines&sessions=mba&session=claude%3Ac-1&fav=1', {page: 'machines', sessions: 'mba', session: 'claude:c-1', fav: true}],
-    ['?page=machines&sessions=mba&project=none&fav=1', {page: 'machines', sessions: 'mba', project: 'none', fav: true}],
-    ['?page=machines&sessions=mba&project=p1', {page: 'machines', sessions: 'mba', project: 'p1'}],
-    ['?page=machines&sessions=mba', {page: 'machines', sessions: 'mba'}]]) {
-    eq(parse(url), route, `${url} read`);
-    eq(format(route), url, `${url} written`);
-  }
-  eq(parse('?page=machines&fav=1'), {page: 'machines'}, 'only with a machine\'s sessions');
-});
-
-test('the list is read once the connection is open, through sessions.list where the server has it', async () => {
-  const status = signal('connecting');
-  let known = new Set();
-  const asked = [];
-  const wire = {status, has: m => known.has(m), call: (method, p) => {
-    asked.push(method === 'node.call' ? p.method : method);
-    return Promise.resolve(method === 'sessions.list' ? {sessions: [{provider: 'claude', session_id: 'a'}], live: {}, projects: {'claude:a': 'p1'}}
-      : p.method === 'list' ? {sessions: [{provider: 'claude', session_id: 'a'}]} : {live: {}});
-  }};
-  const read = ss.readList(wire, 'mba');
-  await Promise.resolve();
-  eq(asked, [], 'nothing asked while connecting');
-  known = new Set(['sessions.list']);
-  status.value = 'open';
-  eq(await read, {rows: [{provider: 'claude', session_id: 'a', key: 'claude:a', live: null, project: 'p1'}], byProject: true}, 'its projects');
-  eq(asked, ['sessions.list'], 'one call');
-  known = new Set();
-  eq((await ss.readList(wire, 'mba')).byProject, false, 'an older server: no projects');
-  eq(asked.slice(1).sort(), ['list', 'live'], 'read of the node');
-});
-
-test('a session links to the task of the newest run that used it, and is found by it', () => {
-  const state = {
-    tasks: {old: {id: 'old', title: 'Old try'}, neu: {id: 'neu', title: 'New try', stage: 'review'}, many: {id: 'many', title: 'Many runs'}, none: {id: 'none', title: 'No session'}},
-    runs: {
-      r1: {id: 'r1', task: 'old', session: 's1', seq: 1, queued_at: '2026-09-30T08:00:00Z'},
-      r2: {id: 'r2', task: 'neu', session: 's1', seq: 5, queued_at: '2026-09-30T09:00:00Z'},
-      r3: {id: 'r3', task: 'old', seq: 6, queued_at: '2026-09-30T10:00:00Z'},
-      r4: {id: 'r4', task: 'many', session: 's2', seq: 2}, r5: {id: 'r5', task: 'many', session: 's2', seq: 3},
-      r6: {id: 'r6', task: 'none', seq: 4}, r7: {id: 'r7', task: 'gone', session: 's3', seq: 7},
-    },
-  };
-  const ls = ss.links(state);
-  eq(ls, {s1: {id: 'neu', title: 'New try', stage: 'review'}, s2: {id: 'many', title: 'Many runs', stage: ''}},
-    'the newest run decides; runs without a session and a task not held link nothing');
-  eq(ss.links({tasks: {}, runs: {}}), {}, 'no runs');
-  const rows = ss.linked([{key: 'claude:s1', session_id: 's1', title: 'One'}, {key: 'claude:s9', session_id: 's9', title: 'Nine'}], ls);
-  eq(rows.map(r => r.task?.id || null), ['neu', null], 'a session no run used has no task');
-  eq(ss.matches(rows, 'new TRY').map(r => r.key), ['claude:s1'], 'by the task\'s title');
-  eq(ss.matches(rows, 'neu one').map(r => r.key), ['claude:s1'], 'by its id and the session\'s own words together');
-  eq(ss.matches(rows, 'review').map(r => r.key), [], 'not by the stage');
 });
 
 // The resume lines for the Go test to type with internal/shell: [os, dir, argv, the page's line].

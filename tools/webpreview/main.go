@@ -6,7 +6,8 @@
 //	go run ./tools/webpreview [-addr 127.0.0.1:18765]
 //
 // The page is at /; ?as=signedout shows the sign-in page, ?as=admin signs in as the admin, #device-<code> a terminal's sign-in, #invite-<code> an
-// invitation.
+// invitation. The sessions page's calls go to POST /fake/call, which answers them from made-up sessions in memory
+// (sessions.go): its changes last until the command ends.
 package main
 
 import (
@@ -18,10 +19,14 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/oxsean/fav/internal/server"
 	"github.com/oxsean/fav/internal/skin"
 )
+
+// ⚠️ The moment the frames are written for (webtest/preview/preview.js's NOW).
+var previewNow = time.Date(2026, 9, 30, 14, 32, 0, 0, time.UTC)
 
 func main() {
 	addr := flag.String("addr", "127.0.0.1:18765", "the address to listen on")
@@ -49,6 +54,7 @@ func main() {
 		w.Header().Set("Content-Type", "text/css; charset=utf-8")
 		fmt.Fprint(w, sk.CSS())
 	})
+	mux.HandleFunc("POST /fake/call", newFakeSessions(previewNow).serve)
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
 		http.ServeFile(w, r, filepath.Join(root, "webtest", "preview", "index.html"))
 	})

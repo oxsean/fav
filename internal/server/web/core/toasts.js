@@ -16,10 +16,11 @@ export function createToasts({timers = globalThis} = {}) {
     list.value = list.value.filter(t => t.id !== id);
   }
 
-  // show adds a notice {text, tone?, undo?} and returns its id; tone is danger or warning, undo a function.
-  function show({text, tone = '', undo = null}) {
+  // show adds a notice {text, tone?, undo?, act?} and returns its id; tone is danger or warning, undo a function, act
+  // {label, run} a way on from it (the task a session became).
+  function show({text, tone = '', undo = null, act = null}) {
     const id = next++;
-    list.value = [...list.value, {id, text, tone, undo}];
+    list.value = [...list.value, {id, text, tone, undo, act}];
     timersOf.set(id, timers.setTimeout(() => dismiss(id), undo ? UNDO_WAIT : plainWait));
     return id;
   }

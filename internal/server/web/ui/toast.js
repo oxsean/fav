@@ -36,6 +36,7 @@ export function Toasts({toasts}) {
   return html`<div class=${cx('toasts', phone && 'toasts-phone')} ref=${box} role="status" aria-live="polite">
     ${list.map(x => html`<div class=${cx('toast', x.tone && 'toast-' + x.tone)} key=${x.id}>
       <span class="toast-text">${x.text}</span>
+      ${x.act && html`<${Button} kind="quiet" onClick=${() => { toasts.dismiss(x.id); x.act.run(); }}>${x.act.label}<//>`}
       ${x.undo ? html`<${Button} kind="quiet" keyName="Mod+Z" onClick=${() => toasts.undo(x.id)}>${t('ui.undo')}<//>`
         : html`<${Button} kind="quiet" onClick=${() => toasts.dismiss(x.id)}>${t('ui.dismiss')}<//>`}
     </div>`)}

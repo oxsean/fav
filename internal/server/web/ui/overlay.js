@@ -26,13 +26,15 @@ export function focusables(root) {
   return out;
 }
 
-// useFocusTrap moves focus into the box when it opens, keeps Tab inside it, and gives focus back when it closes.
+// useFocusTrap moves focus into the box when it opens (to the button marked first, else the first it reaches), keeps Tab
+// inside it, and gives focus back when it closes.
 function useFocusTrap(ref) {
   useEffect(() => {
     const box = ref.current;
     if (!box) return;
     const before = box.ownerDocument?.activeElement;
-    (focusables(box)[0] || box).focus?.();
+    const list = focusables(box);
+    (list.find(el => el.getAttribute('data-first') !== null) || list[0] || box).focus?.();
     return () => before?.focus?.();
   }, []);
   return e => {
@@ -45,9 +47,11 @@ function useFocusTrap(ref) {
   };
 }
 
+const isPrimary = a => (a.kind || '').split(' ').includes('primary');
+
 function actionButtons(actions, phone) {
-  const ordered = phone ? [...actions].sort((a, b) => (b.kind === 'primary') - (a.kind === 'primary')) : actions;
-  return ordered.map(a => html`<${Button} kind=${a.kind} keyName=${a.keyName} wide=${phone} disabled=${a.disabled} onClick=${a.onClick}>${a.label}<//>`);
+  const ordered = phone ? [...actions].sort((a, b) => isPrimary(b) - isPrimary(a)) : actions;
+  return ordered.map(a => html`<${Button} kind=${a.kind} keyName=${a.keyName} wide=${phone} disabled=${a.disabled} first=${a.first} onClick=${a.onClick}>${a.label}<//>`);
 }
 
 function FullPage({titleID, title, onClose, onKeyDown, box, actions, extra, children}) {
@@ -59,15 +63,16 @@ function FullPage({titleID, title, onClose, onKeyDown, box, actions, extra, chil
   </div>`;
 }
 
-// Modal: actions [{label, kind, keyName, onClick, disabled}]; the primary one also runs on Mod+Enter. Esc and the
-// backdrop close it; while open, no key reaches the page behind it.
+// Modal: actions [{label, kind, keyName, onClick, disabled, first}]; the primary one (kind holds primary) also runs on
+// Mod+Enter; first has the focus, so Enter presses it. Esc and the backdrop close it; while open, no key reaches the
+// page behind it.
 export function Modal({title, onClose, actions = [], children, full = false}) {
   const phone = usePhone();
   const {t} = useWords();
   const titleID = useId();
   const box = useRef(null);
   const trap = useFocusTrap(box);
-  const primary = actions.find(a => a.kind === 'primary' && !a.disabled);
+  const primary = actions.find(a => isPrimary(a) && !a.disabled);
   useKeys('modal', [{key: 'Esc', run: onClose}, ...(primary ? [{key: 'Mod+Enter', run: primary.onClick}] : [])], {blocks: true});
   if (phone && full) return html`<${FullPage} titleID=${titleID} title=${title} onClose=${onClose} onKeyDown=${trap} box=${box} actions=${actions}>${children}<//>`;
   if (phone) {

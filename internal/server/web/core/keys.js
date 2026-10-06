@@ -6,7 +6,7 @@ import {signal} from '../vendor/signals-core.mjs';
 export const levels = ['modal', 'drawer', 'list', 'page', 'global'];
 
 // ⚠️ A CJK input method types these marks for the keys the table names.
-export const imeMarks = {'；': ';', '，': ',', '？': '?', '、': '/', '／': '/'};
+export const imeMarks = {'；': ';', '，': ',', '？': '?', '、': '/', '／': '/', '》': '>'};
 
 const named = {Escape: 'Esc', ' ': 'Space', Spacebar: 'Space'};
 
@@ -30,12 +30,13 @@ export function createKeys({timers = globalThis, sequenceWait = 1200} = {}) {
   const changed = signal(0);
 
   // push adds a scope of bindings [{key, run, when?, label?}] at a level and returns what removes it. blocks: no scope below
-  // it sees a key (a modal keeps the page's keys from acting behind it).
+  // it sees a key (a modal keeps the page's keys from acting behind it). A binding with no key is for the palette alone.
   function push(level, bindings, {blocks = false} = {}) {
     if (!levels.includes(level)) throw new Error(`keys: no level ${level}`);
     const seen = new Set();
     for (const b of bindings) {
-      if (!b.key) throw new Error(`keys: ${b.id || 'a binding'} has no key`);
+      if (!b.key && !(b.id && b.palette)) throw new Error(`keys: ${b.id || 'a binding'} has no key`);
+      if (!b.key) continue;
       if (seen.has(b.key)) throw new Error(`keys: ${b.key} twice in one ${level} scope`);
       seen.add(b.key);
     }
@@ -97,10 +98,12 @@ export function createKeys({timers = globalThis, sequenceWait = 1200} = {}) {
     return !!b;
   }
 
-  // active is the bindings a press would run now, each key once, in the order the scopes are searched.
+  // active is the bindings a press would run now, each key once (a keyless one once by its action), in the order the
+  // scopes are searched.
   function active() {
     const seen = new Set();
-    return ordered().flatMap(s => s.bindings.filter(b => (!b.when || b.when()) && !seen.has(b.key) && seen.add(b.key)));
+    const name = b => b.key || '#' + b.id;
+    return ordered().flatMap(s => s.bindings.filter(b => (!b.when || b.when()) && !seen.has(name(b)) && seen.add(name(b))));
   }
 
   return {push, handle, changed, active};

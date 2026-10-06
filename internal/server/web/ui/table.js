@@ -6,6 +6,8 @@ import {html, cx, usePhone, useActions, useWords} from './base.js';
 
 export const VIRTUAL_ABOVE = 200;
 const overscan = 8;
+// ⚠️ How many rows before the end a list asks for its next page (onEnd).
+export const END_ROWS = 10;
 
 // windowOf is the slice of count rows of rowHeight to draw for a viewport of height scrolled to top, with the space
 // before and after it.
@@ -46,8 +48,8 @@ const sortMark = {asc: '▲', desc: '▼'};
 // Table: columns [{id, label, width, align, sort(a, b), render(row), mobile}], mobile being lead (before the text),
 // primary, line (a line of its own under primary), secondary, trailing or hidden (the default); rowClass(row) adds a
 // row's own class. rowHeight is the density's row in px; height is the
-// viewport's until the page has measured it.
-export function Table({label, columns, rows, rowKey = r => r.id, selected, onSelect, onOpen, onToggle, onPick, rowHeight, height = 480, active = true, empty, rowClass = () => ''}) {
+// viewport's until the page has measured it. onEnd asks for more rows once the view comes within END_ROWS of the end.
+export function Table({label, columns, rows, rowKey = r => r.id, selected, onSelect, onOpen, onToggle, onPick, rowHeight, height = 480, active = true, empty, rowClass = () => '', onEnd}) {
   const phone = usePhone();
   const {t, f} = useWords();
   const [order, setOrder] = useState({by: '', dir: 'asc'});
@@ -71,7 +73,12 @@ export function Table({label, columns, rows, rowKey = r => r.id, selected, onSel
     const to = scrollFor({index: i, rowHeight: rh, top: el.scrollTop || 0, height: el.clientHeight || height});
     if (to !== null) { el.scrollTop = to; setTop(to); }
   }, [selected]);
-  const onScroll = e => setTop(e.currentTarget.scrollTop);
+  const nearEnd = el => !!onEnd && !!el && el.clientHeight > 0 && el.scrollHeight - el.scrollTop - el.clientHeight <= END_ROWS * rh;
+  useEffect(() => { if (nearEnd(body.current)) onEnd(); }, [rows.length]);
+  const onScroll = e => {
+    setTop(e.currentTarget.scrollTop);
+    if (nearEnd(e.currentTarget)) onEnd();
+  };
   const cell = (c, r) => (c.render ? c.render(r) : r[c.id]);
   const shown = sorted.slice(win.start, win.end);
   const pad = h => h > 0 && html`<div class="spacer" aria-hidden="true" style=${{height: h + 'px'}}></div>`;

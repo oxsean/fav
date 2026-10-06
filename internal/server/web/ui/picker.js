@@ -35,7 +35,9 @@ function Pop({close, children}) {
 
 // Picker: options [{value, label, sub, state, note, tone, disabled, words}]; value is one value, or an array when
 // multi; onChange gets the new value. empty names the choice of nothing ("" is a value too when an option has it).
-export function Picker({label, options, value, onChange, multi = false, placeholder, empty, note, error}) {
+// trigger({open, toggle, ref, shown}) draws its own button in place of the field (a filter chip); a new want opens it
+// (a key that picks).
+export function Picker({label, options, value, onChange, multi = false, placeholder, empty, note, error, trigger = null, want = 0}) {
   const phone = usePhone();
   const {t} = useWords();
   const id = useId();
@@ -45,6 +47,7 @@ export function Picker({label, options, value, onChange, multi = false, placehol
   const button = useRef(null), box = useRef(null);
   const found = rank(options.map(o => ({...o, words: [o.label, o.value, o.sub || '', ...(o.words || [])]})), query);
   useEffect(() => setAt(0), [query]);
+  useEffect(() => { if (want) setOpen(true); }, [want]);
   const close = () => { setOpen(false); setQuery(''); button.current?.focus?.(); };
   const pick = v => {
     if (!multi) { onChange(v); close(); return; }
@@ -66,6 +69,13 @@ export function Picker({label, options, value, onChange, multi = false, placehol
   const shown = chosen.length ? chosen.map(o => o.label).join(', ') : (empty || t('picker.nothing'));
   const choices = html`<${Choices} options=${found} value=${value} multi=${multi} onPick=${pick} query=${query} setQuery=${setQuery}
     box=${box} onKeyDown=${onKeyDown} at=${at} placeholder=${placeholder} />`;
+  const done = multi && html`<div class="picker-foot"><button type="button" class="btn primary" onClick=${close}>${t('picker.done')}</button></div>`;
+  if (trigger) {
+    return html`<span class="picker-wrap">${trigger({open, toggle: () => setOpen(!open), ref: button, shown: chosen.length ? shown : ''})}
+      ${open && !phone && html`<${Pop} close=${close}>${choices}${done}<//>`}
+      ${open && phone && html`<${Modal} title=${label || t('picker.find')} onClose=${close} full actions=${multi ? [{label: t('picker.done'), kind: 'primary', onClick: close}] : []}>${choices}<//>`}
+    </span>`;
+  }
   return html`<div class=${cx('field', error && 'field-error')}>
     ${label && html`<label for=${id}>${label}</label>`}
     <span class="picker-wrap">
@@ -73,7 +83,7 @@ export function Picker({label, options, value, onChange, multi = false, placehol
         aria-expanded=${open ? 'true' : 'false'} onClick=${() => setOpen(!open)}>
         ${!multi && chosen[0]?.state && html`<${Status} state=${chosen[0].state} />`}<span class="ell">${shown}</span><${Icon} name="down" />
       </button>
-      ${open && !phone && html`<${Pop} close=${close}>${choices}${multi && html`<div class="picker-foot"><button type="button" class="btn primary" onClick=${close}>${t('picker.done')}</button></div>`}<//>`}
+      ${open && !phone && html`<${Pop} close=${close}>${choices}${done}<//>`}
     </span>
     ${error ? html`<span class="field-note t-failed" role="alert">${error}</span>` : note && html`<span class="field-note">${note}</span>`}
     ${open && phone && html`<${Modal} title=${label || t('picker.find')} onClose=${close} full actions=${multi ? [{label: t('picker.done'), kind: 'primary', onClick: close}] : []}>${choices}<//>`}

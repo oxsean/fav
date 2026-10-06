@@ -7,8 +7,10 @@ import * as sel from '../web/core/select.js';
 import {createHTTP, HTTPError, startURL} from '../web/core/http.js';
 import {actions, groups, bindingsFor, runnable, rank} from '../web/core/actions.js';
 import {createCommands} from '../web/core/commands.js';
+import {createKeys} from '../web/core/keys.js';
 import {createPrefs, SPACE_KEY} from '../web/core/prefs.js';
 import {words} from '../web/core/i18n.js';
+import {keyParts} from '../web/ui/base.js';
 import {signal} from '../web/vendor/signals-core.mjs';
 import {NOW, rig, home} from './rig.js';
 import {test, eq, ok, throws, run} from './check.js';
@@ -129,16 +131,16 @@ test('http: the session, sign-in, invitation and a terminal to allow', async () 
 });
 
 // ⚠️ The design's key table (§6.6), every key once.
-const keyTable = ['g h', 'g t', 'g b', 'g r', 'g m', 'g a', 'g p', 'g s', 'Mod+K', '?', '/', 'n', '[', 'Mod+Z', 'Shift+T', 'Shift+L', 'Shift+M',
+const keyTable = ['g h', 'g t', 'g c', 'g b', 'g r', 'g m', 'g a', 'g p', 'g s', 'Mod+K', '?', '/', 'n', '[', 'Mod+Z', 'Shift+T', 'Shift+L', 'Shift+M',
   'v', 'd', 'e', 'x', 'Shift+D', 'p', 'j', 'k', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'Space', 'Enter', 'End', 'Home', 'Shift+O', 'Mod+F',
-  'Shift+ArrowDown', 'Shift+ArrowUp', 'Esc'];
+  'Shift+ArrowDown', 'Shift+ArrowUp', 'Esc', ';', '>', 'm', 't', 's', 'f', 'a', 'Mod+Backspace'];
 
 test('the action table is the key table: one key per action and level, both names for each', () => {
   const all = actions.flatMap(a => a.keys);
   eq([...all].sort(), [...keyTable].sort(), 'keys');
   eq(all.length, new Set(all).size, 'no key twice');
+  eq(actions.filter(a => !a.keys.length).map(a => a.id), ['makeTask', 'hitPrev', 'hitNext'], 'only the palette starts these');
   for (const a of actions) {
-    ok(a.keys.length > 0, `${a.id} has a key`);
     ok(groups.includes(a.group), `${a.id} group`);
     const [zh, en] = words.both('act.' + a.id);
     ok(zh && en && zh !== 'act.' + a.id, `${a.id} has both names`);
@@ -160,6 +162,16 @@ test('bindings: keys, aliases, what the bar shows and what the palette lists', (
   eq(ran, ['next ArrowDown', 'pick 4'], 'run gets its key');
   eq(runnable([...b, ...bindingsFor({theme: {run() {}}, home: {run() {}}})]).map(x => [x.id, x.key]), [['theme', 'Shift+T'], ['home', 'g h']], 'the palette leaves out moves, digits and itself');
   eq((() => { try { bindingsFor({nope: {run() {}}}); } catch (e) { return e.message; } })(), 'actions: no action nope', 'unknown ids fail');
+  const k = createKeys();
+  k.push('page', bindingsFor({makeTask: {run() {}}, hitNext: {run() {}}, favorite: {run() {}}}));
+  eq(k.active().map(x => [x.key, x.id]), [['', 'makeTask'], ['', 'hitNext'], ['f', 'favorite']], 'a keyless action is bound for the palette alone');
+  eq(runnable(k.active()).map(x => [x.id, x.key]), [['makeTask', ''], ['hitNext', ''], ['favorite', 'f']], 'and listed there without a key');
+  eq(k.active().filter(x => x.bar).map(x => x.id), ['favorite'], 'never in the key bar');
+  const del = [];
+  k.push('page', bindingsFor({trash: {run: key => del.push(key)}}));
+  for (const press of [{key: 'Backspace', metaKey: true}, {key: 'Backspace', ctrlKey: true}, {key: 'Delete'}, {key: 'Backspace'}]) k.handle({target: null, ...press});
+  eq(del, ['Mod+Backspace', 'Mod+Backspace', 'Delete'], 'delete is Mod+Backspace, Delete its alias; Backspace alone is not');
+  eq([keyParts('Mod+Backspace', true), keyParts('Mod+Backspace', false)], [['⌘⌫'], ['Ctrl+Backspace']], 'its cap');
 });
 
 test('commands: pending while out, hidden until the list changes, errors dropped', async () => {

@@ -1,5 +1,5 @@
 // Palette is ⌘K: every action the page can do now, found by its Chinese or English name, its id or its key, and
-// what the page adds (tasks, runs, machines by title or id). Help is ?: the whole action table by group.
+// what the page adds (tasks, runs, machines by title or id). Help is ?: the whole action table by group, every action that has a key.
 import {useState} from '../vendor/hooks.mjs';
 import {html, cx, useWords} from './base.js';
 import {Modal} from './overlay.js';
@@ -57,7 +57,7 @@ export function Help({onClose}) {
   return html`<${Modal} title=${t('act.help')} onClose=${onClose} full>
     <div class="help">
       ${groups.map(g => html`<section class="help-group"><h3>${t('group.' + g)}</h3>
-        ${actions.filter(a => a.group === g).map(a => {
+        ${actions.filter(a => a.group === g && a.keys.length).map(a => {
           const ks = keysOf(a), range = ks.length === 2 && ks[0] === '1';
           return html`<div class="help-row"><span>${t('act.' + a.id)}</span><span class="help-keys">${range
             ? html`<${Kbd} k=${ks[0]} />–<${Kbd} k=${ks[1]} />` : ks.map(k => html`<${Kbd} k=${k} />`)}</span></div>`;

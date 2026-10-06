@@ -1,13 +1,13 @@
-// router maps the address to a route and back. A route is {page, task?, run?, view?, sessions?, session?, project?,
-// fav?, wait?, event?, auth?}: run is the run whose conversation the task page shows, or the run the runs page has open;
-// sessions the machine whose own sessions the machines page lists, session (provider:id) the one of them open, project
-// the project it lists only (none: those in no project), fav that it lists only the favorites; wait the task whose
-// waiting item the home shows on its own (a notice's #wait-<task>); event and auth are one-time: event (from
-// #task-<id>/r-<run>/e-<event>) is the step to scroll to, auth a fragment (#device-, #invite-, #signin-) the page acts
-// on; neither is written back.
+// router maps the address to a route and back. A route is {page, task?, run?, view?, q?, fav?, sort?, open?, wait?,
+// event?, auth?}: run is the run whose conversation the task page shows, or the run the runs page has open; q the
+// sessions page's query as typed, fav that it lists only the favorites, sort its order, open (<machine>/<provider>:<id>)
+// the session it has open; wait the task whose waiting item the home shows on its own (a notice's #wait-<task>); event
+// and auth are one-time: event (from #task-<id>/r-<run>/e-<event>) is the step to scroll to, auth a fragment (#device-,
+// #invite-, #signin-) the page acts on; neither is written back.
 import {signal} from '../vendor/signals-core.mjs';
+import {sorts} from './sessions.js';
 
-export const pages = ['home', 'tasks', 'runs', 'machines', 'agents', 'team', 'me'];
+export const pages = ['home', 'tasks', 'sessions', 'runs', 'machines', 'agents', 'team', 'me'];
 export const views = ['list', 'board', 'tree'];
 
 // ⚠️ Old addresses still in links and bookmarks; only these are mapped.
@@ -21,6 +21,20 @@ export function parse(search = '', hash = '') {
   page = legacy[page] || page;
   if (!pages.includes(page)) page = 'home';
   const route = {page};
+  // ⚠️ A machine's own sessions page, as old links name it: that machine's host: on the sessions page.
+  const machine = page === 'machines' && q.get('sessions');
+  if (machine) {
+    route.page = 'sessions';
+    route.q = ['host:' + machine, ...(q.get('project') ? ['project:' + q.get('project')] : [])].join(' ');
+    if (q.get('fav') === '1') route.fav = true;
+    if (q.get('session')) route.open = machine + '/' + q.get('session');
+  }
+  if (page === 'sessions') {
+    if (q.get('q')) route.q = q.get('q');
+    if (q.get('fav') === '1') route.fav = true;
+    if (sorts.includes(q.get('sort')) && q.get('sort') !== sorts[0]) route.sort = q.get('sort');
+    if (q.get('open')) route.open = q.get('open');
+  }
   if (page === 'tasks') {
     const view = q.get('view');
     route.view = views.includes(view) ? view : 'list';
@@ -28,12 +42,6 @@ export function parse(search = '', hash = '') {
     if (q.get('task') && q.get('run')) route.run = q.get('run');
   }
   if (page === 'runs' && q.get('run')) route.run = q.get('run');
-  if (page === 'machines' && q.get('sessions')) {
-    route.sessions = q.get('sessions');
-    if (q.get('session')) route.session = q.get('session');
-    if (q.get('project')) route.project = q.get('project');
-    if (q.get('fav') === '1') route.fav = true;
-  }
   if (page === 'home' && q.get('wait')) route.wait = q.get('wait');
   const frag = hash.replace(/^#/, '');
   const wait = frag.match(/^wait-(.+)$/);
@@ -70,11 +78,11 @@ export function format(route) {
     if (route.view && route.view !== 'list') q.set('view', route.view);
   }
   if (route.page === 'runs' && route.run) q.set('run', route.run);
-  if (route.page === 'machines' && route.sessions) {
-    q.set('sessions', route.sessions);
-    if (route.session) q.set('session', route.session);
-    if (route.project) q.set('project', route.project);
+  if (route.page === 'sessions') {
+    if (route.q) q.set('q', route.q);
     if (route.fav) q.set('fav', '1');
+    if (route.sort) q.set('sort', route.sort);
+    if (route.open) q.set('open', route.open);
   }
   if (route.page === 'home' && route.wait) q.set('wait', route.wait);
   const s = q.toString();

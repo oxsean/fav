@@ -2,7 +2,7 @@
 import {register} from '../core/i18n.js';
 
 register('ui', {
-  'nav.home': ['首页', 'Home'], 'nav.tasks': ['任务', 'Tasks'], 'nav.runs': ['运行', 'Runs'], 'nav.machines': ['机器', 'Machines'],
+  'nav.home': ['首页', 'Home'], 'nav.tasks': ['任务', 'Tasks'], 'nav.sessions': ['会话', 'Sessions'], 'nav.runs': ['运行', 'Runs'], 'nav.machines': ['机器', 'Machines'],
   'nav.agents': ['Agent', 'Agents'], 'nav.team': ['团队', 'Team'], 'nav.me': ['我', 'Me'], 'nav.waiting': ['等你', 'Waiting'],
   'nav.label': ['页面', 'Pages'], 'nav.collapse': ['收起菜单', 'Collapse the menu'], 'nav.expand': ['展开菜单', 'Expand the menu'],
   'shell.search': ['搜索任务、运行、机器，或输入命令', 'Search tasks, runs, machines, or type a command'],

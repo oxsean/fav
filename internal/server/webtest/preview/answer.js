@@ -8,7 +8,7 @@ export const sets = {home: ['home-state', 'output-page', 'home-commands', 'chang
   output: ['output-state', 'output-conv', 'output-item', 'output-send', 'output-answer', 'changes-list'],
   carry: ['output-state', 'output-conv', 'output-item', 'output-send', 'output-carry', 'changes-list'],
   gone: ['output-state', 'output-conv', 'output-item', 'output-answer-gone', 'changes-list'],
-  team: ['team-state', 'team-share', 'team-project', 'team-settings', 'team-offboard', 'sessions', 'sessions-share'],
+  team: ['team-state', 'team-share', 'team-project', 'team-settings', 'team-offboard', 'sessions-share'],
   agents: ['agents-state', 'agents-edit', 'agents-share']};
 // joins are the files whose pushes on a stream an earlier file opened go on that stream, after what it pushed there.
 const joins = new Set(['output-send', 'output-carry']);
@@ -47,12 +47,18 @@ function resumed(pushes, from) {
   return [{type: 'push', method: 'open', params: {cursor: from, mode: 'resume'}}, ...pushes.slice(at + 1).filter(p => p.method !== 'open')];
 }
 
-export function socket(table) {
+// socket answers from table; what asked(frame) answers ({result} or {error}, as a promise) it answers from that.
+export function socket(table, asked = () => null) {
   const s = {
     send(data) {
       for (const line of data.split('\n').filter(Boolean)) {
         const f = JSON.parse(line);
         if (f.type !== 'req') continue;
+        const live = asked(f);
+        if (live) {
+          live.then(a => s.reply({type: 'res', id: f.id, ...a}), e => s.reply({type: 'res', id: f.id, error: {code: 'internal', detail: String(e)}}));
+          continue;
+        }
         const a = table[keyOf(f)] || table[keyOf(f, false)];
         setTimeout(() => {
           if (!a) { s.reply({type: 'res', id: f.id, result: {}}); return; }

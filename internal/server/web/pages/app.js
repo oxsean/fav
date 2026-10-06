@@ -12,7 +12,6 @@ import {Tasks} from './tasks.js';
 import {Runs} from './runs.js';
 import {Machines} from './machines.js';
 import {Sessions} from './sessions.js';
-import {mayRead} from '../core/team.js';
 import {Team} from './team.js';
 import {Me} from './me.js';
 import {Agents} from './agents.js';
@@ -24,7 +23,7 @@ import {nowhere} from '../core/platform.js';
 import {noPush} from '../core/push.js';
 import './words.js';
 
-const goes = {home: {page: 'home'}, tasks: {page: 'tasks', view: 'list'}, board: {page: 'tasks', view: 'board'}, runs: {page: 'runs'},
+const goes = {home: {page: 'home'}, tasks: {page: 'tasks', view: 'list'}, sessions: {page: 'sessions'}, board: {page: 'tasks', view: 'board'}, runs: {page: 'runs'},
   machines: {page: 'machines'}, agents: {page: 'agents'}, team: {page: 'team'}, me: {page: 'me'}};
 
 // find is the palette's own hits for q: tasks by title or id, runs by id, machines by name.
@@ -49,9 +48,10 @@ function finder(store, machines, go) {
 // notes; agentDefs reads the agents (core/agents.js; likewise); names is a signal of user id → name; notices are the
 // browser's ({Notification, secure}), doc the document, tab the tab's storage (the me page's); platform is where the
 // page runs and push its Web Push (core/push.js), whose notices of what no longer waits close as the inbox changes;
-// copy and download are the clipboard's and a file save's (the tests pass their own).
+// copy and download are the clipboard's and a file save's (the tests pass their own); timers wait out typing on the
+// sessions page, sessionRows is how many rows a page of its list holds.
 export function App({store, commands, toasts, wire, http, router, keys, nav, prefs, session, clock, fetchOutput, storage, onLogout, copy, changes: given, names = null,
-  notices = {}, doc = null, tab = null, agentDefs: givenDefs, download, platform = nowhere, push = noPush}) {
+  notices = {}, doc = null, tab = null, agentDefs: givenDefs, download, platform = nowhere, push = noPush, timers = globalThis, sessionRows}) {
   const {t, f} = useWords();
   const route = useSignalValue(router.route);
   const machines = useSignalValue(store.machines);
@@ -98,7 +98,7 @@ export function App({store, commands, toasts, wire, http, router, keys, nav, pre
   // leave the page's old section behind when a notice opened it early on the me page.
   const page = route.page === 'home'
     ? html`<${Home} key=${phone && route.wait ? 'wait' : 'list'} store=${store} commands=${commands} toasts=${toasts} clock=${clock} fetchOutput=${fetchOutput} changes=${changes} onOpen=${onOpen} onNavigate=${onNavigate}
-      wire=${wire} session=${session} onSessions=${machine => go({page: 'machines', sessions: machine})}
+      wire=${wire} session=${session} onSessions=${machine => go(machine ? {page: 'sessions', q: 'host:' + machine} : {page: 'sessions'})}
       wait=${route.wait || ''} onWait=${(task, o) => go(task ? {page: 'home', wait: task} : {page: 'home'}, o)} onBack=${() => router.back({page: 'home'})} storage=${storage} />`
     : route.page === 'tasks'
       ? html`<${Tasks} store=${store} commands=${commands} toasts=${toasts} wire=${wire} router=${router} session=${session} clock=${clock} storage=${storage}
@@ -107,9 +107,9 @@ export function App({store, commands, toasts, wire, http, router, keys, nav, pre
         ? html`<${Runs} store=${store} commands=${commands} toasts=${toasts} router=${router} prefs=${prefs} copy=${copy} changes=${changes} drafts=${drafts} storage=${storage} clock=${clock} />`
         : route.page === 'team'
           ? html`<${Team} store=${store} commands=${commands} toasts=${toasts} platform=${platform} session=${session} http=${http} wire=${wire} clock=${clock} copy=${copy} />`
-          : route.page === 'machines' && route.sessions
-            ? html`<${Sessions} key=${route.sessions} store=${store} wire=${wire} router=${router} toasts=${toasts} session=${session} machine=${route.sessions} open=${route.session || ''} fav=${!!route.fav} project=${route.project || ''}
-              may=${mayRead(session, machines.find(m => m.name === route.sessions) || {})} copy=${copy} clock=${clock} />`
+          : route.page === 'sessions'
+            ? html`<${Sessions} store=${store} wire=${wire} router=${router} toasts=${toasts} commands=${commands} session=${session} route=${route}
+              copy=${copy} clock=${clock} timers=${timers} doc=${doc} limit=${sessionRows} />`
           : route.page === 'machines'
             ? html`<${Machines} store=${store} commands=${commands} toasts=${toasts} platform=${platform} session=${session} http=${http} wire=${wire} router=${router} storage=${storage}
               clock=${clock} copy=${copy} />`

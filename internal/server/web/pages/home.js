@@ -54,7 +54,8 @@ const keepAs = (storage, v) => { try { v ? storage?.setItem(asKey, v) : storage?
 // Home: clock gives now in ms; fetchOutput(run) the last events of a run (run.output.page); changes is core/changes.js's
 // (a phone shows what a run to accept changed); onOpen(task) goes to it. wait is the task whose item has the page to
 // itself (the route's); onWait(task, {replace}) goes to one ('' to the list), onBack() leaves it; storage keeps the
-// roles shown. wire and session tell which machines' own sessions the viewer may open; onSessions(machine) opens them.
+// roles shown. wire and session tell which machines' own sessions the viewer may open; onSessions(machine) opens them
+// ('': every machine's).
 export function Home({store, commands, toasts, clock = () => Date.now(), fetchOutput, changes, onOpen, onNavigate, wait = '', onWait = () => {},
   onBack = () => onWait(''), storage = null, wire = null, session = null, onSessions = () => {}}) {
   const w = useWords();
@@ -278,7 +279,11 @@ export function Home({store, commands, toasts, clock = () => Date.now(), fetchOu
       </section>
       ${readable.length > 0 && html`<section class="home-sess" aria-labelledby="home-sess-head">
         <h2 id="home-sess-head" class="home-sess-head">${t('home.sessions')}</h2>
-        <div class="home-sess-list">${readable.map(m => html`<button type="button" class="going-row" key=${m.name} onClick=${() => onSessions(m.name)}>
+        <div class="home-sess-list"><button type="button" class="going-row home-sess-all" onClick=${() => onSessions('')}>
+          <${Icon} name="sessions" size=${14} /><span class="home-sess-name"><b>${t('home.sessAll')}</b>
+          <span class="t-muted">${f('home.sessAllSub', readable.length, running.filter(g => readable.some(m => m.name === g.run.machine)).length)}</span></span>
+          <span class="t-muted" aria-hidden="true">›</span></button>
+        ${readable.map(m => html`<button type="button" class="going-row" key=${m.name} onClick=${() => onSessions(m.name)}>
           <span class="home-sess-name mono ell">${m.name}</span>
           ${sharedToMe(session, m) && html`<span class="home-sess-who"><${Icon} name="eye" size=${12} />${f('home.sessShared', name(m.owner))}</span>`}<${Status} state=${machineState(m)} word /><span class="t-muted" aria-hidden="true">›</span>
         </button>`)}</div>

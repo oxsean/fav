@@ -10,8 +10,8 @@ import {Menu} from './menu.js';
 import {tokens, money} from '../core/format.js';
 import {format} from '../core/router.js';
 
-export const navPages = ['home', 'tasks', 'runs', 'machines', 'agents', 'team', 'me'];
-const icons = {home: 'home', tasks: 'tasks', runs: 'runs', machines: 'machines', agents: 'agents', team: 'team', me: 'me'};
+export const navPages = ['home', 'tasks', 'sessions', 'runs', 'machines', 'agents', 'team', 'me'];
+const icons = {home: 'home', tasks: 'tasks', sessions: 'sessions', runs: 'runs', machines: 'machines', agents: 'agents', team: 'team', me: 'me'};
 
 // ⚠️ The phone has four tabs; the other pages sit under the tab they are reached from.
 export const phoneTabs = [
@@ -20,7 +20,7 @@ export const phoneTabs = [
   {id: 'runs', label: 'nav.runs', icon: 'runs'},
   {id: 'me', label: 'nav.me', icon: 'person'},
 ];
-export const tabOf = page => ({machines: 'runs', agents: 'me', team: 'me'})[page] || page;
+export const tabOf = page => ({sessions: 'home', machines: 'runs', agents: 'me', team: 'me'})[page] || page;
 
 function link(page, onNavigate) {
   return {

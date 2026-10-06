@@ -340,7 +340,7 @@ func strictInto(t *testing.T, name string, items json.RawMessage, table any) {
 
 // unplayedFrames are frame files written ahead of the page that plays them, each with the card that plays it; that
 // card removes its line.
-var unplayedFrames = map[string]string{"sessions-query": "B6-4"}
+var unplayedFrames = map[string]string{}
 
 // Every frame file is played by a core test, every line is one the player knows, and the frames are wire frames.
 func TestEveryFrameFileIsPlayed(t *testing.T) {
@@ -514,6 +514,7 @@ func TestFrameWritesAndListsAreTheCoordinatorsShapes(t *testing.T) {
 		coord.MAgentDefRemove: func() any { return new(task.AgentDefRef) }, coord.MMachineCheck: func() any { return new(coord.MachineCheck) },
 		coord.MMachineDrain: func() any { return new(task.DrainSet) }, coord.MAgentDefCheck: func() any { return new(coord.AgentDefSave) },
 		coord.MSessionsQuery: func() any { return new(coord.SessionsQuery) }, coord.MPeopleNames: func() any { return new(coord.PeopleParams) },
+		coord.MSessionsGrep: func() any { return new(coord.SessionsGrep) },
 	}
 	results := map[string]func() any{
 		coord.MTaskStatus: func() any { return new(task.Task) }, coord.MTaskUndo: func() any { return new(task.Task) },
@@ -536,12 +537,15 @@ func TestFrameWritesAndListsAreTheCoordinatorsShapes(t *testing.T) {
 		coord.MMachineCheck: func() any { return new(coord.MachineChecks) }, coord.MMachineDrain: func() any { return new(task.Drain) },
 		coord.MAgentDefCheck: func() any { return new(coord.AgentDefCheck) },
 		coord.MSessionsQuery: func() any { return new(coord.SessionsPage) }, coord.MPeopleNames: func() any { return new(coord.People) },
-		"node.call:" + remote.MList: func() any { return new(remote.List) }, "node.call:" + remote.MLive: func() any { return new(remote.Live) },
+		coord.MSessionsGrep:             func() any { return new(coord.SessionsFound) },
 		"node.call:" + remote.MMessages: func() any { return new(capture.Page) }, "node.call:" + remote.MText: func() any { return new(remote.Text) },
+		"node.call:" + remote.MPut: func() any { return new(remote.Row) }, "node.call:" + remote.MHits: func() any { return new(remote.HitsResult) },
+		"node.call:" + remote.MTrash: func() any { return new(remote.TrashResult) }, "node.call:" + remote.MRestore: func() any { return new(remote.RestoreResult) },
 	}
 	// node.call's params by the method it forwards; nil: that method takes none.
-	forwarded := map[string]func() any{remote.MList: nil, remote.MLive: nil,
-		remote.MMessages: func() any { return new(remote.MessagesParams) }, remote.MText: func() any { return new(remote.TextParams) }}
+	forwarded := map[string]func() any{remote.MMessages: func() any { return new(remote.MessagesParams) }, remote.MText: func() any { return new(remote.TextParams) },
+		remote.MPut: func() any { return new(remote.PutParams) }, remote.MHits: func() any { return new(remote.HitsParams) },
+		remote.MTrash: func() any { return new(remote.TrashParams) }, remote.MRestore: func() any { return new(remote.RestoreParams) }}
 	files, _ := filepath.Glob(filepath.Join("webtest", "frames", "*.jsonl"))
 	seen := map[string]int{}
 	for _, f := range files {
@@ -600,8 +604,8 @@ func TestFrameWritesAndListsAreTheCoordinatorsShapes(t *testing.T) {
 		coord.MTaskStart, coord.MTaskMerge, coord.MTaskMove, coord.MTaskPlanSave, coord.MTaskPlanApply, coord.MTaskGate, coord.MTaskSourceAck,
 		coord.MRunPreview, coord.MAgentList, coord.MTaskMessage, coord.MRunInterrupt, coord.MRunChanges, coord.MRunDiff, coord.MRunOutputItem, coord.MMachineShare, coord.MProjectCreate, coord.MProjectMember, coord.MProjectEdit, coord.MProjectDirs,
 		coord.MAgentDefList, coord.MAgentDefSave, coord.MAgentDefShare, coord.MAgentDefRemove, coord.MMachineCheck, coord.MMachineDrain, coord.MAgentDefCheck, "machines", "inbox",
-		"node.call:" + remote.MList, "node.call:" + remote.MLive, "node.call:" + remote.MMessages, "node.call:" + remote.MText, coord.PushAffordances, "affordances part",
-		coord.MSessionsQuery, coord.MPeopleNames} {
+		"node.call:" + remote.MMessages, "node.call:" + remote.MText, "node.call:" + remote.MPut, "node.call:" + remote.MHits, coord.PushAffordances, "affordances part",
+		coord.MSessionsQuery, coord.MPeopleNames, coord.MSessionsGrep, coord.MRunContinue} {
 		if seen[m] == 0 {
 			t.Errorf("no frame file has %s", m)
 		}
