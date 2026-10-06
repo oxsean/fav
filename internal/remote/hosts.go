@@ -10,7 +10,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
-	"strings"
 	"sync"
 	"time"
 
@@ -21,18 +20,14 @@ import (
 	"github.com/oxsean/fav/internal/wire"
 )
 
-// Hosts reaches the configured machines: one client per host, dialed on first use and again after it fails.
-// Safe for concurrent use; calls to one host run one at a time.
+// Hosts reaches other machines through a Transport and keeps their lists: on disk, or in memory for a machine whose
+// lists the transport may not write. Safe for concurrent use.
 type Hosts struct {
+	t       Transport
 	mu      sync.Mutex
-	hosts   []tend.Host
-	lang    string
-	clients map[string]*Client
-	hellos  map[string]Hello
-	dialing map[string]chan struct{} // one dial per host at a time
-	dial    func(tend.Host) (*Client, error)
-	closed  bool
 	files   map[string]string // host + session key → the transcript's fileio.ID as last read from the end
+	mem     map[string]cache  // the lists of machines not kept on disk
+	memLive map[string]liveCache
 }
 
 // NewHosts: lang is sent in hello, so check texts come back in the caller's language.
@@ -40,85 +35,30 @@ func NewHosts(hosts []tend.Host, lang string) *Hosts { return NewHostsDial(hosts
 
 // NewHostsDial reaches hosts through dial (tests: Pipe to a Handler).
 func NewHostsDial(hosts []tend.Host, lang string, dial func(tend.Host) (*Client, error)) *Hosts {
-	return &Hosts{hosts: hosts, lang: lang, clients: map[string]*Client{}, hellos: map[string]Hello{},
-		dialing: map[string]chan struct{}{}, dial: dial, files: map[string]string{}}
+	return NewHostsOver(&sshTransport{hosts: hosts, lang: lang, clients: map[string]*Client{}, hellos: map[string]Hello{},
+		dialing: map[string]chan struct{}{}, dial: dial})
+}
+
+// NewHostsOver reaches machines through t.
+func NewHostsOver(t Transport) *Hosts {
+	return &Hosts{t: t, files: map[string]string{}, mem: map[string]cache{}, memLive: map[string]liveCache{}}
 }
 
 func (h *Hosts) Names() []string {
 	if h == nil {
 		return nil
 	}
-	out := make([]string, len(h.hosts))
-	for i, x := range h.hosts {
-		out[i] = x.Name
-	}
-	return out
+	return h.t.Machines()
 }
 
+// Host is name's ssh configuration; a machine reached through a coordinator has none.
 func (h *Hosts) Host(name string) (tend.Host, bool) {
 	if h != nil {
-		for _, x := range h.hosts {
-			if x.Name == name {
-				return x, true
-			}
+		if s, ok := h.t.(*sshTransport); ok {
+			return s.Host(name)
 		}
 	}
 	return tend.Host{}, false
-}
-
-// client dials name if it has no working client, and checks its protocol with hello.
-func (h *Hosts) client(ctx context.Context, name string) (*Client, error) {
-	h.mu.Lock()
-	if h.closed {
-		h.mu.Unlock()
-		return nil, &wire.Error{Code: wire.CodeClosed}
-	}
-	d := h.dialing[name]
-	if d == nil {
-		d = make(chan struct{}, 1)
-		h.dialing[name] = d
-	}
-	h.mu.Unlock()
-	select {
-	case d <- struct{}{}:
-	case <-ctx.Done():
-		return nil, &wire.Error{Code: wire.CodeTimeout}
-	}
-	defer func() { <-d }()
-	h.mu.Lock()
-	c, closed := h.clients[name], h.closed
-	h.mu.Unlock()
-	if closed { // closed while this call waited for another one's dial
-		return nil, &wire.Error{Code: wire.CodeClosed}
-	}
-	if c != nil && c.Err() == nil {
-		return c, nil
-	}
-	host, ok := h.Host(name)
-	if !ok {
-		return nil, &wire.Error{Code: wire.CodeNotFound, Detail: name}
-	}
-	c, err := h.dial(host)
-	if err != nil {
-		return nil, err
-	}
-	var hello Hello
-	if err := c.Call(ctx, MHello, HelloParams{Proto: wire.Proto, Role: "client", Lang: h.lang}, &hello); err != nil {
-		c.Close()
-		return nil, err
-	}
-	if hello.Proto != wire.Proto {
-		c.Close()
-		return nil, &wire.Error{Code: wire.CodeProto, Detail: hello.Version}
-	}
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	if h.closed { // Close ran while this one was dialing
-		c.Close()
-		return nil, &wire.Error{Code: wire.CodeClosed}
-	}
-	h.clients[name], h.hellos[name] = c, hello
-	return c, nil
 }
 
 // file is the file id known for key; a non-empty set replaces it ("-": the one known turned out stale).
@@ -140,22 +80,11 @@ func Stale(err error) bool {
 
 // Call runs one request on name.
 func (h *Hosts) Call(ctx context.Context, name, method string, params, out any) error {
-	c, err := h.client(ctx, name)
-	if err != nil {
-		return err
-	}
-	return c.Call(ctx, method, params, out)
+	return h.t.Call(ctx, name, method, params, out)
 }
 
-// Hello is what name said when it was last dialed.
-func (h *Hosts) Hello(ctx context.Context, name string) (Hello, error) {
-	if _, err := h.client(ctx, name); err != nil {
-		return Hello{}, err
-	}
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	return h.hellos[name], nil
-}
+// Hello is what name said when it was last reached.
+func (h *Hosts) Hello(ctx context.Context, name string) (Hello, error) { return h.t.Hello(ctx, name) }
 
 // State says where a host's list came from: At is when it was fetched; Err is set when this fetch failed and the
 // list is the cached one (or none).
@@ -168,7 +97,11 @@ type State struct {
 // Sessions fetches name's list and caches it; when name cannot answer it returns the cached list with the error.
 func (h *Hosts) Sessions(ctx context.Context, name string) ([]*tend.Rec, State) {
 	var l List
-	if err := h.Call(ctx, name, MList, nil, &l); err != nil {
+	hello, err := h.t.Hello(ctx, name)
+	if err == nil {
+		err = h.Call(ctx, name, MList, nil, &l)
+	}
+	if err != nil {
 		recs, st := h.Cached(name)
 		st.Err = err
 		c := h.load(name)
@@ -180,9 +113,7 @@ func (h *Hosts) Sessions(ctx context.Context, name string) ([]*tend.Rec, State) 
 		return recs, st
 	}
 	now := time.Now()
-	h.mu.Lock()
-	v := h.hellos[name].Version
-	h.mu.Unlock()
+	v := hello.Version
 	h.save(name, cache{At: now, Version: v, Sessions: l.Sessions})
 	return recs(name, l.Sessions), State{At: now, Version: v}
 }
@@ -208,6 +139,15 @@ func (h *Hosts) Failed(name string) (time.Time, error) {
 
 func (h *Hosts) load(name string) cache {
 	var c cache
+	if !h.t.Keep(name) {
+		h.mu.Lock()
+		c = h.mem[name]
+		h.mu.Unlock()
+		if c.Target != h.target(name) {
+			return cache{}
+		}
+		return c
+	}
 	b, err := os.ReadFile(cachePath(name))
 	if err != nil || json.Unmarshal(b, &c) != nil || c.Target != h.target(name) { // the host now points somewhere else
 		return cache{}
@@ -225,7 +165,12 @@ func (h *Hosts) Live(ctx context.Context, name string) (map[string]capture.Live,
 		v.Since = v.Since.Local()
 		l.Live[k] = v
 	}
-	if b, err := json.Marshal(liveCache{At: time.Now(), Target: h.target(name), Live: l.Live}); err == nil {
+	lc := liveCache{At: time.Now(), Target: h.target(name), Live: l.Live}
+	if !h.t.Keep(name) {
+		h.mu.Lock()
+		h.memLive[name] = lc
+		h.mu.Unlock()
+	} else if b, err := json.Marshal(lc); err == nil {
 		fileio.WriteFile(filepath.Join(filepath.Dir(cachePath(name)), "live.json"), b, 0o600)
 	}
 	return l.Live, nil
@@ -233,12 +178,15 @@ func (h *Hosts) Live(ctx context.Context, name string) (map[string]capture.Live,
 
 // CachedLive is who ran on name at the last Live, and when that was.
 func (h *Hosts) CachedLive(name string) (map[string]capture.Live, time.Time) {
-	b, err := os.ReadFile(filepath.Join(filepath.Dir(cachePath(name)), "live.json"))
-	if err != nil {
+	var c liveCache
+	if !h.t.Keep(name) {
+		h.mu.Lock()
+		c = h.memLive[name]
+		h.mu.Unlock()
+	} else if b, err := os.ReadFile(filepath.Join(filepath.Dir(cachePath(name)), "live.json")); err != nil || json.Unmarshal(b, &c) != nil {
 		return nil, time.Time{}
 	}
-	var c liveCache
-	if json.Unmarshal(b, &c) != nil || c.Target != h.target(name) {
+	if c.Target != h.target(name) {
 		return nil, time.Time{}
 	}
 	return c.Live, c.At
@@ -271,13 +219,7 @@ func (h *Hosts) Close() {
 	if h == nil {
 		return
 	}
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	h.closed = true
-	for _, c := range h.clients {
-		c.Close()
-	}
-	clear(h.clients)
+	h.t.Close()
 }
 
 var reasons = map[string]string{
@@ -302,7 +244,7 @@ func Reason(err error) string {
 
 type cache struct {
 	At       time.Time `json:"at"`
-	Target   string    `json:"target"` // the ssh alias and tend command it was fetched through
+	Target   string    `json:"target"` // what it was fetched through (Transport.Target)
 	Version  string    `json:"version,omitempty"`
 	Sessions []Session `json:"sessions"`
 	Tried    time.Time `json:"tried,omitzero"`   // the last fetch, when it failed
@@ -319,13 +261,16 @@ func cachePath(name string) string {
 	return filepath.Join(tend.Home(), "hosts", dir, "sessions.json")
 }
 
-func (h *Hosts) target(name string) string {
-	host, _ := h.Host(name)
-	return strings.Join(append([]string{host.SSH}, host.Tend...), "\x00")
-}
+func (h *Hosts) target(name string) string { return h.t.Target(name) }
 
 func (h *Hosts) save(name string, c cache) {
 	c.Target = h.target(name)
+	if !h.t.Keep(name) {
+		h.mu.Lock()
+		h.mem[name] = c
+		h.mu.Unlock()
+		return
+	}
 	b, err := json.Marshal(c)
 	if err == nil {
 		fileio.WriteFile(cachePath(name), b, 0o600)

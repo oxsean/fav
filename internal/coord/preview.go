@@ -284,7 +284,8 @@ type Continue struct {
 	Session  string `json:"session,omitempty"`
 	Dir      string `json:"dir,omitempty"` // as its machine names it
 	Title    string `json:"title,omitempty"`
-	Agent    string `json:"agent,omitempty"` // default: the run's profile, else the provider's
+	Agent    string `json:"agent,omitempty"`   // default: the run's profile, else the provider's
+	Project  string `json:"project,omitempty"` // the new task's; "": private to the caller
 }
 
 func (c *Coord) runContinue(who Principal, r *wire.Request) (string, []journal.Event, error) {
@@ -330,6 +331,9 @@ func (c *Coord) runContinue(who Principal, r *wire.Request) (string, []journal.E
 	if err := c.canContinue(prof, machine); err != nil {
 		return "", nil, err
 	}
+	if err := c.continuesIn(who, machine, p.Project); err != nil {
+		return "", nil, err
+	}
 	title := strings.TrimSpace(p.Title)
 	if title == "" {
 		title, _, _ = strings.Cut(strings.TrimSpace(p.Text), "\n")
@@ -337,10 +341,25 @@ func (c *Coord) runContinue(who Principal, r *wire.Request) (string, []journal.E
 	if len(title) > maxTitle {
 		title = title[:maxTitle]
 	}
-	t := task.Task{ID: newID("t_"), Title: title, Dir: p.Dir, Machine: machine, Agent: name, Owner: who.User, Status: task.StatusTodo}
+	t := task.Task{ID: newID("t_"), Title: title, Dir: p.Dir, Machine: machine, Agent: name, Project: p.Project, Owner: who.User,
+		Status: task.StatusTodo}
 	run := task.Run{ID: node.NewRunID(), Task: t.ID, Machine: machine, Agent: name, Profile: prof, Dir: p.Dir, From: machine,
-		Brief: p.Text, Title: title, Runner: node.RunnerBackground, Resume: p.Session, Dispatcher: who.User}
+		Brief: p.Text, Title: title, Runner: node.RunnerBackground, Resume: p.Session, Project: p.Project, Dispatcher: who.User}
 	return run.ID, []journal.Event{journal.NewEvent(task.ETaskCreated, t), journal.NewEvent(task.ERunQueued, run)}, nil
+}
+
+// continuesIn: who may put a session of machine they own, continued, into project ("" keeps it theirs alone). The
+// caller holds mu.
+func (c *Coord) continuesIn(who Principal, machine, project string) error {
+	switch {
+	case project == "":
+		return nil
+	case c.st.Projects[project] == nil || c.roleIn(c.st, who, project) == "":
+		return notFound("project " + project)
+	case c.roleIn(c.st, who, project) != task.RoleParticipant, !c.canUse(who, machine, project):
+		return forbidden("project " + project)
+	}
+	return nil
 }
 
 // continuation is the run that goes on with prev's session with text, as who; agentName "" keeps prev's agent. The

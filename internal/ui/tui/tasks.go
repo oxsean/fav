@@ -38,6 +38,8 @@ type tasksState struct {
 	st         *task.State
 	loaded     bool
 	machines   []coord.Machine
+	machinesIn bool  // this connection listed the machines
+	lost       error // mode 2: why the server could not be reached, until the next connection
 	agents     []tend.AgentProfile
 	list       []*task.Task // shown, filtered by the search box, in the layout's order
 	layout     layout
@@ -171,25 +173,26 @@ func (msg machinesPushMsg) apply(m *Model) tea.Cmd {
 	for _, p := range msg.pushes {
 		var ml coord.MachineList
 		if p.Method == coord.PushMachines && p.Decode(&ml) == nil {
-			t.machines = ml.Items
+			t.machines, t.machinesIn = ml.Items, true
 		}
 	}
 	m.syncServed()
+	synced := m.syncMachines()
 	switch {
 	case msg.err == nil:
-		return func() tea.Msg {
+		return tea.Batch(synced, func() tea.Msg {
 			s := nextState(msg.cl, msg.w, 0)
 			return machinesPushMsg{cl: msg.cl, w: msg.w, pushes: s.pushes, err: s.err}
-		}
+		})
 	case wire.Code(msg.err) == wire.CodeUnknownMethod:
 		t.mstream = nil
-		return m.listMachines()
+		return tea.Batch(synced, m.listMachines())
 	case wire.Code(msg.err) == wire.CodeLagged:
-		return m.openMachines()
+		return tea.Batch(synced, m.openMachines())
 	}
 	tracef("tasks: machines watch ended: %v", msg.err)
 	t.mstream = nil
-	return nil
+	return synced
 }
 
 // listMachines reads the machines once, and the agents while they are not known.
@@ -229,14 +232,17 @@ type tasksMachinesMsg struct {
 }
 
 func (msg tasksMachinesMsg) apply(m *Model) tea.Cmd {
+	var synced tea.Cmd
 	if msg.err == nil && !msg.onlyAgents {
-		m.tasks.machines = msg.machines
+		m.tasks.machines, m.tasks.machinesIn = msg.machines, true
 		m.syncServed()
+		synced = m.syncMachines()
 	}
 	if len(msg.agents) > 0 {
 		m.tasks.agents = msg.agents
+		m.syncMakeAgents()
 	}
-	return nil
+	return synced
 }
 
 // openState opens state.watch from what the fold holds: a resume after its seq, or a snapshot.
@@ -318,6 +324,10 @@ func (msg tasksPushMsg) apply(m *Model) tea.Cmd {
 		t.cl.Close()
 		t.cl = nil
 		m.syncServed()
+		if m.served() { // the lists read through it too: dial again whatever the view
+			m.serverLost(&wire.Error{Code: wire.CodeClosed})
+			return m.tasksOpen()
+		}
 		if m.view == viewTasks {
 			return m.tasksOpen()
 		}
@@ -385,9 +395,13 @@ func (msg tasksConnMsg) apply(m *Model) tea.Cmd {
 	t.connecting = false
 	if msg.err != nil {
 		t.err = msg.err
+		if m.served() {
+			m.serverLost(msg.err)
+			return tea.Batch(m.connected(msg.err), m.retryServer())
+		}
 		return m.connected(msg.err)
 	}
-	t.cl, m.proj.hello = msg.cl, nil
+	t.cl, m.proj.hello, t.machinesIn, t.lost, m.far.retries = msg.cl, nil, false, nil, 0
 	return tea.Batch(m.openState(), m.openMachines(), m.readAgents(), m.readHello(), m.connected(nil))
 }
 

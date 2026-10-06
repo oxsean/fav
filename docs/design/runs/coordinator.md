@@ -59,7 +59,7 @@ run `state` 转移表（终态单调，重复事件无副作用）：
 - 用时：运行时长只用节点时间，排队时长只用协调器时间。
 - `attention` 不是状态，是「需要人」的标记，随节点快照整体覆盖（协调器自己合成的观察不带它）。「等你回复」= 已结束且 attention 是 asked 或 permission（`Run.Waiting`）；asked 也可以出现在运行中（`tend run ask`），stalled 只在运行中有意义。asked 而没有用文字问出来的问题（`Run.Asks`：`ask` 为空，也没有提问请求）是认不出在等什么的等待，界面写「等你处理」；permission 的 `ask` 是它想用的工具（herdr 方式没有请求时）。
 - `output_at`（agent 最后一次输出，截到分钟）也随节点快照来：活跃的 run 只因它变化的观察每分钟最多一条，照常进日志（`run_observed`），每条也会走一次 `flow()` 和通知判断，但不产生任何通知（notify 命令、`task.needs_you`），也不改 inbox 和 `Pending`。旧节点不报它，界面就不显示，不需要节点 feature：这是节点报上来的字段，不是旧节点会忽略的下发字段。
-- `run.continue`：对已结束、有会话的 run（不必在等）排一个新 run：同任务、同机器、同目录、同档案（可换同 provider 的档案），`brief` 是回复，`resume` 是会话，`runner=background`；任务还有未结束的 run 就 `conflict`。对任意已索引的会话（`session`、`provider`、`dir`、`machine`）则新建一个任务（标题取回复首行）再排 run。
+- `run.continue`：对已结束、有会话的 run（不必在等）排一个新 run：同任务、同机器、同目录、同档案（可换同 provider 的档案），`brief` 是回复，`resume` 是会话，`runner=background`；任务还有未结束的 run 就 `conflict`。对任意已索引的会话（`session`、`provider`、`dir`、`machine`）则新建一个任务（标题是 `title`，没给取回复首行）再排 run；只给机器主人，任务私人，带 `project` 时进那个项目（要参与并能用这台机器，见 [tasks/team.md](../tasks/team.md)），不套项目的工作流。
 
 ## 事件
 

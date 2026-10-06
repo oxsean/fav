@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"cmp"
 	"strings"
 
 	"github.com/oxsean/fav/internal/i18n"
@@ -9,15 +10,17 @@ import (
 	"github.com/oxsean/fav/internal/tend"
 )
 
-// sessionTasks: by agent session id, the task of the newest run that used it.
+// sessionTasks: by agent session id, the task of the newest run that used it; a run still queued to continue a session
+// counts for it.
 func sessionTasks(st *task.State) map[string]*task.Task {
 	newest := map[string]*task.Run{}
 	for _, r := range st.Runs {
-		if r.Session == "" || st.Tasks[r.Task] == nil {
+		s := cmp.Or(r.Session, r.Resume)
+		if s == "" || st.Tasks[r.Task] == nil {
 			continue
 		}
-		if o := newest[r.Session]; o == nil || r.Seq > o.Seq || r.Seq == o.Seq && r.QueuedAt.After(o.QueuedAt) {
-			newest[r.Session] = r
+		if o := newest[s]; o == nil || r.Seq > o.Seq || r.Seq == o.Seq && r.QueuedAt.After(o.QueuedAt) {
+			newest[s] = r
 		}
 	}
 	out := make(map[string]*task.Task, len(newest))

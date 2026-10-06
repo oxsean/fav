@@ -8,13 +8,9 @@ import (
 	"time"
 
 	"github.com/oxsean/fav/internal/capture"
-	"github.com/oxsean/fav/internal/coord"
-	"github.com/oxsean/fav/internal/dial"
 	"github.com/oxsean/fav/internal/index"
-	"github.com/oxsean/fav/internal/paths"
 	"github.com/oxsean/fav/internal/projects"
 	"github.com/oxsean/fav/internal/tend"
-	"github.com/oxsean/fav/internal/wire"
 )
 
 // projectDial bounds the one dial a command makes for mode 2's projects.
@@ -48,7 +44,7 @@ func projectsAt(now time.Time) projects.Snapshot {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), projectDial)
 	defer cancel()
-	s, err := fetchProjects(ctx, c.URL, paths.Expand(c.TokenFile))
+	s, err := fetchProjects(ctx)
 	if err != nil {
 		projects.SaveTable(path, projects.Snapshot{}, now)
 		return projects.Down(projects.Offline)
@@ -57,16 +53,11 @@ func projectsAt(now time.Time) projects.Snapshot {
 	return s
 }
 
-func fetchProjects(ctx context.Context, url, tokenFile string) (projects.Snapshot, error) {
-	token, err := dial.ReadToken(tokenFile)
+func fetchProjects(ctx context.Context) (projects.Snapshot, error) {
+	cl, err := dialServer(ctx)
 	if err != nil {
 		return projects.Snapshot{}, err
 	}
-	c, err := dial.Dial(ctx, url, dial.RoleClient, token, wire.Options{})
-	if err != nil {
-		return projects.Snapshot{}, err
-	}
-	cl := &coord.Client{Conn: c}
 	defer cl.Close()
 	return projects.Fetch(ctx, cl, projects.NodeID(tend.Home()))
 }

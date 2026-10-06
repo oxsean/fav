@@ -359,7 +359,7 @@ func (m *Model) navKey(msg tea.KeyPressMsg) tea.Cmd {
 		return nil
 	}
 	if remoteBlocked(a) && m.remoteRow() && !(a == actEdit && m.onGroupHeader()) { // whatever has focus, these act on the current row
-		m.flash(i18n.T("remote.read_only"))
+		m.flash(m.readOnlyNote(m.current()))
 		return nil
 	}
 	if m.hitsOpen() && m.pane == paneList && m.chipFocus < 0 {
@@ -563,6 +563,10 @@ func (m *Model) navKey(msg tea.KeyPressMsg) tea.Cmd {
 	case actPause:
 		m.flash(i18n.T("tasks.pause_where"))
 	case actResume:
+		if r := m.current(); r != nil && m.shared(r.Host) {
+			m.flash(i18n.F("remote.shared_note", m.ownerOf(r.Host)))
+			return nil
+		}
 		m.askResume()
 	case actTags:
 		m.pickTags()
@@ -667,6 +671,8 @@ func (m *Model) overlayKey(msg tea.KeyPressMsg) tea.Cmd {
 		return m.draftKey(msg)
 	case ovProject:
 		return m.projectKey(msg)
+	case ovMakeTask:
+		return m.makeTaskKey(msg)
 	case ovMessage:
 		switch a := keyAct(inReader, msg.String()); a {
 		case actClose:
@@ -698,7 +704,7 @@ func (m *Model) overlayKey(msg tea.KeyPressMsg) tea.Cmd {
 		}
 		a := keyAct(inResume, msg.String())
 		if m.ov.rec.Host != "" && remoteBlocked(a) {
-			m.flash(i18n.T("remote.read_only"))
+			m.flash(m.readOnlyNote(m.ov.rec))
 			return nil
 		}
 		if b := bindingOf(inResume, a); b != nil && b.tier == tierStart && a != actResume {

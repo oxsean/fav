@@ -6,8 +6,8 @@ import (
 	"github.com/oxsean/fav/internal/i18n"
 )
 
-// The palette lists every action of the help page: each has a key the list takes, and its Chinese and English words
-// both find it.
+// The palette lists every action of the help page and the dialogs' actions without a list key: each has a key the list
+// takes or runs itself, and its Chinese and English words both find it.
 func TestThePaletteFindsEveryActionByEitherLanguage(t *testing.T) {
 	t.Setenv("TEND_HOME", t.TempDir())
 	entries := paletteEntries()
@@ -15,7 +15,7 @@ func TestThePaletteFindsEveryActionByEitherLanguage(t *testing.T) {
 		t.Fatalf("%d entries", len(entries))
 	}
 	for i, e := range entries {
-		if got := keyMsg(e.key).String(); got != e.key {
+		if got := keyMsg(e.key).String(); e.do == nil && got != e.key {
 			t.Errorf("%s: its key %q presses as %q", e.desc, e.key, got)
 		}
 		for _, lang := range []string{i18n.ZH, i18n.EN} {

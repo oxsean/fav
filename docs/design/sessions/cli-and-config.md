@@ -76,6 +76,13 @@ tend uninstall-skill                    只删 ~/.claude、~/.codex 下的 tend 
 - 单机：只折叠本机协调器日志（`<数据目录>/coord/events.jsonl`）里的项目和成员事件，不拿锁；另一台机器的系统取这次连上时 `hello` 说的 `OS`，不知道时按路径写法猜。
 - server（`coordinator.url`）：读 `<数据目录>/projects.json`（0600，`projects.SaveTable`），30 秒内写的才用；没有就拨号 1 秒（`hello` + `state.get` + `machine.list`），拿到就写进表。拨号失败也记在表里（`failed_at`），30 秒内不再拨；这时没有项目，全部按自动组，从不用过期的表。
 
+### 别的机器
+
+`tend sessions` / `list` / `show` / `preview` / `resume` 和 fzf 里的 `host:` 都经 `cmd/tend` 的 `newHosts` 读别的机器（`hostrows.go`，每个命令建一次）：
+
+- 单机：`config.hosts` 经 ssh。
+- server（`coordinator.url`）：第一次要读别的机器时拨 server 一次（5 秒为限，`hello` + `machine.list`），经 `node.call` 读它让看的人读的机器（去掉本机），`host:` 用 server 的机器名，不退回 ssh。拨不上时 stderr 一行「连不上 server：原因 · 别的机器显示缓存」，只列自己机器的缓存。fzf 守 30 秒规则、不列别人共享的机器，`tend resume` 的规则，都见 [remote.md](remote.md)「server 模式」「恢复」「fzf」。
+
 fzf 的项目选择器先列项目（`<id>  # <名字>  (N)`，选了写 `project:<id>`），再列自动组；卡片和行里的项目写项目名（`Rec.Group()`）。`--json` 输出里的 `project` 仍是记录自己的字段。
 
 ## 配置

@@ -246,9 +246,12 @@ func (m *Model) selector(body *[]string, label string, field, i, inner int, focu
 	}
 	*body = append(*body, dimmed.Render(label))
 	m.mark(len(*body)+1, ovPad, inner, func(mm *Model) {
-		if mm.ov.kind == ovTaskForm {
+		switch mm.ov.kind {
+		case ovTaskForm:
 			mm.pending = mm.formField(field)
-		} else {
+		case ovMakeTask:
+			mm.pending = mm.makeField(field)
+		default:
 			mm.ov.edit.Blur()
 			mm.ov.field, mm.ov.focus = field, -1
 		}

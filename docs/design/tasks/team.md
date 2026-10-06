@@ -92,7 +92,7 @@
 项目、成员、机器分享、会话可见范围和停止接新运行是事件（`project_created`、`project_edited`、`member_set`、`machine_shared`、`sessions_shared`、`machine_drained`），由 `task.State` 折叠，两种模式相同。任务记下创建人 `Task.Owner`。
 
 **私人任务和个人项目**（模式二）：
-- 不属于任何项目的任务是私人任务，只有它的负责人（`Task.Owner`，起初是创建人）看得到，管理员也看不到。
+- 不属于任何项目的任务是私人任务，只有它的负责人（`Task.Owner`，起初是创建人）看得到，管理员也看不到。私人任务来自不选项目的新建（任务页、`tend task add`），和从会话建的任务：TUI 恢复框的「建成任务」默认不选项目，`tend run continue --session` 不带项目，`run.continue{session}` 不带 `project` 时建的就是私人任务。
 - 个人项目是有负责人、除负责人外没有成员的项目（`task.Project.Personal`）。它和里面的任务只有负责人看得到，管理员也看不到，也不在里面算参与；对它 `project.edit`、`project.member`、往里建任务都回 `not_found`。替别人建的项目在加第一个成员之前同样如此，所以管理员替人建好项目后，由负责人去加成员。
 - 加了第一个成员就是团队项目，管理员看得到、算参与；去掉最后一个成员又变回个人项目。两种 `member_set` 都会让订阅重置（见下面第 4 条），管理员的副本跟着变。
 - 判定在 `taskRole`、`roleIn` 和 `seesProject`（`internal/coord/access.go`），`visibleState`、`sees`、`seesResult`、`managedProject`、收件箱都经由它们。
@@ -120,7 +120,7 @@
 5. **收据按 `(principal, command_id)` 存**。重放之前先检查当前的读权限；有权就返回第一次的结果。
 6. **原生会话的两条旁路收紧**。
    - `node.call` 的会话读取（会话列表、谁在跑、对话、全文）和 `sessions.list`（带项目归属的会话列表，见 [runs/coordinator.md](../runs/coordinator.md)「调度与对账」）用同一个判定 `readsSessions`：机器主人，或者这台机器的会话可见范围包括他（见「共享：agent 和机器默认私有」的「会话」）。管理员不例外，`local` 名下的机器也一样：要读就先用 `tend-server token owner` 把机器改给真正的主人（[runs/deployment.md](../runs/deployment.md)「凭据与身份」）。`node.call` 转发的 `node.dirs`（建项目时列目录）不是会话，照旧只给机器主人和管理员。网页的会话页、机器页和手机首页的入口看 `Machine.sessions`（[runs/clients.md](../runs/clients.md)「会话页」）。
-   - `run.continue{session, …}`（续任意会话）只给机器主人。
+   - `run.continue{session, …}`（续任意会话）只给机器主人。带 `project` 时还要他在那个项目里是参与者（看不到这个项目回 `not_found`，只读成员回 `unauthorized`），并且能用这台机器（`canUse`）；任务和 run 都记上这个项目。
    - 项目成员新建任务时查机器上的目录用 `project.dirs{project, machine, path?}`：要是这个项目的参与者（管理员也算），并且这台机器是他的或分享给了他（`canUse`；不带项目时只看分享给本人的）。协调器转问节点的 `node.dirs`，回 `{path, exists, outside?, parent?, dirs}`：没有这个目录是 `exists: false`，不在节点允许的目录里再加 `outside: true`；不带 `path` 列出节点允许的根目录。看不到的项目或机器回 `not_found`，只读成员和没拿到分享的回 `unauthorized`。
    - 项目成员用两个方法：`run.messages{run, before, n}` 和 `run.continue{run}`。服务端根据 run 找到机器、provider 和会话，再按项目权限判断。客户端声明的项目不作数。
 7. **节点侧的纵深防御**：节点配置 `share_sessions: runs | all | none`，模式二默认 `runs`。节点只回答 run 目录里或 `node/sessions.jsonl` 登记过的会话：列表（`list`）和谁在跑（`live`）只留这些，读一个会话的方法（`messages`、`text`、`steps`、`pulse`、`checks`）对别的会话回 `unauthorized`。节点在 hello 里报它实际用的值（`share_sessions`；没配时 ssh 和模式一是 `all`），协调器放进 `machine.list` 的 `share_sessions`（没报的旧节点不写），网页的会话页据此说明怎么放开。这样即使 server 被攻破，别人的原生会话也读不到。

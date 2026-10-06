@@ -1,6 +1,7 @@
 package main
 
 import (
+	"cmp"
 	"errors"
 	"fmt"
 	"os"
@@ -10,14 +11,15 @@ import (
 	"github.com/atotto/clipboard"
 
 	"github.com/oxsean/fav/internal/capture"
+	"github.com/oxsean/fav/internal/coord"
 	"github.com/oxsean/fav/internal/fulltext"
 	"github.com/oxsean/fav/internal/i18n"
 	"github.com/oxsean/fav/internal/index"
-	"github.com/oxsean/fav/internal/remote"
 	"github.com/oxsean/fav/internal/render"
 	"github.com/oxsean/fav/internal/tend"
 	fzfui "github.com/oxsean/fav/internal/ui/fzf"
 	tuiui "github.com/oxsean/fav/internal/ui/tui"
+	"github.com/oxsean/fav/internal/wire"
 )
 
 func loadConfig() tend.Config {
@@ -55,12 +57,23 @@ func runTUI(s *tend.Store, query string, focus *tend.Rec, mouse bool) error {
 		return err
 	}
 	cfg := loadConfig()
-	var hosts *remote.Hosts
-	if len(cfg.Hosts) > 0 {
-		hosts = remote.NewHosts(cfg.Hosts, i18n.Resolve(cfg.Lang))
+	var link serverLink
+	others := newHosts(cfg, &link)
+	connect := connectCoord
+	if others.Server != nil { // the lists read other machines through the connection the TUI dials
+		connect = func(wopt wire.Options) (*coord.Client, error) {
+			cl, err := connectCoord(wopt)
+			if err == nil {
+				link.use(cl)
+			}
+			return cl, err
+		}
 	}
-	res, err := tuiui.Run(s, idx, cfg, hosts, connectCoord, query, focus, mouse)
-	hosts.Close()
+	res, err := tuiui.Run(s, idx, cfg, others, connect, query, focus, mouse)
+	others.Hosts.Close()
+	if others.SSH != others.Hosts {
+		others.SSH.Close()
+	}
 	if err != nil {
 		return err
 	}
@@ -169,6 +182,7 @@ func cmdFzfList(args []string) error {
 			}
 			fmt.Println(render.LiveLine(r, l, now))
 		}
+		sharedNote(query)
 		return err
 	default:
 		recs, err = listRecs(s, idx, nil, tend.Parse(query), *keep)
@@ -177,7 +191,16 @@ func cmdFzfList(args []string) error {
 	for _, r := range recs {
 		fmt.Println(render.Line(r, now))
 	}
+	sharedNote(query)
 	return err
+}
+
+// sharedNote: fzf lists the viewer's own machines only in mode 2 (others' lists are held in memory, fzf lists in a new
+// process per key); a keyless row says where they are.
+func sharedNote(query string) {
+	if c := loadConfig().Coordinator; c != nil && c.URL != "" && selectsHosts(tend.Parse(query)) {
+		fmt.Println(render.Sep + i18n.T("cli.fzf.shared_in_tui"))
+	}
 }
 
 func cmdFzfTab(args []string) error {
@@ -232,11 +255,11 @@ func cmdFzfPick(args []string) error {
 			return err
 		}
 		if r.Host != "" {
-			spec, err := remoteResume(r)
+			spec, there, err := remoteResume(r)
 			if err != nil {
 				return err
 			}
-			return clipboard.WriteAll(spec.TerminalLine())
+			return clipboard.WriteAll(cmp.Or(there, spec.TerminalLine()))
 		}
 		plan, err := capture.PlanResume(r, capture.LiveSessions(), true)
 		if err != nil {

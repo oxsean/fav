@@ -94,7 +94,7 @@ func (m *Model) fetchHosts() tea.Cmd {
 // fetchHost reads name's list and who runs there, off the main loop; at most one fetch per host at a time.
 func (m *Model) fetchHost(name string) tea.Cmd {
 	hr := m.remote[name]
-	if hr == nil || hr.loading {
+	if hr == nil || hr.loading || m.far.nc != nil && m.tasks.cl == nil { // mode 2 reads through the server's connection
 		return nil
 	}
 	hr.loading = true
@@ -228,7 +228,7 @@ func (m *Model) hostDown(name string) string {
 	if hr == nil || hr.err == nil {
 		return ""
 	}
-	if hr.at.IsZero() {
+	if hr.at.IsZero() || m.now.Sub(hr.at) < time.Minute { // no list, or one too fresh to have an age
 		return i18n.F("remote.down", name, remote.Reason(hr.err))
 	}
 	return i18n.F("remote.down_since", name, remote.Reason(hr.err), render.ShortDur(m.now.Sub(hr.at)))
@@ -238,6 +238,13 @@ func (m *Model) hostDown(name string) string {
 func (m *Model) offlineNote() string {
 	if m.hosts == nil {
 		return ""
+	}
+	if err := m.serverDown(); err != nil { // every machine read through it is down: one sentence, not one per machine
+		text := i18n.F("remote.server_down", remote.Reason(err))
+		if m.view == viewProjects {
+			text = i18n.T("remote.server_down_projects")
+		}
+		return warnSty.Render(render.GlyphWarn + " " + text)
 	}
 	q := tend.Parse(m.search.Value())
 	var parts []string
@@ -260,7 +267,12 @@ func (m *Model) pickHost() {
 	items := []item{{name: "", label: i18n.T("remote.local")}, {name: tend.HostAll, label: i18n.T("remote.all")}}
 	for _, name := range m.hosts.Names() {
 		label := name
-		if s := m.hostDown(name); s != "" {
+		switch s := m.hostDown(name); {
+		case m.shared(name) && m.remote[name].err != nil:
+			label = i18n.F("remote.shared_host_down", name, m.ownerOf(name), remote.Reason(m.remote[name].err))
+		case m.shared(name):
+			label = i18n.F("remote.shared_host", name, m.ownerOf(name))
+		case s != "":
 			label = s
 		}
 		items = append(items, item{name: name, label: label, count: len(m.remote[name].recs)})
@@ -269,7 +281,11 @@ func (m *Model) pickHost() {
 	if q.Host != tend.HostLocal {
 		cur = m.hostName(q.Host)
 	}
-	m.openPicker(i18n.T("remote.picker_title"), "", items, false, []string{cur},
+	hint := ""
+	if m.far.nc != nil {
+		hint = i18n.T("remote.picker_sub")
+	}
+	m.openPicker(i18n.T("remote.picker_title"), hint, items, false, []string{cur},
 		func(m *Model, chosen []string) {
 			var toks []string
 			if len(chosen) > 0 && chosen[0] != "" {
@@ -277,9 +293,10 @@ func (m *Model) pickHost() {
 			}
 			m.setQuery(toks, tend.HasPrefix("host:", "machine:"))
 		})
+	if m.far.nc != nil {
+		m.ov.note = i18n.T("remote.manage_web")
+	}
 }
-
-func hostMark(r *tend.Rec) string { return "@" + r.Host }
 
 // remoteRow: the action would act on another machine's session (or a project group holding one).
 func (m *Model) remoteRow() bool {
@@ -305,27 +322,32 @@ func remoteBlocked(a act) bool {
 	return false
 }
 
-// openRemoteResume: resume over ssh (a new Herdr tab when tend runs inside Herdr, else this terminal) or copy the command.
+// openRemoteResume: resume over ssh (a new Herdr tab when tend runs inside Herdr, else this terminal) or, when this
+// machine cannot reach that one, the command to run there. Mode 2 goes over ssh only to the viewer's own machine whose
+// host of the same name here has its node id; a machine shared by another person is read, never resumed.
 func (m *Model) openRemoteResume(r *tend.Rec) {
-	cmd, ok := m.hosts.ResumeCommand(r)
-	if !ok { // a node with no ssh host here (mode 2): the command to run on that machine
-		spec, err := agent.ResumeOf(r, "")
-		if err != nil {
-			m.flash(i18n.F("remote.unreachable", r.Host, remote.Reason(&wire.Error{Code: wire.CodeNotFound})))
-			return
-		}
-		sh := shell.POSIX // the shell of that machine, not this one's
-		for _, mc := range m.tasks.machines {
-			if mc.Name == r.Host && mc.OS == "windows" {
-				sh = shell.PowerShell
+	h := m.hosts
+	if m.far.nc != nil {
+		if m.shared(r.Host) {
+			if m.chatVisible() {
+				m.pane, m.projCur = paneChat, 0
 			}
-		}
-		line := sh.Line(spec.Cwd, spec.Argv())
-		if copyText(line) != nil {
-			m.flash(i18n.F("remote.run_there", r.Host, line))
 			return
 		}
-		m.flash(i18n.F("remote.run_there_copied", r.Host, line))
+		same, known := m.far.same[r.Host]
+		if _, ok := m.far.ssh.Host(r.Host); ok && !known {
+			m.askSSH(r)
+			return
+		}
+		if !same {
+			m.openRunThere(r)
+			return
+		}
+		h = m.far.ssh
+	}
+	cmd, ok := h.ResumeCommand(r)
+	if !ok {
+		m.openRunThere(r)
 		return
 	}
 	plan := capture.Plan{Spec: agent.CommandSpec{Exec: cmd.Args[0], Args: cmd.Args[1:]}, Ws: herdrHere()}
@@ -335,6 +357,30 @@ func (m *Model) openRemoteResume(r *tend.Rec) {
 	ti := newInput()
 	ti.SetValue(r.Title)
 	m.ov = overlay{kind: ovResume, rec: r, plan: plan, edit: ti, focus: -1}
+}
+
+// openRunThere shows the command to run on r's machine, quoted for that machine's shell, to copy.
+func (m *Model) openRunThere(r *tend.Rec) {
+	spec, err := agent.ResumeOf(r, "")
+	if err != nil {
+		m.flash(i18n.F("remote.unreachable", r.Host, remote.Reason(&wire.Error{Code: wire.CodeNotFound})))
+		return
+	}
+	sh := shell.POSIX // the shell of that machine, not this one's
+	for _, mc := range m.tasks.machines {
+		if mc.Name == r.Host && mc.OS == "windows" {
+			sh = shell.PowerShell
+		}
+	}
+	m.ov = overlay{kind: ovResume, rec: r, plan: capture.Plan{Spec: spec}, there: sh.Line(spec.Cwd, spec.Argv()), focus: -1}
+}
+
+// thereNote says why the resume dialog offers the command to run there.
+func (m *Model) thereNote(r *tend.Rec) string {
+	if _, ok := m.far.ssh.Host(r.Host); ok {
+		return i18n.F("remote.run_there_other", r.Host, r.Host)
+	}
+	return i18n.F("remote.run_there_note", r.Host, r.Host)
 }
 
 // herdrHere is the Herdr workspace tend runs in, nil outside Herdr.
@@ -357,6 +403,10 @@ func herdrHere() *herdr.Workspace {
 
 func (m *Model) remoteGroups() []btnGroup {
 	k := func(a act, text string) string { return keyed(keyOf(inResume, a), i18n.T(text)) }
+	if m.ov.there != "" {
+		copyThere := btn{keyed(keyOf(inResume, actEnter), i18n.T("remote.btn_copy_there")), true, (*Model).copyResume}
+		return append([]btnGroup{{label: i18n.T("resume.group.resume"), bs: []btn{copyThere}, end: []btn{cancelBtn()}}}, m.taskGroup(m.ov.rec)...)
+	}
 	bs := []btn{{keyed(keyOf(inResume, actEnter), i18n.T("resume.btn_resume")), true, func(mm *Model) { mm.remoteResume(false) }}}
 	if m.ov.plan.Ws != nil {
 		bs = append(bs, btn{k(actTerminal, "resume.btn_terminal"), false, func(mm *Model) { mm.remoteResume(true) }})
@@ -367,6 +417,10 @@ func (m *Model) remoteGroups() []btnGroup {
 
 // remoteResume runs the ssh resume in a new tab of this Herdr workspace, or quits and runs it in this terminal.
 func (m *Model) remoteResume(here bool) {
+	if m.ov.there != "" {
+		m.copyResume()
+		return
+	}
 	r, p := m.ov.rec, m.ov.plan
 	cp := *r // ⚠️ the row is refreshed in place on the main loop
 	if p.Ws == nil || here {
@@ -392,5 +446,9 @@ func (m *Model) remoteTarget(r *tend.Rec, arrow string) string {
 	if ws := m.ov.plan.Ws; ws != nil && m.ov.rec == r {
 		where = "Herdr " + ws.Label + arrow + i18n.T("resume.where.new_tab") + arrow + r.Host
 	}
-	return where + arrow + dir + arrow + "ssh"
+	via := "ssh"
+	if m.ov.there != "" && m.ov.rec == r || !m.sshHere(r.Host) {
+		via = i18n.T("remote.run_there_title")
+	}
+	return where + arrow + dir + arrow + via
 }

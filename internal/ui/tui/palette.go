@@ -11,14 +11,16 @@ import (
 	"github.com/oxsean/fav/internal/render"
 )
 
-// paletteEntry is one action of the list as the help page lists it: its words, and the key that runs it.
+// paletteEntry is one action of the list as the help page lists it: its words, and the key that runs it; an action
+// with no list key (a dialog's starting button) runs do instead.
 type paletteEntry struct {
 	desc string
 	key  string
+	do   func(*Model) tea.Cmd
 }
 
 // paletteEntries: every row of the help page that is not a pair of moves, one entry per action, keyed by the key the
-// footer shows; the palette itself is left out.
+// footer shows, then the dialogs' actions that have none; the palette itself is left out.
 func paletteEntries() []paletteEntry {
 	var out []paletteEntry
 	for _, sec := range helpLayout() {
@@ -28,15 +30,15 @@ func paletteEntries() []paletteEntry {
 			}
 			for _, a := range row.acts {
 				if b := bindingOf(inList, a); b != nil && a != actPalette {
-					out = append(out, paletteEntry{row.desc, b.keys[0]})
+					out = append(out, paletteEntry{desc: row.desc, key: b.keys[0]})
 				}
 			}
 		}
 	}
-	return out
+	return append(out, paletteEntry{desc: "resume.btn_make_task", do: func(m *Model) tea.Cmd { return m.makeTask(m.current()) }})
 }
 
-// openPalette lists the actions to pick one by its words in either language; picking it presses its key.
+// openPalette lists the actions to pick one by its words in either language; picking it presses its key, or runs it.
 func (m *Model) openPalette() {
 	entries := paletteEntries()
 	items := make([]item, len(entries))
@@ -52,6 +54,10 @@ func (m *Model) openPalette() {
 		}
 		i, err := strconv.Atoi(strings.Fields(chosen[0])[0])
 		if err != nil || i >= len(entries) {
+			return
+		}
+		if do := entries[i].do; do != nil {
+			mm.pending = tea.Batch(mm.pending, do(mm))
 			return
 		}
 		mm.pending = tea.Batch(mm.pending, mm.navKey(keyMsg(entries[i].key)))

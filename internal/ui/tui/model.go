@@ -156,6 +156,7 @@ type Model struct {
 
 	hosts  *remote.Hosts        // other machines; nil = none configured, nothing is contacted
 	remote map[string]*hostRows // by host name
+	far    servedHosts          // mode 2: how the other machines are read through the server
 
 	tasks tasksState
 	proj  projectsState
@@ -842,7 +843,7 @@ func (m *Model) editRec(r *tend.Rec, change func(*tend.Rec)) *tend.Rec {
 		return nil
 	}
 	if r.Host != "" {
-		m.flash(i18n.T("remote.read_only"))
+		m.flash(m.readOnlyNote(r))
 		return nil
 	}
 	m.syncStore()

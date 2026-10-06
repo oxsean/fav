@@ -2,7 +2,7 @@
 
 在任何一台机器上看、读、恢复其它机器上的 Claude Code / Codex 会话：远端合同（协议、标识、路径映射、配置、连接与失败）和聚合（列表、筛选、右栏、恢复、缓存）。迁移、记忆和环境诊断见 [migration.md](migration.md)。
 
-实现：`internal/remote`（`proto.go` 方法与类型、`local.go` 应答端、`client.go` ssh 客户端、`hosts.go` 机器与缓存、`source.go` 记录来源），`internal/pathmap`，`internal/paths`（`SocketRoom`），`cmd/tend`（`hosts.go`、`rpc.go`）；帧与连接在 `internal/wire`。
+实现：`internal/remote`（`proto.go` 方法与类型、`local.go` 应答端、`client.go` ssh 客户端、`transport.go` 两种传输、`hosts.go` 机器与缓存、`source.go` 记录来源），`internal/pathmap`，`internal/paths`（`SocketRoom`），`cmd/tend`（`hosts.go`、`rpc.go`）；帧与连接在 `internal/wire`。
 
 ## 范围
 
@@ -16,9 +16,34 @@
 
 ## 架构
 
-每台机器各跑各的 tend。本机经 SSH 去问远端的 tend，远端读它自己的索引和文件，把结果返回；本机只做聚合和展示。
+每台机器各跑各的 tend。本机去问远端的 tend，远端读它自己的索引和文件，把结果返回；本机只做聚合和展示。
 
 四类机器（Mac、Linux、Windows、WSL）**两端都支持**：都能跑 TUI 去看别的机器（发起端），也都能被别的机器查询（远端）。
+
+### 两种传输
+
+`Hosts` 管缓存、文件身份和 `Source`，经一个传输（`Transport`）去问别的机器。传输负责四件事：给出机器名单、执行一次调用（含握手 `hello`）、给出缓存目标、说明列表能不能写盘。`Source`、翻页、文件身份、`stale` 与传输无关。
+
+| | ssh（`NewHosts`） | `node.call`（`NewNodeCall` + `NewHostsOver`） |
+|---|---|---|
+| 机器名单 | `config.hosts` | 调用方给的 `[]Machine`（`SetMachines`，随时可换），不在名单上的机器回 `not_found` |
+| 一次调用 | 每台机器一条 `tend rpc --stdio` 长连接，拨号后先 `hello` | 经协调器的 `node.call{machine, method, params}` 转给那台机器的节点；每台机器第一次调用前发一次 `hello`，遇到 `offline` / `closed` 后重发。`hello` 不带 `lang`（节点按它设整个进程的语言），检查项文本用节点自己的语言 |
+| 缓存目标 | ssh 别名 + tend argv | server 地址 + 机器名 |
+| 写盘 | 都写 | 只有 `Mine`（看的人是主人）的机器写；其余只放内存 |
+
+- `node.call` 传输不依赖 `internal/coord`（`coord` 依赖 `remote`）：它接一个执行 `node.call` 的函数（`NodeCaller`），由客户端用自己连协调器的连接组装；那条连接归调用方，`Hosts.Close` 不关它。
+- 经 `node.call` 读的机器没有 ssh 配置：`Hosts.Host` 和 `ResumeCommand` 对它们返回 false，怎么恢复由客户端定。
+- 协调器转发哪些方法见 [wire.md](../runs/wire.md)（`node.call` 只转发会话读取方法），谁能读见 [team.md](../tasks/team.md)。节点断开后协调器回断开时的错误码（多为 `closed`），从没连上过的回 `offline`；两种都按取不到处理，用缓存。
+- 用哪种由 `cmd/tend` 的 `newHosts` 按配置定：没有 `coordinator.url`（单机）用 ssh；有（server 模式）时 TUI、`tend sessions`、fzf、`tend show` / `preview` 都用 `node.call`，任何一步都不退回 ssh。`tend hosts` 只管 ssh 主机。
+
+### server 模式
+
+- 连接：TUI 启动就在后台拨 server，任务页和读会话共用这一条；断开后立刻重拨一次，再失败按 30 秒起、翻倍、封顶 5 分钟重试。命令行在第一次要读别的机器时拨一次（5 秒为限）。
+- 机器名单：`machine.list` 里 `sessions` 为真的机器（看的人能读它的会话），去掉本机（`node_id` 等于本机 `<数据目录>/node/id` 的那台）；主人是看的人（`hello.caller`）的算「自己的」，可以写盘。名单变了随时换。还没连上时先用盘上缓存目标是「这个 server + 机器名」的那几台（都是自己的）。
+- 连不上 server：自己的机器显示缓存，标「离线 · n 分钟前」；顶栏不再一台台列，合成一句「连不上 server：原因 · 别的机器显示缓存」（项目页写「项目分组暂时按目录」）；别人共享的机器不显示；本机会话照常。命令行只在 stderr 打这一句。
+- 旧 server（机器名单里没有 `node_id`）：认不出本机，本机会话照样本地读，不归项目，底栏提示一次；它也不给 `sessions`，所以别的机器一台都不列。
+- 别人共享的机器（`sessions` 为真、主人不是看的人）只读：卡片、右栏状态行在 `@机器` 后写「只读 · <主人>」，右栏的「恢复目标」和恢复前的检查换成「只读」和「<主人> 共享给你的会话：不能在这里恢复，也不能建成任务」；Enter（和 Space）打开对话，底栏写「Enter 看对话」；`r` 和命令面板的「建成任务」闪这一句，不开对话框；写记录的键见「远端行只读」。主人写 `Machine.owner`（用户 id：协调器不给客户端用户名）。
+- server 给出完整名单（有 `hello.caller`、不是旧 server）时，盘上缓存目标是这个 server、而名单里已不是自己的机器（换了主人、改成别人共享给你、或不在名单里了），整个缓存目录删掉（`NodeCall.Forget`）；连不上 server、只剩自己的机器时不删。
 
 ## 远端协议
 
@@ -112,25 +137,36 @@
 - `ssh -t <别名> <tend argv> resume --terminal --no-herdr <sid>`：远端 tend 自己处理目录、转义和 attach（后台会话用 `claude attach`），Windows 和 WSL 的命令差异也由远端处理。
 - 在 Herdr 里时开本 workspace 的新 tab 跑这条命令，否则在当前终端。
 - docker / podman 的 `exec` 在恢复时自动加 `-t`。
+- server 模式：
+  - 自己的机器在 `config.hosts` 里有同名项时，先经 ssh `hello` 问它的 `node_id`，和 server 名单里那台的对上才走上面的 ssh 恢复（每个进程每台问一次；连不上不记结果）。
+  - 没有同名项或对不上：对话框给在那台机器上执行的恢复命令（`cd <目录> && <agent> resume <id>`，引号按 server 报的那台机器的系统：Windows 用 PowerShell，其余 POSIX），主按钮复制，同网页；命令行的 `tend resume` 打印这条命令并失败退出，fzf 的复制复制它。
+  - 别人共享的机器不给恢复：TUI 里 Enter 打开对话，命令行拒绝。
 
 ### 远端行只读
 
-收藏、状态、标签、归档、删除、搬目录、在本机打开都拒绝，并提示到那台机器上做；拦截不看焦点，删除和搬目录的入口再各拦一次。`Store` 也拒绝写入 `Rec.Host` 非空的记录。
+收藏、状态、标签、归档、删除、搬目录、在本机打开都拒绝，并提示到那台机器上做；拦截不看焦点，删除和搬目录的入口再各拦一次。`Store` 也拒绝写入 `Rec.Host` 非空的记录。别人共享的机器的行提示换成「<主人> 共享给你的会话在这里只读：只能看对话」（原句说可以恢复，对它不成立）。
 
 ### TUI
 
 - 启动时先显示各机器缓存，每台后台拉一次；之后只对筛选里看得到的机器每 30 秒拉一次（同一台同时最多一个请求，失败后间隔翻倍、封顶 5 分钟）；live 查询失败时保留上次结果。
 - 行按「机器 + 会话」键复用，原地更新，光标、pin、probe 不丢。
-- 机器筹码 `m` 选本机 / 全部 / 某台（带条数或离线）；筛选包含的机器连不上时头部显示「<机器> 离线 · 5 分钟前」。
+- 机器筹码 `m` 选本机 / 全部 / 某台（带条数或离线）；筛选包含的机器连不上时头部显示「<机器> 离线 · 5 分钟前」。server 模式下列 server 名单里能读的机器（去掉本机），副标题「server 上你能读会话的机器；本机的会话不经 server」，「本机」一项保留；别人共享的写「<机器>：只读 · <主人>」（离线时再加原因），按键提示下面一行灰字「谁能看你机器上的会话，在网页的机器页设」：会话可见范围、分享这类管理只在网页上做，TUI 不给入口。
 - 顶部 tab 计数只算本机。
 
 ### fzf
 
 fzf 每次击键都会 reload，所以 `fzf-list` 直接用 30 秒内的列表和 live 缓存；30 秒内失败过的主机也不重拨。
 
+server 模式下同样守 30 秒：
+
+- 只列自己的机器（盘上缓存目标是这个 server 的），列表 30 秒内的直接用，不拨 server；
+- 要拨时拨失败，就在 `hosts/server.json`（0600）记下 server 地址和失败时间（不含任何会话内容），30 秒内不再拨；
+- 别人共享的机器只放内存，fzf 每次是新进程，所以不列；筛选含别的机器时列表末尾一行无键的提示「共享给你的机器在 tend tui 里看」。
+
 ### 缓存与隐私
 
-- 每台机器的列表缓存在 `~/.agent/tend/hosts/<名字>-<哈希>/sessions.json`，带拉取时间，文件权限 0600；缓存里记下 ssh 别名和 tend 命令，配置换了目标就不用旧缓存。取不到时用缓存并标离线。
+- 每台机器的列表缓存在 `~/.agent/tend/hosts/<名字>-<哈希>/sessions.json`，在跑名单在同目录的 `live.json`，都带拉取时间，文件权限 0600。缓存里记下传输给的目标（ssh：别名 + tend 命令；`node.call`：server 地址 + 机器名），目标变了（改了配置、换了 server、在 ssh 和 server 之间切换）就不用旧缓存。取不到时用缓存并标离线。
+- 传输说不能写盘的机器（经 `node.call` 读、主人不是看的人），列表、在跑名单和上次失败都只放在这个进程的内存里，`hosts/` 下不为它建任何文件；进程退出就没了。原来是自己的、现在不是的机器，TUI 或命令行收到 server 的完整名单时删掉它的缓存目录（见「server 模式」）。
 - 缓存按字段白名单存：只有卡片字段（标题、摘要、回顾；这些由对话内容生成，所以其实带有对话摘录）。**不缓存对话正文，搜索片段也不写盘。**
 - 远端内容永远不进本机的全文库 `text/`。
 - `tend hosts clear` 清缓存；`tend hosts rm` 连缓存目录一起删。按机器配置 `cache: meta | none`：未实现。

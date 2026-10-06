@@ -72,6 +72,7 @@ plus a resume button that lands in the right place.
 - **Resume**: Herdr running → a new tab in its workspace; no Herdr → `exec` in this terminal; already running → focus that tab; background session → `claude attach`. Directory, transcript and branch are checked first.
 - **Desktop apps**: the resume dialog also opens the session in Claude's desktop app or ChatGPT's (Codex); a setting makes the app the default, or only for sessions started there — those cards say `Claude App` / `Codex App`. The button needs the session's working directory to exist and its transcript under the default `~/.claude/projects` / `~/.codex/sessions`, and appears only when the system routes `claude://` / `codex://` to that app (macOS, Windows, and Linux via xdg-mime).
 - **Fork and hand off**: the resume dialog's `b` forks the session (`claude --resume … --fork-session` / `codex fork`) — a new session with the same history, the original left as it was. `s` writes a handoff pack (summary, the latest five requests, the last reply, files it changed, `git status`; no tool output) under `~/.agent/tend/handoff/`, shows it for review or editing, then starts a new Claude or Codex session in the same directory whose first message is to read it. CLI: `tend resume --fork <id>`, `tend handoff <id> [--to claude|codex]`.
+- **Make a task**: the resume dialog's *New session* row has **Make a task** (no key: reach it with `Tab` or `←` `→`, or click it; also in the `:` palette). Its form asks what to do, the agent and the project (private by default, then the project the session's directory is in, then the others you take part in); `Ctrl+S` makes a task whose background run goes on in this very session through the coordinator (`run.continue`), so resuming it later shows the agent's turns. The session's content goes into the task's output, which the project's members see. The button says why instead while the session runs, the coordinator cannot be reached, the machine is not yours, or no agent can continue it. Afterwards the card's task label and `g` in the resume dialog open the task.
 - **Peek and reply**: `` ` `` (`·` under an IME) on a session running in Herdr shows its terminal (refreshed every second — permission questions show there, not in the transcript), `:` types a reply sent as its next prompt, and `1`–`3` pressed twice answer a numbered question (forgotten when the screen changes or after 5 s).
 - **Close idle tabs**: in Agents, `Z` closes every Herdr tab quiet for 4 hours with nothing you have not seen (asks first, Cancel focused).
 - **New session here**: `w` (`Ctrl+W`) on a Projects group header or any session opens a new Claude or Codex session (`1` / `2` select, again or Enter starts) in that directory — in a Herdr tab when a workspace is there — after listing what already runs there (↑↓ Enter goes to one of those instead).
@@ -228,7 +229,7 @@ Mouse on by default: click tabs, chips, cards, double-click to resume, click an 
 
 **In the resume dialog**
 
-Keys that start a process, a tab or an app only focus their button; the same key again or Enter runs it. Keys that mean the same as in the list act at once.
+Keys that start a process, a tab or an app only focus their button; the same key again or Enter runs it. Keys that mean the same as in the list act at once. **Make a task** has no key: `Tab` or `←` `→` to it, then `Enter`.
 
 | Key | What it does |
 |---|---|
@@ -346,6 +347,8 @@ tend show mba:<id> · tend resume mba:<id> # a remote session: preview and check
 ```
 
 In the TUI the machine chip (`m`) picks this machine, all of them or one; remote rows carry `@name`, the preview and Agents read from their machine, and resume opens `ssh -t` in a new Herdr tab or this terminal. Remote sessions are read-only: favorite, tag, archive, delete and move are done on their own machine. The machines the filter shows are fetched in the background every 30 s (after a failure the interval doubles, up to 5 min), and cached under `~/.agent/tend/hosts/`; a machine that cannot be reached shows its cached rows and "offline since".
+
+With a server set (`coordinator.url`, mode 2 below) other machines are read through the server instead, never over ssh: the machines it lets you read (yours, and those others share with you) but this one. Only your own machines' lists are cached on disk; when the server cannot be reached they show their cache marked offline, under one "server unreachable" line, and shared ones are hidden. Resume goes over ssh only to your own machine whose host of the same name here is that machine (their node ids match); otherwise the dialog gives the command to run there, to copy. Rows of a machine shared with you say "read only · owner": Enter reads the conversation, and nothing there resumes it, makes a task from it or changes its favorite or tags; who sees a machine's sessions is set on the web. When a machine becomes someone else's or shared, its old cache on disk is deleted. fzf lists only your own machines in this mode; shared ones are in `tend tui`.
 
 ## Tasks: agents on your machines
 

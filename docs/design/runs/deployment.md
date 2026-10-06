@@ -6,7 +6,7 @@
 
 - 协调器：持锁的 TUI / CLI，或 `tend service`（前台常驻；用户自己决定要不要放进 launchd / systemd）。
 - 机器：本机（进程内节点）+ `config.hosts` 每一台（`ssh … node --stdio`）。
-- TUI 读远端会话仍直接 ssh（有 ControlMaster 时和协调器共用 TCP 连接）。
+- TUI 和 CLI 读远端会话直接 ssh（有 ControlMaster 时和协调器共用 TCP 连接）；这只在模式一。模式二读会话见下面「客户端与接手」。
 
 ## 模式二
 
@@ -40,7 +40,8 @@
 ### 客户端与接手
 
 - 客户端：`config.coordinator = {url, token_file}` 设了就连 server。模式二的 TUI 机器列表只用 `machine.list`，派发必须指定机器（没有 `local`）。
-- 接手：机器也配了 `hosts`（能 ssh）→ 在当前终端恢复；否则把在那台机器上执行的恢复命令复制下来并显示，引号按那台机器的 OS 加（`machine.list` 报 windows 用 PowerShell，否则 POSIX）。
+- 读会话：TUI 启动就在后台拨 server（只拨号，没有副作用），任务页和会话列表共用这条连接；别的机器的会话一律经 `node.call` 读，连不上 server 也不改走 ssh。能读哪些机器、本机怎么认、缓存和连不上时显示什么见 [sessions/remote.md](../sessions/remote.md)「server 模式」。
+- 接手：自己的机器也配了同名的 `hosts`，且 ssh `hello` 的 `node_id` 和 server 名单里那台对上 → 在当前终端恢复；否则把在那台机器上执行的恢复命令给出来复制，引号按那台机器的 OS 加（`machine.list` 报 windows 用 PowerShell，否则 POSIX）。别人共享的机器不接手。
 
 ### 常驻部署的做法
 

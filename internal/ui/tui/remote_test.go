@@ -14,8 +14,10 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/oxsean/fav/internal/capture"
+	"github.com/oxsean/fav/internal/coord"
 	"github.com/oxsean/fav/internal/i18n"
 	"github.com/oxsean/fav/internal/remote"
+	"github.com/oxsean/fav/internal/render"
 	"github.com/oxsean/fav/internal/tend"
 	"github.com/oxsean/fav/internal/wire"
 )
@@ -217,6 +219,7 @@ func TestUnreachableHostShowsItsCacheAndOffline(t *testing.T) {
 	if n := len(remoteRows(m)); n != 3 {
 		t.Fatalf("a failed fetch keeps the cached rows: %d", n)
 	}
+	m.now = m.now.Add(5 * time.Minute)
 	head := ansi.Strip(m.header())
 	if !strings.Contains(head, "mba："+i18n.T("remote.err.offline")) || !strings.Contains(head, "前") {
 		t.Fatalf("the header marks mba offline with the age of its list: %q", head)
@@ -324,6 +327,35 @@ func withRemote(m *Model) {
 	m.search.SetValue("host:all")
 	m.refresh()
 	m.cursor, m.scroll = 0, 0
+	m.clampCursor()
+}
+
+// withServer: mode 2 with the viewer's mba and win (offline 4 minutes) and Bob's bobs, connected.
+func withServer(m *Model) {
+	m.cfg.Coordinator = &tend.CoordinatorConfig{URL: "https://tend.example"}
+	nc := remote.NewNodeCall("https://tend.example", func(context.Context, string, string, json.RawMessage, any) error {
+		return &wire.Error{Code: wire.CodeOffline}
+	})
+	m.useOthers(Others{Hosts: remote.NewHostsOver(nc), Server: nc})
+	m.setMachines([]remote.Machine{{Name: "mba", Mine: true}, {Name: "win", Mine: true}, {Name: "bobs"}})
+	m.tasks.machines = []coord.Machine{{Name: "mba", OS: "linux", Owner: "u_ann"}, {Name: "win", OS: "windows", Owner: "u_ann"},
+		{Name: "bobs", OS: "darwin", Owner: "u_bob"}}
+	now := time.Now()
+	for host, titles := range map[string][]string{"mba": {"远端会话：分页游标在另一台机器上的排查，标题很长很长很长很长", "remote session"},
+		"bobs": {"Draft the release notes"}, "win": {"Windows 打包脚本"}} {
+		var recs []*tend.Rec
+		for i, title := range titles {
+			recs = append(recs, remote.Session{Provider: tend.ProviderCodex, SessionID: fmt.Sprintf("0199a0c2-7e1f-7a31-9d44-%s00000000%d", host[:1], i), Title: title,
+				Project: "notes-api", Cwd: "/home/u/dev/notes-api", Turns: 30, LastAt: now.Add(-time.Duration(i) * time.Minute), UpdatedAt: now}.Rec(host))
+		}
+		m.remote[host].merge(recs)
+		m.remote[host].at = now.Add(-4 * time.Minute)
+	}
+	m.remote["win"].err = &wire.Error{Code: wire.CodeOffline}
+	m.setView(viewSessions)
+	m.search.SetValue("host:all")
+	m.refresh()
+	m.cursor = slices.IndexFunc(m.rows, func(r row) bool { return r.rec != nil && r.rec.Host == "mba" })
 	m.clampCursor()
 }
 
@@ -469,5 +501,21 @@ func TestARemoteProjectIsDescribedFromItsMachine(t *testing.T) {
 	text := ansi.Strip(strings.Join(m.projectBlock("notes-api", 0, 0, 90, 30), "\n"))
 	if !strings.Contains(text, "mba:/home/u/dev/notes-api") || strings.Contains(text, strings.TrimSpace(i18n.T("project.missing"))) {
 		t.Fatalf("the directory is mba's, not checked on this machine:\n%s", text)
+	}
+}
+
+// TestADownHostFetchedJustNowSaysNoAge: within a minute of its list there is no age to tell.
+func TestADownHostFetchedJustNowSaysNoAge(t *testing.T) {
+	m := sized(t, 140, 40)
+	withRemote(m)
+	off := &wire.Error{Code: wire.CodeOffline}
+	hr := m.remote["mba"]
+	hr.err, hr.at = off, m.now.Add(-10*time.Second)
+	if got, want := m.hostDown("mba"), i18n.F("remote.down", "mba", remote.Reason(off)); got != want {
+		t.Fatalf("%q, want %q", got, want)
+	}
+	hr.at = m.now.Add(-4 * time.Minute)
+	if got := m.hostDown("mba"); got != i18n.F("remote.down_since", "mba", remote.Reason(off), render.ShortDur(4*time.Minute)) {
+		t.Fatalf("%q", got)
 	}
 }

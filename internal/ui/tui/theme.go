@@ -48,7 +48,7 @@ var (
 	liveTone                                                                                                    []lipgloss.Style // working / waiting / idle / finished
 	selLine, selTitle, selBody                                                                                  lipgloss.Style
 	panelSty, cardSty, cardSel, chipSty, chipSel, btnSty, noticeSty, btnKey, btnText, btnPri, btnFocus          lipgloss.Style
-	chipFoc, warnBox, ovBox                                                                                     lipgloss.Style
+	btnOff, chipFoc, warnBox, ovBox                                                                             lipgloss.Style
 	darkTheme                                                                                                   bool
 )
 
@@ -99,6 +99,7 @@ func setTheme(dark bool) {
 	btnText = lipgloss.NewStyle().Foreground(cText)
 	btnPri = fill(cAccent, cBtnBg).Foreground(cAccent).Bold(true)
 	btnFocus = fill(cText, cBtnBg).Foreground(cText).Bold(true)
+	btnOff = box(cFrame).Foreground(cMuted)
 	chipFoc = fill(cAccent, cSelBg).Foreground(cAccent).Bold(true)
 	warnBox = box(cWarnBd).Foreground(cWarn)
 	ovBox = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(cAccent).Padding(0, 2)

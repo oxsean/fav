@@ -43,7 +43,7 @@ func (m *Model) askDelete(r *tend.Rec) {
 		return
 	}
 	if r.Host != "" {
-		m.flash(i18n.T("remote.read_only"))
+		m.flash(m.readOnlyNote(r))
 		return
 	}
 	if m.inTrash() {

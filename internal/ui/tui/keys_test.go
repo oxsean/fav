@@ -5,6 +5,10 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/oxsean/fav/internal/capture"
+	"github.com/oxsean/fav/internal/coord"
+	"github.com/oxsean/fav/internal/wire"
 )
 
 func TestKeysAreUniquePerScope(t *testing.T) {
@@ -99,6 +103,36 @@ func TestEveryListActionHasAnIMERoute(t *testing.T) {
 	}
 }
 
+// Every button of the resume dialog that is on takes the focus from Tab and Shift+Tab, 「建成任务」 among them, which has
+// no key; one that is off never does.
+func TestEveryResumeButtonTakesTheFocus(t *testing.T) {
+	for _, running := range []bool{false, true} {
+		m := sized(t, 140, 40)
+		m.SetCoordinator(func(wire.Options) (*coord.Client, error) { return nil, &wire.Error{Code: wire.CodeOffline} })
+		if running {
+			m.live = map[string]capture.Live{m.current().SessionID: {Status: "idle"}}
+		}
+		m.askResume()
+		m.screen()
+		focused := map[int]bool{}
+		for _, k := range []string{"tab", "shift+tab"} {
+			for range len(m.ov.btns) + 1 {
+				m.Update(press(k))
+				m.screen()
+				focused[m.ov.focus] = true
+			}
+		}
+		for i, b := range m.ov.btns {
+			if on := b.act != nil; on != focused[i] {
+				t.Errorf("running=%v: %q is on=%v, focused=%v", running, b.label, on, focused[i])
+			}
+		}
+		if i, _ := makeBtn(m); i < 0 || (m.ov.btns[i].act == nil) != running {
+			t.Errorf("running=%v: 「建成任务」 %d", running, i)
+		}
+	}
+}
+
 func hasNonLetter(keys []string) bool {
 	for _, k := range keys {
 		if !isLetter(k) {
@@ -147,6 +181,17 @@ func TestLabelTextsCarryNoKeys(t *testing.T) {
 			if _, _, ok := labelKey(v); label && ok {
 				t.Errorf("%s %s = %q starts with a key", lang, k, v)
 			}
+		}
+	}
+}
+
+// TestEveryRecordKeyIsRefusedOnAnotherMachine: a list key that changes a record is refused on another machine's
+// session (read-only here, and only read when shared with the viewer).
+func TestEveryRecordKeyIsRefusedOnAnotherMachine(t *testing.T) {
+	notOnARow := map[act]bool{actPause: true, actCloseIdle: true} // the task view's pause; this machine's idle tabs
+	for _, b := range bindings {
+		if b.in&inList != 0 && (b.tier == tierRecord || b.tier == tierHeavy) && !notOnARow[b.act] && !remoteBlocked(b.act) {
+			t.Errorf("%q changes a record but another machine's session does not refuse it", b.keys[0])
 		}
 	}
 }

@@ -15,11 +15,13 @@ import (
 
 	"github.com/oxsean/fav/internal/capture"
 	"github.com/oxsean/fav/internal/coord"
+	"github.com/oxsean/fav/internal/i18n"
 	"github.com/oxsean/fav/internal/index"
 	"github.com/oxsean/fav/internal/projects"
 	"github.com/oxsean/fav/internal/skin"
 	"github.com/oxsean/fav/internal/task"
 	"github.com/oxsean/fav/internal/tend"
+	"github.com/oxsean/fav/internal/wire"
 )
 
 // every frame is exactly the terminal's size: each line w wide (overlays are composited by column), h lines
@@ -27,12 +29,13 @@ func TestFrameLinesFillWidth(t *testing.T) {
 	st := demoStore(t)
 	states := []string{"", "detail", "projects", "syntax", "picker", "help", "help-input", "resume", "resume-edit", "edit",
 		"edit-summary", "settings", "settings-ide", "palette", "status", "delete", "start", "message", "handoff", "peek", "remote", "remote-resume",
-		"projects-grouped", "project-file", "project-edit"}
+		"projects-grouped", "project-file", "project-edit", "server", "server-down", "server-down-projects", "server-picker",
+		"server-shared", "server-shared-refused", "server-old", "run-there", "make-task", "make-task-project", "make-task-busy"}
 	for _, size := range []struct{ w, h int }{{140, 40}, {120, 34}, {80, 24}, {80, 18}, {56, 20}, {50, 16}} {
 		for _, state := range states {
 			m := newModel(t, st, size.w, size.h)
 			openOverlay(m, state)
-			if layout := state == "" || state == "detail" || state == "projects" || state == "projects-grouped" || state == "syntax" || state == "remote"; layout == m.ov.active() {
+			if layout := state == "" || state == "detail" || state == "projects" || state == "projects-grouped" || state == "syntax" || state == "remote" || strings.HasPrefix(state, "server") && state != "server-picker"; layout == m.ov.active() {
 				t.Fatalf("%q did not open (overlay %d)", state, m.ov.kind)
 			}
 			lines := strings.Split(m.screen(), "\n")
@@ -75,6 +78,50 @@ func openOverlay(m *Model, kind string) {
 		withRemote(m)
 	case "remote-resume":
 		withRemote(m)
+		m.askResume()
+	case "server":
+		withServer(m)
+	case "server-down":
+		withServer(m)
+		m.serverLost(&wire.Error{Code: wire.CodeTimeout})
+	case "server-down-projects":
+		withServer(m)
+		m.serverLost(&wire.Error{Code: wire.CodeTimeout})
+		m.setView(viewProjects)
+		m.foldAll(nil)
+	case "server-picker":
+		withServer(m)
+		m.pickHost()
+	case "server-shared", "server-shared-refused":
+		withServer(m)
+		m.cursor = slices.IndexFunc(m.rows, func(r row) bool { return r.rec != nil && r.rec.Host == "bobs" })
+		if kind == "server-shared-refused" {
+			m.Update(press("f"))
+		}
+	case "server-old":
+		withServer(m)
+		m.setView(viewProjects)
+		m.foldAll(nil)
+		m.flash(i18n.T("remote.old_server"))
+	case "run-there":
+		withServer(m)
+		m.openRunThere(m.current())
+	case "make-task", "make-task-project":
+		r := makeTaskRow(m)
+		if kind == "make-task-project" {
+			p := &task.Project{ID: "p_notes", Name: "notes-api", Owner: coord.Owner.User, Members: map[string]string{"u_bob": task.RoleParticipant},
+				Repos: []task.Repo{{Name: "notes-api", Dirs: map[string]string{coord.Local: r.Cwd}}}}
+			m.setProjects(projects.Mine(map[string]*task.Project{p.ID: p}))
+		}
+		m.openMakeTask(r)
+		m.ov.area.SetValue("把 14 条表驱动测试补成 20 条，覆盖生效时间窗跨零点的情况；跑一遍 go test ./internal/tags")
+		if kind == "make-task-project" {
+			m.ov.pick[1] = 1
+			m.makeField(makeProject)
+		}
+	case "make-task-busy":
+		r := makeTaskRow(m)
+		m.live = map[string]capture.Live{r.SessionID: {Status: "working"}}
 		m.askResume()
 	case "picker":
 		m.pickTags()
@@ -128,6 +175,14 @@ func openOverlay(m *Model, kind string) {
 		m.ov = overlay{kind: ovPeek, rec: m.current(), title: "p1", edit: newInput(), focus: -1,
 			lines: strings.Split(strings.Repeat("Edit a.go?\n❯ 1. Yes\n", 60), "\n")}
 	}
+}
+
+// makeTaskRow selects the demo session the make-task frames start from, with a coordinator to reach.
+func makeTaskRow(m *Model) *tend.Rec {
+	m.SetCoordinator(func(wire.Options) (*coord.Client, error) { return nil, &wire.Error{Code: wire.CodeOffline} })
+	m.cursor = slices.IndexFunc(m.rows, func(r row) bool { return r.rec != nil && r.rec.Title == "标签合并规则重写" })
+	m.clampCursor()
+	return m.current()
 }
 
 // demoProject puts the directory of the first session of the projects view into a team project, and the same

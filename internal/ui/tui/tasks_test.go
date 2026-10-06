@@ -98,7 +98,7 @@ func pump(m *Model, cmd tea.Cmd) {
 		switch msg := msg.(type) {
 		case tea.BatchMsg:
 			queue = append(queue, msg...)
-		case interface{ apply(*Model) tea.Cmd }:
+		case interface{ apply(*Model) tea.Cmd }, hostMsg:
 			_, next := m.Update(msg)
 			queue = append(queue, next)
 		}

@@ -55,6 +55,7 @@ func main() {
 func run(args []string) error {
 	i18n.Set(i18n.Resolve(loadConfig().Lang)) // icons / time format / turn threshold apply to every subcommand, including the fzf children
 	sessionProjects = sync.OnceValue(loadProjects)
+	farHosts = sync.OnceValue(loadFarHosts)
 	cmd := ""
 	if len(args) > 0 && (!strings.HasPrefix(args[0], "-") || slices.Contains([]string{"-h", "--help", "--version"}, args[0])) {
 		cmd, args = args[0], args[1:]

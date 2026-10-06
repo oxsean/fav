@@ -20,7 +20,7 @@ func (m *Model) askMove(r *tend.Rec) {
 		return
 	}
 	if m.remoteRow() {
-		m.flash(i18n.T("remote.read_only"))
+		m.flash(m.readOnlyNote(r))
 		return
 	}
 	old := ""

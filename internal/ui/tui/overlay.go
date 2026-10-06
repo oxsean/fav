@@ -42,6 +42,7 @@ const (
 	ovTaskAnswer
 	ovTaskDraft
 	ovProject
+	ovMakeTask
 )
 
 // ovPad: border + padding columns left of the overlay box; box-local zones add it.
@@ -54,6 +55,7 @@ type overlay struct {
 	room       int // lines shown
 	title      string
 	hint       string
+	note       string // picker: a line under its keys
 	items      []item
 	filter     textinput.Model
 	checked    map[string]bool
@@ -75,6 +77,7 @@ type overlay struct {
 	back       func(*Model) // ovConfirm cancel goes back here (nil = close)
 	okLabel    string
 	app        bool        // resume dialog: opening in the desktop app is the primary action
+	there      string      // resume dialog: the command to run on the session's machine, which this one cannot reach
 	providers  []string    // handoff / new session: the CLIs a new session can start in, the default first
 	running    []*tend.Rec // new session: sessions already running in that directory
 	armed      string      // peek: the digit pressed once, sent on the second press
@@ -84,6 +87,7 @@ type overlay struct {
 	taskWas    *task.Task     // task form: the task as task.get read it; only fields changed from it are saved
 	opts       [][]string     // task form and run dialog: the choices (machines, agents)
 	pick       []int          // the chosen index of each
+	ids        []string       // make-task form: the project id of each project choice ("" private)
 	preview    *coord.Preview // run dialog: how the choice would run
 	request    string         // answer dialog: the request answered (taskID is the run)
 	send       bool           // reply dialog: a message for the running run, not a continuation
@@ -168,7 +172,8 @@ func (m *Model) openPicker(title, hint string, items []item, multi bool, preset 
 
 func (m *Model) closeOverlay() { m.ov = overlay{} }
 
-// moveFocus moves between buttons without wrap-around; the first move starts from the primary button.
+// moveFocus moves between buttons without wrap-around, past those that are off; the first move starts from the primary
+// button.
 func (m *Model) moveFocus(delta int) {
 	n := len(m.ov.btns)
 	if n == 0 {
@@ -182,11 +187,15 @@ func (m *Model) moveFocus(delta int) {
 			}
 		}
 	}
-	f := max(from+delta, 0)
-	if f >= n {
-		f = n - 1
+	f := min(max(from+delta, 0), n-1)
+	for _, d := range []int{delta, -delta} { // the nearest button that is on, onward first
+		for i := f; d != 0 && i >= 0 && i < n; i += d {
+			if m.ov.btns[i].act != nil {
+				m.ov.focus = i
+				return
+			}
+		}
 	}
-	m.ov.focus = f
 }
 
 // placeCursor puts the cursor at the clicked column; lead = columns between the zone's left edge and the text (border, padding, prompt).
@@ -278,7 +287,7 @@ func (m *Model) scrollKey(a act) bool {
 }
 
 func (m *Model) pressFocused() bool {
-	if m.ov.focus < 0 || m.ov.focus >= len(m.ov.btns) {
+	if m.ov.focus < 0 || m.ov.focus >= len(m.ov.btns) || m.ov.btns[m.ov.focus].act == nil {
 		return false
 	}
 	m.ov.btns[m.ov.focus].act(m)
@@ -354,6 +363,8 @@ func (m *Model) renderOverlay() string {
 		return m.renderDraft()
 	case ovProject:
 		return m.renderProject()
+	case ovMakeTask:
+		return m.renderMakeTask()
 	}
 	return ""
 }
@@ -459,7 +470,7 @@ func (m *Model) ovWidth() int {
 		w = min(m.w-8, 96)
 	case ovTask:
 		w = min(max(w, 64, groupsWidth([]btnGroup{{bs: m.taskButtons()}})), m.w-4)
-	case ovTaskForm, ovTaskReply, ovTaskAnswer, ovTaskDraft:
+	case ovTaskForm, ovTaskReply, ovTaskAnswer, ovTaskDraft, ovMakeTask:
 		w = min(m.w-8, 100)
 	case ovProject:
 		w = min(max(w, 66), m.w-4)
@@ -467,6 +478,7 @@ func (m *Model) ovWidth() int {
 	return w
 }
 
+// btn is a dialog button; one without act is off: drawn dim, never focused or pressed (its label says why).
 type btn struct {
 	label   string
 	primary bool
@@ -508,14 +520,18 @@ func (m *Model) btnRows(y0, x0, inner int, bs []btn, base, right int) []string {
 			}
 		}
 		sty, label := btnSty, keyedLabel(b.label)
-		if b.primary {
+		switch {
+		case b.act == nil:
+			sty, label = btnOff, b.label
+		case base+i == m.ov.focus:
+			sty, label = btnFocus, b.label
+		case b.primary:
 			sty, label = btnPri, b.label
 		}
-		if base+i == m.ov.focus {
-			sty, label = btnFocus, b.label
-		}
 		cols = append(cols, strings.Split(sty.Render(label), "\n"))
-		m.markRows(y0+len(out), x, w, 3, b.act)
+		if b.act != nil {
+			m.markRows(y0+len(out), x, w, 3, b.act)
+		}
 		x += w + 1
 	}
 	flush()
@@ -682,7 +698,11 @@ func (m *Model) renderPicker() string {
 	if m.ov.browse != nil {
 		hint = i18n.T("dir.hint")
 	}
-	body = append(body, "", faint.Render(hint), "")
+	body = append(body, "", faint.Render(hint))
+	if m.ov.note != "" {
+		body = append(body, dimmed.Render(render.Truncate(m.ov.note, inner)))
+	}
+	body = append(body, "")
 
 	bs := []btn{{keyed(keyName("enter"), i18n.T("btn.apply")), true, (*Model).applyPicker}, {keyed(keyName("backspace"), i18n.T("btn.clear")), false, (*Model).clearPicker}, cancelBtn()}
 	if m.ov.browse != nil {
@@ -958,7 +978,10 @@ func (m *Model) renderResume() string {
 	body = append(body, "")
 
 	p := m.ov.plan
-	if p.Live.TabID != "" {
+	if m.ov.there != "" {
+		body = append(body, render.Wrap(m.thereNote(r), inner)...)
+		body = append(body, dimmed.Render(render.Truncate(m.ov.there, inner)))
+	} else if p.Live.TabID != "" {
 		body = append(body, okSty.Render(render.GlyphOK+i18n.T("resume.note_running")))
 	} else if p.Spec.Exec == "" {
 		body = append(body, errSty.Render(render.GlyphErr+i18n.T("resume.note_no_session")))
@@ -1067,7 +1090,7 @@ func (m *Model) resumeGroups() []btnGroup {
 		gs = append(gs, btnGroup{label: i18n.T("resume.group.agent"), bs: ag})
 	}
 	gs = append(gs,
-		btnGroup{label: i18n.T("resume.group.new"), bs: []btn{{k(actFork, i18n.T("resume.btn_fork")), false, (*Model).doFork}, {k(actHandoff, i18n.T("resume.btn_handoff")), false, (*Model).doHandoff}, {k(actNew, i18n.T("resume.btn_new")), false, (*Model).askStartFromDialog}}},
+		btnGroup{label: i18n.T("resume.group.new"), bs: []btn{{k(actFork, i18n.T("resume.btn_fork")), false, (*Model).doFork}, {k(actHandoff, i18n.T("resume.btn_handoff")), false, (*Model).doHandoff}, {k(actNew, i18n.T("resume.btn_new")), false, (*Model).askStartFromDialog}, m.makeTaskBtn(m.ov.rec)}},
 		project,
 		btnGroup{label: i18n.T("resume.group.record"), bs: m.recordBtns()},
 	)
@@ -1218,6 +1241,9 @@ func (m *Model) recordBtns() []btn {
 }
 
 func (m *Model) resumeCommand() string {
+	if m.ov.there != "" {
+		return m.ov.there
+	}
 	p := m.ov.plan
 	if p.Spec.Exec == "" {
 		return ""
@@ -1241,7 +1267,7 @@ func (m *Model) copyResume() {
 
 func (m *Model) titleLines(inner, y0 int) []string {
 	if m.ov.rec.Host != "" { // another machine's record: read-only
-		return []string{render.Truncate(m.ov.rec.Title, inner) + "  " + dimmed.Render(hostMark(m.ov.rec))}
+		return []string{render.Truncate(m.ov.rec.Title, inner) + "  " + dimmed.Render(m.hostMark(m.ov.rec))}
 	}
 	if !m.ov.editing {
 		label := keyed(keyOf(inResume, actTitle), i18n.T("resume.btn_edit_title"))

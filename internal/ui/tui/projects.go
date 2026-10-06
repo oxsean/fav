@@ -158,7 +158,7 @@ func (msg helloMsg) apply(m *Model) tea.Cmd {
 	}
 	m.proj.hello = &msg.hello
 	m.syncServed()
-	return nil
+	return m.syncMachines()
 }
 
 // withCoord runs do once the coordinator is reached: at once when it is, else after connecting (mode 1: this TUI

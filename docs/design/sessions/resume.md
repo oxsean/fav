@@ -46,6 +46,7 @@
 
 - 分叉（恢复框 `b`，`tend resume --fork <id>`）：Claude `claude --resume <id> --fork-session`，Codex `codex fork <id>`；新会话带着原历史，原会话不动。检查项和恢复相同（记录文件要在）；去向同恢复（Herdr 新 tab / 多个 workspace 时选 / 当前终端），但不算一次恢复（`herdrDoneMsg.resumed` 为假，不加 `resume_count`）。
 - 交接（恢复框 `s`，`tend handoff <id> [--to claude|codex]`）：后台写交接包 `~/.agent/tend/handoff/<sid 前 8 位>-<时间>.md`（0600，写新包时删 30 天前的），内容：来源（provider、会话 id、目录、分支、最近活动）、记录文件路径（让新 AI 需要时自己读）、摘要（`Rec.Summary`）、最近 5 条用户要求（每条 600 字封顶）、最后一条回复（2000 字封顶）、改过的文件（最近 80 条消息里 Write/Edit/MultiEdit/NotebookEdit 的路径、apply_patch 的文件，目录下的写相对路径，最多 30 个）、`git status --short --branch`（30 行）。不放工具输入和输出（可能带密钥）。
+- 建成任务（恢复框「另开会话」一行的「建成任务」，没有键）：不在终端里开新会话，而是经协调器建一个任务，后台运行接着原会话写（`run.continue{session}`，Claude `--resume`、Codex `exec resume`），不分叉：之后在终端里恢复这个会话，会看到 agent 的轮次。所以会话正在跑时不让建，不然两边同时写同一个记录。只对本机的会话，也只给这台机器的主人。表单、项目选项和不能建的几种原因见 [tui.md](tui.md)「建成任务」。
 - 交接弹窗（`ovHandoff`）：预览全文（↑↓ / PgUp PgDn / 滚轮），`e` 用 `$VISUAL`/`$EDITOR` 编辑（TUI 让出终端，回来重读），没设就用 VS Code 打开（不等）；`y` 复制全文；`1` Claude Code / `2` Codex CLI 开新会话（只列装了的，原会话的 provider 在前、Enter 就是它）。新会话在原目录，第一条消息是「先读 <路径>，说说理解和下一步」——包本身不进命令行，编辑过的内容就是新会话读到的内容。检查只看 CLI 装没装、目录在不在。
 - `tend handoff <id>` 不带 `--to` 时把包打到 stdout、路径打到 stderr；`--to` 同 resume 的去向规则（`--dry-run` 也会写包）。
 

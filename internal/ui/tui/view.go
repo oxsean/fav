@@ -565,7 +565,7 @@ func (m *Model) recLine(r *tend.Rec, sel bool, w int) string {
 		turns = " " + i18n.F("card.task", x.ID) + turns
 	}
 	if r.Host != "" {
-		turns = " " + hostMark(r) + turns
+		turns = " " + m.hostMark(r) + turns
 	}
 	mark := ""
 	if d, t := m.broken(r); d || t {
@@ -588,7 +588,7 @@ func (m *Model) cardBox(r *tend.Rec, sel bool, w int) []string {
 		meta += " App"
 	}
 	if r.Host != "" {
-		meta = hostMark(r) + "  ·  " + meta
+		meta = m.hostMark(r) + "  ·  " + meta
 	}
 	if r.CodexArchived {
 		meta += "  ·  " + i18n.T("card.codex_archived")
@@ -767,7 +767,7 @@ func (m *Model) statusLine(r *tend.Rec, w int) string {
 	}
 	tail := "  ·  " + tend.ProviderLabel(r.Provider) + "  ·  " + render.WhenFull(r.When())
 	if r.Host != "" {
-		tail = "  ·  " + hostMark(r) + tail
+		tail = "  ·  " + m.hostMark(r) + tail
 	}
 	return fit(state+dimmed.Render(tail), w)
 }
@@ -952,6 +952,9 @@ func plainText(s string) string {
 }
 
 func (m *Model) checkLines(r *tend.Rec, w int) []string {
+	if m.shared(r.Host) { // checked for a resume, which a shared row never offers
+		return nil
+	}
 	p := m.probes[r]
 	if p == nil || !p.done {
 		return []string{dimmed.Render(render.GlyphClock + i18n.T("detail.checking"))}
@@ -977,6 +980,9 @@ func (m *Model) targetBox(w int) []string {
 	}
 	// ⚠️ content cut at w-4 (Width w includes border and padding); two more columns wrap
 	content := accent.Render(i18n.T("card.resume_target")) + "\n" + fit(render.Truncate(m.resumeTargetLine(r), w-4), w-4)
+	if m.shared(r.Host) {
+		content = accent.Render(i18n.T("remote.read_title")) + "\n" + fit(render.Truncate(i18n.F("remote.shared_note", m.ownerOf(r.Host)), w-4), w-4)
+	}
 	return strings.Split(panelSty.Width(w).Render(content), "\n")
 }
 
@@ -1092,6 +1098,9 @@ func (m *Model) footer() string {
 // mainKeys: Enter opens the action dialog; Space presses its primary button (resume, switch, or the hits of a message search).
 func (m *Model) mainKeys(r *tend.Rec) footGroup {
 	g := footGroup{fk(enterKey, "footer.enter_actions", 0)}
+	if r != nil && m.shared(r.Host) {
+		g = footGroup{fk(enterKey, "footer.enter_read", 0)}
+	}
 	switch {
 	case r == nil:
 	case m.msgMode():
