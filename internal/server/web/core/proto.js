@@ -136,6 +136,7 @@ export const methods = Object.freeze([
   'agentdef.transfer',
   'inbox.list',
   'user.offboard',
+  'user.offboard.preview',
   'task.sync',
   'task.link',
   'task.source_ack',
@@ -155,6 +156,10 @@ export const methods = Object.freeze([
   'run.diff',
   'run.blob',
   'project.dirs',
+  'project.attach',
+  'project.detach',
+  'sessions.list',
+  'machine.sessions',
 ]);
 
 // workflow.Builtins: the workflows a task or project may name besides its project's own.

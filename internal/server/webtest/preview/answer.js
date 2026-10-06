@@ -8,7 +8,7 @@ export const sets = {home: ['home-state', 'output-page', 'home-commands', 'chang
   output: ['output-state', 'output-conv', 'output-item', 'output-send', 'output-answer', 'changes-list'],
   carry: ['output-state', 'output-conv', 'output-item', 'output-send', 'output-carry', 'changes-list'],
   gone: ['output-state', 'output-conv', 'output-item', 'output-answer-gone', 'changes-list'],
-  team: ['team-state', 'team-share', 'team-project', 'team-settings', 'sessions'],
+  team: ['team-state', 'team-share', 'team-project', 'team-settings', 'team-offboard', 'sessions', 'sessions-share'],
   agents: ['agents-state', 'agents-edit', 'agents-share']};
 // joins are the files whose pushes on a stream an earlier file opened go on that stream, after what it pushed there.
 const joins = new Set(['output-send', 'output-carry']);

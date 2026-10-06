@@ -71,7 +71,7 @@ register('pages', {
   'home.as.admin': ['管理员', 'as admin'],
   'home.running': ['在跑 %d · 排队 %d', '%d running · %d queued'], 'home.allRuns': ['全部运行', 'All runs'],
   'home.nothingRuns': ['现在没有在跑的运行', 'Nothing runs now'],
-  'home.sessions': ['会话', 'Sessions'],
+  'home.sessions': ['会话', 'Sessions'], 'home.sessShared': ['%s 共享', 'shared by %s'],
   'home.recent': ['最近结束', 'Ended lately'], 'home.today': ['今天', 'today'], 'home.noRecent': ['今天还没有运行结束', 'No run has ended today'],
   'home.lanes': ['今天的运行', "Today's runs"], 'home.lanesNote': ['按机器 · %s 到现在', 'By machine · %s to now'],
   'home.inUse': ['%d / %d 在用', '%d / %d in use'], 'home.full': ['%d / %d 满', '%d / %d full'], 'home.offline': ['离线', 'offline'],

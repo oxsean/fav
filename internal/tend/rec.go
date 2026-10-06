@@ -106,7 +106,10 @@ type Rec struct {
 	Repo string `json:"-"`
 	// Files: absolute path → times the AI wrote it in this session.
 	Files map[string]int `json:"-"`
-	extra string
+	// ProjectID and ProjectName: the project its directory belongs to, filled while listing (index.Rows.Belong).
+	ProjectID   string `json:"-"`
+	ProjectName string `json:"-"`
+	extra       string
 
 	hay string
 }
@@ -114,6 +117,14 @@ type Rec struct {
 func (r *Rec) Attach(turns, msgs int, lastAt time.Time, prompts string) {
 	r.Turns, r.Msgs, r.LastAt, r.extra = turns, msgs, lastAt, prompts
 	r.buildHay()
+}
+
+// Group is what the projects view groups r under: its project's name, else Project.
+func (r *Rec) Group() string {
+	if r.ProjectID != "" {
+		return r.ProjectName
+	}
+	return r.Project
 }
 
 func (r *Rec) Archived() bool { return r.ArchivedAt != nil }

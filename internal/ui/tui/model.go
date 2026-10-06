@@ -6,6 +6,7 @@ import (
 	"os"
 	"slices"
 	"strconv"
+	"strings"
 	"time"
 	"unicode/utf8"
 
@@ -51,10 +52,12 @@ type Result struct {
 }
 
 type row struct {
-	group  string // non-empty = group header row, not selectable
-	count  int
-	rec    *tend.Rec
-	folded bool
+	group   string // non-empty = group header row: the group's key (a project's is projKey + its id)
+	label   string // the header's text; the key when empty
+	section string // a heading over the project groups or the automatic ones, not selectable
+	count   int
+	rec     *tend.Rec
+	folded  bool
 }
 
 const (
@@ -155,6 +158,7 @@ type Model struct {
 	remote map[string]*hostRows // by host name
 
 	tasks tasksState
+	proj  projectsState
 }
 
 func New(s *tend.Store, idx *index.Index, cfg tend.Config, initialQuery string) *Model {
@@ -172,6 +176,7 @@ func New(s *tend.Store, idx *index.Index, cfg tend.Config, initialQuery string) 
 	setWheelTuning(m.wheelStep, cfg.WheelSpeed)
 	useSkin(cfg)
 	m.startDir, _ = os.Getwd()
+	m.initProjects()
 	m.unfav = idx.Attach(s, nil)
 	m.recount()
 	m.refresh()
@@ -212,7 +217,11 @@ func (m *Model) Init() tea.Cmd {
 			capture.AppAvailable(tend.ProviderCodex)
 		}()
 	}
-	return tea.Batch(textinput.Blink, askTheme(), m.pollLive(), watchStore(), m.refreshIndex(), m.syncText(m.idx), m.fetchHosts())
+	var dial tea.Cmd
+	if m.served() { // mode 2 dials at start: the lists need the server's projects, the Tasks view uses the same connection
+		dial = m.tasksOpen()
+	}
+	return tea.Batch(textinput.Blink, askTheme(), m.pollLive(), watchStore(), m.refreshIndex(), m.syncText(m.idx), m.fetchHosts(), dial)
 }
 
 const indexEvery = 10 * time.Second
@@ -339,7 +348,7 @@ func (m *Model) recount() {
 	all := m.list(q)
 	projects := map[string]bool{}
 	for _, r := range all {
-		projects[r.Project] = true
+		projects[groupKey(r)] = true
 	}
 	m.nAll, m.nProj = len(all), len(projects)
 }
@@ -484,32 +493,71 @@ func timelineRows(recs []*tend.Rec, at map[*tend.Rec]time.Time, now time.Time) [
 	return out
 }
 
-// projectRows groups by project, groups ordered by their newest record; groups not in open are collapsed.
+// projKey starts a project group's key, before the project's id: no directory name, an automatic group's key, does.
+const projKey = "\x00"
+
+// groupKey is the projects view's group of r: its project, else its automatic group (the directory's name).
+func groupKey(r *tend.Rec) string {
+	switch {
+	case r.ProjectID != "":
+		return projKey + r.ProjectID
+	case r.Project == "":
+		return i18n.T("group.no_project")
+	}
+	return r.Project
+}
+
+// groupProject is the project id of group key g, "" for an automatic group.
+func groupProject(g string) string {
+	id, _ := strings.CutPrefix(g, projKey)
+	if id == g {
+		return ""
+	}
+	return id
+}
+
+// projectRows groups by project: the projects' groups first, then the automatic ones, each part under a heading when
+// there are projects and ordered on its own (by the newest record, the count or the name); groups not in open are
+// collapsed.
 func projectRows(recs []*tend.Rec, open map[string]bool, order string) ([]row, map[string][]*tend.Rec) {
-	byProject := map[string][]*tend.Rec{}
-	var names []string
+	byGroup := map[string][]*tend.Rec{}
+	labels := map[string]string{}
+	var inProject, auto []string
 	for _, r := range recs {
-		p := r.Project
-		if p == "" {
-			p = i18n.T("group.no_project")
+		g := groupKey(r)
+		if _, seen := byGroup[g]; !seen {
+			labels[g] = r.Group()
+			if r.ProjectID != "" {
+				inProject = append(inProject, g)
+			} else {
+				labels[g] = g
+				auto = append(auto, g)
+			}
 		}
-		if _, seen := byProject[p]; !seen {
-			names = append(names, p)
-		}
-		byProject[p] = append(byProject[p], r)
+		byGroup[g] = append(byGroup[g], r)
 	}
 
 	var out []row
-	for _, p := range orderGroups(names, byProject, order) {
-		out = append(out, row{group: p, folded: !open[p], count: len(byProject[p])})
-		if !open[p] {
-			continue
-		}
-		for _, r := range byProject[p] {
-			out = append(out, row{rec: r})
+	add := func(keys []string) {
+		for _, g := range orderGroups(keys, byGroup, labels, order) {
+			out = append(out, row{group: g, label: labels[g], folded: !open[g], count: len(byGroup[g])})
+			if !open[g] {
+				continue
+			}
+			for _, r := range byGroup[g] {
+				out = append(out, row{rec: r})
+			}
 		}
 	}
-	return out, byProject
+	if len(inProject) > 0 {
+		out = append(out, row{section: i18n.F("group.projects", len(inProject))})
+		add(inProject)
+		if len(auto) > 0 {
+			out = append(out, row{section: i18n.F("group.unfiled", len(auto))})
+		}
+	}
+	add(auto)
+	return out, byGroup
 }
 
 func (m *Model) current() *tend.Rec {
@@ -872,8 +920,23 @@ type item struct {
 func tagsOf(recs []*tend.Rec) []item {
 	return countBy(recs, func(r *tend.Rec) []string { return r.Tags })
 }
+
+// projectsOf: the projects of recs first, each named by its id and labelled with its name, then the automatic groups.
 func projectsOf(recs []*tend.Rec) []item {
-	return countBy(recs, func(r *tend.Rec) []string { return []string{r.Project} })
+	inProject := countBy(recs, func(r *tend.Rec) []string { return []string{r.ProjectID} })
+	names := map[string]string{}
+	for _, r := range recs {
+		names[r.ProjectID] = r.ProjectName
+	}
+	for i := range inProject {
+		inProject[i].label = render.GlyphProject + " " + names[inProject[i].name]
+	}
+	return append(inProject, countBy(recs, func(r *tend.Rec) []string {
+		if r.ProjectID != "" {
+			return nil
+		}
+		return []string{r.Project}
+	})...)
 }
 func providersOf(recs []*tend.Rec) []item {
 	return countBy(recs, func(r *tend.Rec) []string { return []string{r.Provider} })

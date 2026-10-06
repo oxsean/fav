@@ -304,7 +304,7 @@ func (s *Server) audited(r *http.Request, u store.User, h wire.Handler) wire.Han
 		switch {
 		case wire.Code(err) == wire.CodeUnauthorized:
 			s.audit(r, u.ID, "denied", req.Method+" "+subjectOf(req.Params))
-		case err == nil && (req.Method == coord.MMachineShare || req.Method == coord.MRunAnswer || req.Method == coord.MProjectMember):
+		case err == nil && (req.Method == coord.MMachineShare || req.Method == coord.MMachineSessions || req.Method == coord.MRunAnswer || req.Method == coord.MProjectMember):
 			s.audit(r, u.ID, req.Method, subjectOf(req.Params))
 		}
 		return res, err
@@ -317,6 +317,7 @@ func subjectOf(params json.RawMessage) string {
 		ID, Task, Run, Project, Machine, User, Role, Request string
 		Allow                                                *bool
 		Users, Projects                                      []string
+		Team                                                 bool
 	}
 	json.Unmarshal(params, &p)
 	var parts []string
@@ -331,6 +332,9 @@ func subjectOf(params json.RawMessage) string {
 	}
 	if len(p.Users)+len(p.Projects) > 0 {
 		parts = append(parts, "users="+strings.Join(p.Users, ","), "projects="+strings.Join(p.Projects, ","))
+	}
+	if p.Team {
+		parts = append(parts, "team=true")
 	}
 	return strings.Join(parts, " ")
 }

@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"cmp"
 	"slices"
 	"sort"
 	"strings"
@@ -9,6 +10,7 @@ import (
 	"github.com/oxsean/fav/internal/i18n"
 	"github.com/oxsean/fav/internal/paths"
 	"github.com/oxsean/fav/internal/render"
+	"github.com/oxsean/fav/internal/task"
 	"github.com/oxsean/fav/internal/tend"
 )
 
@@ -39,10 +41,15 @@ func (m *Model) projectBlock(name string, y0, x0, w, h int) []string {
 			body = append(body, dimmed.Render(render.Pad(k, labelW))+render.Truncate(v, inner-labelW))
 		}
 	}
-	body = append(body, boldSty.Foreground(cText).Render(render.Truncate(name, inner)), "")
+	body = append(body, boldSty.Foreground(cText).Render(render.Truncate(m.groupLabel(name), inner)), "")
 
 	dirs := topN(recs, func(r *tend.Rec) string { return r.Cwd }, 1)
-	if len(dirs) > 0 {
+	if p := m.proj.snap.Projects[groupProject(name)]; p != nil {
+		body = append(body, m.projectLines(p, inner, labelW)...)
+	} else if len(dirs) > 0 {
+		if m.proj.snap.Ready() {
+			add(render.GlyphProject+i18n.T("card.project"), i18n.F("project.unfiled_why", keyOf(inList, actEdit)))
+		}
 		dir := paths.Tilde(dirs[0].key)
 		if i := slices.IndexFunc(recs, func(r *tend.Rec) bool { return r.Cwd == dirs[0].key }); recs[i].Host != "" {
 			dir = recs[i].Host + ":" + dirs[0].key // another machine's directory: not checked here
@@ -160,6 +167,57 @@ func (m *Model) projectBlock(name string, y0, x0, w, h int) []string {
 	return panel(i18n.T("detail.project"), body, w, h)
 }
 
+// projectLines: the project's kind, owner and participants, and its directory on each machine (this machine's says
+// whether it is there; another machine's cannot be checked from here).
+func (m *Model) projectLines(p *task.Project, inner, labelW int) []string {
+	s := &m.proj.snap
+	lines := []string{dimmed.Render(render.Pad(render.GlyphProject+i18n.T("card.project"), labelW)) +
+		render.Truncate(m.projectKindLine(p, false), inner-labelW)}
+	type at struct{ machine, dir string }
+	var dirs []at
+	for _, r := range p.Repos {
+		for mc, d := range r.Dirs {
+			dirs = append(dirs, at{mc, d})
+		}
+	}
+	slices.SortFunc(dirs, func(a, b at) int {
+		if (a.machine == s.Here) != (b.machine == s.Here) {
+			if a.machine == s.Here {
+				return -1
+			}
+			return 1
+		}
+		return cmp.Or(strings.Compare(a.machine, b.machine), strings.Compare(a.dir, b.dir))
+	})
+	machW := 0
+	for _, d := range dirs {
+		machW = max(machW, render.Width(m.machineLabel(d.machine)))
+	}
+	for i, d := range dirs {
+		label := ""
+		if i == 0 {
+			label = render.GlyphDir + i18n.T("card.directory")
+		}
+		tail, tailW := "", 0
+		if d.machine == s.Here {
+			tail = i18n.T("project.here")
+			if !paths.IsDir(d.dir) {
+				tail = errSty.Render(i18n.T("project.not_here"))
+			}
+			tailW = render.Width(i18n.T("project.here"))
+			if !paths.IsDir(d.dir) {
+				tailW = render.Width(i18n.T("project.not_here"))
+			}
+		}
+		room := inner - labelW
+		head := render.Pad(m.machineLabel(d.machine), machW) + "  "
+		path := render.Truncate(paths.Tilde(d.dir), max(4, room-render.Width(head)-tailW-1))
+		gap := strings.Repeat(" ", max(1, room-render.Width(head)-render.Width(path)-tailW))
+		lines = append(lines, dimmed.Render(render.Pad(label, labelW))+head+path+gap+tail)
+	}
+	return lines
+}
+
 func (m *Model) jumpTo(group string, r *tend.Rec) {
 	m.open[group] = true
 	m.refresh()
@@ -237,17 +295,18 @@ func projSortLabel(name string) string {
 	return i18n.T("sort.active")
 }
 
-// orderGroups: the projects view orders groups by their newest record (the record order), by how many sessions they hold, or by name.
-func orderGroups(names []string, by map[string][]*tend.Rec, mode string) []string {
+// orderGroups: the projects view orders groups by their newest record (the record order), by how many sessions they
+// hold, or by the name shown (labels).
+func orderGroups(keys []string, by map[string][]*tend.Rec, labels map[string]string, mode string) []string {
 	switch mode {
 	case projSortCount:
-		sort.SliceStable(names, func(i, j int) bool { return len(by[names[i]]) > len(by[names[j]]) })
+		sort.SliceStable(keys, func(i, j int) bool { return len(by[keys[i]]) > len(by[keys[j]]) })
 	case projSortName:
-		sort.SliceStable(names, func(i, j int) bool {
-			return strings.ToLower(names[i]) < strings.ToLower(names[j])
+		sort.SliceStable(keys, func(i, j int) bool {
+			return strings.ToLower(labels[keys[i]]) < strings.ToLower(labels[keys[j]])
 		})
 	}
-	return names
+	return keys
 }
 
 const hotWindow = 7 * 24 * time.Hour

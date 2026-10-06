@@ -259,8 +259,12 @@ func (g *journalGen) event() journal.Event {
 	case 26:
 		return ev(task.ERunInterrupt, task.RunInterrupt{ID: g.pick(g.runs, "r"), Turn: 1 + g.n(2), Ask: g.of("int_1", "int_2"), By: g.user()})
 	case 25:
-		if g.chance(50) {
+		switch g.n(3) {
+		case 0:
 			return ev(task.EMachineDrained, task.DrainSet{Machine: g.of("m1", "m2"), On: g.chance(60), By: g.user()})
+		case 1:
+			return ev(task.ESessionsShared, task.SessionsSet{Machine: g.of("m1", "m2"), Users: g.some([]string{"u_a", "u_b"}, "u"),
+				Projects: g.some(g.projects, "p"), Team: g.chance(30)})
 		}
 		return ev(task.EMachineShared, task.Share{Machine: g.of("m1", "m2"), Users: g.some([]string{"u_a", "u_b"}, "u"), Projects: g.some(g.projects, "p")})
 	default:

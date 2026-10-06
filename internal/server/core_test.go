@@ -77,7 +77,44 @@ func TestTheChangesOfARunInPagesAndOnTheTab(t *testing.T) { runModule(t, "webtes
 
 func TestTheRunsPageAndARunsOwn(t *testing.T) { runModule(t, "webtest/runs_test.js") }
 
-func TestTheMachinesPage(t *testing.T) { runModule(t, "webtest/team_test.js") }
+// The team pages call a project personal as the coordinator does (task.Project.Personal), on personal.json's cases and
+// the team frames' projects.
+func TestTheMachinesPage(t *testing.T) {
+	cases := runModule(t, "webtest/team_test.js")
+	var told [][]json.RawMessage
+	if err := json.Unmarshal(cases["personal projects"].Data, &told); err != nil || len(told) < 6 {
+		t.Fatalf("%d projects: %v", len(told), err)
+	}
+	b, err := os.ReadFile(filepath.Join("webtest", "personal.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var want []struct {
+		Project  task.Project `json:"project"`
+		Personal bool         `json:"personal"`
+	}
+	if err := json.Unmarshal(b, &want); err != nil || len(told) <= len(want) {
+		t.Fatalf("%d cases, %d projects from the page: %v", len(want), len(told), err)
+	}
+	for _, w := range want {
+		if got := w.Project.Personal(); got != w.Personal {
+			t.Errorf("personal.json %s: Personal() = %v, want %v", w.Project.ID, got, w.Personal)
+		}
+	}
+	for _, x := range told {
+		var p task.Project
+		var page bool
+		if err := json.Unmarshal(x[0], &p); err != nil {
+			t.Fatal(err)
+		}
+		if err := json.Unmarshal(x[1], &page); err != nil {
+			t.Fatal(err)
+		}
+		if p.Personal() != page {
+			t.Errorf("project %s: the page says personal %v, Personal() %v", p.ID, page, p.Personal())
+		}
+	}
+}
 
 // The sessions page's resume lines are what internal/shell types: POSIX sh, and PowerShell on Windows.
 func TestTheSessionsPageAndItsResumeLines(t *testing.T) {

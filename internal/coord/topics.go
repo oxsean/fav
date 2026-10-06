@@ -101,13 +101,7 @@ func (c *Coord) topicView(sb *topic) ([]byte, error) {
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	out := MachineList{Items: []Machine{}}
-	for _, m := range c.machineList() {
-		if c.canSee(sb.p, m.Name) {
-			out.Items = append(out.Items, m)
-		}
-	}
-	return json.Marshal(out)
+	return json.Marshal(MachineList{Items: c.machinesFor(sb.p, c.machineList())})
 }
 
 // kick wakes the subscribers of kind whose viewer who picks (nil: all of them); the caller holds mu.

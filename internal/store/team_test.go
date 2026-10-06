@@ -142,7 +142,21 @@ func TestACredentialIsItsSecretsHashAndGoesWhenRevoked(t *testing.T) {
 	if err := tm.Bind(c.ID, "n_2", "host-b"); !errors.Is(err, ErrOtherMachine) {
 		t.Fatalf("a bound node token on another machine: %v", err)
 	}
+	invite, err := tm.NewInvite(RoleMember, LocalUser, time.Hour)
+	must(t, err)
+	ann, err := tm.Admit(Identity{Provider: "github", Subject: "7", Username: "ann"}, invite)
+	must(t, err)
+	must(t, tm.SetOwner(c.ID, ann.ID))
+	if got, ok := found(); !ok || got.Owner != ann.ID || got.NodeID != "n_1" || got.Host != "host-a" || got.Sum != Sum(secret) {
+		t.Fatalf("a new owner keeps the token and the node it is bound to: %+v %v", got, ok)
+	}
+	if err := tm.SetOwner("c_none", ann.ID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("no such token: %v", err)
+	}
 	must(t, tm.Revoke(c.ID))
+	if err := tm.SetOwner(c.ID, LocalUser); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("a revoked token: %v", err)
+	}
 	if _, ok := found(); ok {
 		t.Fatal("a revoked credential still counts")
 	}

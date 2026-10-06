@@ -56,7 +56,7 @@ func (c *Coord) runAllows(p Principal, r *task.Run, act string) bool {
 	case task.ActContinue:
 		return dry(p, c.runContinue, Continue{Run: r.ID, Text: "x"})
 	case task.ActTakeover:
-		return canRead(c.st, p, runTask(c.st, r)) && c.ownerOf(r.Machine) == p.User
+		return c.canRead(c.st, p, runTask(c.st, r)) && c.ownerOf(r.Machine) == p.User
 	}
 	return false
 }
@@ -157,13 +157,13 @@ func (c *Coord) affordKeys(p Principal, ids []string) (tasks, runs []string) {
 	seen := map[string]bool{}
 	if ids == nil {
 		for id, t := range c.st.Tasks {
-			if canRead(c.st, p, t) {
+			if c.canRead(c.st, p, t) {
 				tasks, seen[id] = append(tasks, id), true
 			}
 		}
 	} else {
 		for _, id := range ids {
-			if canRead(c.st, p, c.st.Tasks[id]) {
+			if c.canRead(c.st, p, c.st.Tasks[id]) {
 				tasks, seen[id] = append(tasks, id), true
 			}
 		}

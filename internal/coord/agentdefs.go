@@ -85,7 +85,7 @@ func (c *Coord) manages(p Principal, d *task.AgentDef) bool {
 
 // usesDef: p may run d for a task of project. The caller holds mu.
 func (c *Coord) usesDef(p Principal, d *task.AgentDef, project string) bool {
-	return !c.team() || d.Usable(p.User, project, roleIn(c.st, p, project))
+	return !c.team() || d.Usable(p.User, project, c.roleIn(c.st, p, project))
 }
 
 // usesDefSomewhere: p may run d for some task. The caller holds mu.
@@ -216,7 +216,7 @@ func (c *Coord) vetDef(who Principal, p AgentDefSave) (rec task.AgentDef, errs [
 	} else if p.Owner != "" && p.Owner != who.User {
 		pr := c.st.Projects[strings.TrimPrefix(p.Owner, task.ProjectOwner)]
 		switch {
-		case !strings.HasPrefix(p.Owner, task.ProjectOwner) || pr == nil || !who.Admin && pr.Role(who.User) == "":
+		case !strings.HasPrefix(p.Owner, task.ProjectOwner) || pr == nil || !c.seesProject(who, pr):
 			return rec, nil, notFound(p.Owner)
 		case !who.Admin && pr.Owner != who.User:
 			return rec, nil, forbidden(p.Owner)
@@ -357,7 +357,7 @@ func (c *Coord) agentDefTransfer(who Principal, r *wire.Request) (string, []jour
 	}
 	pr := c.st.Projects[id]
 	switch {
-	case pr == nil || !who.Admin && pr.Role(who.User) == "":
+	case pr == nil || !c.seesProject(who, pr):
 		return "", nil, notFound(p.Owner)
 	case !who.Admin && pr.Owner != who.User:
 		return "", nil, forbidden(p.Owner)

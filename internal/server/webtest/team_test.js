@@ -1,8 +1,9 @@
 // team_test draws the machines and team pages in both forms and both languages from the team frames and the /api
 // answers in api.json, and drives them in a fake document. Machines: grouped as each viewer sees them, a machine's
-// sharing changed by its owner, a machine added and its token shown once, a node token moved and revoked, Enter
+// sharing changed by its owner, who sees its sessions set, taken back and undone by its owner and shown to whom they
+// are shared with, a machine added and its token shown once, a node token moved and revoked, Enter
 // opening the runs page on a machine, a phone showing a machine's facts without the controls. Team: a person's role,
-// disabling and handing over, an invitation and the sign-in rules, the log's filters, a project created and its
+// disabling and handing over as the coordinator previews it, an invitation and the sign-in rules, the log's filters, a project created and its
 // members changed by who may, and a phone that only shows. A project's drawer: its settings saved as changed, its
 // checkouts checked and its workflows; its issue sync (state, log, comment preview, settings, token, unbinding, binding).
 process.env.TZ = 'UTC';
@@ -21,6 +22,7 @@ import {signal} from '../web/vendor/signals-core.mjs';
 import {html, KeysContext} from '../web/ui/base.js';
 import {App} from '../web/pages/app.js';
 import {RUNS_FILTER_KEY} from '../web/pages/runs.js';
+import {apiText} from '../web/pages/words.js';
 import * as tm from '../web/core/team.js';
 import {install} from './dom.js';
 import {settle} from './fake.js';
@@ -122,6 +124,15 @@ const buttonOf = (root, label) => {
   if (got.length !== 1) throw new Error(`${label}: ${got.length} buttons`);
   return got[0];
 };
+const cardOf = (root, name) => root.find('.mach-card').find(c => c.one('b').textContent === name);
+// scopeOf is the machine's 「会话谁能看」 section as drawn: its heading, its line and the line under it.
+const scopeOf = root => {
+  const sec = root.one('.mach-scope-sec');
+  return [sec.one('h3').childNodes[0].textContent.trim(), sec.one('.mach-scope-line').textContent.trim(), ...sec.find('.mach-scope-sub').map(x => x.textContent)];
+};
+const optionsOf = root => root.one('.scope-opts').find('[role=radio]').map(b => [b.one('b').textContent, b.getAttribute('aria-checked') === 'true']);
+const optionOf = (root, label) => root.one('.scope-opts').find('[role=radio]').find(b => b.one('b').textContent === label);
+const saveOf = root => buttonOf(root.one('.modal-foot'), words.t('form.save'));
 const groupsOf = root => root.find('.mach-group').map(g => [g.one('h2').childNodes[0].textContent.trim(), g.find('.mach-card').map(c => c.one('b').textContent)]);
 
 test('project settings: only what changed is sent; paths, directory checks and workflow names read right', () => {
@@ -194,9 +205,10 @@ test('machines: the picked machine\'s facts, its notes, and who may change its s
   eq(other.one('.mach-aside').find('button').filter(b => labelOf(b) === words.t('mach.share')).length, 0, 'nobody else shares it');
 });
 
-test('machines: its owner changes who else may use it', async () => {
+test('machines: its owner changes who else may use it, then who sees its sessions, takes that back and undoes it', async () => {
   const r = await team();
-  const root = await mount(app(r).vnode());
+  const a = app(r);
+  const root = await mount(a.vnode());
   await r.srv.play('team-share', {
     async share() {
       await click(root.find('.mach-card').find(c => c.one('b').textContent === 'linux'));
@@ -213,7 +225,93 @@ test('machines: its owner changes who else may use it', async () => {
       eq(root.find('.modal').length, 0, 'closed');
       ok(root.one('.toast-text').textContent === words.f('mach.sharedDone', 'linux'), 'said');
     },
+    async scope() {
+      const t = words.t;
+      eq(scopeOf(root), [t('mach.scope'), t('mach.scopePrivate'), t('mach.scopePrivateHint')], 'private as it starts');
+      eq(cardOf(root, 'linux').one('.mach-card-scope').textContent, words.f('mach.scopeCard', t('mach.scopeCardPrivate')), 'the card says so');
+      eq(root.one('.mach-scope-sec').find('button').map(labelOf), [t('mach.scopeEdit')], 'nothing to take back');
+      await click(buttonOf(root.one('.mach-aside'), t('mach.scopeEdit')));
+      const modal = root.one('.modal');
+      eq(modal.one('h2').textContent, words.f('mach.scopeTitle', 'linux'), 'titled');
+      eq(modal.one('.scope-note').textContent, t('mach.scopeAbout'), 'admins too see nothing unless picked');
+      eq(optionsOf(root), [[t('mach.scopePrivate'), true], [t('mach.scopeUsers'), false], [t('mach.scopeProject'), false], [t('mach.scopeTeam'), false]], 'the four, the current one on');
+      await click(optionOf(root, t('mach.scopeTeam')));
+      ok(root.one('.modal').textContent.includes(words.f('mach.scopeTeamHint', 4)), 'everyone active now, the server admin and the disabled left out');
+      await click(optionOf(root, t('mach.scopeProject')));
+      eq(saveOf(root).getAttribute('disabled') !== null, true, 'no project picked yet');
+      await click(root.one('.modal').one('.picker-btn'));
+      await click(root.find('[role=option]').find(o => o.textContent.includes('Shop')));
+      eq(root.one('.modal').find('.scope-note').at(-1).textContent, words.f('mach.scopeProjectNote', 'Shop', 'linux', 'Shop'), 'every shared session of the machine, not only the project\'s');
+      await click(optionOf(root, t('mach.scopeUsers')));
+      eq(saveOf(root).getAttribute('disabled') !== null, true, 'nobody picked yet');
+      ok(root.one('.modal').textContent.includes(t('mach.scopeNeedOne')), 'and says why');
+      await click(root.one('.modal').one('.picker-btn'));
+      eq(root.find('[role=option]').map(o => [o.one('.pk-label').textContent, o.one('.pk-sub').textContent]),
+        [['Bo Lin', t('role.member')], ['Cy Park', t('role.member')], ['Eve Ng', t('role.member')]], 'the others active, each with their role');
+      await click(root.find('[role=option]').find(o => o.textContent.includes('Bo Lin')));
+      await click(root.find('[role=option]').find(o => o.textContent.includes('Cy Park')));
+      await click(buttonOf(root, t('picker.done')));
+      await click(saveOf(root));
+    },
+    async scoped() {
+      await settled();
+      const t = words.t;
+      eq(root.find('.modal').length, 0, 'closed');
+      ok(root.find('.toast-text').some(x => x.textContent === words.f('mach.scopeDone', 'linux')), 'said');
+      eq(scopeOf(root), [t('mach.scope'), t('mach.scopeUsers'), 'Bo Lin, Cy Park'], 'the people picked');
+      eq(cardOf(root, 'linux').one('.mach-card-scope').textContent, words.f('mach.scopeCard', 'Bo Lin, Cy Park'), 'on the card too');
+      await click(buttonOf(root.one('.mach-scope-sec'), t('mach.scopeRevoke')));
+      eq(root.find('.modal').length, 0, 'taken back without asking');
+    },
+    async revoked() {
+      await settled();
+      ok(root.find('.toast-text').some(x => x.textContent === words.f('mach.scopeRevoked', 'linux')), 'said, with an undo');
+      eq(scopeOf(root)[1], words.t('mach.scopePrivate'), 'private again');
+      await act(() => { a.toasts.undo(); });
+    },
+    async undone() {
+      await settled();
+      eq(scopeOf(root)[2], 'Bo Lin, Cy Park', 'the people back');
+    },
   });
+  eq(r.errors, [], 'errors');
+});
+
+test('machines: who sees their sessions, as each viewer is told: the node\'s own setting, a machine shared with the viewer, a phone', async () => {
+  const r = await team();
+  const t = words.t;
+  const root = await mount(app(r).vnode());
+  eq(['linux', 'mba', 'win', 'bo-laptop', 'old-box'].map(n => cardOf(root, n).find('.mach-card-scope').map(x => x.textContent).join('')),
+    [words.f('mach.scopeCard', t('mach.scopeCardPrivate')), words.f('mach.scopeCard', 'Bo Lin, Cy Park'), words.f('mach.scopeCard', words.f('mach.scopeCardProject', 'Shop')),
+      t('mach.scopeShared'), ''], 'each card: the owner\'s scope, or shared with the viewer');
+  await click(cardOf(root, 'win'));
+  eq(scopeOf(root), [t('mach.scope'), t('mach.scopeProject'), words.f('mach.scopeCardProject', 'Shop')], 'a project\'s members');
+  ok(root.one('.mach-aside').textContent.includes(t('mach.shareSessions')) && root.one('.mach-aside').textContent.includes(t('mach.share.runs')), 'what the node itself releases, renamed');
+  await click(buttonOf(root.one('.mach-aside'), t('mach.scopeEdit')));
+  eq(optionsOf(root).find(o => o[1])[0], t('mach.scopeProject'), 'the dialog opens on it');
+  eq(root.one('.modal').find('.scope-note').filter(x => x.classList.contains('warn')).map(x => x.textContent), [words.f('mach.scopeNodeRuns', 'win')], 'the node narrows it further');
+  await click(buttonOf(root.one('.modal-foot'), t('home.cancel')));
+  await click(cardOf(root, 'bo-laptop'));
+  const aside = root.one('.mach-aside');
+  eq(scopeOf(root).slice(0, 2), [t('mach.scope'), words.f('mach.scopeSharedBy', 'Bo Lin')], 'Bo shares it with Ann');
+  ok(aside.textContent.includes(t('mach.scopeSharedNote')), 'read only');
+  eq(aside.find('button').filter(b => [t('mach.scopeEdit'), t('mach.scopeRevoke')].includes(labelOf(b))).length, 0, 'only its owner changes it, admins too');
+  ok(buttonOf(aside, t('mach.sessions')), 'its sessions open');
+  r.store.machines.value = r.store.machines.value.map(m => ({...m, sessions: m.owner === 'u_b' || m.name === 'mba', session_share: undefined}));
+  const other = await mount(app(r, {session: bo}).vnode());
+  await click(cardOf(other, 'mba'));
+  const heads = other.one('.mach-aside').find('h3').map(h => h.childNodes[0].textContent.trim());
+  ok(heads.includes(t('mach.scope')) && !heads.includes(t('mach.shared')), 'shared with Bo: the owner\'s dispatch sharing is not his to see: ' + heads);
+  eq(cardOf(other, 'mba').one('.mach-card-scope').textContent, t('mach.scopeShared'), 'his card says so');
+  try {
+    const r2 = await team();
+    const phone = await mount(app(r2).vnode(), 'phone');
+    ok(phone.textContent.includes(t('mach.desktop')), 'scopes are changed on a computer');
+    ok(phone.find('.card-row').find(b => b.textContent.includes('mba')).textContent.includes(words.f('mach.scopeCard', 'Bo Lin, Cy Park')), 'a card says who sees');
+    await click(phone.find('.card-row').find(b => b.textContent.includes('mba')));
+    eq(scopeOf(phone), [t('mach.scope'), t('mach.scopeUsers'), 'Bo Lin, Cy Park'], 'its facts say who sees');
+    eq(phone.find('button').filter(b => [t('mach.scopeEdit'), t('mach.scopeRevoke')].includes(labelOf(b))).length, 0, 'and change nothing');
+  } finally { form.value = 'desktop'; }
   eq(r.errors, [], 'errors');
 });
 
@@ -321,7 +419,7 @@ test('machines: a machine added shows its token once; a node token is moved and 
   await click(buttonOf(root.one('.mach-aside'), words.t('mach.revoke')));
   await click(buttonOf(root.one('.modal-foot'), words.t('mach.revoke')));
   await settled();
-  eq(http.calls.filter(c => c[0] !== 'GET /api/machines'), [['POST /api/machines', {name: 'lab-1'}], ['POST /api/machines/rebind', {id: 'n1'}],
+  eq(http.calls.filter(c => !c[0].startsWith('GET ')), [['POST /api/machines', {name: 'lab-1'}], ['POST /api/machines/rebind', {id: 'n1'}],
     ['DELETE /api/machines', {id: 'n1'}]], 'the writes');
   ok(root.find('.toast-text').some(x => x.textContent === words.f('mach.revoked', 'mba')), 'said');
   await click(root.find('.mach-card').find(c => c.one('b').textContent === 'old-box'));
@@ -398,11 +496,14 @@ test('team: drawn in both forms and languages, for an admin and for a member', a
   eq(rowOf(root, 'Ann Lee').find('.menu-wrap').length, 0, 'nothing to change about oneself');
   const member = await mounted(app(r, {url: '/?page=team', session: bo}), 'desktop', 'zh', 'member');
   eq(member.find('.panel').map(x => x.one('h2').textContent), [words.t('team.members'), words.t('team.projects')], 'a member sees the people and the projects');
-  eq(member.one('.team').find('.menu-wrap').length + member.one('.team').find('button').filter(b => [words.t('team.new'), words.t('team.invite')].includes(labelOf(b))).length, 0, 'and changes nothing there');
+  eq(member.one('.team').find('.menu-wrap').length + member.one('.team').find('button').filter(b => labelOf(b) === words.t('team.invite')).length, 0, 'and changes no one there');
+  ok(buttonOf(member, words.t('team.new')), 'but creates a project');
+  eq(root.find('.team-project').map(b => [b.one('b').textContent, b.find('.team-personal').map(x => x.textContent)]),
+    [['Docs', []], ['Shop', []], ['side', [words.t('team.personal')]]], 'a project with only its owner is personal');
   eq(r.errors, [], 'errors');
 });
 
-test('team: an admin changes a role, disables and enables, and hands someone\'s work over', async () => {
+test('team: an admin changes a role, disables and enables, and hands someone\'s work over as the coordinator previews it', async () => {
   const r = await team();
   const a = app(r, {url: '/?page=team'});
   const root = await mounted(a, 'desktop', 'zh', 'admin');
@@ -414,15 +515,42 @@ test('team: an admin changes a role, disables and enables, and hands someone\'s 
   await settled();
   await menuOf(root, 'Di Wu', words.t('team.enable'));
   await settled();
-  await menuOf(root, 'Bo Lin', words.t('team.offboard'));
-  const steps = root.one('.team-steps').textContent;
-  ok(steps.includes(words.f('team.offProjects', 1, 'Ann Lee')) && steps.includes(words.f('team.offLeft', 1)) && steps.includes(words.t('team.offEnd')), 'the steps: ' + steps);
-  ok(steps.includes(words.f('team.offDefs', 'bo-dev', 'Ann Lee')), 'his agent definitions go to the heir: ' + steps);
-  await click(buttonOf(root.one('.modal-foot'), words.t('team.offGo')));
+  const t = words.t;
+  const go = () => buttonOf(root.one('.modal-foot'), t('team.offGo'));
+  const steps = () => root.one('.team-steps').find('li').map(x => x.textContent);
+  await r.srv.play('team-offboard', {
+    async open() { await menuOf(root, 'Bo Lin', t('team.offboard')); },
+    async waiting() {
+      ok(root.one('.off-wait').textContent.includes(t('team.offWait')), 'it waits for the coordinator');
+      eq(go().disabled, true, 'nothing to hand over yet');
+    },
+    async previewed() {
+      await settled();
+      eq(steps(), [words.f('team.offProjects', 1, 'Ann Lee'), words.f('team.offLeft', 1), words.f('team.offTasks', 2, 'Ann Lee'),
+        words.f('team.offDefs', 'bo-dev', 'Ann Lee'), words.f('team.offMachines', 'bo-laptop'), words.f('team.offPrivate', 2) + t('team.offPrivateWhy'), t('team.offEnd')],
+      'what the coordinator says it does, his personal projects not among them, his private tasks kept');
+      eq(go().disabled, false, 'it may go');
+      await click(root.one('.modal').one('.picker-btn'));
+      await click(root.find('[role=option]').find(o => o.textContent.includes('Cy Park')));
+    },
+    async failed() {
+      await settled();
+      ok(root.one('.off-err').textContent.includes(words.f('team.offFailed', apiText(words, {code: 'timeout'}))), 'why it cannot say: ' + root.one('.off-err').textContent);
+      eq(go().disabled, true, 'no handing over without it');
+      await click(buttonOf(root.one('.off-err'), t('team.offRetry')));
+    },
+    async retried() {
+      await settled();
+      eq(steps(), [words.f('team.offProjects', 1, 'Cy Park'), words.f('team.offLeft', 1), words.f('team.offTasks', 2, 'Cy Park'),
+        words.f('team.offMachines', 'bo-laptop'), t('team.offEnd')], 'for Cy, no private tasks: no such line');
+      await click(go());
+    },
+  });
   await settled();
   eq(writes(a.http), [['POST /api/users', {id: 'u_b', role: 'admin'}], ['POST /api/users', {id: 'u_c', disabled: true}],
-    ['POST /api/users', {id: 'u_d', disabled: false}], ['POST /api/users/offboard', {user: 'u_b', to: 'u_a'}]], 'the writes');
-  ok(root.find('.toast-text').some(x => x.textContent === words.f('team.offDone', 'Bo Lin', 'Ann Lee')), 'said');
+    ['POST /api/users', {id: 'u_d', disabled: false}], ['POST /api/users/offboard', {user: 'u_b', to: 'u_c'}]], 'the writes');
+  ok(root.find('.toast-text').some(x => x.textContent === words.f('team.offDone', 'Bo Lin', 'Cy Park')), 'said');
+  eq(r.errors, [], 'errors');
 });
 
 test('team: an invitation made and one revoked, sign-in rules added and removed, the log filtered', async () => {
@@ -470,11 +598,13 @@ test('team: a project created for someone; an admin changes another\'s members',
       await type(root.one('.modal').find('input')[0], ' Billing ');
       await click(root.one('.modal').one('.picker-btn'));
       await click(root.find('[role=option]').find(o => o.textContent.includes('Bo Lin')));
+      eq(root.one('.modal').find('.field-note').filter(x => x.classList.contains('t-warning')).map(x => x.textContent).join(''), words.f('team.newOther', 'Bo Lin', 'Bo Lin'), 'she loses sight of it at once; Bo adds its members');
       await click(buttonOf(root.one('.modal-foot'), words.t('team.create')));
     },
     async add() {
       await settled();
       eq(root.find('.modal').length, 0, 'created');
+      eq(root.find('.drawer').length, 0, 'nothing of it to open');
       await click(root.find('.team-project').find(b => b.textContent.includes('Shop')));
       const drawer = root.one('.drawer');
       ok(drawer.textContent.includes('Shop'), 'Shop opens');
@@ -514,6 +644,54 @@ test('team: j and Enter open a project; a member manages the one they own and on
   await click(root.one('.drawer').find('button').find(b => b.getAttribute('aria-label') === words.t('ui.close')));
   await click(root.find('.team-project').find(b => b.textContent.includes('Docs')));
   ok(buttonOf(root.one('.drawer'), words.t('team.add')), 'Docs is Bo\'s');
+});
+
+test('team: a member creates a project of their own; the first member of a personal project is added once its owner confirms', async () => {
+  const r = await team();
+  eq(Object.values(r.store.state.projects).map(p => [p.id, tm.personal(p)]).sort(), [['p1', false], ['p2', false], ['p_side', true]],
+    'the frames\' projects as task.Project.Personal tells them: only side, Ann\'s with no one else in it');
+  let root = await mounted(app(r, {url: '/?page=team', session: bo}), 'desktop', 'zh', 'member');
+  await r.srv.play('team-personal', {
+    async create() {
+      await click(buttonOf(root, words.t('team.new')));
+      eq(root.one('.modal').find('.picker-btn').length, 0, 'no owner to choose: it is Bo\'s');
+      eq(root.one('.modal').find('.field-note').length, 0, 'his own: nothing to warn of');
+      await type(root.one('.modal').find('input')[0], 'Notes');
+      await click(buttonOf(root.one('.modal-foot'), words.t('team.create')));
+    },
+    async add() {
+      await settled();
+      eq(root.find('.modal').length, 0, 'created');
+      root = await mounted(app(r, {url: '/?page=team'}), 'desktop', 'zh', 'admin');
+      await click(root.find('.team-project').find(b => b.textContent.includes('side')));
+      const drawer = root.one('.drawer');
+      ok(drawer.one('.team-facts').textContent.includes(words.t('team.personal')), 'the drawer says it is personal');
+      ok(tabOf(root, words.t('proj.settings')), 'its owner edits its repositories and directories');
+      await click(buttonOf(drawer, words.t('team.add')));
+      await click(root.one('.modal').one('.picker-btn'));
+      await click(root.find('[role=option]').find(o => o.textContent.includes('Eve Ng')));
+      await click(buttonOf(root.one('.modal-foot'), words.t('team.add')));
+      eq(r.srv.current().sent.length, 0, 'nothing sent yet');
+      eq(root.one('.modal').one('p').textContent, words.f('team.firstMember', 'Eve Ng', 0), 'what she will see');
+      await click(buttonOf(root.one('.modal-foot'), words.t('team.firstAdd')));
+    },
+    async done() { await settled(); eq(root.find('.modal').length, 0, 'added'); },
+  });
+  eq(r.errors, [], 'errors');
+  eq(tm.personal({owner: 'u_b'}), true, 'no members');
+  eq([tm.personal({}), tm.personal({members: {u_b: 'participant'}})], [false, false], 'without an owner a project is no one\'s personal one (task.Project.Personal)');
+  eq(tm.personal({owner: 'u_b', members: {u_b: 'participant'}}), true, 'only its owner');
+  eq(tm.personal({owner: 'u_b', members: {u_e: 'reader'}}), false, 'a reader makes it a team\'s');
+  eq(tm.projectFacts({tasks: {t1: {project: 'p'}, t2: {project: 'q'}, t3: {project: 'p', status: 'done'}}}, {id: 'p'}).tasks, 2, 'its tasks, finished too');
+});
+
+// The personal projects for the Go test to tell with task.Project.Personal: personal.json's cases, each as expected, and
+// the team frames' projects, as [project, what the page says].
+test('personal projects', async () => {
+  const cases = JSON.parse(readFileSync(new URL('./personal.json', import.meta.url), 'utf8'));
+  for (const c of cases) eq(tm.personal(c.project), c.personal, c.why);
+  const r = await team();
+  return [...cases.map(c => c.project), ...Object.values(r.store.state.projects)].map(p => [p, tm.personal(p)]);
 });
 
 const valueOf = el => el.value ?? el.getAttribute('value');

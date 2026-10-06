@@ -82,7 +82,7 @@ func groupReport(recs []*tend.Rec, since time.Time) []*reportProject {
 	by := map[string]*reportProject{}
 	var out []*reportProject
 	for _, r := range recs {
-		name := r.Project
+		name := r.Group()
 		if name == "" {
 			name = i18n.T("group.no_project")
 		}

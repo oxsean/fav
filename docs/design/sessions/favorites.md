@@ -7,7 +7,7 @@
 1. 用户在 Claude Code 或 Codex 当前会话执行 `/tend`。
 2. Skill 根据当前会话生成结构化 JSON（只含语义字段）。
 3. Skill 将 JSON 通过 stdin 交给 `tend add`。
-4. Core 自动补充环境元数据、校验并追加写入 JSONL。
+4. Core 自动补充环境元数据、校验并追加写入 JSONL。会话目录（索引里的主仓库，否则 `cwd`）属于某个项目时，`project` 写成项目名，skill 给的名字只在没有项目时用；项目从哪来见 [cli-and-config.md](cli-and-config.md)「项目表」。
 5. 返回简短确认：标题、项目、标签、记录 ID。
 6. 同一 Provider + Session ID 已存在时更新该记录，不重复创建。
 

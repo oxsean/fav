@@ -822,7 +822,7 @@ func (c *Coord) recheckOutputs() {
 		run := c.st.Runs[id]
 		h.mu.Lock()
 		for sb := range h.subs {
-			if !canRead(c.st, sb.p, runTask(c.st, run)) {
+			if !c.canRead(c.st, sb.p, runTask(c.st, run)) {
 				sb.s.End(nil, &wire.Error{Code: wire.CodeUnauthorized})
 				delete(h.subs, sb)
 			}

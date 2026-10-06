@@ -41,6 +41,7 @@ const (
 	ovTaskReply
 	ovTaskAnswer
 	ovTaskDraft
+	ovProject
 )
 
 // ovPad: border + padding columns left of the overlay box; box-local zones add it.
@@ -87,6 +88,7 @@ type overlay struct {
 	request    string         // answer dialog: the request answered (taskID is the run)
 	send       bool           // reply dialog: a message for the running run, not a continuation
 	previewErr error
+	proj       *projDialog // the 「项目」 dialog
 
 	msg   capture.Message
 	steps []string // the full text of msg's steps
@@ -350,6 +352,8 @@ func (m *Model) renderOverlay() string {
 		return m.renderAnswer()
 	case ovTaskDraft:
 		return m.renderDraft()
+	case ovProject:
+		return m.renderProject()
 	}
 	return ""
 }
@@ -457,6 +461,8 @@ func (m *Model) ovWidth() int {
 		w = min(max(w, 64, groupsWidth([]btnGroup{{bs: m.taskButtons()}})), m.w-4)
 	case ovTaskForm, ovTaskReply, ovTaskAnswer, ovTaskDraft:
 		w = min(m.w-8, 100)
+	case ovProject:
+		w = min(max(w, 66), m.w-4)
 	}
 	return w
 }

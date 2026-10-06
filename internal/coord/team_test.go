@@ -23,6 +23,7 @@ var (
 	bob  = Principal{User: "u_bob"} // participates in p1
 	cy   = Principal{User: "u_cy"}  // in no project
 	dee  = Principal{User: "u_dee"} // reads p1
+	eve  = Principal{User: "u_eve"} // in no project; stage gives her far's and solo's sessions to read
 )
 
 // team is an env in team mode: ann owns every machine, and p1 has bob participating and dee reading.
@@ -327,9 +328,9 @@ func TestALeavingMemberHandsTheirWorkOn(t *testing.T) {
 		t.Fatal(err)
 	}
 	st := e.c.State()
-	if st.Tasks[x.ID].Owner != ann.User || st.Tasks[mine.ID].Owner != cy.User || st.Projects["p1"].Role(bob.User) != "" ||
+	if st.Tasks[x.ID].Owner != ann.User || st.Tasks[mine.ID].Owner != bob.User || st.Projects["p1"].Role(bob.User) != "" ||
 		st.AgentDefs["careful"].Owner != cy.User {
-		t.Fatalf("p1's task goes to p1's owner, the rest to cy; bob leaves p1: %+v %+v %v", st.Tasks[x.ID], st.Tasks[mine.ID], st.Projects["p1"].Members)
+		t.Fatalf("p1's task goes to p1's owner, his definition to cy, his private task stays; bob leaves p1: %+v %+v %v", st.Tasks[x.ID], st.Tasks[mine.ID], st.Projects["p1"].Members)
 	}
 	if err := callAs(e.as(root), MUserOffboard, "o2", Offboard{User: ann.User}, nil); err != nil {
 		t.Fatal(err)

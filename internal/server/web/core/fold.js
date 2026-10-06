@@ -235,16 +235,31 @@ function applyEvent(s, e, at, seq) {
       x.owner = d.owner; x.updated_at = at; x.rev = (x.rev || 0) + 1;
       break;
     }
-    case 'machine_shared':
-      if (!(d.users || []).length && !(d.projects || []).length) delete s.shares[d.machine];
-      else s.shares[d.machine] = d;
+    case 'machine_shared': { // the session scope stays as it was
+      const {sessions: _, ...x} = d;
+      const sessions = s.shares[d.machine]?.sessions;
+      setShare(s, sessions ? {...x, sessions} : x);
       break;
+    }
+    case 'sessions_shared': {
+      const {sessions: _, ...x} = s.shares[d.machine] || {machine: d.machine};
+      const open = (d.users || []).length || (d.projects || []).length || d.team;
+      const scope = {...(d.users?.length ? {users: d.users} : {}), ...(d.projects?.length ? {projects: d.projects} : {}), ...(d.team ? {team: true} : {})};
+      setShare(s, open ? {...x, sessions: scope} : x);
+      break;
+    }
     case 'machine_drained':
       if (d.on) s.drains[d.machine] = {machine: d.machine, ...(d.by ? {by: d.by} : {}), at};
       else delete s.drains[d.machine];
       break;
     default: // an event this page does not know yet: only the seq moves on
   }
+}
+
+// setShare puts x in its machine's place in shares; an entry with no dispatch share and no session scope goes.
+function setShare(s, x) {
+  if (!(x.users || []).length && !(x.projects || []).length && !x.sessions) delete s.shares[x.machine];
+  else s.shares[x.machine] = x;
 }
 
 // parts names the tables of the state each event changes, for the store's versions; an event missing here changes
@@ -257,7 +272,7 @@ const parts = {
   run_canceled: ['runs'], run_abandoned: ['runs'], run_answered: ['runs'], run_sent: ['runs'], run_interrupt_requested: ['runs'],
   project_created: ['projects'], project_edited: ['projects'], member_set: ['projects'],
   agentdef_saved: ['agent_defs'], agentdef_removed: ['agent_defs'], agentdef_shared: ['agent_defs'], agentdef_transferred: ['agent_defs'],
-  machine_shared: ['shares'], machine_drained: ['drains', 'tasks'],
+  machine_shared: ['shares'], sessions_shared: ['shares'], machine_drained: ['drains', 'tasks'],
 };
 
 // apply folds env into s (which it changes) and returns s.

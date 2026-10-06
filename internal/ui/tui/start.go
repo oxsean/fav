@@ -32,10 +32,10 @@ func (m *Model) newSessionDir(r *tend.Rec) (dir, name string) {
 	g := m.groupUnderCursor()
 	for _, d := range topN(m.groups[g], func(r *tend.Rec) string { return r.Cwd }, 8) {
 		if paths.IsDir(d.key) {
-			return d.key, g
+			return d.key, m.groupLabel(g)
 		}
 	}
-	return "", g
+	return "", m.groupLabel(g)
 }
 
 // askStart: a new session in r's directory; the sessions already running there come first.

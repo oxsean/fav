@@ -3,7 +3,7 @@
 // item a card row with one quick action, a short list of what runs and the machines whose own sessions the viewer may
 // open; a row opens the item's own page, where it is answered and the next one follows. The figures stay on the desktop.
 import {useState, useEffect, useRef} from '../vendor/hooks.mjs';
-import {html, cx, usePhone, useWords, useSignalValue, useActions} from '../ui/base.js';
+import {html, cx, usePhone, useWords, useSignalValue, useActions, useName} from '../ui/base.js';
 import {Panel, Stat} from '../ui/panel.js';
 import {Button, Chip, Chips} from '../ui/controls.js';
 import {Status, waitOf, runState} from '../ui/status.js';
@@ -19,7 +19,7 @@ import {tokens, money, duration, clock as hhmm, usageTokens} from '../core/forma
 import {unsure} from '../core/commands.js';
 import {code} from '../core/proto.js';
 import {noInbox} from '../core/store.js';
-import {opensSessions, machineState} from '../core/team.js';
+import {opensSessions, machineState, sharedToMe} from '../core/team.js';
 import {why} from './words.js';
 
 // ⚠️ An item's waiting bar is full after two hours.
@@ -60,6 +60,7 @@ export function Home({store, commands, toasts, clock = () => Date.now(), fetchOu
   const w = useWords();
   const {t, f} = w;
   const phone = usePhone();
+  const name = useName();
   useSignalValue(store.rev.runs);
   useSignalValue(store.rev.tasks);
   const machines = useSignalValue(store.machines);
@@ -278,7 +279,8 @@ export function Home({store, commands, toasts, clock = () => Date.now(), fetchOu
       ${readable.length > 0 && html`<section class="home-sess" aria-labelledby="home-sess-head">
         <h2 id="home-sess-head" class="home-sess-head">${t('home.sessions')}</h2>
         <div class="home-sess-list">${readable.map(m => html`<button type="button" class="going-row" key=${m.name} onClick=${() => onSessions(m.name)}>
-          <span class="home-sess-name mono ell">${m.name}</span><${Status} state=${machineState(m)} word /><span class="t-muted" aria-hidden="true">›</span>
+          <span class="home-sess-name mono ell">${m.name}</span>
+          ${sharedToMe(session, m) && html`<span class="home-sess-who"><${Icon} name="eye" size=${12} />${f('home.sessShared', name(m.owner))}</span>`}<${Status} state=${machineState(m)} word /><span class="t-muted" aria-hidden="true">›</span>
         </button>`)}</div>
       </section>`}
       ${dialog}

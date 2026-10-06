@@ -184,7 +184,7 @@ func (q Query) Match(r *Rec) bool {
 			return false
 		}
 	}
-	if q.Project != "" && !strings.EqualFold(r.Project, q.Project) {
+	if q.Project != "" && !q.inProject(r) {
 		return false
 	}
 	if q.Provider != "" && !strings.EqualFold(r.Provider, q.Provider) {
@@ -209,12 +209,21 @@ func (q Query) Match(r *Rec) bool {
 	if q.Also != nil && len(q.Words) > 0 {
 		also = strings.ToLower(q.Also(r))
 	}
+	project := strings.ToLower(r.ProjectName)
 	for _, w := range q.Words {
-		if !strings.Contains(r.hay, w) && !strings.Contains(also, w) {
+		if !strings.Contains(r.hay, w) && !strings.Contains(also, w) && !strings.Contains(project, w) {
 			return false
 		}
 	}
 	return true
+}
+
+// inProject: project: names the project r belongs to (its name or id), or r's automatic group when it is in none.
+func (q Query) inProject(r *Rec) bool {
+	if r.ProjectID != "" {
+		return strings.EqualFold(r.ProjectID, q.Project) || strings.EqualFold(r.ProjectName, q.Project)
+	}
+	return strings.EqualFold(r.Project, q.Project)
 }
 
 // HostLocal and HostAll are the host: values besides a configured name.

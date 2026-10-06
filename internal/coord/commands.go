@@ -88,6 +88,7 @@ type Machine struct {
 	Active    int                    `json:"active"` // starting, running or unknown runs
 	Queued    int                    `json:"queued"`
 	OS        string                 `json:"os,omitempty"`
+	NodeID    string                 `json:"node_id,omitempty"` // its node's lasting identity (node.ID), as its hello said
 	Hostname  string                 `json:"hostname,omitempty"`
 	Version   string                 `json:"version,omitempty"`
 	Agents    map[string]agent.Check `json:"agents,omitempty"`         // how each agent CLI stood when last checked
@@ -96,6 +97,9 @@ type Machine struct {
 	Missing   []string               `json:"missing,omitempty"`        // node features its build lacks
 	Retired   bool                   `json:"retired,omitempty"`        // its owner was disabled: nobody runs anything there again
 	Share     string                 `json:"share_sessions,omitempty"` // which of its sessions its node answers (all | runs | none); empty: not told
+	// Sessions: the viewer may read its sessions (readsSessions); SessionShare: who else may, told its owner only.
+	Sessions     bool               `json:"sessions,omitempty"`
+	SessionShare *task.SessionShare `json:"session_share,omitempty"`
 }
 
 // How a machine is reached, in Machine.Via.
@@ -136,8 +140,8 @@ var readMethods = []string{remote.MHello, remote.MList, remote.MMessages, remote
 var Methods = []string{MStateGet, MTaskGet, MTaskCreate, MTaskEdit, MTaskStatus, MTaskUndo, MRunDispatch, MRunStop, MRunAbandon, MRunTail, MRunOutputPage, MRunOutputWatch,
 	MAgentList, MMachineList, MMachineCheck, MStateWatch, MNodeCall, MRunPreview, MRunContinue, MRunAnswer, MRunSend, MRunMessages,
 	MProjectCreate, MProjectEdit, MProjectMember, MMachineShare, MMachineDrain, MTaskStart, MTaskPause, MTaskMove,
-	MAgentDefList, MAgentDefGet, MAgentDefSave, MAgentDefCheck, MAgentDefRemove, MAgentDefShare, MAgentDefLeave, MAgentDefTransfer, MInboxList, MUserOffboard, MTaskSync, MTaskLink, MTaskSourceAck, MTaskGate, MTaskMerge, MTaskPlan, MTaskPlanSave, MTaskPlanApply, MTaskMessage, MTaskMessagePreview, MRunInterrupt, MMachinesWatch, MInboxWatch,
-	MRunOutputItem, MRunOutputFind, MRunChanges, MRunDiff, MRunBlob, MProjectDirs}
+	MAgentDefList, MAgentDefGet, MAgentDefSave, MAgentDefCheck, MAgentDefRemove, MAgentDefShare, MAgentDefLeave, MAgentDefTransfer, MInboxList, MUserOffboard, MUserOffboardPreview, MTaskSync, MTaskLink, MTaskSourceAck, MTaskGate, MTaskMerge, MTaskPlan, MTaskPlanSave, MTaskPlanApply, MTaskMessage, MTaskMessagePreview, MRunInterrupt, MMachinesWatch, MInboxWatch,
+	MRunOutputItem, MRunOutputFind, MRunChanges, MRunDiff, MRunBlob, MProjectDirs, MProjectAttach, MProjectDetach, MSessionsList, MMachineSessions}
 
 // Bulk marks the methods whose answers are large pieces fetched on demand: a connection writes them after everything
 // else (wire.Options.Bulk).
@@ -162,7 +166,8 @@ func (c *Coord) HandlerFor(p Principal) wire.Handler {
 		case wire.MPing:
 			return nil, nil
 		case remote.MHello:
-			return remote.Hello{Proto: wire.Proto, Version: c.opt.Version, Build: c.opt.Build, Role: "coordinator", Methods: Methods}, nil
+			return remote.Hello{Proto: wire.Proto, Version: c.opt.Version, Build: c.opt.Build, Role: "coordinator", Methods: Methods,
+				Caller: &remote.Caller{User: p.User, Admin: p.Admin}}, nil
 		case MStateGet:
 			var sp StateParams
 			if err := r.Decode(&sp); err != nil {
@@ -176,7 +181,7 @@ func (c *Coord) HandlerFor(p Principal) wire.Handler {
 			}
 			c.mu.Lock()
 			defer c.mu.Unlock()
-			if canRead(c.st, p, c.st.Tasks[rp.ID]) {
+			if c.canRead(c.st, p, c.st.Tasks[rp.ID]) {
 				return taskView(c.st, rp.ID), nil
 			}
 			return nil, notFound(rp.ID)
@@ -188,6 +193,8 @@ func (c *Coord) HandlerFor(p Principal) wire.Handler {
 			return c.inbox(p), nil
 		case MUserOffboard:
 			return c.command(p, r, c.userOffboard, func(*task.State, string) any { return nil })
+		case MUserOffboardPreview:
+			return c.offboardPreview(p, r)
 		case MAgentDefGet:
 			var ref task.AgentDefRef
 			if err := r.Decode(&ref); err != nil {
@@ -213,7 +220,7 @@ func (c *Coord) HandlerFor(p Principal) wire.Handler {
 			}
 			ms := c.Machines(ctx, mp.Connect)
 			c.mu.Lock()
-			ms.Machines = slices.DeleteFunc(ms.Machines, func(m Machine) bool { return !c.canSee(p, m.Name) })
+			ms.Machines = c.machinesFor(p, ms.Machines)
 			c.mu.Unlock()
 			return ms, nil
 		case MMachineCheck:
@@ -267,9 +274,12 @@ func (c *Coord) HandlerFor(p Principal) wire.Handler {
 				return nil, forbidden(np.Method)
 			}
 			c.mu.Lock()
-			mine := p.Admin || c.ownerOf(np.Machine) == p.User
+			may := c.readsSessions(p, np.Machine)
+			if np.Method == node.MDirs {
+				may = p.Admin || c.ownerOf(np.Machine) == p.User
+			}
 			c.mu.Unlock()
-			if !mine {
+			if !may {
 				return nil, forbidden(MNodeCall)
 			}
 			var out json.RawMessage
@@ -335,10 +345,18 @@ func (c *Coord) HandlerFor(p Principal) wire.Handler {
 			return c.command(p, r, c.projectEdit, projectView)
 		case MProjectMember:
 			return c.command(p, r, c.projectMember, projectView)
+		case MProjectAttach:
+			return c.command(p, r, c.projectAttach, projectView)
+		case MProjectDetach:
+			return c.command(p, r, c.projectDetach, projectView)
+		case MSessionsList:
+			return c.sessionsList(ctx, p, r)
 		case MMachineShare:
 			return c.command(p, r, c.machineShare, shareView)
 		case MMachineDrain:
 			return c.command(p, r, c.machineDrain, drainView)
+		case MMachineSessions:
+			return c.command(p, r, c.machineSessions, sessionView)
 		}
 		return nil, &wire.Error{Code: wire.CodeUnknownMethod, Detail: r.Method}
 	}
@@ -349,7 +367,7 @@ func (c *Coord) readableRun(p Principal, id string) (task.Run, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	run := c.st.Runs[id]
-	if !canRead(c.st, p, runTask(c.st, run)) {
+	if !c.canRead(c.st, p, runTask(c.st, run)) {
 		return task.Run{}, notFound(id)
 	}
 	return *run, nil
@@ -403,6 +421,10 @@ func (c *Coord) command(p Principal, r *wire.Request, do func(Principal, *wire.R
 		if d := c.st.AgentDefs[id]; d != nil {
 			cp := *d
 			st.AgentDefs[id] = &cp
+		}
+		if sh := c.st.Shares[id]; sh != nil { // the fold replaces an entry, never changes it in place
+			cp := *sh
+			st.Shares[id] = &cp
 		}
 		if st.Apply(env) != nil { // env touches what the copy lacks: views that need no state still answer
 			st = task.New()
@@ -736,9 +758,9 @@ func (c *Coord) plan(who Principal, p Dispatch) (task.Run, error) {
 func (c *Coord) writableTask(who Principal, id string) (*task.Task, error) {
 	t := c.st.Tasks[id]
 	switch {
-	case !canRead(c.st, who, t):
+	case !c.canRead(c.st, who, t):
 		return nil, notFound(id)
-	case !canWrite(c.st, who, t):
+	case !c.canWrite(c.st, who, t):
 		return nil, forbidden(id)
 	}
 	return t, nil
@@ -749,9 +771,9 @@ func (c *Coord) writableRun(who Principal, id string) (*task.Run, error) {
 	run := c.st.Runs[id]
 	t := runTask(c.st, run)
 	switch {
-	case !canRead(c.st, who, t):
+	case !c.canRead(c.st, who, t):
 		return nil, notFound(id)
-	case !canWrite(c.st, who, t):
+	case !c.canWrite(c.st, who, t):
 		return nil, forbidden(id)
 	}
 	return run, nil
@@ -764,9 +786,9 @@ func (c *Coord) checkProject(who Principal, project string) error {
 		return bad("project")
 	case project == "":
 		return nil
-	case c.st.Projects[project] == nil && c.team():
+	case c.team() && (c.st.Projects[project] == nil || !c.seesProject(who, c.st.Projects[project])):
 		return notFound("project " + project)
-	case c.st.Projects[project] != nil && roleIn(c.st, who, project) != task.RoleParticipant:
+	case c.st.Projects[project] != nil && c.roleIn(c.st, who, project) != task.RoleParticipant:
 		return forbidden("project " + project)
 	case c.st.Projects[project] == nil && !who.Admin:
 		return forbidden("project " + project)
@@ -849,7 +871,7 @@ func (c *Coord) machineList() []Machine {
 
 // machineView is how m stands; the caller holds mu.
 func (c *Coord) machineView(m *machine) Machine {
-	x := Machine{Name: m.name, Slots: c.slots(m.name), OS: m.hello.OS, Hostname: m.hello.Hostname, Version: m.hello.Version, Share: m.hello.Share,
+	x := Machine{Name: m.name, Slots: c.slots(m.name), OS: m.hello.OS, NodeID: m.hello.NodeID, Hostname: m.hello.Hostname, Version: m.hello.Version, Share: m.hello.Share,
 		Agents: m.checks, Via: ViaLocal}
 	if !m.checkedAt.IsZero() {
 		at := m.checkedAt
@@ -908,4 +930,22 @@ func firstOf(xs ...string) string {
 		}
 	}
 	return ""
+}
+
+// machinesFor is ms as p may see them: those p sees, each saying whether p reads its sessions, and its session scope
+// to its owner. The caller holds mu.
+func (c *Coord) machinesFor(p Principal, ms []Machine) []Machine {
+	out := []Machine{}
+	for _, m := range ms {
+		if !c.canSee(p, m.Name) {
+			continue
+		}
+		m.Sessions = c.readsSessions(p, m.Name)
+		if sh := c.st.Shares[m.Name]; sh != nil && sh.Sessions != nil && c.ownerOf(m.Name) == p.User {
+			cp := *sh.Sessions
+			m.SessionShare = &cp
+		}
+		out = append(out, m)
+	}
+	return out
 }

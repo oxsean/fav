@@ -68,13 +68,14 @@ last:7d status:archived
 
 - 多个标签默认为 AND；普通关键词也是 AND。
 - 关键词搜 title、summary、project、work_type、branch、remote、cwd、tags，中文直接子串匹配，不分词。
+- `project:x`：会话归到项目时，比项目 id 或项目名（不分大小写）；不在项目里的比自动组名（`Rec.Project`）。项目名也参与关键词匹配。
 - 限定词：`project:` `provider:`（别名 `source:`）`status:` `after:`/`since:` `before:`/`until:` `last:` `turns:` `file:`。
 - `file:x`：AI 在这个会话里写过路径含 `x` 的文件（不分大小写的子串，匹配 `Rec.Files` 的绝对路径）。
 - 时间：`after:` / `before:` 按会话开始时间；`last:7d`、`last:2026-09-01` 按最近活动（上周开始、今天还在用的会话也算，`Rec.ActiveAt`）。时间筛选器里开放区间（今天、最近 N 天、本周、本月、今年、手输 `09-01`）写 `last:`，封闭区间（昨天、上周、上月、`a..b`）写 `after:` + `before:`，chip 上 `last:` 显示为「动过 · 自 …」。
 - `turns:N`：没收藏的会话至少 N 轮才列，默认 3；收藏的不受它管。索引里的提示语也参与关键词匹配。
 - `status:` 不写 = `open`（未归档，任意看板状态）；`active`（todo + doing）/ `todo` / `doing` / `done`（别名 `completed`）/ `archived`（已归档，任意看板状态）/ `live`（别名 `running`，正在跑的）/ `trash`（别名 `deleted`，回收站：库里没有这种记录，从 `trash/manifest.jsonl` 另取）/ `agent`（别名 `sdk`，SDK / `-p` / 子代理拉起的一次性会话：索引里打了 `skip`，其余任何列表都不出现，只有写了这个才列出来，`Index.AgentSessions()` 另取；标题多半没有，兜底成「目录名: 首条消息」；不受 `turns:` 下限约束；放在状态里而不是来源轮换里，因为 Claude 和 Codex 都有这类会话，放进来源就没法说「Codex 的 agent 会话」，不进默认列表是因为一天能有几十条）/ `all`。除 `archived` / `all` 外都不含已归档。未收藏的记录只在 `All` 作用域（`tend sessions`、会话 / 项目视图）里出现。
   `live` 要调用方给 `Query.Live`（谁在跑），TUI 用探测结果，CLI 问一次 Herdr；没给就一条都不匹配。
-- 所有列表（TUI 各页、`tend list` / `sessions`、fzf 三页、`tend clean`、fzf 的标签 / 项目选择器）都从 `index.Rows.List` 取：库里的记录，`All` 时加上索引里没收藏的，`live` 再加上索引还没见过的在跑会话；`trash` / `agent` 不看 `All`，各取各的来源。排序：会话列表按 `Rec.ActiveAt`（索引看到的最后活动，没有就退到 `When()`），收藏列表按 `When()`，Agents 页默认 `tend.SortByStart`（没有时间的算最新）。
+- 所有列表（TUI 各页、`tend list` / `sessions`、fzf 三页、`tend clean`、fzf 的标签 / 项目选择器）都从 `index.Rows.List` 取。匹配之前，每一行先经 `Rows.Belong` 填上 `Rec.ProjectID` / `ProjectName`（不落盘）：调用方注入这个函数（`projects.Snapshot.Belong`，内部调 `task.ProjectOf`，参数是机器名、它的系统、`Repo` 否则 `Cwd`），`internal/index` 不依赖 `internal/task`；别处列出的行（其他机器的）走 `Rows.Place`。来源：库里的记录，`All` 时加上索引里没收藏的，`live` 再加上索引还没见过的在跑会话；`trash` / `agent` 不看 `All`，各取各的来源。排序：会话列表按 `Rec.ActiveAt`（索引看到的最后活动，没有就退到 `When()`），收藏列表按 `When()`，Agents 页默认 `tend.SortByStart`（没有时间的算最新）。
 - 作用域另有 `Query.All`：默认只看收藏（`tend list`、「收藏」页）；「会话」「项目」页和 `tend sessions` 置 true，库里不算收藏的记录也一起看。
 - 时间接受 `2026-09-01` / `09-01`（今年）和相对量 `24h` `7d` `2w` `3m` `1y`；`after:` / `before:` 比的是会话开始时间，`last:` 比的是最近活动（见上）。
 - 无法识别的限定词按普通文本处理，并记录下来供 UI 轻提示。

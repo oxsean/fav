@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"cmp"
 	"strconv"
 	"strings"
 	"time"
@@ -241,7 +242,7 @@ func (m *Model) chipData() []chip {
 		tagVal = strings.Join(q.Tags, "+")
 	}
 	chips := []chip{
-		{render.GlyphProject, i18n.T("label.projects"), orAll(q.Project), q.Project != "", (*Model).pickProjects},
+		{render.GlyphProject, i18n.T("label.projects"), orAll(m.projectQueryLabel(q.Project)), q.Project != "", (*Model).pickProjects},
 		{render.GlyphTag, i18n.T("label.tags"), tagVal, len(q.Tags) > 0, (*Model).pickTags},
 		{render.GlyphTerm, i18n.T("label.source"), orAll(q.Provider), q.Provider != "", (*Model).cycleProvider},
 		{render.GlyphOK, i18n.T("label.status"), statusLabel(q.Status), q.Status != tend.StatusOpen, (*Model).pickStatus},
@@ -434,6 +435,10 @@ func (m *Model) listLines(w, from, to int) (lines []string, acts []func(*Model))
 			continue
 		}
 		y += hs[i]
+		if r.section != "" {
+			add(sectionLine(r.section, w), nil)
+			continue
+		}
 		if r.group != "" {
 			var act func(*Model)
 			if m.view == viewProjects {
@@ -502,13 +507,27 @@ func (m *Model) listPane(y0, x0, w, h int) []string {
 	return out
 }
 
+// sectionLine is the heading over the project groups or the automatic ones, drawn like a day separator.
+func sectionLine(text string, w int) string {
+	text = render.Truncate(text, max(1, w-2))
+	if gap := w - render.Width(text) - 1; gap > 0 {
+		return dimmed.Render(text) + " " + frame.Render(strings.Repeat(hRule, gap))
+	}
+	return fit(dimmed.Render(text), w)
+}
+
 func (m *Model) groupLine(r row, w int, sel bool) string {
-	label := r.group
+	label := cmp.Or(r.label, r.group)
 	sty := dimmed.Bold(true)
+	kind := "" // a project group's "team" / "personal", kept when the name is cut
 	if m.view == viewProjects {
 		mark := render.GlyphOpen
 		if r.folded {
 			mark = render.GlyphClosed
+		}
+		if id := groupProject(r.group); id != "" {
+			label = render.GlyphProject + " " + label
+			kind = "  " + m.projectKind(id)
 		}
 		label = mark + " " + label
 		sty = accent.Bold(true)
@@ -521,16 +540,17 @@ func (m *Model) groupLine(r row, w int, sel bool) string {
 	if m.view == viewProjects && r.count > 0 {
 		count = strconv.Itoa(r.count)
 	}
-	text := sty.Render(render.Truncate(label, w-len(count)-2))
-	gap := w - ansi.StringWidth(text) - len(count)
+	name := render.Truncate(label, max(1, w-len(count)-2-render.Width(kind)))
+	text := sty.Render(name)
+	gap := w - render.Width(name) - render.Width(kind) - len(count)
 	if gap < 1 {
-		return text
+		return fit(text, w)
 	}
 	if m.view == viewProjects {
 		if sel {
-			return sty.Render(fit(render.Truncate(label, w-len(count)-2)+strings.Repeat(" ", gap)+count, w))
+			return sty.Render(fit(name+kind+strings.Repeat(" ", gap)+count, w))
 		}
-		return text + strings.Repeat(" ", gap) + dimmed.Render(count)
+		return text + dimmed.Render(kind) + strings.Repeat(" ", gap) + dimmed.Render(count)
 	}
 	return text + " " + frame.Render(strings.Repeat(hRule, gap-1))
 }
@@ -1049,7 +1069,7 @@ func (m *Model) footer() string {
 		if m.cursor < len(m.rows) && m.rows[m.cursor].folded {
 			expand = "footer.enter_expand"
 		}
-		left = []footGroup{{fk(enterKey, expand, 0), fk(footKeyOf(inList, actFoldAll), "footer.fold_all", 4)}, {fk(footKeyOf(inList, actNew), "footer.new_session", 3), fk(keyOf(inList, actMove), "footer.move_project", 4)}, {fk(keyOf(inList, actSearch), "footer.search", 0)}}
+		left = []footGroup{{fk(enterKey, expand, 0), fk(footKeyOf(inList, actFoldAll), "footer.fold_all", 4)}, {fk(footKeyOf(inList, actEdit), "footer.project", 2), fk(footKeyOf(inList, actNew), "footer.new_session", 3), fk(keyOf(inList, actMove), "footer.move_project", 4)}, {fk(keyOf(inList, actSearch), "footer.search", 0)}}
 	case m.current() == nil:
 		left = []footGroup{m.searchKeys()}
 		if m.w < compactCols {

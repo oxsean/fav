@@ -76,7 +76,7 @@ func (c *Coord) Act(user string, on ActOn) error {
 // stillPending: on's item waits in its task at its version, as p may see it; else who answered it. The caller holds mu.
 func (c *Coord) stillPending(p Principal, on ActOn) error {
 	t := c.st.Tasks[on.Task]
-	if !canRead(c.st, p, t) {
+	if !c.canRead(c.st, p, t) {
 		return notFound(on.Task)
 	}
 	if slices.ContainsFunc(c.st.Pending(t), func(q task.Pending) bool { return q.ID == on.Item && q.Version == on.Version }) {

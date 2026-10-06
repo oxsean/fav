@@ -80,6 +80,7 @@ func newSyncRigOf(t *testing.T, kind string) *syncRig {
 	go r.c.Run(ctx)
 	t.Cleanup(func() { cancel(); r.c.Close(); r.team.Close(); r.g.Close() })
 	r.call(coord.Owner, coord.MProjectCreate, coord.ProjectCreate{ID: "p1", Name: "One", Owner: r.ann}, nil)
+	r.call(coord.Principal{User: r.ann}, coord.MProjectMember, task.MemberSet{Project: "p1", User: store.LocalUser, Role: task.RoleParticipant}, nil) // a team project: its admins see it
 	seal, err := LoadSealer(home)
 	must(err)
 	r.s = NewSyncer(r.team, r.c, seal, func(n coord.Notice) { r.mu.Lock(); r.notices = append(r.notices, n); r.mu.Unlock() })

@@ -9,7 +9,7 @@
 | Task 字段、事件、推导的处境 | `internal/task` |
 | 依赖派发、阶段推进、gate、预算、父任务 | `internal/coord`（`tree.go`、`workflow.go`、`work.go`） |
 | Project、AgentDef、Workflow 的加载、校验、编译 | Project 是 `internal/task` 折叠的事件；AgentDef 在 `internal/defs`；Workflow 在 `internal/workflow` |
-| 方法：`project.*`、`agentdef.*`、`task.start|pause|gate|move|plan|plan_save|plan_apply|message|merge` | `internal/coord`，`Methods` 协商 |
+| 方法：`project.*`（含 `project.attach|detach`）、`sessions.list`、`machine.sessions`、`user.offboard.preview`（交接的预览，见 [team.md](team.md)「成员离开」）、`agentdef.*`、`task.start|pause|gate|move|plan|plan_save|plan_apply|message|merge` | `internal/coord`，`Methods` 协商 |
 | `run.start` 的 spec 带工作区（`agent.Workspace`：`checkout, branch, chain, base, remote, read_only, merge, setup, cleanup`）、`check`、`files`（settings、mcp、skills） | `internal/node`；节点方法变了 → `tend hosts install` |
 | `node.agents` 报告各 CLI 的安装、版本、登录，不报告 skills、MCP 名字（见 [agent-definitions.md](agent-definitions.md)「skills、MCP 和密钥怎么到目标机器」） | `internal/node`、`internal/agent` |
 | `tend run verdict`、`tend run plan` | `cmd/tend` |
@@ -45,6 +45,7 @@ Web 在客户端折叠信封（`web/core/fold.js`），规则逐条照搬 `task.
   - feature 名字是稳定的字符串，节点现有八个：`dispatcher` `agentdef` `verdict` `check` `worktree` `files` `plan` `before_run`；
   - 节点在 hello 里报告 `node.Features`；一个 run 需要哪些由协调器的 `runFeatures(run)` 按 run 的发起人、档案、阶段和工作区推算。每加一种执行语义就各加一个名字。
 - 协调器不读客户端的 `hello.features`，不按它剥掉事件：推送对所有客户端一样，只按人过滤。
+- 协调器回给客户端的 hello 带 `caller{user, admin}`：它把这条连接当成谁（`HandlerFor` 的那个人），节点的 hello 不带。TUI 靠它判断自己能往哪些项目加目录；server 模式下 hello 里没有 `caller` 或 `methods` 里没有 `project.attach`，TUI 就当它是旧 server，项目对话框不画按钮（见 [sessions/tui.md](../sessions/tui.md)「项目对话框」）。
 - 客户端折叠时跳过未知的事件类型，只推进 `seq`。协调器自己的折叠仍然遇到未知类型就报错。
 - 执行契约（features）、事件 schema、数据库 schema 各有自己的版本规则，互不借用。
 - `tend` 和 `tend-server` 版本不同时怎么配合，见 [storage.md](storage.md)「进程与代码划分」。

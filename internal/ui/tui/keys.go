@@ -23,9 +23,10 @@ const (
 	inReader                     // help and the full-message view
 	inTaskForm                   // the task form (its text fields take every other key)
 	inTaskRun                    // the run dialog: machine, agent, buttons
+	inProject                    // the 「项目」 dialog (its name box takes every letter)
 )
 
-var scopes = []scope{inList, inResume, inConfirm, inStart, inHandoff, inPeek, inReader, inTaskForm, inTaskRun}
+var scopes = []scope{inList, inResume, inConfirm, inStart, inHandoff, inPeek, inReader, inTaskForm, inTaskRun, inProject}
 
 // tier is how much an action changes. ⚠️ Rules for new keys:
 // tierStart never gets a list key (only a dialog's Enter or the same key pressed twice runs it);
@@ -119,6 +120,7 @@ const (
 	actExtendDown
 	actExtendUp
 	actTask
+	actTick
 	// actViaDialog is not a key: an ime route meaning "a button in the resume dialog".
 	actViaDialog
 )
@@ -245,6 +247,16 @@ var bindings = []binding{
 	{act: actUp, in: inTaskForm, keys: []string{"up"}},
 	{act: actLeft, in: inTaskForm | inTaskRun, keys: []string{"left", "h"}},
 	{act: actRight, in: inTaskForm | inTaskRun, keys: []string{"right", "l"}},
+
+	{act: actEnter, in: inProject, keys: []string{"enter"}},
+	{act: actClose, in: inProject, keys: []string{"esc"}},
+	{act: actFocusNext, in: inProject, keys: []string{"tab"}},
+	{act: actFocusPrev, in: inProject, keys: []string{"shift+tab"}},
+	{act: actDown, in: inProject, keys: []string{"down", "ctrl+n"}},
+	{act: actUp, in: inProject, keys: []string{"up", "ctrl+p"}},
+	{act: actLeft, in: inProject, keys: []string{"left"}},
+	{act: actRight, in: inProject, keys: []string{"right"}},
+	{act: actTick, in: inProject, tier: tierRecord, keys: []string{"x", "ctrl+x"}}, // ticks a directory; Ctrl+X while the name box types
 }
 
 var keyIndex = func() map[scope]map[string]*binding {
@@ -419,6 +431,8 @@ func helpLayout() []helpSection {
 			{"help.status", inList, false, []act{actStatus}},
 			{"help.host", inList, false, []act{actHost}},
 			{"help.enter_group", inList, false, []act{actEnter}},
+			{"help.group_project", inList, false, []act{actEdit}},
+			{"help.project_tick", inProject, false, []act{actTick}},
 			{"help.fold_all", inList, false, []act{actFoldAll, actFold, actUnfold}},
 		}},
 		{"help.group.chat", []helpSpec{

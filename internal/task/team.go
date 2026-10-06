@@ -98,13 +98,53 @@ func (p *Project) Role(user string) string {
 	return p.Members[user]
 }
 
-// Share is who else may dispatch to a machine besides its owner.
+// Personal: p has an owner and no other member, so it is its owner's alone, as a task outside any project is.
+func (p *Project) Personal() bool {
+	if p == nil || p.Owner == "" {
+		return false
+	}
+	for u := range p.Members {
+		if u != p.Owner {
+			return false
+		}
+	}
+	return true
+}
+
+// Share is who else may dispatch to a machine besides its owner, and who else reads its sessions.
 type Share struct {
+	Machine  string        `json:"machine"`
+	Users    []string      `json:"users,omitempty"`
+	Projects []string      `json:"projects,omitempty"`
+	Approve  bool          `json:"approve,omitempty"` // they may also grant its runs' permission requests
+	Sessions *SessionShare `json:"sessions,omitempty"`
+}
+
+// SessionShare is who reads a machine's sessions besides its owner: the people named, the members of the projects
+// named (every session of the machine, not only those in the project's directories), or the whole team.
+type SessionShare struct {
+	Users    []string `json:"users,omitempty"`
+	Projects []string `json:"projects,omitempty"`
+	Team     bool     `json:"team,omitempty"`
+}
+
+// SessionsSet is machine.sessions, and its event: the machine's session scope; all empty is private.
+type SessionsSet struct {
 	Machine  string   `json:"machine"`
 	Users    []string `json:"users,omitempty"`
 	Projects []string `json:"projects,omitempty"`
-	Approve  bool     `json:"approve,omitempty"` // they may also grant its runs' permission requests
+	Team     bool     `json:"team,omitempty"`
 }
+
+// Opens: s lets user read the machine's sessions; projects are those that exist.
+func (s *SessionShare) Opens(projects map[string]*Project, user string) bool {
+	if s == nil || user == "" {
+		return false
+	}
+	return s.Team || slices.Contains(s.Users, user) || slices.ContainsFunc(s.Projects, func(id string) bool { return projects[id].Role(user) != "" })
+}
+
+func (s *Share) dispatches() bool { return len(s.Users) > 0 || len(s.Projects) > 0 }
 
 // Opens: s lets user, or a run of project, use its machine.
 func (s *Share) Opens(user, project string) bool {
@@ -132,6 +172,7 @@ const (
 	EMemberSet      = "member_set"
 	EMachineShared  = "machine_shared"
 	EMachineDrained = "machine_drained"
+	ESessionsShared = "sessions_shared"
 )
 
 type ProjectEdit struct {
@@ -229,11 +270,25 @@ func (s *State) applyTeam(e journal.Event, at time.Time) (bool, error) {
 		if err := json.Unmarshal(e.Data, &d); err != nil {
 			return true, err
 		}
-		if len(d.Users) == 0 && len(d.Projects) == 0 {
-			delete(s.Shares, d.Machine)
-		} else {
-			s.Shares[d.Machine] = &d
+		d.Sessions = nil
+		if old := s.Shares[d.Machine]; old != nil {
+			d.Sessions = old.Sessions
 		}
+		s.setShare(&d)
+	case ESessionsShared:
+		var d SessionsSet
+		if err := json.Unmarshal(e.Data, &d); err != nil {
+			return true, err
+		}
+		sh := Share{Machine: d.Machine}
+		if old := s.Shares[d.Machine]; old != nil {
+			sh = *old
+		}
+		sh.Sessions = nil
+		if len(d.Users) > 0 || len(d.Projects) > 0 || d.Team {
+			sh.Sessions = &SessionShare{Users: d.Users, Projects: d.Projects, Team: d.Team}
+		}
+		s.setShare(&sh)
 	case EMachineDrained:
 		var d DrainSet
 		if err := json.Unmarshal(e.Data, &d); err != nil {
@@ -248,4 +303,14 @@ func (s *State) applyTeam(e journal.Event, at time.Time) (bool, error) {
 		return false, nil
 	}
 	return true, nil
+}
+
+// setShare puts sh in place of its machine's entry, a new one each time: a copy of the state may hold the old. An
+// entry with neither half goes.
+func (s *State) setShare(sh *Share) {
+	if !sh.dispatches() && sh.Sessions == nil {
+		delete(s.Shares, sh.Machine)
+		return
+	}
+	s.Shares[sh.Machine] = sh
 }

@@ -192,6 +192,7 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case storeTickMsg:
 		m.pathOK = nil // cwd / transcript existence is re-checked every 2 s, not on every key
 		m.syncStore()
+		m.readProjects()
 		cmd = watchStore()
 
 	case indexMsg:
@@ -357,7 +358,7 @@ func (m *Model) navKey(msg tea.KeyPressMsg) tea.Cmd {
 		m.flash(i18n.T("trash.in_trash_hint"))
 		return nil
 	}
-	if remoteBlocked(a) && m.remoteRow() { // whatever has focus, these act on the current row
+	if remoteBlocked(a) && m.remoteRow() && !(a == actEdit && m.onGroupHeader()) { // whatever has focus, these act on the current row
 		m.flash(i18n.T("remote.read_only"))
 		return nil
 	}
@@ -602,6 +603,9 @@ func (m *Model) navKey(msg tea.KeyPressMsg) tea.Cmd {
 	case actDone:
 		m.toggleStatus(m.current(), tend.StatusDone)
 	case actEdit:
+		if m.onGroupHeader() {
+			return m.openProject()
+		}
 		return m.openEdit(m.current())
 	case actHelp:
 		m.ov = overlay{kind: ovHelp, focus: -1}
@@ -661,6 +665,8 @@ func (m *Model) overlayKey(msg tea.KeyPressMsg) tea.Cmd {
 		return m.answerKey(msg)
 	case ovTaskDraft:
 		return m.draftKey(msg)
+	case ovProject:
+		return m.projectKey(msg)
 	case ovMessage:
 		switch a := keyAct(inReader, msg.String()); a {
 		case actClose:

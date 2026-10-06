@@ -78,6 +78,7 @@ type hostMsg struct {
 	st      remote.State
 	live    map[string]capture.Live
 	liveErr error
+	os      string // its GOOS, as its hello said
 }
 
 type hostTickMsg string
@@ -106,6 +107,9 @@ func (m *Model) fetchHost(name string) tea.Cmd {
 		msg.liveErr = msg.st.Err
 		if msg.st.Err == nil {
 			msg.live, msg.liveErr = h.Live(ctx, name)
+			if hello, err := h.Hello(ctx, name); err == nil { // reached just now: no dial
+				msg.os = hello.OS
+			}
 		}
 		return msg
 	}
@@ -117,6 +121,7 @@ func (m *Model) applyHost(msg hostMsg) tea.Cmd {
 		return nil
 	}
 	hr.loading, hr.err = false, msg.st.Err
+	m.noteHostOS(msg.name, msg.os)
 	if hr.liveErr = msg.liveErr; msg.liveErr == nil { // unknown is not "nothing runs": keep the last answer
 		hr.live = msg.live
 	}
@@ -179,6 +184,7 @@ func (m *Model) remoteList(q tend.Query) []*tend.Rec {
 		hr := m.remote[name]
 		hq := q
 		hq.Live = func(id string) bool { _, ok := hr.live[id]; return ok }
+		m.lists.Place(hr.recs...)
 		for _, r := range hr.recs {
 			if hq.Match(r) {
 				out = append(out, r)

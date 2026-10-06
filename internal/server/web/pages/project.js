@@ -428,7 +428,8 @@ export function ProjectDrawer({project: p, st, machines, people, wire, http, com
   const shown = tabs.some(x => x.id === tab) ? tab : 'members';
   return html`<${Drawer} title=${p.name} onClose=${onClose}>
     <div class="team-drawer">
-      <p class="t-muted team-facts">${[f('team.owner', name(p.owner)), f('team.tasks', n.tasks, n.open), f('team.people', n.participants, n.readers)].join(' · ')}</p>
+      <p class="t-muted team-facts">${[...(tm.personal(p) ? [t('team.personal')] : []), f('team.owner', name(p.owner)), f('team.tasks', n.tasks, n.open),
+        f('team.people', n.participants, n.readers)].join(' · ')}</p>
       ${tabs.length > 1 && html`<${Tabs} label=${p.name} idPrefix="proj" value=${shown} onChange=${setTab} tabs=${tabs} />`}
       <div id=${'proj-' + shown + '-pane'} role=${tabs.length > 1 ? 'tabpanel' : undefined} aria-labelledby=${tabs.length > 1 ? 'proj-' + shown : undefined}>
         ${shown === 'members' && html`<${Members} project=${p} manages=${manages} busy=${busy} onRole=${onRole} onAdd=${onAdd} onRemove=${onRemove} />`}

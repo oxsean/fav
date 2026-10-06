@@ -1,0 +1,8 @@
+{"note":"Bo, a member, creates a project of his own; then Ann adds Eve to side, her own personal project, once she confirms what Eve will see (Ann's page sends its own first command)"}
+{"step":"create"}
+{"c":{"type":"req","id":5,"method":"project.create","command_id":"c1","params":{"name":"Notes"}}}
+{"s":{"type":"res","id":5,"result":{"id":"p_n1","name":"Notes","owner":"u_b","rev":1}}}
+{"step":"add"}
+{"c":{"type":"req","id":6,"method":"project.member","command_id":"c1","params":{"project":"p_side","user":"u_e","role":"participant"}}}
+{"s":{"type":"res","id":6,"result":{"id":"p_side","name":"side","owner":"u_a","members":{"u_e":"participant"},"rev":2}}}
+{"step":"done"}

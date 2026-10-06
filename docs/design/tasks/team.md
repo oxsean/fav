@@ -74,8 +74,8 @@
 
 | 层 | 角色 | 能做什么 |
 |---|---|---|
-| 实例 | 管理员 | 加人、停用、建项目、管机器和工单凭据；看得到所有项目，并在每个项目里算「参与」（这也是一条信任声明：管理员能看到别人 run 的输出）。机器不例外：往别人的机器派发，同样要主人分享 |
-| 实例 | 成员 | 只看得到自己加入的项目；可以建自己的 agent 定义，可以登记自己的机器 |
+| 实例 | 管理员 | 加人、停用、替别人建项目、管机器和工单凭据；看得到有成员的项目，并在这些项目里算「参与」（这也是一条信任声明：管理员能看到别人 run 的输出）。私人任务和别人的个人项目不例外：他看不到，也不算参与（见下面「私人任务和个人项目」）。机器不例外：往别人的机器派发，同样要主人分享；读别人机器上的会话，同样要主人把他放进会话可见范围（`local` 名下的机器也一样） |
+| 实例 | 成员 | 只看得到自己加入的项目；可以建自己当负责人的项目（[projects.md](projects.md)「规则」），可以建自己的 agent 定义，可以登记自己的机器 |
 | 项目 | 参与 | 建任务、拆解、开始、派发、回答提问、打回、发消息、评论；放行只限验收人（见「人在任务里」）；批准权限请求见「共享：agent 和机器默认私有」 |
 | 项目 | 只读 | 看任务、run 输出、评论、用量；不能改，也不能作答 |
 
@@ -83,13 +83,20 @@
 
 | 归属 | 独占动作 |
 |---|---|
-| 项目负责人（project.owner） | 管本项目的成员和工单绑定 |
+| 项目负责人（project.owner） | 管本项目的成员和工单绑定；在任何机器上加、删本项目的目录（参与者只在自己的机器上，`project.attach` / `detach`） |
 | 机器主人（machine.owner） | 看这台机器上的原生会话；批准权限请求（可以委托，见「共享：agent 和机器默认私有」）；分享和收回这台机器 |
 | 定义主人（agentdef.owner） | 编辑、分享、收回这个定义 |
 
 **不在项目里的人看不到这个项目的任何东西**：任务、run、输出、会话、用量、工单关联，也不会知道这些对象是否存在（问起来一律 `not_found`）。
 
-项目、成员、机器分享和停止接新运行是事件（`project_created`、`project_edited`、`member_set`、`machine_shared`、`machine_drained`），由 `task.State` 折叠，两种模式相同。任务记下创建人 `Task.Owner`；不属于任何项目的任务只有它的创建人和管理员看得到。机器页列出每台机器的主人和分享对象，主人和管理员在那里分享，也在那里让它停止接新运行（`machine.drain`）。
+项目、成员、机器分享、会话可见范围和停止接新运行是事件（`project_created`、`project_edited`、`member_set`、`machine_shared`、`sessions_shared`、`machine_drained`），由 `task.State` 折叠，两种模式相同。任务记下创建人 `Task.Owner`。
+
+**私人任务和个人项目**（模式二）：
+- 不属于任何项目的任务是私人任务，只有它的负责人（`Task.Owner`，起初是创建人）看得到，管理员也看不到。
+- 个人项目是有负责人、除负责人外没有成员的项目（`task.Project.Personal`）。它和里面的任务只有负责人看得到，管理员也看不到，也不在里面算参与；对它 `project.edit`、`project.member`、往里建任务都回 `not_found`。替别人建的项目在加第一个成员之前同样如此，所以管理员替人建好项目后，由负责人去加成员。
+- 加了第一个成员就是团队项目，管理员看得到、算参与；去掉最后一个成员又变回个人项目。两种 `member_set` 都会让订阅重置（见下面第 4 条），管理员的副本跟着变。
+- 判定在 `taskRole`、`roleIn` 和 `seesProject`（`internal/coord/access.go`），`visibleState`、`sees`、`seesResult`、`managedProject`、收件箱都经由它们。
+- 模式一照旧：本机主人看得到全部任务，没有创建人的老任务也在内。tend-server 自己的工作（`System`，比如工单同步往绑定的个人项目里建任务）也不受这条限制：它代替设置的人做事。两者是 `seesAll`。机器页列出每台机器的主人和分享对象，主人和管理员在那里分享，也在那里让它停止接新运行（`machine.drain`）。
 
 **怎么做到不能绕过**：
 
@@ -103,21 +110,21 @@
 4. **订阅保持 seq 连续**。
    - 仍然一个 `seq` 一个信封。
    - 信封里的事件按人过滤成子集，子集为空也照发，客户端只推进 `seq`。
-   - 每种事件由 `sees` 按类型判定：任务和 run 的事件（含 `plan_drafted`、`plan_applied`、`task_linked`）跟随任务的读权限，项目和成员事件跟随项目成员身份，`machine_shared` 跟随机器的可见性（见「共享：agent 和机器默认私有」），`agentdef_saved` / `agentdef_shared` / `agentdef_transferred` 跟随定义的可读性；`agentdef_removed` 和没有规则的事件类型只推给管理员，所以新事件类型要同时在 `sees` 里补一条规则。
+   - 每种事件由 `sees` 按类型判定：任务和 run 的事件（含 `plan_drafted`、`plan_applied`、`task_linked`）跟随任务的读权限，项目和成员事件跟随项目成员身份，`machine_shared`、`sessions_shared` 跟随机器的可见性（见「共享：agent 和机器默认私有」），`agentdef_saved` / `agentdef_shared` / `agentdef_transferred` 跟随定义的可读性；`agentdef_removed` 和没有规则的事件类型只推给管理员，所以新事件类型要同时在 `sees` 里补一条规则。
    - 推送里的 `command` 只留 `id` 和 `method`，结果和 `digest` 只回给调用者本人。
    - 历史补发和实时推送用同一条规则。
    - 事件属于哪个项目，由协调器在推送时按当前状态解析（run → task → project），不靠事件自带；对象从不删除，所以总能解析。
    - 推送里的命令名只发给调用者本人，以及看得到其中某个事件的人。
-   - `member_set`、`project_edited`、`machine_shared`、`agentdef_shared`、`agentdef_removed`、`agentdef_transferred`、改了项目或负责人的 `task_edited` 不单独推：`state.watch` 在同一个流里推 `reset`，接着推这个人的新快照，丢掉不再可见的数据；续传的那一段里有这些事件时也改给快照（见 [runs/coordinator.md](../runs/coordinator.md)「订阅」）。网页和 TUI 平时自己折叠信封（网页用 `fold.js`，和 Go 的折叠用同一批 Go 生成的信封对照测试），只在 seq 断档或遇到不认识的对象时整量重读。
+   - `member_set`、`project_edited`、`machine_shared`、`sessions_shared`、`agentdef_shared`、`agentdef_removed`、`agentdef_transferred`、改了项目或负责人的 `task_edited` 不单独推：`state.watch` 在同一个流里推 `reset`，接着推这个人的新快照，丢掉不再可见的数据；续传的那一段里有这些事件时也改给快照（见 [runs/coordinator.md](../runs/coordinator.md)「订阅」）。网页和 TUI 平时自己折叠信封（网页用 `fold.js`，和 Go 的折叠用同一批 Go 生成的信封对照测试），只在 seq 断档或遇到不认识的对象时整量重读。
    - 连接上的身份在连上时定下；server 的 `sweep`（每几秒）发现凭据的主人被停用、或管理员身份被授予或撤销时断开这条连接，客户端按新身份重连。
 5. **收据按 `(principal, command_id)` 存**。重放之前先检查当前的读权限；有权就返回第一次的结果。
 6. **原生会话的两条旁路收紧**。
-   - `node.call`（读会话列表、谁在跑、对话、全文，以及建项目时列目录的 `node.dirs`）只给机器主人和管理员；网页的会话页（[runs/clients.md](../runs/clients.md)「会话页」）只对他们给入口。
+   - `node.call` 的会话读取（会话列表、谁在跑、对话、全文）和 `sessions.list`（带项目归属的会话列表，见 [runs/coordinator.md](../runs/coordinator.md)「调度与对账」）用同一个判定 `readsSessions`：机器主人，或者这台机器的会话可见范围包括他（见「共享：agent 和机器默认私有」的「会话」）。管理员不例外，`local` 名下的机器也一样：要读就先用 `tend-server token owner` 把机器改给真正的主人（[runs/deployment.md](../runs/deployment.md)「凭据与身份」）。`node.call` 转发的 `node.dirs`（建项目时列目录）不是会话，照旧只给机器主人和管理员。网页的会话页、机器页和手机首页的入口看 `Machine.sessions`（[runs/clients.md](../runs/clients.md)「会话页」）。
    - `run.continue{session, …}`（续任意会话）只给机器主人。
    - 项目成员新建任务时查机器上的目录用 `project.dirs{project, machine, path?}`：要是这个项目的参与者（管理员也算），并且这台机器是他的或分享给了他（`canUse`；不带项目时只看分享给本人的）。协调器转问节点的 `node.dirs`，回 `{path, exists, outside?, parent?, dirs}`：没有这个目录是 `exists: false`，不在节点允许的目录里再加 `outside: true`；不带 `path` 列出节点允许的根目录。看不到的项目或机器回 `not_found`，只读成员和没拿到分享的回 `unauthorized`。
    - 项目成员用两个方法：`run.messages{run, before, n}` 和 `run.continue{run}`。服务端根据 run 找到机器、provider 和会话，再按项目权限判断。客户端声明的项目不作数。
 7. **节点侧的纵深防御**：节点配置 `share_sessions: runs | all | none`，模式二默认 `runs`。节点只回答 run 目录里或 `node/sessions.jsonl` 登记过的会话：列表（`list`）和谁在跑（`live`）只留这些，读一个会话的方法（`messages`、`text`、`steps`、`pulse`、`checks`）对别的会话回 `unauthorized`。节点在 hello 里报它实际用的值（`share_sessions`；没配时 ssh 和模式一是 `all`），协调器放进 `machine.list` 的 `share_sessions`（没报的旧节点不写），网页的会话页据此说明怎么放开。这样即使 server 被攻破，别人的原生会话也读不到。
-8. **没有项目也没有创建人的任务**只有管理员看得到，不当作公共数据。
+8. **没有项目也没有创建人的任务**在模式二里谁都看不到，不当作公共数据；模式一里本机主人看得到。
 
 ## 共享：agent 和机器默认私有
 
@@ -133,8 +140,13 @@
   - 默认只有主人；
   - 可以对指定项目或指定成员开放；
   - 节点侧的 `allow_dirs`、`allow_profiles`、`allow_bypass` 仍然是最后一道边界；
+  - **会话**：谁能读这台机器上的会话和派发分开设，只有主人能设，管理员不能替别人设：`machine.sessions{machine, users?, projects?, team?}`，四项都空是私人（默认），否则是指定的人、某些项目的成员、团队里所有人的并集；看不见这台机器回 `not_found`，不是主人回 `unauthorized`，没有的人或项目回 `not_found`；回答是新的范围。
+    - 项目只决定谁能看：项目成员（负责人也算）读得到这台机器节点放出的全部会话，不按项目目录过滤（决定 Q2）。项目没有了就不算数。
+    - 写成 `sessions_shared{machine, users, projects, team}`，折进 `task.Share.Sessions`（状态的 `shares` 部分，不新开快照部分）。`machine_shared` 不动它，`machine.share` 也改不了它；一台机器的分享和范围都空了才去掉这一项。
+    - 范围只给主人看：别人的状态快照里这一项没有 `sessions`，`machine.list` 和 `machines.watch` 只对主人带 `session_share`；每个人都拿到 `sessions`（bool），即他能不能读这台机器的会话。
+    - 被放进范围的人只读：恢复和续会话（`run.continue{session}`）照旧只给主人。节点的 `share_sessions` 还会再筛一遍（第 7 条）。
   - 节点可以按项目设置目录白名单：`projects.<id>.dirs`；
-  - 能**看见**机器的是管理员、主人、分享名单里的人和被分享项目的成员（`canSee`）。其他人在 `machine.list` 和状态里看不到它，对它 `machine.share` 回 `not_found`，不暴露它存在。看得见不等于能用：派发要主人或分享（`canUse`），否则回 `unauthorized`，`run.preview` 写明原因，管理员也一样。
+  - 能**看见**机器的是管理员、主人、分享名单里的人、被分享项目的成员和会话可见范围里的人（`canSee`）。后者也因此看得到这台机器的派发分享和停止接新运行，也能让它重新检查 agent CLI（`machine.check`，会让主人的机器重新探测一次）。其他人在 `machine.list` 和状态里看不到它，对它 `machine.share` 回 `not_found`，不暴露它存在。看得见不等于能用：派发要主人或分享（`canUse`），否则回 `unauthorized`，`run.preview` 写明原因，管理员也一样。
 - 机器页按「我的机器 / 分享给我的 / 其他人的」分组（模式一只有一组）；每台标出怎么连上的（`machine.list` 的 `via`：本机、ssh、连入）、agent CLI 装没装和登没登录（看得见它的人可以让它重新检查：`machine.check`）、它的 tend 缺哪些节点 feature（`missing`，缺的那些运行不会派到这里）。模式二里每个成员在机器页添加自己的机器、拿到一次性的节点 token，主人和管理员在那里换机或吊销它的 token；页面细节见 [runs/clients.md](../runs/clients.md)「机器页」。管理员在团队页改身份、停用、交接并停用、邀请、管准入规则和看审计，项目负责人和管理员在项目抽屉里管成员；见同一文件的「团队页」。
 - **信任声明**：分享对话框写明「他们的 agent 以你的账号运行，能读你 home 下的文件、用你的 CLI 额度」。推荐做法是：要共享的机器用专用 OS 用户或容器跑 `tend node`，登录团队自己的 claude / codex 账号；个人机器不共享。计划：节点在 `hello` 里报告自己是不是主人的交互账号，共享派发时 `run.preview` 给出 `shared_home` 提示（未实现）。
 - **派发检查**：下面四条都满足才派发。任何一条不满足，`run.preview` 都会写明原因。
@@ -203,9 +215,9 @@
   - token、会话、分享的变更；
   - 权限请求是谁批的。
 
-  不记任何秘密，只记 id 和来源 IP（`login`、`login_refused`、`denied`、`token`、`machine`、`revoke`、`rebind`、`admit`、`invite`、`user`、`link`、`unlink`，以及 `machine.share`、`project.member`、`run.answer` 这类命令）。管理员在网页的管理页或 `tend-server admin audit` 查看。
+  不记任何秘密，只记 id 和来源 IP（`login`、`login_refused`、`denied`、`token`、`machine`（含 `tend-server token owner` 改机器主人）、`revoke`、`rebind`、`admit`、`invite`、`user`、`link`、`unlink`，以及 `machine.share`、`machine.sessions`、`project.member`、`run.answer` 这类命令）。管理员在网页的管理页或 `tend-server admin audit` 查看。
 - 事件里只写 user id，不写邮箱和姓名。
-- 会话索引归机器主人。项目 run 产生的会话按项目权限可见；机器上其余的原生会话只有主人能看，不出现在别人的界面里（见「权限：两层，外加三种归属」第 6、7 条）。
+- 会话索引归机器主人。项目 run 产生的会话按项目权限可见（`run.messages`）；机器上其余的原生会话只有主人和他放进会话可见范围的人能看，管理员也不例外，不出现在别人的界面里（见「权限：两层，外加三种归属」第 6、7 条和「共享：agent 和机器默认私有」的「会话」）。
 - token、OAuth 凭据、工单凭据、Web Push 的私钥只存在 server 上，只存哈希或加密后的值，从不进事件表。加密密钥来自 `TEND_SERVER_KEY` 或者一个 0600 的文件，不放在数据库里。
 
 ## 成员离开
@@ -215,7 +227,7 @@
   - 转移他作为项目负责人、任务负责人、验收人的身份，默认转给项目负责人；
   - 吊销他的会话、个人 token 和节点 token；
   - 他的机器标为 `retired`；
-  - 他机器上没结束的 run 进管理员的「等你」（停止或放弃）；
+  - 他机器上没结束的 run 进管理员的「等你」（停止或放弃），管理员看不到的私人任务除外；
   - 他的私有 agent 定义可以「转给项目」。
 - **成果不能只留在他的机器上**：分支在每个 run 结束后推到共享 remote，不只在换机器时推（见 [execution.md](execution.md)「跨机器接力」）。
 
@@ -223,9 +235,10 @@
 
 `user.offboard`（管理员；网页管理页的「交接并停用」）：
 
-- 他负责的项目交给指定的人（默认是操作的管理员）；他从所有项目的成员里移除；
-- 他负责或验收的未完成任务：项目里的交给那个项目的负责人（交接后的），项目外的交给指定的人；
-- 他的 agent 定义交给指定的人；他机器上的分享全部撤掉；
+- 他负责的团队项目交给指定的人（默认是操作的管理员）；他的个人项目不转交；他从所有项目的成员里移除；
+- 他负责或验收的未完成任务，在团队项目里的交给那个项目的负责人（交接后的）。私人任务（不属于项目的、在个人项目里的，按交接前的项目判断）不转交，留在原来的负责人名下：他自己的那些在跑的 run 写 `run_stop_asked`，排队的写 `run_canceled`（`access_revoked`）；停用以后它们留在记录里，没有人再能动；
+- 他的 agent 定义交给指定的人；他机器上的派发分享和会话可见范围全部撤掉（`machine_shared`、`sessions_shared` 都写成空的）；
 - `tend-server` 接着停用他，吊销他所有的会话、token 和节点 token，记审计 `offboard`。
-- 网页的交接对话框先列出会发生什么：他负责的项目、项目外（或在这些项目里）的未完成任务、他的 agent 定义 → 接手人；其他项目里的任务 → 各项目负责人；他的机器 → 停止分享；项目成员身份移除；所有 token 和登录立即失效；并写明会进审计。
+- 预览由协调器给：`user.offboard.preview{user, to?}`（管理员）和 `user.offboard` 用同一份计算（`coord.offboard`），回 `{user, to, projects?, left?, tasks?: [{id, to}], defs?, machines?, canceled?, private?}`，即他交出去的项目、他退出的项目、换人的任务和接手人、交出去的定义、关闭的机器、别人排在这些机器上、之后会被取消的 run 数，以及他留下的未完成私人任务数（个人项目里的也算）。在跑的私人 run 不单独计数。这些私人任务管理员看不到，页面数不出来，所以页面不自己算。
+- 网页的交接对话框按预览列出会发生什么：他负责的项目、项目外（或在这些项目里）的未完成任务、他的 agent 定义 → 接手人；其他项目里的任务 → 各项目负责人；他的机器 → 不再对别人开放，会话也不再共享；「还有 N 个私人任务：不转交，在跑的会停下」；项目成员身份移除；所有 token 和登录立即失效；并写明会进审计。
 - 机器退役：节点 token 的主人被停用，这台机器就是 `retired`。不另存状态：`store.RetiredMachines` 从已停用主人的节点凭据里认出来，`Directory` 用它继续回答机器主人；机器视图 `retired: true`，网页机器卡片标「已退役」。上面还没结束的 run（`task.Open`）进每个管理员的「等你」，身份 `admin`（「我是管理员，它的机器已退役」），由管理员停止或放弃；run 结束后就不再出现。主人重新启用，或这个机器名换了别人的有效节点 token，就不再退役。

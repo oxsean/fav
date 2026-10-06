@@ -273,7 +273,7 @@ func (c *Coord) messagePreview(who Principal, r *wire.Request) (MessageRoute, er
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	t := c.st.Tasks[p.ID]
-	if !canRead(c.st, who, t) {
+	if !c.canRead(c.st, who, t) {
 		return MessageRoute{}, notFound(p.ID)
 	}
 	return MessageRoute{Route: c.st.Route(t)}, nil

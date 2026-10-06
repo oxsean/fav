@@ -11,7 +11,22 @@ import (
 // Rows lists the sessions a query shows; the zero value is ready. ⚠️ Rows it makes up (trash, agent runs, unindexed
 // live sessions) are reused per session key, because the TUI keys cursor, pin and probes by pointer.
 type Rows struct {
+	// Belong names the project a row's directory belongs to ("" for none); the caller brings the projects and the
+	// rule (task.ProjectOf), so this package does not depend on them. nil: every row is in none.
+	Belong func(r *tend.Rec) (id, name string)
+
 	trash, agents, live map[string]*tend.Rec
+}
+
+// Place sets the project of each of recs, as List does before it matches: rows listed elsewhere (another machine's)
+// go through it too.
+func (rs *Rows) Place(recs ...*tend.Rec) {
+	for _, r := range recs {
+		r.ProjectID, r.ProjectName = "", ""
+		if rs.Belong != nil {
+			r.ProjectID, r.ProjectName = rs.Belong(r)
+		}
+	}
 }
 
 // List: status:trash the trash manifest, status:agent the one-shot runs, else the store (plus unfav when q.All, plus
@@ -26,8 +41,10 @@ func (rs *Rows) List(s *tend.Store, idx *Index, unfav []*tend.Rec, live map[stri
 	case tend.StatusAgent:
 		return rs.agentRuns(s, idx, q), nil
 	}
+	rs.Place(s.All()...)
 	out := s.Query(q)
 	if q.All {
+		rs.Place(unfav...)
 		for _, r := range unfav {
 			if q.Match(r) {
 				out = append(out, r)
@@ -57,6 +74,7 @@ func (rs *Rows) trashed(q tend.Query) ([]*tend.Rec, error) {
 			r = trashRec(e)
 		}
 		next[k] = r
+		rs.Place(r)
 		if q.Match(r) {
 			out = append(out, r)
 		}
@@ -98,6 +116,7 @@ func (rs *Rows) agentRuns(s *tend.Store, idx *Index, q tend.Query) []*tend.Rec {
 			}
 			next[ss.Key()] = r
 		}
+		rs.Place(r)
 		if q.Match(r) {
 			out = append(out, r)
 		}
@@ -133,6 +152,7 @@ func (rs *Rows) running(s *tend.Store, idx *Index, unfav []*tend.Rec, live map[s
 		}
 		r.Prepare()
 		next[k] = r
+		rs.Place(r)
 		if q.Match(r) {
 			out = append(out, r)
 		}

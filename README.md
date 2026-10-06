@@ -129,7 +129,7 @@ Five tabs, `Tab` / `1`–`5`:
 |---|---|
 | Favorites | `/tend`-ed sessions, by last activity (`o` cycles the sort) |
 | Sessions | every session on the machine (fewer than 3 turns hidden by default, `turns:1` shows all) |
-| Projects | grouped by directory (a session in a git worktree goes under its main checkout, its card says `worktree <branch>`; `tend fix` moves the sessions of a removed worktree there): `→` expands, `←` collapses, `→` again shows project info on the right (directory / session count / sources / recent sessions); the group of the directory `tend` was started in opens by itself, scrolled to the top |
+| Projects | sessions whose directory belongs to a project are grouped by that project, first; the rest by directory (`e` on a group header files it into a project; a session in a git worktree goes under its main checkout, its card says `worktree <branch>`; `tend fix` moves the sessions of a removed worktree there): `→` expands, `←` collapses, `→` again shows project info on the right (directory / session count / sources / recent sessions); the group of the directory `tend` was started in opens by itself, scrolled to the top |
 | Agents | who is running now: waiting / working / idle for how long, how long this turn has run, how full the context is, what the AI said last; refreshed every 3 s. Sessions asking you or finished and unseen are flagged (tab `Agents 5 !2`); `.` marks one handled, `H` snoozes it for an hour |
 | Tasks | tasks and their runs (see [Tasks](#tasks-agents-on-your-machines)) |
 
@@ -186,6 +186,7 @@ Mouse on by default: click tabs, chips, cards, double-click to resume, click an 
 | `t / p / v / d` | tag / project / source / time filter |
 | `s` | status filter: open / active / done / archived / all / trash |
 | `Enter` | on a projects group header: fold / unfold it |
+| `e` `Ctrl+E` | on a projects group header: its project; file an automatic group into a project, rename one, add or remove its directories |
 | `z / - / =` `+` | projects view: toggle fold all, fold all, unfold all; Tasks view: the same for the edit rows in a run's output, each opening on its first hunk (a click opens one) |
 
 **Open and continue**
@@ -253,6 +254,7 @@ Keys that start a process, a tab or an app only focus their button; the same key
 | `e` `Ctrl+E` `y` `Ctrl+Y` | hand off: edit / copy the pack |
 | `1` `2` `3` | peek: answer a numbered question; the same digit twice sends it |
 | `:` | peek: type a line; Enter sends it as the agent's next prompt |
+| `↑ / ↓` `Ctrl+N / Ctrl+P` `x` `Ctrl+X` | project: move in the list, tick a directory (`Ctrl+X` also while typing a name) |
 
 **Other**
 
@@ -532,7 +534,7 @@ A node only runs in `allow_dirs`. Unless `node.allow_bypass` is set, it runs `co
 `config.json` defines them, takes claude / codex `args` only from its own profiles, allows the permission modes
 `default` / `manual` / `acceptEdits` / `plan` / `dontAsk` (claude; not `auto`) and `read-only` / `workspace-write` (codex), and refuses a command line with a
 known bypass flag. With `node.allow_profiles` it runs just those names, each as its own config defines it (define them
-there, with the permission they need). `tend-server token rm <name>` revokes a token and drops its connections. A node token is bound to the first machine that connects with it; another machine is refused until `tend-server token rebind <name>`.
+there, with the permission they need). `tend-server token rm <name>` revokes a token and drops its connections. A node token is bound to the first machine that connects with it; another machine is refused until `tend-server token rebind <name>`. `tend-server token owner <machine> <user>` hands a machine to another owner; one registered without `--owner` belongs to `local`, whose sessions no admin reads until it is handed on.
 
 **People.** The server is for a team. People sign in with GitHub or any OIDC provider (Gitea, GitLab, Keycloak, Google)
 listed in the server's `config.json`:
@@ -552,7 +554,8 @@ the invitee a participant or reader of a project (`--project`, `--access`).
 
 Tasks belong to projects. An admin creates a project; its owner adds members as participants (create, dispatch, answer,
 send) or readers (look only). Someone outside a project sees nothing of it, not even that it exists; a task outside any
-project is its creator's. Machines are private too: whoever adds a machine owns it (for now a server admin gives its node token:
+project is its creator's, and so is a personal project (one with no member but its owner) until someone joins it: admins
+do not see these either. Machines are private too: whoever adds a machine owns it (for now a server admin gives its node token:
 `tend-server token add --node <name> --owner <user>`), and only they dispatch to it until they share it with people or projects. Runs on a machine use
 its owner's claude / codex login, git identity and files — share a machine set up for that (its own OS user or a
 container), not your laptop. A run's permission requests are for the machine's owner and whoever dispatched it; a share
@@ -565,7 +568,8 @@ dispatched the run it is about — in their **Needs you** list on the web page, 
 open, and at a personal webhook (Account page; a JSON POST with a `text` field for ntfy, Slack and the like, with a link to
 the task when `public_url` is set). The server posts only to public addresses; a webhook, or a tracker, on the team's own
 network, or on the tailnet (`100.64.0.0/10`, `fd7a:115c:a1e0::/48`), needs its prefix in `server.egress_allow` (`["10.0.0.0/8"]`). An admin's **Hand over and disable** on the Team page gives a leaving member's projects,
-tasks and definitions to others and ends their credentials; their machines retire, and runs still open on them wait in
+tasks and definitions to others and ends their credentials (their private tasks and personal projects stay theirs, and
+those tasks' runs stop); their machines retire, and runs still open on them wait in
 the admins' **Needs you**.
 
 **Issues.** A project can follow a Gitea, GitHub or GitLab repository (Projects page, **Issue sync**): give its address
@@ -587,7 +591,7 @@ runs; creates, edits and dispatches tasks; previews a dispatch; follows a run's 
 ended or what it asks and takes a reply; stops or abandons runs; marks tasks done, reopens or cancels them; shows task
 trees and starts them; lists what needs you; edits and shares agent definitions and project settings; shows the
 machines (state, slots, agent CLIs, queue and the day's runs), who owns them and whom they are shared with; lets a
-machine's owner and admins read its own Claude / Codex sessions (filter, page back through a conversation, copy the
+machine's owner, and whom the owner lets read them (admins too only when named), read its own Claude / Codex sessions (filter, page back through a conversation, copy the
 resume command; a node shares every session only with `"share_sessions": "all"` under `node`); adds a
 machine and shows its node token once, and moves or revokes a node token; manages projects and members; makes personal tokens for the CLI
 and TUI on the Account page, or confirms one from `tend login` on a terminal-authorization page (the code, the client's

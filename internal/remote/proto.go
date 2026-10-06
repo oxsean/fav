@@ -53,6 +53,14 @@ type Hello struct {
 	Role  string `json:"role,omitempty"`
 	// Build: tend-server's Web UI, a hash of its files; a page that loaded other files reloads.
 	Build string `json:"build,omitempty"`
+	// Caller: a coordinator tells a client who it answers as; a node leaves it out.
+	Caller *Caller `json:"caller,omitempty"`
+}
+
+// Caller is who a coordinator answers a client as.
+type Caller struct {
+	User  string `json:"user"`
+	Admin bool   `json:"admin,omitempty"`
 }
 
 // Ref names a session on the machine that answers.

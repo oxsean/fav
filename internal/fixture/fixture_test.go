@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -368,5 +369,60 @@ func TestTheJournalHasATaskWhoseRunUsedASession(t *testing.T) {
 		if x.Auto || st.OpenRun(x.ID) != nil {
 			t.Errorf("%s would be dispatched", x.ID)
 		}
+	}
+}
+
+func TestSessionsBelongToTheProjectOfTheirDirectory(t *testing.T) {
+	d, idx, _ := load(t)
+	st := task.New()
+	log, err := journal.Open(filepath.Join(d.Home, "coord", "events.jsonl"), st.Apply)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer log.Close()
+	if err := log.ReadOnly(); err != nil {
+		t.Fatal(err)
+	}
+	listed := byKey(idx.Sessions())
+	rec := func(name string) *tend.Rec {
+		s := listed[key(d.Get(name))]
+		if s == nil {
+			t.Fatalf("%s not indexed", name)
+		}
+		return s.Rec()
+	}
+	belongs := func(r *tend.Rec) string {
+		dir := r.Cwd
+		if r.Repo != "" {
+			dir = r.Repo
+		}
+		if p := task.ProjectOf(st.Projects, "local", runtime.GOOS, dir); p != nil {
+			return p.ID
+		}
+		return ""
+	}
+	want := map[string]string{"oauth": Project, "worktree": Project, "webapp-sub": Project, "codex-cli": Project,
+		"same-name": "", "pagination": "", "cjk-dir": ""}
+	_, gitErr := exec.LookPath("git")
+	if gitErr == nil {
+		want["linked-worktree"] = Project
+	}
+	for name, id := range want {
+		if got := belongs(rec(name)); got != id {
+			t.Errorf("%s (cwd %s, repo %s): project %q, want %q", name, rec(name).Cwd, rec(name).Repo, got, id)
+		}
+	}
+	if r := rec("same-name"); r.Project != "webapp" {
+		t.Errorf("same-name: grouped by name as %q, the same as the webapp checkout", r.Project)
+	}
+	if gitErr != nil {
+		return
+	}
+	r := rec("linked-worktree")
+	if r.Repo != filepath.Join(d.Work, "webapp") || r.Project != "webapp" {
+		t.Errorf("linked-worktree: repo %q, project %q", r.Repo, r.Project)
+	}
+	if task.ProjectOf(st.Projects, "local", runtime.GOOS, r.Cwd) != nil {
+		t.Errorf("linked-worktree: its own directory %s is outside the checkout", r.Cwd)
 	}
 }

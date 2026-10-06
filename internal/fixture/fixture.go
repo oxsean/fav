@@ -46,6 +46,9 @@ func (d *Dataset) Get(name string) Session {
 
 const remote = "https://example.com/acme/%s.git"
 
+// Project is the id of the project holding the webapp checkout.
+const Project = "fx-webapp"
+
 type builder struct {
 	*Dataset
 	now   time.Time
@@ -66,6 +69,12 @@ func Build(root string, now time.Time) (*Dataset, error) {
 	}
 	if _, err := os.Stat(filepath.Join(root, "claude")); err == nil {
 		return nil, errors.New("fixture: " + root + " already holds a dataset")
+	}
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		return nil, err
+	}
+	if root, err = filepath.EvalSymlinks(root); err != nil { // ⚠️ git prints resolved paths (macOS /var is /private/var)
+		return nil, err
 	}
 	d := &Dataset{Root: root, Claude: filepath.Join(root, "claude"), Codex: filepath.Join(root, "codex"),
 		Home: filepath.Join(root, "home"), Work: filepath.Join(root, "work"), Tmp: filepath.Join(root, "tmp")}
@@ -89,6 +98,9 @@ func Build(root string, now time.Time) (*Dataset, error) {
 		return nil, err
 	}
 	if err := b.tasks(); err != nil {
+		return nil, err
+	}
+	if err := b.teamProjects(); err != nil {
 		return nil, err
 	}
 	var recs []byte
@@ -128,6 +140,26 @@ func (b *builder) tasks() error {
 	return nil
 }
 
+// teamProjects writes a project holding the webapp checkout on this machine ("local"), created and then given its
+// repository as the coordinator does.
+func (b *builder) teamProjects() error {
+	log, err := journal.Open(filepath.Join(b.Home, "coord", "events.jsonl"), func(journal.Envelope) error { return nil })
+	if err != nil {
+		return err
+	}
+	defer log.Close()
+	repos := []task.Repo{{Name: "webapp", Remote: fmt.Sprintf(remote, "webapp"), Base: "main", Dirs: map[string]string{"local": b.dir("webapp")}}}
+	for _, e := range []journal.Event{
+		journal.NewEvent(task.EProjectCreated, task.Project{ID: Project, Name: "Webapp", Owner: "local"}),
+		journal.NewEvent(task.EProjectEdited, task.ProjectEdit{ID: Project, Repos: &repos}),
+	} {
+		if _, err := log.Append(journal.System, nil, []journal.Event{e}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (b *builder) dir(parts ...string) string {
 	return filepath.Join(append([]string{b.Work}, parts...)...)
 }
@@ -135,7 +167,7 @@ func (b *builder) dir(parts ...string) string {
 func (b *builder) projects() error {
 	moved := filepath.Join(b.Root, "dev", "legacy-app")
 	for _, p := range []string{b.dir("webapp"), b.dir("notes-api"), b.dir("中文项目"), b.dir("dir with space"), moved,
-		b.dir("webapp", ".claude", "worktrees", "fix-login")} {
+		b.dir("webapp", ".claude", "worktrees", "fix-login"), b.dir("webapp", "src", "auth"), b.sameName()} {
 		if err := os.MkdirAll(p, 0o755); err != nil {
 			return err
 		}
@@ -156,13 +188,26 @@ func (b *builder) projects() error {
 	if _, err := exec.LookPath("git"); err == nil {
 		gitInit(b.dir("webapp"), fmt.Sprintf(remote, "webapp"))
 		gitInit(moved, fmt.Sprintf(remote, "legacy-app"))
+		git(b.dir("webapp"), "-c", "user.name=fixture", "-c", "user.email=fixture@example.com", "-c", "commit.gpgsign=false",
+			"commit", "-q", "--allow-empty", "-m", "init")
+		git(b.dir("webapp"), "worktree", "add", "-q", "-b", "fix-signup", b.linkedWorktree())
 	}
 	return nil
 }
 
+// linkedWorktree is a git worktree of webapp beside it, its name sharing webapp's as a prefix.
+func (b *builder) linkedWorktree() string { return b.dir("webapp-signup") }
+
+// sameName is a directory named like the webapp checkout elsewhere: grouped by name with it, in no project.
+func (b *builder) sameName() string { return filepath.Join(b.Root, "clones", "webapp") }
+
+func git(dir string, args ...string) {
+	exec.Command("git", append([]string{"-C", dir}, args...)...).Run()
+}
+
 func gitInit(dir, url string) {
-	exec.Command("git", "-C", dir, "init", "-q", "-b", "main").Run()
-	exec.Command("git", "-C", dir, "remote", "add", "origin", url).Run()
+	git(dir, "init", "-q", "-b", "main")
+	git(dir, "remote", "add", "origin", url)
 }
 
 func (b *builder) claudeID() string {
@@ -287,6 +332,30 @@ func (b *builder) claudeSessions() {
 	wt.reply("测试已加，覆盖请求中和失败两种状态。")
 	wt.user("提交到 worktree 分支")
 	wt.reply("已提交。")
+
+	sub := b.claude("webapp-sub", b.dir("webapp", "src", "auth"), "main", 11*h)
+	sub.user("auth 目录下的 callback 有单元测试吗")
+	sub.reply("没有，我加了一个覆盖回调参数的测试。")
+	sub.user("把测试名改成中文描述")
+	sub.reply("已改。")
+	sub.user("跑一下")
+	sub.reply("通过。")
+
+	linked := b.claude("linked-worktree", b.linkedWorktree(), "fix-signup", 12*h)
+	linked.user("在这个 worktree 里修注册页的邮箱校验")
+	linked.reply("校验改成了先去掉首尾空格再比对。")
+	linked.user("补一个测试")
+	linked.reply("已补。")
+	linked.user("提交")
+	linked.reply("已提交到 fix-signup。")
+
+	other := b.claude("same-name", b.sameName(), "main", 13*h)
+	other.user("这个 webapp 是另一份克隆，看看它的 README")
+	other.reply("README 只有构建步骤。")
+	other.user("它和主仓库有什么区别")
+	other.reply("这份停在半年前的版本。")
+	other.user("好")
+	other.reply("还需要别的吗？")
 
 	old := b.claude("chain-old", b.dir("notes-api"), "main", 2*d)
 	old.user("给 notes-api 加限流中间件")

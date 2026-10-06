@@ -53,6 +53,7 @@ func (c *Coord) checkMachines(ctx context.Context, p Principal, name string) (Ma
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	var views []Machine
 	for i, m := range ms {
 		if errs[i] != nil {
 			if out.Failed == nil {
@@ -61,8 +62,9 @@ func (c *Coord) checkMachines(ctx context.Context, p Principal, name string) (Ma
 			out.Failed[m.name] = cmp.Or(wire.Code(errs[i]), wire.CodeInternal)
 			continue
 		}
-		out.Machines = append(out.Machines, c.machineView(m))
+		views = append(views, c.machineView(m))
 	}
+	out.Machines = c.machinesFor(p, views)
 	sort.Slice(out.Machines, func(i, j int) bool { return out.Machines[i].Name < out.Machines[j].Name })
 	return out, nil
 }

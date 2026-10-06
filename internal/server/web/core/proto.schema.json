@@ -286,6 +286,20 @@
       },
       "type": "object"
     },
+    "remote.Caller": {
+      "properties": {
+        "admin": {
+          "type": "boolean"
+        },
+        "user": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "user"
+      ],
+      "type": "object"
+    },
     "remote.Hello": {
       "properties": {
         "arch": {
@@ -293,6 +307,9 @@
         },
         "build": {
           "type": "string"
+        },
+        "caller": {
+          "$ref": "#/$defs/remote.Caller"
         },
         "claude_home": {
           "type": "string"

@@ -64,7 +64,7 @@ func (c *Coord) checkActor(project, user string) error {
 	switch {
 	case project == "" && !u.Admin:
 		return forbidden("a task outside projects stays with its owner")
-	case project != "" && roleIn(c.st, Principal{User: u.ID, Admin: u.Admin}, project) != task.RoleParticipant:
+	case project != "" && c.roleIn(c.st, Principal{User: u.ID, Admin: u.Admin}, project) != task.RoleParticipant:
 		return forbidden("user " + user + " takes no part in project " + project)
 	}
 	return nil
@@ -116,7 +116,7 @@ func (c *Coord) checkPlace(who Principal, t *task.Task, parent string, after []s
 	for i, a := range after {
 		d := c.st.Tasks[a]
 		switch {
-		case !canRead(c.st, who, d):
+		case !c.canRead(c.st, who, d):
 			return notFound(a)
 		case slices.Contains(after[:i], a):
 			return bad("after " + a + " twice")

@@ -41,6 +41,11 @@ func foldScenario() []journal.Envelope {
 	add(ev(task.EMachineShared, task.Share{Machine: "mba", Projects: []string{"p1"}, Approve: true}))
 	add(ev(task.EMachineShared, task.Share{Machine: "old", Users: []string{"u_b"}}))
 	add(ev(task.EMachineShared, task.Share{Machine: "old"}))
+	add(ev(task.ESessionsShared, task.SessionsSet{Machine: "mba", Users: []string{"u_c"}, Projects: []string{"p1"}}))
+	add(ev(task.EMachineShared, task.Share{Machine: "mba", Projects: []string{"p1"}})) // keeps the scope
+	add(ev(task.ESessionsShared, task.SessionsSet{Machine: "solo", Team: true}))
+	add(ev(task.ESessionsShared, task.SessionsSet{Machine: "gone", Users: []string{"u_b"}}))
+	add(ev(task.ESessionsShared, task.SessionsSet{Machine: "gone"}))
 	add(ev(task.EMachineDrained, task.DrainSet{Machine: "old", On: true, By: "u_a"}))
 	add(ev(task.EMachineDrained, task.DrainSet{Machine: "mba", On: true, By: "u_a"}))
 	add(ev(task.EMachineDrained, task.DrainSet{Machine: "old"}))

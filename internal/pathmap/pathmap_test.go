@@ -75,3 +75,81 @@ func TestMap(t *testing.T) {
 		}
 	}
 }
+
+func TestUnder(t *testing.T) {
+	for _, c := range []struct {
+		name, path, dir, goos string
+		want                  bool
+	}{
+		{"the directory itself", "/srv/app", "/srv/app", "linux", true},
+		{"a child", "/srv/app/cmd/x", "/srv/app", "linux", true},
+		{"trailing separators", "/srv/app/", "/srv/app//", "linux", true},
+		{"a doubled separator and a dot", "/srv//app/./x", "/srv/app", "linux", true},
+		{"a sibling with a common prefix", "/srv/appx", "/srv/app", "linux", false},
+		{"the parent", "/srv", "/srv/app", "linux", false},
+		{"the root holds everything", "/srv/app", "/", "darwin", true},
+		{"POSIX keeps case", "/srv/App/x", "/srv/app", "linux", false},
+		{"macOS keeps case too", "/Users/me/Dev/x", "/Users/me/dev", "darwin", false},
+		{"a backslash is a name on POSIX", `/srv/app\x`, "/srv/app", "linux", false},
+		{"dot dot", "/srv/app/../app/x", "/srv/app", "linux", false},
+		{"dot dot in the directory", "/srv/app/x", "/srv/x/../app", "linux", false},
+		{"relative", "srv/app/x", "srv/app", "linux", false},
+		{"empty path", "", "/srv", "linux", false},
+		{"empty directory", "/srv", "", "linux", false},
+		{"a Windows path on POSIX", `C:\work\app`, `C:\work`, "linux", false},
+
+		{"WSL mount", "/mnt/c/work/app", "/mnt/c/work", "linux", true},
+		{"WSL mount root", "/mnt/c/work", "/mnt/c", "linux", true},
+		{"WSL mount keeps case", "/mnt/c/Work/app", "/mnt/c/work", "linux", false},
+		{"another WSL mount", "/mnt/d/work", "/mnt/c", "linux", false},
+		{"WSL mount against its drive", "/mnt/c/work/app", `C:\work`, "linux", false},
+
+		{"Windows child", `C:\work\app\x`, `C:\work\app`, "windows", true},
+		{"Windows ignores case", `c:\WORK\App\x`, `C:\work\app`, "windows", true},
+		{"forward slashes on Windows", "C:/work/app/x", `C:\work\app`, "windows", true},
+		{"mixed separators", `C:\work/app\x`, "C:/work/app/", "windows", true},
+		{"Windows trailing separator", `C:\work\app\`, `C:\work\app`, "windows", true},
+		{"Windows sibling with a common prefix", `C:\work\appx`, `C:\work\app`, "windows", false},
+		{"another drive", `D:\work\app`, `C:\work\app`, "windows", false},
+		{"drive root", `C:\work`, `C:\`, "windows", true},
+		{"bare drive", `C:\work`, "C:", "windows", false},
+		{"drive-relative", `C:work\app`, `C:\work`, "windows", false},
+		{"rooted without a drive", `\work\app`, `\work`, "windows", false},
+		{"Windows relative", `work\app`, "work", "windows", false},
+		{"Windows dot dot", `C:\work\..\work\app`, `C:\work`, "windows", false},
+		{"UNC share itself", `\\srv\share`, `\\srv\share\`, "windows", true},
+		{"under a UNC share", `\\srv\share\app\x`, `\\srv\share\app`, "windows", true},
+		{"UNC ignores case", `\\SRV\Share\App`, `\\srv\share`, "windows", true},
+		{"UNC with forward slashes", "//srv/share/app", `\\srv\share`, "windows", true},
+		{"another share", `\\srv\share2\app`, `\\srv\share`, "windows", false},
+		{"another server", `\\srv2\share\app`, `\\srv\share`, "windows", false},
+		{"a server without a share", `\\srv\share`, `\\srv`, "windows", false},
+		{"UNC against a drive", `\\srv\share\app`, `C:\share\app`, "windows", false},
+		{"a POSIX path on Windows", "/mnt/c/work/app", "/mnt/c/work", "windows", false},
+		{"a WSL path against its drive on Windows", "/mnt/c/work/app", `C:\work`, "windows", false},
+	} {
+		if got := Under(c.path, c.dir, c.goos); got != c.want {
+			t.Errorf("%s: Under(%q, %q, %s) = %v, want %v", c.name, c.path, c.dir, c.goos, got, c.want)
+		}
+	}
+}
+
+func TestUnderAcrossMachines(t *testing.T) {
+	under := map[string][2]string{
+		"darwin":  {"/Users/me/dev/中文 项目/x", "/Users/me/dev/中文 项目"},
+		"linux":   {"/home/me/dev/中文 项目/x", "/home/me/dev/中文 项目"},
+		"wsl":     {"/mnt/c/dev/中文 项目/x", "/mnt/c/dev/中文 项目"},
+		"windows": {`C:\dev\中文 项目\x`, `C:\dev\中文 项目`},
+	}
+	goos := map[string]string{"darwin": "darwin", "linux": "linux", "wsl": "linux", "windows": "windows"}
+	for on, g := range goos {
+		for pn, p := range under {
+			for dn, d := range under {
+				want := pn == dn && (goos[pn] == "windows") == (g == "windows")
+				if got := Under(p[0], d[1], g); got != want {
+					t.Errorf("on %s: Under(%q, %q) = %v, want %v", on, p[0], d[1], got, want)
+				}
+			}
+		}
+	}
+}

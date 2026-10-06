@@ -9,6 +9,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/oxsean/fav/internal/i18n"
 	"github.com/oxsean/fav/internal/tend"
 )
 
@@ -114,5 +115,49 @@ func TestProjectBlockShowsThisWeeksFiles(t *testing.T) {
 		if w := ansi.StringWidth(l); w > 70 {
 			t.Errorf("line %d is %d wide", i, w)
 		}
+	}
+}
+
+// TestProjectGroupsComeFirst: groups of projects come first, under their own heading, then the automatic groups;
+// o orders each part on its own; a project group is keyed by its id and shows its name.
+func TestProjectGroupsComeFirst(t *testing.T) {
+	in := func(id, name, dir string) *tend.Rec { return &tend.Rec{Project: dir, ProjectID: id, ProjectName: name} }
+	recs := []*tend.Rec{
+		{Project: "zeta"}, in("p_b", "Beta", "web"), {Project: "alpha"}, {Project: "alpha"}, in("p_a", "Alpha", "api"),
+		in("p_a", "Alpha", "api-v2"), in("p_b", "Beta", "web"), in("p_b", "Beta", "web"),
+	}
+	lines := func(rows []row) []string {
+		var out []string
+		for _, r := range rows {
+			switch {
+			case r.section != "":
+				out = append(out, "= "+r.section)
+			case r.group != "":
+				out = append(out, r.label)
+			}
+		}
+		return out
+	}
+	head := func(n int) string { return i18n.F("group.projects", n) }
+	tail := func(n int) string { return i18n.F("group.unfiled", n) }
+	for _, tc := range []struct {
+		mode string
+		want []string
+	}{
+		{projSortActive, []string{"= " + head(2), "Beta", "Alpha", "= " + tail(2), "zeta", "alpha"}},
+		{projSortCount, []string{"= " + head(2), "Beta", "Alpha", "= " + tail(2), "alpha", "zeta"}},
+		{projSortName, []string{"= " + head(2), "Alpha", "Beta", "= " + tail(2), "alpha", "zeta"}},
+	} {
+		rows, groups := projectRows(recs, map[string]bool{}, tc.mode)
+		if got := lines(rows); !slices.Equal(got, tc.want) {
+			t.Errorf("%s: got %v want %v", tc.mode, got, tc.want)
+		}
+		if len(groups[projKey+"p_a"]) != 2 || len(groups[projKey+"p_b"]) != 3 {
+			t.Errorf("%s: a project's group holds its sessions of every directory: %v", tc.mode, groups)
+		}
+	}
+	rows, _ := projectRows(recs[:1], map[string]bool{}, projSortActive)
+	if got := lines(rows); !slices.Equal(got, []string{"zeta"}) {
+		t.Errorf("without projects there are no headings: %v", got)
 	}
 }

@@ -261,10 +261,10 @@ func (c *Coord) inbox(p Principal) Inbox {
 // inboxItem is what t waits on p for; false when it waits on them for nothing. The caller holds mu.
 func (c *Coord) inboxItem(p Principal, t *task.Task) (InboxItem, bool) {
 	sit := c.st.Situation(t)
-	if r := c.st.Runs[sit.Run]; p.Admin && r != nil && task.Open(r.State) && c.retired(r.Machine) {
+	if r := c.st.Runs[sit.Run]; p.Admin && r != nil && task.Open(r.State) && c.retired(r.Machine) && c.canRead(c.st, p, t) {
 		return InboxItem{Task: t.ID, Title: t.Title, Project: t.Project, Reason: sit.Reason, Run: r.ID, Since: r.Since(), As: []string{AsAdmin}}, true
 	}
-	if sit.Kind != task.SitWaiting || sit.Reason == task.WhyDispatch || sit.Reason == task.WhyPaused && t.Paused == nil || !canWrite(c.st, p, t) || !slices.Contains(concerns(c.st, t, sit), p.User) {
+	if sit.Kind != task.SitWaiting || sit.Reason == task.WhyDispatch || sit.Reason == task.WhyPaused && t.Paused == nil || !c.canWrite(c.st, p, t) || !slices.Contains(concerns(c.st, t, sit), p.User) {
 		return InboxItem{}, false
 	}
 	since := t.UpdatedAt
@@ -317,7 +317,7 @@ func (c *Coord) Sees(user, id string) bool {
 	defer c.mu.Unlock()
 	p, ok := c.principal(user)
 	t := c.st.Tasks[id]
-	return ok && t != nil && canRead(c.st, p, t)
+	return ok && t != nil && c.canRead(c.st, p, t)
 }
 
 // Request is what run asks in its request id, while it is unanswered.

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"cmp"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -11,6 +12,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/oxsean/fav/internal/capture"
@@ -52,6 +54,7 @@ func main() {
 
 func run(args []string) error {
 	i18n.Set(i18n.Resolve(loadConfig().Lang)) // icons / time format / turn threshold apply to every subcommand, including the fzf children
+	sessionProjects = sync.OnceValue(loadProjects)
 	cmd := ""
 	if len(args) > 0 && (!strings.HasPrefix(args[0], "-") || slices.Contains([]string{"-h", "--help", "--version"}, args[0])) {
 		cmd, args = args[0], args[1:]
@@ -305,7 +308,7 @@ func cmdAdd(args []string) error {
 	r.Title, r.Summary = strings.TrimSpace(in.Title), strings.TrimSpace(in.Summary)
 	r.Label = strings.TrimSpace(in.Label)
 	r.Tags = tend.Normalize(in.Tags)
-	r.Project, r.WorkType = in.Project, in.WorkType
+	r.Project, r.WorkType = cmp.Or(projectFor(sessionDir(ctx)), in.Project), in.WorkType
 	if r.Status = in.Status; !tend.ValidStatus(r.Status) {
 		r.Status = tend.StatusDefault
 	}
@@ -456,7 +459,7 @@ func localRecs(s *tend.Store, idx *index.Index, live map[string]capture.Live, q 
 		live = capture.LiveSessions()
 	}
 	unfav := idx.Attach(s, nil)
-	var rows index.Rows
+	rows := belongRows()
 	recs, err := rows.List(s, idx, unfav, live, q)
 	isKept := func(r *tend.Rec) bool { return keep != "" && (r.ID == keep || r.SessionID == keep) }
 	if !slices.ContainsFunc(recs, isKept) {

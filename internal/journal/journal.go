@@ -155,6 +155,9 @@ func Open(path string, fold func(Envelope) error) (*Log, error) {
 // maxLine bounds an envelope; a longer line is skipped by the reader, which shows as a gap in seq.
 const maxLine = 4 << 20
 
+// Parse checks a line's sum and decodes it: what a reader without the coordinator lock folds.
+func Parse(line []byte) (Envelope, error) { return parse(line) }
+
 // parse checks a line's sum and decodes it.
 func parse(line []byte) (Envelope, error) {
 	line = bytes.TrimRight(line, "\r\n")

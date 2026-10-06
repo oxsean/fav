@@ -1,7 +1,10 @@
 // team is the team page: who is on this server and what they take part in, the projects the viewer sees, and for an
-// admin the invitations not used yet, who may sign in without one, and the security log. An admin creates projects,
-// invites, changes a person's role, disables them or hands their work on; a project's owner or an admin changes its
-// members, settings and issue sync in the project's drawer (pages/project.js). On a phone the page only shows.
+// admin the invitations not used yet, who may sign in without one, and the security log. Everyone creates projects (an
+// admin for anyone, the others their own), and a project only its owner takes part in is marked personal; an admin
+// invites, changes a person's role, disables them or hands their work on as the coordinator previews it (their private
+// tasks and personal projects stay theirs); a project's owner or an admin changes its
+// members, settings and issue sync in the project's drawer (pages/project.js), the first member of a personal project
+// once they confirm what that one will see. On a phone the page only shows.
 import {useState, useEffect} from '../vendor/hooks.mjs';
 import {html, cx, usePhone, useWords, useSignalValue, useName} from '../ui/base.js';
 import {Panel} from '../ui/panel.js';
@@ -9,6 +12,7 @@ import {Modal} from '../ui/overlay.js';
 import {Button, Chip, Chips, Segmented} from '../ui/controls.js';
 import {TextInput} from '../ui/input.js';
 import {Picker} from '../ui/picker.js';
+import {Status} from '../ui/status.js';
 import {Menu} from '../ui/menu.js';
 import {Secret} from '../ui/secret.js';
 import {useListKeys} from '../ui/table.js';
@@ -40,14 +44,22 @@ register('team', {
   'team.offLeft': ['他离开参与的 %d 个项目', 'They leave the %d {project|projects} they take part in'],
   'team.offTasks': ['%d 个没结束的任务（他负责或验收的）交给各自项目的负责人，不在项目里的交给 %s', 'The %d unfinished {task|tasks} they own or accept {goes|go} to their project\'s owner, or to %s outside a project'],
   'team.offDefs': ['他的 agent 定义 %s 交给 %s', 'Their agent definitions %s go to %s'],
-  'team.offMachines': ['机器 %s 不再对别人开放', 'Machines %s close to everyone else'],
-  'team.offCanceled': ['机器 %s 不再对别人开放，别人排在那里的 %d 个运行取消', 'Machines %s close to everyone else, and %d {run|runs} queued there by others {is|are} canceled'],
+  'team.offMachines': ['机器 %s 不再对别人开放，会话也不再共享', 'Machines %s close to everyone else and share their sessions with no one'],
+  'team.offCanceled': ['机器 %s 不再对别人开放，会话也不再共享，别人排在那里的 %d 个运行取消', 'Machines %s close to everyone else and share their sessions with no one, and %d {run|runs} queued there by others {is|are} canceled'],
+  'team.offPrivate': ['还有 %d 个私人任务：不转交，在跑的会停下', '%d private {task stays|tasks stay} with them: not handed over; any running stop'],
+  'team.offPrivateWhy': ['私人任务和他的个人项目只有他自己看得到，你也看不到内容；停用以后它们留在记录里，不再有人能动。', 'Private tasks and personal projects are theirs alone: you cannot see inside them either. Once they are disabled these stay on record and no one changes them.'],
+  'team.offWait': ['正在算要交接的东西…', 'Working out what to hand over…'],
+  'team.offFailed': ['算不出要交接的东西：%s。什么都还没改。', 'Could not work out what to hand over: %s. Nothing has changed.'],
+  'team.offRetry': ['再算一次', 'Try again'],
   'team.offEnd': ['最后停用他，吊销他的全部凭据（包括他机器的 token）', 'Last, they are disabled and every credential of theirs ends, their machines\' tokens too'],
   'team.offGo': ['交接并停用', 'Hand over and disable'], 'team.offDone': ['%s 的工作已交给 %s，账号已停用', 'The work of %s went to %s; they are disabled'],
   'team.projects': ['项目', 'Projects'], 'team.projectsNote': ['负责人管成员', 'Their owners manage the members'],
   'team.owner': ['负责人 %s', 'owner %s'], 'team.tasks': ['%d 个任务 · %d 未结束', '%d {task|tasks} · %d open'],
   'team.people': ['%d 人参与 · %d 人只读', '%d take part · %d read'], 'team.sync': ['工单同步 %s · %s', 'Issue sync %s · %s'],
   'team.sync.ok': ['同步中', 'syncing'], 'team.sync.stopped': ['已停', 'stopped'], 'team.sync.paused': ['限流中', 'rate limited'], 'team.noProjects': ['你还不在任何项目里', 'You are in no project yet'],
+  'team.personal': ['个人', 'Personal'], 'team.firstAdd': ['确认加入', 'Add them'],
+  'team.firstMember': ['加入后 %s 能看到这个项目里已有的 %d 个任务和运行', 'Once added, %s sees the %d {task|tasks} already in this project and their runs'],
+  'team.newOther': ['建好后这是 %s 的个人项目：你看不到它，成员由 %s 自己加。', 'Once created it is the personal project of %s: you no longer see it, and %s adds its members.'],
   'team.name': ['名称', 'Name'], 'team.projectOwner': ['负责人', 'Owner'], 'team.create': ['建立', 'Create'], 'team.created': ['项目 %s 已建立', 'Project %s is created'],
   'team.add': ['加成员', 'Add a member'], 'team.person': ['谁', 'Who'], 'team.role': ['角色', 'Role'],
   'team.added': ['%s 加进了 %s', '%s joined %s'], 'team.changed': ['%s 现在是%s', '%s is now a %s'],
@@ -84,15 +96,19 @@ function ago(w, at, now) {
 const when = at => (at ? day(at) + ' ' + clock(at) : '');
 const byLabel = (a, b) => a.label.localeCompare(b.label);
 
-function NewProject({people, me, busy, onCreate, onClose}) {
-  const {t} = useWords();
+// NewProject: an admin chooses its owner, and is told a project made for someone else is that one's personal project,
+// out of the admin's sight at once; anyone else owns what they create.
+function NewProject({people, me, admin, busy, onCreate, onClose}) {
+  const {t, f} = useWords();
+  const nameOf = useName();
   const [name, setName] = useState('');
   const [owner, setOwner] = useState(me);
   const ok = name.trim() && owner && !busy;
   return html`<${Modal} title=${t('team.new')} onClose=${onClose}
     actions=${[{label: t('home.cancel'), onClick: onClose}, {label: t('team.create'), kind: 'primary', keyName: 'Mod+Enter', disabled: !ok, onClick: () => onCreate(name.trim(), owner)}]}>
     <${TextInput} label=${t('team.name')} value=${name} onInput=${setName} autoFocus />
-    <${Picker} label=${t('team.projectOwner')} value=${owner} onChange=${setOwner} options=${people} />
+    ${admin && html`<${Picker} label=${t('team.projectOwner')} value=${owner} onChange=${setOwner} options=${people} />`}
+    ${admin && owner && owner !== me && html`<p class="field-note t-warning">${f('team.newOther', nameOf(owner), nameOf(owner))}</p>`}
   <//>`;
 }
 
@@ -135,23 +151,38 @@ function AddAdmit({busy, error, onAdd, onClose}) {
   <//>`;
 }
 
-function Offboard({user, people, me, plan, busy, onGo, onClose}) {
-  const {t, f} = useWords();
+// Offboard hands user's work to whom the admin picks, as user.offboard.preview says it would go: asked again for each
+// heir, an answer for an earlier one dropped; without one nothing is handed over.
+function Offboard({user, people, me, wire, busy, onGo, onClose}) {
+  const w = useWords();
+  const {t, f} = w;
   const name = useName();
   const [to, setTo] = useState(me);
-  const p = plan(to);
+  const [ask, setAsk] = useState(0);
+  const [pv, setPv] = useState({to: '', plan: null, error: null});
+  useEffect(() => {
+    let gone = false;
+    setPv({to, plan: null, error: null});
+    wire.call('user.offboard.preview', {user, to}).then(plan => !gone && setPv({to, plan: tm.offboardOf(plan), error: null}),
+      error => !gone && setPv({to, plan: null, error}));
+    return () => { gone = true; };
+  }, [to, ask]);
+  const p = pv.to === to ? pv.plan : null;
   const heir = name(to);
   return html`<${Modal} title=${f('team.offTitle', name(user))} onClose=${onClose}
-    actions=${[{label: t('confirm.keep'), onClick: onClose}, {label: t('team.offGo'), kind: 'primary', keyName: 'Mod+Enter', disabled: !to || busy, onClick: () => onGo(to)}]}>
+    actions=${[{label: t('confirm.keep'), onClick: onClose}, {label: t('team.offGo'), kind: 'primary', keyName: 'Mod+Enter', disabled: !to || !p || busy, onClick: () => onGo(to)}]}>
     <${Picker} label=${t('team.offTo')} value=${to} onChange=${setTo} options=${people.filter(o => o.value !== user)} />
-    <ol class="team-steps">
+    ${pv.error ? html`<div class="off-err"><p>${f('team.offFailed', apiText(w, pv.error))}</p><${Button} onClick=${() => setAsk(n => n + 1)}>${t('team.offRetry')}<//></div>`
+      : !p ? html`<div class="off-wait"><${Status} state="running" />${t('team.offWait')}</div>`
+      : html`<ol class="team-steps">
       ${p.projects.length > 0 && html`<li>${f('team.offProjects', p.projects.length, heir)}</li>`}
       ${p.left.length > 0 && html`<li>${f('team.offLeft', p.left.length)}</li>`}
       ${p.tasks.length > 0 && html`<li>${f('team.offTasks', p.tasks.length, heir)}</li>`}
       ${p.defs.length > 0 && html`<li>${f('team.offDefs', p.defs.join(', '), heir)}</li>`}
       ${p.machines.length > 0 && html`<li>${p.canceled ? f('team.offCanceled', p.machines.join(', '), p.canceled) : f('team.offMachines', p.machines.join(', '))}</li>`}
+      ${p.private > 0 && html`<li class="off-private">${f('team.offPrivate', p.private)}<span class="t-muted">${t('team.offPrivateWhy')}</span></li>`}
       <li>${t('team.offEnd')}</li>
-    </ol>
+    </ol>`}
   <//>`;
 }
 
@@ -222,9 +253,9 @@ export function Team({store, commands, toasts, session, http, wire, clock: now =
   const pending = p => commands.state('project:' + p.id) === 'pending';
 
   const dialog = modal && ({
-    new: () => html`<${NewProject} people=${options} me=${me} busy=${commands.state('project:new') === 'pending'} onClose=${close}
+    new: () => html`<${NewProject} people=${options} me=${me} admin=${admin} busy=${commands.state('project:new') === 'pending'} onClose=${close}
       onCreate=${(n, owner) => send('project.create', owner === me ? {name: n} : {name: n, owner}, 'project:new', f('team.created', n))
-        .then(p => { close(); if (p?.id) setOpen(p.id); }, quiet)} />`,
+        .then(p => { close(); if (p?.id && owner === me) setOpen(p.id); }, quiet)} />`,
     invite: () => html`<${Invite} projects=${projectOptions} busy=${busy} made=${modal.made} copy=${copy} onClose=${close}
       onInvite=${p => { setBusy(true); http.makeInvite(p).then(made => { setModal({kind: 'invite', made}); readAdmin(); }, failed).finally(() => setBusy(false)); }} />`,
     admit: () => html`<${AddAdmit} busy=${busy} error=${modal.error} onClose=${close}
@@ -232,14 +263,21 @@ export function Team({store, commands, toasts, session, http, wire, clock: now =
     disable: () => html`<${Modal} title=${f('team.disableTitle', modal.user.name)} onClose=${close} actions=${[{label: t('confirm.keep'), onClick: close},
       {label: t('team.disable'), kind: 'primary', keyName: 'Mod+Enter', onClick: () => setUser(modal.user, {disabled: true}, f('team.disabledDone', modal.user.name))}]}>
       <p>${t('team.disableNote')}</p><//>`,
-    offboard: () => html`<${Offboard} user=${modal.user} people=${options} me=${me} busy=${busy} onClose=${close}
-      plan=${to => tm.offboardPlan(st, machines, modal.user, to)}
+    offboard: () => html`<${Offboard} user=${modal.user} people=${options} me=${me} wire=${wire} busy=${busy} onClose=${close}
       onGo=${to => call(http.offboard({user: modal.user, to}), f('team.offDone', name(modal.user), name(to)), readUsers)} />`,
     add: () => {
       const p = st.projects[modal.project];
       const people = options.filter(o => o.value !== p.owner && !(p.members || {})[o.value]);
       return html`<${AddMember} project=${p} people=${people} busy=${pending(p)} onClose=${close}
-        onAdd=${(user, role) => member(p, user, role, f('team.added', name(user), p.name)).then(close)} />`;
+        onAdd=${(user, role) => (tm.personal(p) ? setModal({kind: 'first', project: p.id, user, role})
+          : member(p, user, role, f('team.added', name(user), p.name)).then(close))} />`;
+    },
+    first: () => {
+      const p = st.projects[modal.project];
+      return html`<${Modal} title=${t('team.add') + ' · ' + p.name} onClose=${close} actions=${[{label: t('home.cancel'), onClick: close},
+        {label: t('team.firstAdd'), kind: 'primary', keyName: 'Mod+Enter', disabled: pending(p),
+          onClick: () => member(p, modal.user, modal.role, f('team.added', name(modal.user), p.name)).then(close)}]}>
+        <p>${f('team.firstMember', name(modal.user), tm.projectFacts(st, p).tasks)}</p><//>`;
     },
     remove: () => {
       const p = st.projects[modal.project];
@@ -260,7 +298,7 @@ export function Team({store, commands, toasts, session, http, wire, clock: now =
   const projectRows = html`<ul class="team-projects">${projects.map(p => {
     const n = tm.projectFacts(st, p);
     return html`<li key=${p.id}><button type="button" class=${cx('team-project', !phone && p.id === cur && 'sel')} onClick=${() => { setPicked(p.id); setOpen(p.id); }}>
-      <span class="team-project-head"><b>${p.name}</b><span class="t-muted">${f('team.owner', name(p.owner))}</span><span class="mono t-muted team-project-n">${f('team.tasks', n.tasks, n.open)}</span></span>
+      <span class="team-project-head"><b>${p.name}</b>${tm.personal(p) && html`<span class="chip team-personal">${t('team.personal')}</span>`}<span class="t-muted">${f('team.owner', name(p.owner))}</span><span class="mono t-muted team-project-n">${f('team.tasks', n.tasks, n.open)}</span></span>
       <span class="t-muted">${f('team.people', n.participants, n.readers)}</span>
       ${trackers.filter(x => x.project === p.id).map(x => html`<span class=${cx('team-sync', tm.trackerState(x) === 'ok' ? 't-muted' : 't-failed')}>
         ${f('team.sync', x.repo, t('team.sync.' + tm.trackerState(x)))}</span>`)}
@@ -288,8 +326,8 @@ export function Team({store, commands, toasts, session, http, wire, clock: now =
   return html`<div class="team">
     <div class="mach-head">
       <h1 class="tasks-title">${t('team.title')}</h1><span class="t-muted">${summary}</span>
-      ${admin && html`<span class="mach-head-acts"><${Button} icon="plus" onClick=${() => setModal({kind: 'new'})}>${t('team.new')}<//>
-        <${Button} kind="primary" onClick=${() => setModal({kind: 'invite'})}>${t('team.invite')}<//></span>`}
+      <span class="mach-head-acts"><${Button} icon="plus" onClick=${() => setModal({kind: 'new'})}>${t('team.new')}<//>
+        ${admin && html`<${Button} kind="primary" onClick=${() => setModal({kind: 'invite'})}>${t('team.invite')}<//>`}</span>
     </div>
     <div class="team-body">
       <div class="team-main-col">

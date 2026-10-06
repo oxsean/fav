@@ -263,6 +263,29 @@ func cmdToken(args []string) error {
 		}
 		fmt.Print(i18n.F("cli.server.token_rebound", args[1]))
 		return nil
+	case "owner":
+		if len(args) != 3 {
+			return i18n.E("cli.server.token_owner_usage")
+		}
+		c, ok := credByName(team, args[1])
+		if !ok || c.Kind != store.KindNode {
+			return i18n.E("cli.server.token_missing", args[1])
+		}
+		u, ok, err := team.User(args[2])
+		switch {
+		case err != nil:
+			return err
+		case !ok:
+			return i18n.E("cli.server.no_user", args[2])
+		case u.Disabled:
+			return i18n.E("cli.server.user_disabled", args[2])
+		}
+		if err := team.SetOwner(c.ID, u.ID); err != nil {
+			return err
+		}
+		team.Audit(store.AuditEntry{Actor: store.LocalUser, Kind: "machine", Detail: "owner " + c.Name + " " + c.Owner + " " + u.ID})
+		fmt.Print(i18n.F("cli.server.token_owned", c.Name, u.ID))
+		return nil
 	case "", "list", "ls":
 		cs, err := team.ActiveCredentials()
 		if err != nil {

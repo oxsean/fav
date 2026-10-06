@@ -203,3 +203,27 @@ func TestFileQualifier(t *testing.T) {
 		t.Errorf("most written first, then by path: %+v", got)
 	}
 }
+
+// TestProjectMatchesWhereTheSessionBelongs: a session in a project answers to the project's name or id, not to its
+// directory's name; one in none answers to its automatic group.
+func TestProjectMatchesWhereTheSessionBelongs(t *testing.T) {
+	in := &Rec{ID: "a", FavoritedAt: new(time.Now()), Project: "web-v2", ProjectID: "p_web", ProjectName: "Shop Web"}
+	out := &Rec{ID: "b", FavoritedAt: new(time.Now()), Project: "scratch"}
+	in.Prepare()
+	out.Prepare()
+	for q, want := range map[string][2]bool{
+		"project:p_web":   {true, false},
+		"project:shop":    {false, false},
+		"p:P_WEB":         {true, false},
+		"project:web-v2":  {false, false},
+		"project:scratch": {false, true},
+		"shop":            {true, false},
+	} {
+		if got := [2]bool{Parse(q).Match(in), Parse(q).Match(out)}; got != want {
+			t.Errorf("%q matches %v, want %v", q, got, want)
+		}
+	}
+	if in.Group() != "Shop Web" || out.Group() != "scratch" {
+		t.Errorf("groups %q %q", in.Group(), out.Group())
+	}
+}

@@ -54,67 +54,72 @@ const (
 
 // methodAccess covers every method a client may call; one missing here is refused.
 var methodAccess = map[string]access{
-	wire.MPing:          anyone,
-	remote.MHello:       anyone,
-	MStateGet:           reader,
-	MTaskGet:            reader,
-	MAgentList:          reader,
-	MMachineList:        reader,
-	MMachineCheck:       reader, // whoever sees the machine (checkMachines)
-	MStateWatch:         reader,
-	MRunTail:            reader,
-	MRunOutputPage:      reader,
-	MRunOutputWatch:     reader,
-	MRunMessages:        reader,
-	MRunOutputItem:      reader,
-	MRunOutputFind:      reader,
-	MRunChanges:         reader, // a directory run's other changes: its machine's owner only (runChanges)
-	MRunDiff:            reader,
-	MRunBlob:            reader,
-	MProjectDirs:        reader, // who may run the project's tasks on the machine (projectDirs)
-	MRunPreview:         reader,
-	MNodeCall:           reader, // a machine's own sessions: its owner and admins (nodeCall)
-	MTaskCreate:         writer,
-	MTaskEdit:           writer,
-	MTaskStatus:         writer,
-	MTaskUndo:           writer,
-	MTaskStart:          writer,
-	MTaskPause:          writer,
-	MTaskMove:           writer,
-	MAgentDefList:       reader,
-	MAgentDefGet:        reader,
-	MAgentDefSave:       writer,
-	MAgentDefCheck:      reader, // agentdef.save's rules, saving nothing (agentDefCheck)
-	MAgentDefRemove:     writer,
-	MAgentDefShare:      writer,
-	MAgentDefLeave:      writer,
-	MAgentDefTransfer:   writer,
-	MInboxList:          reader,
-	MMachinesWatch:      reader,
-	MInboxWatch:         reader,
-	MUserOffboard:       admin,
-	MTaskSync:           internal,
-	MTaskLink:           internal,
-	MTaskSourceAck:      writer,
-	MTaskGate:           writer,
-	MTaskMerge:          writer,
-	MTaskPlan:           writer,
-	MTaskPlanSave:       writer,
-	MTaskPlanApply:      writer,
-	MTaskMessage:        writer,
-	MTaskMessagePreview: reader,
-	MRunDispatch:        writer,
-	MRunStop:            writer,
-	MRunAbandon:         writer,
-	MRunAnswer:          writer,
-	MRunSend:            writer,
-	MRunInterrupt:       writer,
-	MRunContinue:        writer, // any session of a machine: its owner only (runContinue)
-	MProjectCreate:      admin,
-	MProjectEdit:        writer,
-	MProjectMember:      writer,
-	MMachineShare:       writer,
-	MMachineDrain:       writer, // its owner or an admin (machineDrain)
+	wire.MPing:           anyone,
+	remote.MHello:        anyone,
+	MStateGet:            reader,
+	MTaskGet:             reader,
+	MAgentList:           reader,
+	MMachineList:         reader,
+	MMachineCheck:        reader, // whoever sees the machine (checkMachines)
+	MStateWatch:          reader,
+	MRunTail:             reader,
+	MRunOutputPage:       reader,
+	MRunOutputWatch:      reader,
+	MRunMessages:         reader,
+	MRunOutputItem:       reader,
+	MRunOutputFind:       reader,
+	MRunChanges:          reader, // a directory run's other changes: its machine's owner only (runChanges)
+	MRunDiff:             reader,
+	MRunBlob:             reader,
+	MProjectDirs:         reader, // who may run the project's tasks on the machine (projectDirs)
+	MRunPreview:          reader,
+	MNodeCall:            reader, // a machine's own sessions: its owner and whom its scope names (readsSessions); node.dirs: its owner and admins
+	MSessionsList:        reader, // the same as node.call's session reads (readsSessions)
+	MTaskCreate:          writer,
+	MTaskEdit:            writer,
+	MTaskStatus:          writer,
+	MTaskUndo:            writer,
+	MTaskStart:           writer,
+	MTaskPause:           writer,
+	MTaskMove:            writer,
+	MAgentDefList:        reader,
+	MAgentDefGet:         reader,
+	MAgentDefSave:        writer,
+	MAgentDefCheck:       reader, // agentdef.save's rules, saving nothing (agentDefCheck)
+	MAgentDefRemove:      writer,
+	MAgentDefShare:       writer,
+	MAgentDefLeave:       writer,
+	MAgentDefTransfer:    writer,
+	MInboxList:           reader,
+	MMachinesWatch:       reader,
+	MInboxWatch:          reader,
+	MUserOffboard:        admin,
+	MUserOffboardPreview: admin,
+	MTaskSync:            internal,
+	MTaskLink:            internal,
+	MTaskSourceAck:       writer,
+	MTaskGate:            writer,
+	MTaskMerge:           writer,
+	MTaskPlan:            writer,
+	MTaskPlanSave:        writer,
+	MTaskPlanApply:       writer,
+	MTaskMessage:         writer,
+	MTaskMessagePreview:  reader,
+	MRunDispatch:         writer,
+	MRunStop:             writer,
+	MRunAbandon:          writer,
+	MRunAnswer:           writer,
+	MRunSend:             writer,
+	MRunInterrupt:        writer,
+	MRunContinue:         writer, // any session of a machine: its owner only (runContinue)
+	MProjectCreate:       writer, // a project of one's own; only an admin names another owner (projectCreate)
+	MProjectAttach:       writer, // its owner and admins on any machine, a participant on their own (attachable)
+	MProjectDetach:       writer,
+	MProjectEdit:         writer,
+	MProjectMember:       writer,
+	MMachineShare:        writer,
+	MMachineDrain:        writer, // its owner or an admin (machineDrain)
+	MMachineSessions:     writer, // its owner only (machineSessions)
 }
 
 func forbidden(what string) error { return &wire.Error{Code: wire.CodeUnauthorized, Detail: what} }
@@ -173,32 +178,40 @@ func (c *Coord) person(id string) *node.Person {
 	return &node.Person{ID: u.ID, Name: u.Name, Email: u.Email}
 }
 
-// roleIn is p's role in project: an admin participates everywhere.
-func roleIn(st *task.State, p Principal, project string) string {
-	if p.Admin {
+// seesAll: p is above anyone's privacy: mode 1's owner, or tend-server's own work (System), which acts for whoever
+// set it up.
+func (c *Coord) seesAll(p Principal) bool { return p.Admin && !c.team() || p.system }
+
+// roleIn is p's role in project: an admin participates in every project but someone else's personal one.
+func (c *Coord) roleIn(st *task.State, p Principal, project string) string {
+	pr := st.Projects[project]
+	if p.Admin && (c.seesAll(p) || !pr.Personal()) {
 		return task.RoleParticipant
 	}
-	return st.Projects[project].Role(p.User)
+	return pr.Role(p.User)
 }
 
-// taskRole is p's role for t: its project's, or, for a task outside any project, its owner's.
-func taskRole(st *task.State, p Principal, t *task.Task) string {
+// taskRole is p's role for t: its project's, or, for a task outside any project, its owner's alone (seesAll has every
+// task, those without an owner included).
+func (c *Coord) taskRole(st *task.State, p Principal, t *task.Task) string {
 	switch {
 	case t == nil:
 		return ""
-	case t.Project == "" && !p.Admin:
+	case t.Project == "" && !c.seesAll(p):
 		if p.User != "" && t.Owner == p.User {
 			return task.RoleParticipant
 		}
 		return ""
 	}
-	return roleIn(st, p, t.Project)
+	return c.roleIn(st, p, t.Project)
 }
 
-func canRead(st *task.State, p Principal, t *task.Task) bool { return taskRole(st, p, t) != "" }
+func (c *Coord) canRead(st *task.State, p Principal, t *task.Task) bool {
+	return c.taskRole(st, p, t) != ""
+}
 
-func canWrite(st *task.State, p Principal, t *task.Task) bool {
-	return taskRole(st, p, t) == task.RoleParticipant
+func (c *Coord) canWrite(st *task.State, p Principal, t *task.Task) bool {
+	return c.taskRole(st, p, t) == task.RoleParticipant
 }
 
 // runTask is run's task, nil for a run the state does not hold.
@@ -207,6 +220,17 @@ func runTask(st *task.State, run *task.Run) *task.Task {
 		return nil
 	}
 	return st.Tasks[run.Task]
+}
+
+// seesProject: p may know project pr exists: its members, and admins unless it is someone else's personal project.
+func (c *Coord) seesProject(p Principal, pr *task.Project) bool {
+	return pr.Role(p.User) != "" || p.Admin && (c.seesAll(p) || !pr.Personal())
+}
+
+// readsSessions: p may read machine's own sessions, through node.call or sessions.list: its owner, or whom its session
+// scope names. Admins are not exempt, nor are machines under local. The caller holds mu.
+func (c *Coord) readsSessions(p Principal, machine string) bool {
+	return c.ownerOf(machine) == p.User || c.st.Shares[machine] != nil && c.st.Shares[machine].Sessions.Opens(c.st.Projects, p.User)
 }
 
 // canUse: p may start a run of project on machine: its owner, or someone it is shared with. Admins are not exempt,
@@ -224,7 +248,7 @@ func (c *Coord) canSee(p Principal, machine string) bool {
 	if s == nil {
 		return false
 	}
-	if slices.Contains(s.Users, p.User) {
+	if slices.Contains(s.Users, p.User) || s.Sessions.Opens(c.st.Projects, p.User) {
 		return true
 	}
 	for _, id := range s.Projects {
@@ -257,7 +281,7 @@ func (c *Coord) stillAllowed(run *task.Run) bool {
 	}
 	p := Principal{User: u.ID, Admin: u.Admin}
 	t := c.st.Tasks[run.Task]
-	return canWrite(c.st, p, t) && c.canUse(p, run.Machine, t.Project)
+	return c.canWrite(c.st, p, t) && c.canUse(p, run.Machine, t.Project)
 }
 
 // visibleState is st cut down to what p may see: st is a copy the caller owns.
@@ -266,7 +290,7 @@ func (c *Coord) visibleState(p Principal, st *task.State) *task.State {
 		return st
 	}
 	for id, t := range st.Tasks {
-		if !canRead(st, p, t) {
+		if !c.canRead(st, p, t) {
 			delete(st.Tasks, id)
 		}
 	}
@@ -276,14 +300,19 @@ func (c *Coord) visibleState(p Principal, st *task.State) *task.State {
 		}
 	}
 	for id, pr := range st.Projects {
-		if !p.Admin && pr.Role(p.User) == "" {
+		if !c.seesProject(p, pr) {
 			delete(st.Projects, id)
 		}
 	}
 	c.mu.Lock()
-	for m := range st.Shares {
-		if !c.canSee(p, m) {
+	for m, s := range st.Shares {
+		switch {
+		case !c.canSee(p, m):
 			delete(st.Shares, m)
+		case s.Sessions != nil && c.ownerOf(m) != p.User: // the scope is its owner's to know
+			cp := *s
+			cp.Sessions = nil
+			st.Shares[m] = &cp
 		}
 	}
 	for m := range st.Drains {
@@ -322,23 +351,23 @@ func (c *Coord) sees(p Principal, e journal.Event) bool {
 	json.Unmarshal(e.Data, &s)
 	switch e.Type {
 	case task.ETaskCreated, task.ETaskEdited, task.ETaskStatus, task.ETaskRestored:
-		return canRead(c.st, p, c.st.Tasks[s.ID])
+		return c.canRead(c.st, p, c.st.Tasks[s.ID])
 	case task.ERunQueued, task.ERunStarting, task.ERunObserved, task.ERunStopAsked, task.ERunCanceled, task.ERunAbandoned,
 		task.ERunAnswered, task.ERunSent, task.ERunInterrupt:
-		return canRead(c.st, p, runTask(c.st, c.st.Runs[s.ID]))
+		return c.canRead(c.st, p, runTask(c.st, c.st.Runs[s.ID]))
 	case task.EProjectCreated, task.EProjectEdited:
-		return p.Admin || c.st.Projects[s.ID].Role(p.User) != ""
+		return c.seesProject(p, c.st.Projects[s.ID])
 	case task.EMemberSet:
-		return p.Admin || c.st.Projects[s.Project].Role(p.User) != ""
-	case task.EMachineShared, task.EMachineDrained:
+		return c.seesProject(p, c.st.Projects[s.Project])
+	case task.EMachineShared, task.EMachineDrained, task.ESessionsShared:
 		return c.canSee(p, s.Machine)
 	case task.ETaskMoved, task.ETaskHeld, task.ETaskPaused, task.ETaskSourced, task.ETaskSourceAcked, task.ETaskStaged, task.ETaskNoted,
 		task.ETaskLinked, task.EPlanDrafted, task.EPlanApplied:
-		return canRead(c.st, p, c.st.Tasks[s.ID])
+		return c.canRead(c.st, p, c.st.Tasks[s.ID])
 	case task.ETaskStarted:
 		var d task.TaskStart
 		json.Unmarshal(e.Data, &d)
-		return slices.ContainsFunc(d.IDs, func(id string) bool { return canRead(c.st, p, c.st.Tasks[id]) })
+		return slices.ContainsFunc(d.IDs, func(id string) bool { return c.canRead(c.st, p, c.st.Tasks[id]) })
 	case task.EAgentDefSaved, task.EAgentDefShared, task.EAgentDefTransferred:
 		d := c.st.AgentDefs[s.Name]
 		return d != nil && c.readsDef(p, d)
@@ -372,7 +401,7 @@ func (c *Coord) visibleEnv(p Principal, env journal.Envelope) journal.Envelope {
 func reshapes(env journal.Envelope) bool {
 	for _, e := range env.Events {
 		switch e.Type {
-		case task.EMemberSet, task.EProjectEdited, task.EMachineShared, task.EAgentDefShared, task.EAgentDefRemoved, task.EAgentDefTransferred:
+		case task.EMemberSet, task.EProjectEdited, task.EMachineShared, task.ESessionsShared, task.EAgentDefShared, task.EAgentDefRemoved, task.EAgentDefTransferred:
 			return true
 		case task.ETaskEdited:
 			var d task.TaskEdit
@@ -391,13 +420,13 @@ func (c *Coord) seesResult(p Principal, result json.RawMessage) bool {
 		return true
 	}
 	if t := c.st.Tasks[s.ID]; t != nil {
-		return canRead(c.st, p, t)
+		return c.canRead(c.st, p, t)
 	}
 	if r := c.st.Runs[s.ID]; r != nil {
-		return canRead(c.st, p, runTask(c.st, r))
+		return c.canRead(c.st, p, runTask(c.st, r))
 	}
 	if pr := c.st.Projects[s.ID]; pr != nil {
-		return p.Admin || pr.Role(p.User) != ""
+		return c.seesProject(p, pr)
 	}
 	return true
 }

@@ -44,9 +44,10 @@ export function useListKeys({ids, selected, onSelect, onOpen, onToggle, onPick, 
 const sortMark = {asc: '▲', desc: '▼'};
 
 // Table: columns [{id, label, width, align, sort(a, b), render(row), mobile}], mobile being lead (before the text),
-// primary, secondary, trailing or hidden (the default). rowHeight is the density's row in px; height is the
+// primary, line (a line of its own under primary), secondary, trailing or hidden (the default); rowClass(row) adds a
+// row's own class. rowHeight is the density's row in px; height is the
 // viewport's until the page has measured it.
-export function Table({label, columns, rows, rowKey = r => r.id, selected, onSelect, onOpen, onToggle, onPick, rowHeight, height = 480, active = true, empty}) {
+export function Table({label, columns, rows, rowKey = r => r.id, selected, onSelect, onOpen, onToggle, onPick, rowHeight, height = 480, active = true, empty, rowClass = () => ''}) {
   const phone = usePhone();
   const {t, f} = useWords();
   const [order, setOrder] = useState({by: '', dir: 'asc'});
@@ -83,11 +84,12 @@ export function Table({label, columns, rows, rowKey = r => r.id, selected, onSel
       <ul class="cards" aria-label=${label}>
         ${shown.map(r => {
           const id = rowKey(r);
-          return html`<li key=${id}><button type="button" class=${cx('card-row', id === selected && 'sel')} aria-current=${id === selected ? 'true' : undefined}
+          return html`<li key=${id}><button type="button" class=${cx('card-row', rowClass(r), id === selected && 'sel')} aria-current=${id === selected ? 'true' : undefined}
             onClick=${() => { onSelect?.(id); onOpen?.(id); }}>
             ${part('lead').map(c => html`<span class="card-lead">${cell(c, r)}</span>`)}
             <span class="card-main">
               <span class="card-primary">${part('primary').map((c, i) => html`${i > 0 ? ' · ' : ''}${cell(c, r)}`)}</span>
+              ${part('line').map(c => cell(c, r))}
               ${part('secondary').length > 0 && html`<span class="card-secondary">${part('secondary').map((c, i) => html`${i > 0 ? ' · ' : ''}${cell(c, r)}`)}</span>`}
             </span>
             ${part('trailing').map(c => html`<span class="card-trailing mono">${cell(c, r)}</span>`)}
@@ -114,7 +116,7 @@ export function Table({label, columns, rows, rowKey = r => r.id, selected, onSel
       ${pad(win.before)}
       ${shown.map((r, i) => {
         const id = rowKey(r);
-        return html`<div role="row" key=${id} class=${cx('tr', id === selected && 'sel')} aria-selected=${id === selected ? 'true' : 'false'}
+        return html`<div role="row" key=${id} class=${cx('tr', rowClass(r), id === selected && 'sel')} aria-selected=${id === selected ? 'true' : 'false'}
           aria-rowindex=${win.start + i + 2} style=${grid} onClick=${() => onSelect?.(id)} onDblClick=${() => onOpen?.(id)}>
           ${columns.map(c => html`<div role="gridcell" class=${cx('td', c.align && 'align-' + c.align)}>${cell(c, r)}</div>`)}
         </div>`;

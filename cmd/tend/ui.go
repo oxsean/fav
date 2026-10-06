@@ -263,7 +263,7 @@ func cmdFzfPick(args []string) error {
 		}
 		return pickResult(tend.ReplaceTokens(query, toks, tend.HasPrefix("#")))
 	case "projects":
-		sel := fzfui.Pick(i18n.T("label.projects"), append([]string{i18n.T("picker.all")}, counted(tend.CountBy(scopeRecs(s, query), func(r *tend.Rec) []string { return []string{r.Project} }))...), false)
+		sel := fzfui.Pick(i18n.T("label.projects"), append([]string{i18n.T("picker.all")}, projectChoices(scopeRecs(s, query))...), false)
 		if sel == nil {
 			return pickResult(query)
 		}
@@ -329,6 +329,24 @@ func scopeRecs(s *tend.Store, query string) []*tend.Rec {
 	}
 	recs, _ := listRecs(s, idx, nil, q, "")
 	return recs
+}
+
+// projectChoices: the projects first, each as its id (what the filter takes) and its name, then the automatic groups.
+func projectChoices(recs []*tend.Rec) []string {
+	names := map[string]string{}
+	for _, r := range recs {
+		names[r.ProjectID] = r.ProjectName
+	}
+	var out []string
+	for _, c := range tend.CountBy(recs, func(r *tend.Rec) []string { return []string{r.ProjectID} }) {
+		out = append(out, fmt.Sprintf("%s  %s %s  (%d)", c.Name, render.GlyphProject, names[c.Name], c.N))
+	}
+	return append(out, counted(tend.CountBy(recs, func(r *tend.Rec) []string {
+		if r.ProjectID != "" {
+			return nil
+		}
+		return []string{r.Project}
+	}))...)
 }
 
 func counted(counts []tend.Count) []string {

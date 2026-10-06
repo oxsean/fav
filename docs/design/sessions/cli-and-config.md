@@ -8,6 +8,7 @@
 tend                              默认 UI（TEND_UI=fzf|tui）
 tend tui [--no-mouse] | tend fzf
 tend add [--supersede <id>] [--session-id <id>] [--provider <p>]
+                                       从 stdin 读 /tend 的 JSON；会话目录属于某个项目时 project 写成项目名（「项目表」）
 tend list [表达式] [--json|--line] [--limit N]
 tend sessions [表达式] [--json] [--limit N]   本机全部会话，收藏的和没收藏的都在
 tend show <id> [--json]
@@ -67,6 +68,15 @@ tend uninstall-skill                    只删 ~/.claude、~/.codex 下的 tend 
 所有面向 UI 的子命令支持稳定 JSON 输出（list / sessions / show / trash / clean / fix 的列表都有 `--json`），ANSI 展示输出与业务数据分离。
 所有 `[y/N]` 确认在 stdin 不是终端时直接报错退出，要脚本化就加 `-y`；clean / fix 有失败项时非零退出。
 子命令一律用 `newFlags(name)` 建参数解析器：`-h` / `--help` 只打印全局用法里属于这个子命令的行和它的参数，退出码 0；`tend help` 打完整用法。
+
+### 项目表
+
+`tend add`、`tend list` / `sessions`、fzf 的各页和项目选择器、`tend report` 用的是同一个归属（`cmd/tend/projects.go`，每个命令只读一次）：
+
+- 单机：只折叠本机协调器日志（`<数据目录>/coord/events.jsonl`）里的项目和成员事件，不拿锁；另一台机器的系统取这次连上时 `hello` 说的 `OS`，不知道时按路径写法猜。
+- server（`coordinator.url`）：读 `<数据目录>/projects.json`（0600，`projects.SaveTable`），30 秒内写的才用；没有就拨号 1 秒（`hello` + `state.get` + `machine.list`），拿到就写进表。拨号失败也记在表里（`failed_at`），30 秒内不再拨；这时没有项目，全部按自动组，从不用过期的表。
+
+fzf 的项目选择器先列项目（`<id>  # <名字>  (N)`，选了写 `project:<id>`），再列自动组；卡片和行里的项目写项目名（`Rec.Group()`）。`--json` 输出里的 `project` 仍是记录自己的字段。
 
 ## 配置
 

@@ -69,6 +69,7 @@ func hostRows(q tend.Query) ([]*tend.Rec, map[string]map[string]capture.Live) {
 		st      remote.State
 		live    map[string]capture.Live
 		liveErr error
+		goos    string
 	}
 	answers := make([]answer, len(names))
 	ctx, cancel := context.WithTimeout(context.Background(), hostTimeout)
@@ -84,6 +85,11 @@ func hostRows(q tend.Query) ([]*tend.Rec, map[string]map[string]capture.Live) {
 				a.st.Err = failed
 			case cachedFor == 0 || a.st.At.IsZero() || time.Since(a.st.At) > cachedFor:
 				a.recs, a.st = h.Sessions(ctx, name)
+				if a.st.Err == nil {
+					if hello, err := h.Hello(ctx, name); err == nil { // reached just now: no dial
+						a.goos = hello.OS
+					}
+				}
 			}
 			if q.Status == tend.StatusLive && a.st.Err == nil {
 				var at time.Time
@@ -96,8 +102,13 @@ func hostRows(q tend.Query) ([]*tend.Rec, map[string]map[string]capture.Live) {
 	wg.Wait()
 	var out []*tend.Rec
 	live := make(map[string]map[string]capture.Live, len(names))
+	snap, rows := sessionProjects(), belongRows()
 	for i, name := range names {
 		a := answers[i]
+		if _, known := snap.OS[name]; a.goos != "" && !known && snap.OS != nil {
+			snap.OS[name] = a.goos
+		}
+		rows.Place(a.recs...)
 		switch {
 		case a.st.Err != nil && !a.st.At.IsZero():
 			fmt.Fprintln(os.Stderr, i18n.F("cli.host.cached", name, remote.Reason(a.st.Err), render.WhenFull(a.st.At)))

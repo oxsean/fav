@@ -130,8 +130,8 @@ func line(r *tend.Rec, now time.Time, col string) string {
 // Meta: provider · project, after an @host mark for another machine's session.
 func Meta(r *tend.Rec) string {
 	meta := tend.ProviderName(r.Provider)
-	if r.Project != "" {
-		meta += " · " + r.Project
+	if g := r.Group(); g != "" {
+		meta += " · " + g
 	}
 	if r.Host != "" {
 		meta = HostMark(r) + " · " + meta
@@ -240,7 +240,7 @@ func Preview(r *tend.Rec, src Source, width int, now time.Time) string {
 			line(dim.p(Pad(k, labelW)) + Truncate(v, width-labelW))
 		}
 	}
-	field(GlyphProject+i18n.T("card.project"), r.Project)
+	field(GlyphProject+i18n.T("card.project"), r.Group())
 	field(GlyphTerm+i18n.T("card.type"), r.WorkType)
 	field(GlyphBranch+i18n.T("card.branch"), r.GitBranch)
 	field(GlyphDir+i18n.T("card.directory"), paths.Tilde(r.Cwd))

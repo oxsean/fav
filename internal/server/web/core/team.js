@@ -60,11 +60,36 @@ export function machineNotes(m, drain) {
 // mayShare: session may change who else uses m (its owner or an admin; nobody once it is retired or has no owner).
 export const mayShare = (session, m) => !m.retired && !!m.owner && (isAdmin(session) || m.owner === session?.id);
 
-// mayRead: session may read m's own sessions (node.call: its owner or an admin).
-export const mayRead = (session, m) => isAdmin(session) || (!!m.owner && m.owner === session?.id);
+// mayRead: the viewer may read m's own sessions, as the coordinator says (its owner, or whom its scope names).
+export const mayRead = (session, m) => !!m?.sessions;
 
 // opensSessions: the viewer may open m's own sessions page: the server forwards node.call and session may read them.
 export const opensSessions = (wire, session, m) => !!wire?.has?.('node.call') && mayRead(session, m);
+
+// sharedToMe: the viewer reads m's sessions because its owner shares them, read only.
+export const sharedToMe = (session, m) => !!m?.sessions && !!m.owner && m.owner !== session?.id;
+
+// ⚠️ Who sees a machine's sessions (task.SessionShare): nobody but its owner, people by name, a project's owner and
+// members, or everyone signed in to the team.
+export const scopeKinds = ['private', 'users', 'project', 'team'];
+
+// scopeOf is the session_share the coordinator gives m's owner as one of scopeKinds, with the people or the project
+// it names; a project no longer in state counts as private.
+export function scopeOf(state, m) {
+  const s = m?.session_share || {};
+  if (s.team) return {kind: 'team', users: [], project: ''};
+  const project = (s.projects || []).find(id => state.projects?.[id]) || '';
+  if (project) return {kind: 'project', users: [], project};
+  if (s.users?.length) return {kind: 'users', users: [...s.users], project: ''};
+  return {kind: 'private', users: [], project: ''};
+}
+
+// scopeParams is what machine.sessions sends for a scope: nothing but the machine for private.
+export const scopeParams = (machine, sc) => ({machine, ...(sc.kind === 'users' ? {users: sc.users}
+  : sc.kind === 'project' ? {projects: [sc.project]} : sc.kind === 'team' ? {team: true} : {})});
+
+// scopeReady: a scope that names someone, or private.
+export const scopeReady = sc => (sc.kind === 'users' ? sc.users.length > 0 : sc.kind === 'project' ? !!sc.project : true);
 
 // queueOn is what waits for the machine: its queued runs, first queued first, each with its task and why it waits.
 export const queueOn = (state, name) => sel.openRuns(state).filter(x => x.run.state === 'queued' && x.run.machine === name);
@@ -107,27 +132,15 @@ export function projectFacts(state, p) {
     participants: roles.filter(r => r === 'participant').length + (p.owner ? 1 : 0), readers: roles.filter(r => r === 'reader').length};
 }
 
+// personal: p has an owner and no one else takes part in it (task.Project.Personal: a project without an owner is not).
+export const personal = p => !!p?.owner && !Object.keys(p.members || {}).some(u => u !== p.owner);
+
 // mayManage: session may change project p's members and settings (its owner or an admin).
 export const mayManage = (session, p) => !!p && (isAdmin(session) || p.owner === session?.id);
 
-// offboardPlan is what handing user's work to to does, as the coordinator does it (coord.userOffboard): the projects
-// they own go to to, they leave the projects they are in, their unfinished tasks (as owner or approver) go to each
-// project's owner once this is done (to without a project), their agent definitions go to to, their machines close to
-// everyone else and the runs others queued there are canceled.
-export function offboardPlan(state, machines, user, to) {
-  const owned = Object.values(state.projects || {}).filter(p => p.owner === user).map(p => p.id);
-  const heir = p => (owned.includes(p) || !state.projects?.[p] ? to : state.projects[p].owner);
-  const tasks = Object.values(state.tasks || {}).filter(t => !finished(t.status) && (t.owner === user || t.approver === user));
-  const mine = machines.filter(m => m.owner === user && !m.retired).map(m => m.name);
-  const canceled = Object.values(state.runs || {}).filter(r => r.state === 'queued' && mine.includes(r.machine) && r.dispatcher !== user);
-  return {
-    projects: owned,
-    left: Object.values(state.projects || {}).filter(p => (p.members || {})[user] !== undefined).map(p => p.id),
-    tasks: tasks.map(t => ({id: t.id, to: heir(t.project)})),
-    defs: Object.values(state.agent_defs || {}).filter(d => d.owner === user).map(d => d.name).sort(),
-    machines: mine, canceled: canceled.length,
-  };
-}
+// offboardOf is user.offboard.preview's answer with every field it may leave out filled.
+export const offboardOf = p => ({projects: p?.projects || [], left: p?.left || [], tasks: p?.tasks || [], defs: p?.defs || [],
+  machines: p?.machines || [], canceled: p?.canceled || 0, private: p?.private || 0});
 
 // ⚠️ The security log's kinds (server.audit) in the page's groups: sign-ins, credentials, refusals.
 const auditGroups = {

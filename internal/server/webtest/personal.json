@@ -1,0 +1,8 @@
+[
+  {"why": "an owner and no members", "project": {"id": "a", "owner": "u_b"}, "personal": true},
+  {"why": "an owner listed among the members alone", "project": {"id": "b", "owner": "u_b", "members": {"u_b": "participant"}}, "personal": true},
+  {"why": "a reader besides the owner", "project": {"id": "c", "owner": "u_b", "members": {"u_e": "reader"}}, "personal": false},
+  {"why": "a participant besides the owner", "project": {"id": "d", "owner": "u_b", "members": {"u_b": "participant", "u_c": "participant"}}, "personal": false},
+  {"why": "no owner, no members", "project": {"id": "e"}, "personal": false},
+  {"why": "no owner, one member", "project": {"id": "f", "members": {"u_b": "participant"}}, "personal": false}
+]

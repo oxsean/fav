@@ -24,6 +24,7 @@ func stage(t *testing.T, teamMode bool) *env {
 	var e *env
 	if teamMode {
 		e = team(t, cfg)
+		e.users[eve.User] = User{ID: eve.User, Name: "eve"}
 	} else {
 		e = newEnv(t, cfg)
 	}
@@ -33,6 +34,11 @@ func stage(t *testing.T, teamMode bool) *env {
 		e.project()
 		if err := callAs(e.as(ann), MMachineShare, "s-solo-none", task.Share{Machine: "solo"}, nil); err != nil {
 			t.Fatal(err)
+		}
+		for _, m := range []string{"far", "solo"} {
+			if err := callAs(e.as(ann), MMachineSessions, "ss-"+m, task.SessionsSet{Machine: m, Users: []string{eve.User}}, nil); err != nil {
+				t.Fatal(err)
+			}
 		}
 	}
 	return e
@@ -172,21 +178,38 @@ func (e *env) offered(p Principal, taskID, runID string) (tasks, runs []string) 
 
 // TestEveryActionGivenIsTakenAndNoneWithheldIs: for each viewer, each state and each action that state allows, the
 // coordinator takes the action exactly when the viewer's affordances give it; the viewers cover the machine's owner,
-// the dispatcher, a reader, someone outside the project, an admin whose project the machine is not shared with, and
-// mode 1.
+// the dispatcher, a reader, someone outside the project, an admin whose project the machine is not shared with, someone
+// who reads the machines' sessions and is in no project, an admin before a task of no project (private) or in someone's
+// personal project, and mode 1.
 func TestEveryActionGivenIsTakenAndNoneWithheldIs(t *testing.T) {
+	type seat struct {
+		p       Principal
+		project string
+	}
 	for _, teamMode := range []bool{true, false} {
 		e := stage(t, teamMode)
-		viewers, project, owner := []Principal{root, ann, bob, cy, dee}, "p1", bob.User
-		if !teamMode {
-			viewers, project, owner = []Principal{Owner}, "", Owner.User
+		var seats []seat
+		for _, p := range []Principal{root, ann, bob, cy, dee, eve} {
+			seats = append(seats, seat{p, "p1"})
+		}
+		seats = append(seats, seat{root, ""}, seat{root, "side"}, seat{bob, ""}, seat{bob, "side"})
+		owner := bob.User
+		if teamMode {
+			e.personalProject()
+		} else {
+			seats, owner = []seat{{Owner, ""}}, Owner.User
 		}
 		n, given, withheld := 0, 0, 0
-		for _, p := range viewers {
+		for _, s := range seats {
+			p, project := s.p, s.project
+			hidden := teamMode && p.Admin && project != "p1"
 			for _, kind := range scenes {
 				n++
 				tid, rid := e.scene(kind, project, owner, n)
 				tasks, runs := e.offered(p, tid, rid)
+				if hidden && len(tasks)+len(runs) > 0 {
+					t.Errorf("an admin is given %v %v on bob's own %s task in %q", tasks, runs, kind, project)
+				}
 				e.c.mu.Lock()
 				tc := e.c.st.TaskActions(e.c.st.Tasks[tid])
 				var rc []string
@@ -204,7 +227,7 @@ func TestEveryActionGivenIsTakenAndNoneWithheldIs(t *testing.T) {
 						err := e.act(p, a, t2, r2)
 						want := slices.Contains(offer, a)
 						if want != (err == nil) {
-							t.Errorf("team %v, %s, %s, %s: given %v, taken: %v", teamMode, p.User, kind, a, want, err)
+							t.Errorf("team %v, %s, %q, %s, %s: given %v, taken: %v", teamMode, p.User, project, kind, a, want, err)
 						}
 						if want {
 							given++

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/oxsean/fav/internal/fixture"
+	"github.com/oxsean/fav/internal/paths"
 )
 
 func main() {
@@ -81,7 +82,8 @@ func smoke(dir string) error {
 	return hostsSmoke(d, env, bin)
 }
 
-// taskSmoke: a task run to its end by the fake agent, this process being the coordinator for the command.
+// taskSmoke: a task of its own, beside the fixture's, run to its end by the fake agent, this process being the
+// coordinator for the command.
 func taskSmoke(d *fixture.Dataset, env []string, bin string) error {
 	proj := filepath.Join(d.Root, "task-smoke")
 	if err := os.MkdirAll(proj, 0o755); err != nil {
@@ -97,12 +99,23 @@ func taskSmoke(d *fixture.Dataset, env []string, bin string) error {
 		return err
 	}
 	var tasks []struct {
-		ID string `json:"id"`
+		ID    string `json:"id"`
+		Title string `json:"title"`
+		Dir   string `json:"dir"`
 	}
-	if err := json.Unmarshal(out, &tasks); err != nil || len(tasks) != 1 {
+	if err := json.Unmarshal(out, &tasks); err != nil {
 		return fmt.Errorf("task list: %s", out)
 	}
-	return run(env, bin, "run", "start", "--runner", "background", "--wait", tasks[0].ID)
+	var mine []string
+	for _, t := range tasks {
+		if t.Title == "smoke" && paths.Same(t.Dir, proj) {
+			mine = append(mine, t.ID)
+		}
+	}
+	if len(mine) != 1 {
+		return fmt.Errorf("task list: %d smoke tasks in %s", len(mine), out)
+	}
+	return run(env, bin, "run", "start", "--runner", "background", "--wait", mine[0])
 }
 
 // hostsSmoke: this machine as both ends of the multi-host path, tend reaching its own launcher as a process.

@@ -21,6 +21,7 @@
 - 角色限制方法：node token 只能被调用 `run.*` 和会话读取、只能推 `node.changed`；client token 只能调客户端方法。
 - 同一节点 token 重复连接：后连的赢，旧连接关掉。
 - 节点身份：节点第一次用到时生成 `<home>/node/id`（`n_` + 16 位十六进制），握手时放在 `hello.node_id`。节点 token 第一次被带 id 的节点用时绑定这个 id（凭据记 `node_id`、`host`）；不带 id 的节点一律拒绝；之后别的 id 拿它连 → `unauthorized "node identity"`，server 在 stderr 记一行。换机器用 `tend-server token rebind <名>` 解绑，下一个连上的节点重新绑定；`token list` 多一列 MACHINE。
+- 改机器主人：`tend-server token owner <机器> <用户>` 把这台机器的节点 token 改给另一个人（`store.Team.SetOwner`），token、绑定的节点身份都不变，不用 `rebind`；记审计 `machine`（`owner <机器> <旧主人> <新主人>`）。没有这台机器的节点 token、没有这个用户、用户已停用都拒绝。server 下次重读凭据（3 s 内）后，协调器的机器主人就是新主人，`Reaffirm` 把它推给客户端。用 `token add --node` 不带 `--owner` 登记的机器和从 `tokens.json` 迁来的机器都在 `local` 名下，会话除了 `local` 谁都读不了（管理员也不行），要先这样改给真正的主人。
 - server 自己的密钥：Web Push（VAPID）的 P-256 密钥对在第一次启动时生成，私钥用 `seal.go` 封存进库的 `secrets` 表（[tasks/storage.md](../tasks/storage.md)「表」），以后启动读出来用；`GET /api/push/key`（登录后）回 `{key}`，是 base64url 的未压缩公钥，浏览器订阅推送时要它。库里的密钥用当前的 `server.key` 解不开时照原样留着、不重新生成（订阅都绑在原来的公钥上），server 在 stderr 记一行，没有推送地照常运行，`/api/push/key` 回 503 `push_key`。每条推送按 RFC 8291 为那个浏览器单独加密（aes128gcm、一个记录，每条新的发送方密钥和 salt，正文最多 3993 字节），用这对密钥按 RFC 8292 签 VAPID（ES256 的 JWT，`aud` 是推送服务的 origin，12 小时有效；`sub` 是 `server.public_url`，它不是 https 时用项目地址 `https://github.com/oxsean/fav`），都只用标准库（`webpush.go`），对照 RFC 8291 附录 A 的中间值测试。推送按钮的令牌由另一把 32 字节的密钥 `act` 签（HMAC-SHA256），同样封存在 `secrets` 里、重启后照用，签过的令牌在重启后仍然有效；解不开时推送不带按钮，`/api/act` 回 503 `act_key`（令牌和 `/api/act` 见 [tasks/team.md](../tasks/team.md)「人在任务里」的实现）。
 - 吊销：连接和推送设备记下它们用的凭据 id；server 每 3 s 从数据库重读有效凭据和用户，凭据已吊销、过期或用户已停用的连接关掉，推送设备去掉（[tasks/team.md](../tasks/team.md)「人在任务里」的实现）。
 
@@ -51,7 +52,7 @@
 
 - `spec.json`、`prompt.md`、token 文件、`coord/tend.db` 一律 0600。
 - 任务书正文不进 argv / ps。
-- 模式二信任边界按人划分：个人 token 只有它主人的权限；只有主人是 `local` 的客户端 token（`tend-server token add --client` 不带 `--owner`）和 `tend-server` 命令行算内置管理员 `local`，拿到这种 token = 能在 `allow_dirs` 里用允许的档案跑任意任务书、读所有节点的会话；`node.call` 限机器主人和管理员；连 server 的节点默认 `share_sessions: runs`。部署在 tailnet 或公网都行，公网必须 TLS；`--plain` 时只让绑定 tailnet 地址的转发器连它。
+- 模式二信任边界按人划分：个人 token 只有它主人的权限；只有主人是 `local` 的客户端 token（`tend-server token add --client` 不带 `--owner`）和 `tend-server` 命令行算内置管理员 `local`，拿到这种 token = 能在 `allow_dirs` 里用允许的档案跑任意任务书、读 `local` 名下节点的会话；读一台机器的会话（`node.call`、`sessions.list`）限机器主人和他放进会话可见范围的人，管理员不例外（[tasks/team.md](../tasks/team.md)「共享：agent 和机器默认私有」）；连 server 的节点默认 `share_sessions: runs`。部署在 tailnet 或公网都行，公网必须 TLS；`--plain` 时只让绑定 tailnet 地址的转发器连它。
 - token 哈希按常量时间比较。
 - server 替成员发出的请求（webhook、Web Push、工单）只连公网地址，内网网段要管理员写进 `server.egress_allow`（[tasks/team.md](../tasks/team.md)「人在任务里」的实现，「出网」）。tailnet 的地址（`100.64.0.0/10`、`fd7a:115c:a1e0::/48`）也不连：tailnet 上的工单系统和 webhook 要把它们的地址或这两段写进 `server.egress_allow`（如 `["100.101.8.10/32"]`），写整段就是让每个成员都能让 server 连 tailnet 上任何一台机器。
 - 升级到带 `__Host-` 前缀的会话 cookie 的版本后，https 下旧的 `tend_session` 不再认：每个浏览器（包括主屏幕上的 PWA）要重新登录一次，推送设备在重新登录后打开页面时按新会话重新登记。

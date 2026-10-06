@@ -1,0 +1,12 @@
+{"note":"an admin hands Bo's work over: the dialog asks user.offboard.preview for each heir it is opened with or changed to; Bo keeps two private tasks; the preview for Cy fails once and is asked again, and there Bo keeps none"}
+{"step":"open"}
+{"c":{"type":"req","id":5,"method":"user.offboard.preview","params":{"user":"u_b","to":"u_a"}}}
+{"step":"waiting"}
+{"s":{"type":"res","id":5,"result":{"user":"u_b","to":"u_a","projects":["p2"],"left":["p1"],"tasks":[{"id":"t1","to":"u_a"},{"id":"t3","to":"u_a"}],"defs":["bo-dev"],"machines":["bo-laptop"],"private":2}}}
+{"step":"previewed"}
+{"c":{"type":"req","id":6,"method":"user.offboard.preview","params":{"user":"u_b","to":"u_c"}}}
+{"s":{"type":"res","id":6,"error":{"code":"timeout","detail":"the coordinator did not answer"}}}
+{"step":"failed"}
+{"c":{"type":"req","id":7,"method":"user.offboard.preview","params":{"user":"u_b","to":"u_c"}}}
+{"s":{"type":"res","id":7,"result":{"user":"u_b","to":"u_c","projects":["p2"],"left":["p1"],"tasks":[{"id":"t1","to":"u_a"},{"id":"t3","to":"u_c"}],"machines":["bo-laptop"]}}}
+{"step":"retried"}

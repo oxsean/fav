@@ -127,8 +127,8 @@ func TestSigningInWithAProviderNeedsAnAdmission(t *testing.T) {
 	if err := cl.Call(ctx, coord.MMachineList, coord.MachinesParams{}, &ms); err != nil || len(ms.Machines) != 0 {
 		t.Fatalf("a member sees no machine of the host's: %+v %v", ms, err)
 	}
-	if err := cl.CallCommand(ctx, coord.MProjectCreate, "p", coord.ProjectCreate{Name: "x"}, nil); wire.Code(err) != wire.CodeUnauthorized {
-		t.Fatalf("a member creates no project: %v", err)
+	if err := cl.CallCommand(ctx, coord.MProjectCreate, "p", coord.ProjectCreate{Name: "x", Owner: "u_other"}, nil); wire.Code(err) != wire.CodeUnauthorized {
+		t.Fatalf("a member creates no project for someone else: %v", err)
 	}
 
 	off := true

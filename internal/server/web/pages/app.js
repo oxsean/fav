@@ -108,7 +108,7 @@ export function App({store, commands, toasts, wire, http, router, keys, nav, pre
         : route.page === 'team'
           ? html`<${Team} store=${store} commands=${commands} toasts=${toasts} platform=${platform} session=${session} http=${http} wire=${wire} clock=${clock} copy=${copy} />`
           : route.page === 'machines' && route.sessions
-            ? html`<${Sessions} key=${route.sessions} store=${store} wire=${wire} router=${router} toasts=${toasts} machine=${route.sessions} open=${route.session || ''}
+            ? html`<${Sessions} key=${route.sessions} store=${store} wire=${wire} router=${router} toasts=${toasts} session=${session} machine=${route.sessions} open=${route.session || ''} fav=${!!route.fav} project=${route.project || ''}
               may=${mayRead(session, machines.find(m => m.name === route.sessions) || {})} copy=${copy} clock=${clock} />`
           : route.page === 'machines'
             ? html`<${Machines} store=${store} commands=${commands} toasts=${toasts} platform=${platform} session=${session} http=${http} wire=${wire} router=${router} storage=${storage}

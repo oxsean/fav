@@ -275,9 +275,9 @@ func (c *Coord) projectDirs(ctx context.Context, p Principal, r *wire.Request) (
 	c.mu.Lock()
 	var err error
 	switch {
-	case dp.Project != "" && c.st.Projects[dp.Project] == nil, dp.Project != "" && roleIn(c.st, p, dp.Project) == "":
+	case dp.Project != "" && c.st.Projects[dp.Project] == nil, dp.Project != "" && c.roleIn(c.st, p, dp.Project) == "":
 		err = notFound("project " + dp.Project)
-	case dp.Project != "" && roleIn(c.st, p, dp.Project) != task.RoleParticipant:
+	case dp.Project != "" && c.roleIn(c.st, p, dp.Project) != task.RoleParticipant:
 		err = forbidden(MProjectDirs)
 	case c.ms[dp.Machine] == nil || !c.canSee(p, dp.Machine):
 		err = notFound("machine " + dp.Machine)

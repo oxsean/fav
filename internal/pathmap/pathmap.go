@@ -49,16 +49,42 @@ func Map(p string, from, to End) (string, bool) {
 	return join(to.Home, segs[len(home):], to)
 }
 
-// parse splits an absolute path into its drive ("" off Windows) and names.
+// parse splits an absolute path into its drive ("" off Windows) and names; a UNC path has no counterpart.
 func parse(p string, e End) (drive string, segs []string, ok bool) {
+	root, segs, ok := split(p, e.OS)
+	switch {
+	case !ok || strings.HasPrefix(root, `\\`):
+		return "", nil, false
+	case e.windows():
+		return root[:1], segs, true
+	}
+	return "", segs, true
+}
+
+// split splits an absolute path into its root and names by goos's rules: off Windows the root is "/"; on Windows either
+// separator, and the root is an upper-case drive ("C:") or a UNC share (\\server\share). False when p is relative,
+// drive-relative (C: or C:x), rooted without a drive, or holds "..".
+func split(p, goos string) (root string, segs []string, ok bool) {
+	e := End{OS: goos}
 	rest := p
 	if e.windows() {
 		rest = strings.ReplaceAll(p, "/", `\`)
-		if !Drive(rest) {
-			return "", nil, false // relative, drive-relative (C: or C:x), rooted without a drive, or UNC
+		switch {
+		case strings.HasPrefix(rest, `\\`):
+			server, after, _ := strings.Cut(rest[2:], `\`)
+			share, tail, _ := strings.Cut(after, `\`)
+			if server == "" || share == "" {
+				return "", nil, false
+			}
+			root, rest = `\\`+server+`\`+share, tail
+		case Drive(rest):
+			root, rest = strings.ToUpper(rest[:1])+":", rest[2:]
+		default:
+			return "", nil, false
 		}
-		drive, rest = strings.ToUpper(rest[:1]), rest[2:]
-	} else if !strings.HasPrefix(rest, "/") {
+	} else if strings.HasPrefix(rest, "/") {
+		root = "/"
+	} else {
 		return "", nil, false
 	}
 	for s := range strings.SplitSeq(rest, e.sep()) {
@@ -70,7 +96,24 @@ func parse(p string, e End) (drive string, segs []string, ok bool) {
 			segs = append(segs, s)
 		}
 	}
-	return drive, segs, true
+	return root, segs, true
+}
+
+// Under: path is dir or inside it, both absolute on one machine whose OS is goos and read by its rules (Windows: either
+// separator, any case, a drive or a UNC share). A path in another machine's form is under nothing: Map carries it over.
+func Under(path, dir, goos string) bool {
+	pRoot, p, ok := split(path, goos)
+	dRoot, d, dOK := split(dir, goos)
+	e := End{OS: goos}
+	if !ok || !dOK || len(p) < len(d) || !same(pRoot, dRoot, e) {
+		return false
+	}
+	for i := range d {
+		if !same(p[i], d[i], e) {
+			return false
+		}
+	}
+	return true
 }
 
 func join(base string, segs []string, to End) (string, bool) {

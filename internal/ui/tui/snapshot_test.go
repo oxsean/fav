@@ -5,6 +5,7 @@ import (
 	"image/color"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -13,8 +14,11 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/oxsean/fav/internal/capture"
+	"github.com/oxsean/fav/internal/coord"
 	"github.com/oxsean/fav/internal/index"
+	"github.com/oxsean/fav/internal/projects"
 	"github.com/oxsean/fav/internal/skin"
+	"github.com/oxsean/fav/internal/task"
 	"github.com/oxsean/fav/internal/tend"
 )
 
@@ -22,12 +26,13 @@ import (
 func TestFrameLinesFillWidth(t *testing.T) {
 	st := demoStore(t)
 	states := []string{"", "detail", "projects", "syntax", "picker", "help", "help-input", "resume", "resume-edit", "edit",
-		"edit-summary", "settings", "settings-ide", "palette", "status", "delete", "start", "message", "handoff", "peek", "remote", "remote-resume"}
+		"edit-summary", "settings", "settings-ide", "palette", "status", "delete", "start", "message", "handoff", "peek", "remote", "remote-resume",
+		"projects-grouped", "project-file", "project-edit"}
 	for _, size := range []struct{ w, h int }{{140, 40}, {120, 34}, {80, 24}, {80, 18}, {56, 20}, {50, 16}} {
 		for _, state := range states {
 			m := newModel(t, st, size.w, size.h)
 			openOverlay(m, state)
-			if layout := state == "" || state == "detail" || state == "projects" || state == "syntax" || state == "remote"; layout == m.ov.active() {
+			if layout := state == "" || state == "detail" || state == "projects" || state == "projects-grouped" || state == "syntax" || state == "remote"; layout == m.ov.active() {
 				t.Fatalf("%q did not open (overlay %d)", state, m.ov.kind)
 			}
 			lines := strings.Split(m.screen(), "\n")
@@ -51,6 +56,18 @@ func openOverlay(m *Model, kind string) {
 	case "projects":
 		m.setView(viewProjects)
 		m.foldAll(nil)
+	case "projects-grouped":
+		demoProject(m)
+		m.cursor = slices.IndexFunc(m.rows, func(r row) bool { return groupProject(r.group) != "" })
+		m.toggleGroup()
+	case "project-file":
+		demoProject(m)
+		m.cursor = slices.IndexFunc(m.rows, func(r row) bool { return r.group != "" && groupProject(r.group) == "" })
+		m.openProject()
+	case "project-edit":
+		demoProject(m)
+		m.cursor = slices.IndexFunc(m.rows, func(r row) bool { return groupProject(r.group) != "" })
+		m.openProject()
 	case "syntax":
 		m.search.SetValue("> ")
 		m.refresh()
@@ -111,6 +128,23 @@ func openOverlay(m *Model, kind string) {
 		m.ov = overlay{kind: ovPeek, rec: m.current(), title: "p1", edit: newInput(), focus: -1,
 			lines: strings.Split(strings.Repeat("Edit a.go?\n❯ 1. Yes\n", 60), "\n")}
 	}
+}
+
+// demoProject puts the directory of the first session of the projects view into a team project, and the same
+// directory on two other machines, then shows the projects view with every group folded.
+func demoProject(m *Model) {
+	m.setView(viewProjects)
+	m.foldAll(new(true))
+	var dir, name string
+	for _, r := range m.groups {
+		if len(r) > 0 && (dir == "" || r[0].Project < name) {
+			dir, name = r[0].Cwd, r[0].Project
+		}
+	}
+	p := &task.Project{ID: "p_demo", Name: name, Owner: "u_ann", Members: map[string]string{"u_bob": task.RoleParticipant, "u_cy": task.RoleParticipant},
+		Repos: []task.Repo{{Name: name, Dirs: map[string]string{coord.Local: dir, "mba": "/home/u/dev/" + name, "win": `D:\dev\` + name}}}}
+	m.setProjects(projects.Mine(map[string]*task.Project{p.ID: p}))
+	m.foldAll(new(true))
 }
 
 func TestClickZones(t *testing.T) {

@@ -113,3 +113,18 @@ func TestPushesLeaveACommandsResultWithItsCaller(t *testing.T) {
 		t.Fatalf("a push names the command, nothing more: %+v", c)
 	}
 }
+
+// TestHelloSaysWhoItAnswers: a client learns from hello who the coordinator takes it for.
+func TestHelloSaysWhoItAnswers(t *testing.T) {
+	e := newEnv(t, tend.Config{})
+	e.start()
+	for _, p := range []Principal{{User: "ann"}, Owner} {
+		var h remote.Hello
+		if err := callAs(e.as(p), remote.MHello, "", remote.HelloParams{Proto: wire.Proto}, &h); err != nil {
+			t.Fatal(err)
+		}
+		if h.Caller == nil || h.Caller.User != p.User || h.Caller.Admin != p.Admin {
+			t.Errorf("%+v: hello says %+v", p, h.Caller)
+		}
+	}
+}

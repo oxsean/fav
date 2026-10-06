@@ -628,6 +628,11 @@ func (t *Team) Rebind(id string) error {
 	return affected(t.w.Exec(`UPDATE credentials SET node_id = '', host = '' WHERE id = ?`, id))
 }
 
+// SetOwner hands the live node token id, and so its machine, to owner: its secret and the node it is bound to stay.
+func (t *Team) SetOwner(id, owner string) error {
+	return affected(t.w.Exec(`UPDATE credentials SET owner = ? WHERE id = ? AND kind = ? AND revoked = 0`, owner, id, KindNode))
+}
+
 // Touch records that a credential was used now, from the address ip.
 func (t *Team) Touch(id, ip string) error {
 	_, err := t.w.Exec(`UPDATE credentials SET last_used = ?, last_ip = ? WHERE id = ?`, time.Now().UnixNano(), ip, id)

@@ -174,6 +174,7 @@ func (msg machinesPushMsg) apply(m *Model) tea.Cmd {
 			t.machines = ml.Items
 		}
 	}
+	m.syncServed()
 	switch {
 	case msg.err == nil:
 		return func() tea.Msg {
@@ -230,6 +231,7 @@ type tasksMachinesMsg struct {
 func (msg tasksMachinesMsg) apply(m *Model) tea.Cmd {
 	if msg.err == nil && !msg.onlyAgents {
 		m.tasks.machines = msg.machines
+		m.syncServed()
 	}
 	if len(msg.agents) > 0 {
 		m.tasks.agents = msg.agents
@@ -306,6 +308,7 @@ func (msg tasksPushMsg) apply(m *Model) tea.Cmd {
 		t.err, t.st, t.loaded = nil, t.fold.St, true
 		m.filterTasks()
 		m.announceTreesDone()
+		m.syncServed()
 	}
 	switch {
 	case msg.err == nil:
@@ -314,6 +317,7 @@ func (msg tasksPushMsg) apply(m *Model) tea.Cmd {
 		t.stream, t.mstream = nil, nil
 		t.cl.Close()
 		t.cl = nil
+		m.syncServed()
 		if m.view == viewTasks {
 			return m.tasksOpen()
 		}
@@ -381,10 +385,10 @@ func (msg tasksConnMsg) apply(m *Model) tea.Cmd {
 	t.connecting = false
 	if msg.err != nil {
 		t.err = msg.err
-		return nil
+		return m.connected(msg.err)
 	}
-	t.cl = msg.cl
-	return tea.Batch(m.openState(), m.openMachines(), m.readAgents())
+	t.cl, m.proj.hello = msg.cl, nil
+	return tea.Batch(m.openState(), m.openMachines(), m.readAgents(), m.readHello(), m.connected(nil))
 }
 
 func (msg taskDoneMsg) apply(m *Model) tea.Cmd {
