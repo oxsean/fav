@@ -2,9 +2,13 @@ package main
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
+	"log"
 	"os"
 	"os/signal"
+	"runtime/debug"
 	"syscall"
 	"time"
 
@@ -31,8 +35,23 @@ func cmdNode(args []string) error {
 	fs.Bool("stdio", true, i18n.T("cli.rpc.flag_stdio"))
 	url := fs.String("connect", "", i18n.T("cli.node.flag_connect"))
 	tokenFile := fs.String("token-file", "", i18n.T("cli.node.flag_token_file"))
+	envFile := fs.String("env", "", i18n.T("cli.node.flag_env"))
+	logFile := fs.String("log", "", i18n.T("cli.node.flag_log"))
 	if err := fs.Parse(args); err != nil {
 		return err
+	}
+	if *logFile != "" {
+		if *url == "" {
+			return errors.New(i18n.T("cli.node.log_needs_connect"))
+		}
+		if err := logTo(*logFile); err != nil {
+			return err
+		}
+	}
+	if *envFile != "" {
+		if err := applyEnvFile(*envFile); err != nil {
+			return err
+		}
 	}
 	n := node.New(tend.Home())
 	cfg := loadConfig()
@@ -46,6 +65,41 @@ func cmdNode(args []string) error {
 	c := wire.New(stdPipes{os.Stdin, out}, wire.Options{Handler: n.Handler(remote.NewLocal(version)), Keepalive: nodeKeepalive})
 	go n.Watch(c.Done(), func(ch node.Changed) { c.Push(node.MChanged, ch) })
 	<-c.Done()
+	return nil
+}
+
+// logTo sends everything this process prints, the error main prints on the way out and a crash's trace, to the end of
+// file: a scheduled task has no output of its own to redirect.
+func logTo(file string) error {
+	f, err := os.OpenFile(file, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+	if err != nil {
+		return err
+	}
+	if err := debug.SetCrashOutput(f, debug.CrashOptions{}); err != nil {
+		f.Close()
+		return err
+	}
+	os.Stdout, os.Stderr = f, f
+	log.SetOutput(f)
+	return nil
+}
+
+// applyEnvFile sets the variables of a JSON object file before the node reads its home: a scheduled task carries no
+// environment of its own.
+func applyEnvFile(file string) error {
+	b, err := os.ReadFile(file)
+	if err != nil {
+		return err
+	}
+	var env map[string]string
+	if err := json.Unmarshal(b, &env); err != nil {
+		return fmt.Errorf("%s: %w", file, err)
+	}
+	for k, v := range env {
+		if err := os.Setenv(k, v); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 

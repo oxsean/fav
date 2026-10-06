@@ -527,6 +527,7 @@ tend-server --listen 100.101.8.10:7788
 tend node --connect ws://100.101.8.10:7788 --token-file ~/.config/tend/node-token
 # or keep it running from login: a LaunchAgent (macOS), a systemd --user unit (Linux) or a scheduled task (Windows)
 tend node install-service --connect ws://100.101.8.10:7788 --token-file ~/.config/tend/node-token   # --print shows it first
+# Windows: --at-boot runs it from boot whether or not anyone is logged on (S4U, needs an administrator shell); its runs cannot use Windows Credential Manager
 
 # on a client: sign in through the browser (a device code you confirm at the printed URL)
 tend login http://100.101.8.10:7788   # writes coordinator.token and config.json's coordinator on its own

@@ -21,7 +21,7 @@ tend run answer <run> [--request id] --allow | --deny [--message m] | --answer [
 tend run send <run> <text> [--file f]
 tend agent list | defs | import <file> [--project p] | export <name> [-o f] | check <file> | rm <name> | share <name> [--users u,…] [--projects p,…] [--all] [--view] | leave <name> | transfer <name> --project p
 tend machine list
-tend service | tend node --stdio | --connect URL --token-file f | node install-service --connect URL --token-file f [--print] | uninstall-service
+tend service | tend node --stdio | --connect URL --token-file f [--env f] [--log f] | node install-service --connect URL --token-file f [--at-boot] [--print] | uninstall-service   # --at-boot：Windows 上不登录也开机运行（S4U），run 用不了凭据管理器；--env / --log 给 Windows 计划任务用：先设环境文件里的变量、输出追加进日志
 tend-server [--listen addr] | token add --node n | --client n [--owner u] | token rm n | token rebind n | token owner m u | token list
 tend-server admin add <email | 域名 | provider:username> [--role admin|member] | rm v | invite [--role r] | disable u | enable u | role u r | audit | list
 tend-server import [file] | export [-o file] | backup [dir] | db check [--json]

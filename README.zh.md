@@ -486,6 +486,7 @@ tend-server --listen 100.101.8.10:7788
 tend node --connect ws://100.101.8.10:7788 --token-file ~/.config/tend/node-token
 # 或者让它登录即启动：LaunchAgent（macOS）、systemd --user（Linux）、计划任务（Windows）
 tend node install-service --connect ws://100.101.8.10:7788 --token-file ~/.config/tend/node-token   # 先用 --print 看一眼
+# Windows：加 --at-boot 开机即运行、没人登录也跑（S4U，要管理员终端）；它跑的 run 用不了 Windows 凭据管理器
 
 # 客户端：通过浏览器登录（设备码，在打印出的地址上核对后允许）
 tend login http://100.101.8.10:7788   # 自动写好 coordinator.token 和 config.json 的 coordinator
