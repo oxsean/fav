@@ -2,7 +2,7 @@
 // viewer turned notices on and the browser allows them. Clicking one brings the page up on its task.
 import {useRef, useEffect} from '../vendor/hooks.mjs';
 import {useWords, useSignalValue} from '../ui/base.js';
-import {fresh} from '../core/notices.js';
+import {fresh, treesDone} from '../core/notices.js';
 import {why} from './words.js';
 
 // useNotices: notices are the browser's ({Notification}), doc the document whose visibility counts; active is false
@@ -23,4 +23,21 @@ export function useNotices({store, prefs, notices, doc, active, onOpen}) {
       } catch {}
     }
   }, [items]);
+}
+
+// useTreesDone shows a toast for each tree that comes to be done while the page is live (toasts are core's).
+export function useTreesDone({store, toasts}) {
+  const {f} = useWords();
+  const aff = useSignalValue(store.affordances);
+  const phase = useSignalValue(store.phase);
+  const seen = useRef(null);
+  useEffect(() => {
+    if (phase !== 'live') return;
+    const got = treesDone(seen.current, aff);
+    seen.current = got.seen;
+    for (const id of got.fresh) {
+      const s = aff.tasks[id].tree_done;
+      toasts.show({text: f('toast.treeDone', store.state.tasks[id]?.title || id, s.done || 0, s.leaves || 0)});
+    }
+  }, [aff, phase]);
 }

@@ -72,6 +72,7 @@ type Task struct {
 	Auto      bool      `json:"auto,omitempty"`      // started: the coordinator dispatches it once what it comes after is done
 	StartSeq  int64     `json:"start_seq,omitempty"` // the seq of its last start or reopening; runs queued before it are earlier tries
 	Held      string    `json:"held,omitempty"`      // why the coordinator could not dispatch it; cleared by an edit or a start
+	Paused    *Pause    `json:"paused,omitempty"`    // nothing new is dispatched under it until it is resumed
 	Source    *Source   `json:"source,omitempty"`    // the issue a requirement comes from
 	Issue     string    `json:"issue,omitempty"`     // the sub-issue that mirrors it on its root's tracker
 	PR        string    `json:"pr,omitempty"`        // the pull request opened from its branch
@@ -86,6 +87,7 @@ type Task struct {
 	WorkOn    string    `json:"work_on,omitempty"`   // the machine that made it
 	Head      string    `json:"head,omitempty"`      // the branch's head as its latest run left it
 	Merged    bool      `json:"merged,omitempty"`    // its branch went into its parent's
+	DoneAt    time.Time `json:"done_at,omitzero"`    // when it was last marked done; zero while it is not
 	Draft     *Draft    `json:"draft,omitempty"`     // a plan of subtasks not applied yet
 	Rev       int       `json:"rev,omitzero"`
 	CreatedAt time.Time `json:"created_at,omitzero"`
@@ -149,6 +151,7 @@ type Run struct {
 	Caps       *agent.RunCaps     `json:"caps,omitempty"`      // what it can do, as its node found it once it started
 	Doing      string             `json:"doing,omitempty"`     // the tool call its turn is at
 	Turn       int                `json:"turn,omitempty"`      // the turn its output is at, as its node last said
+	OutputAt   *time.Time         `json:"output_at,omitzero"`  // when its agent last put anything out, to the minute
 	Interrupt  *RunInterrupt      `json:"interrupt,omitempty"` // the latest ask to end a turn
 	Takes      []string           `json:"takes,omitempty"`     // the messages of the run it continues that it carries
 	Provider   string             `json:"provider,omitempty"`
@@ -224,24 +227,25 @@ type TaskStatus struct {
 // TaskRestore puts task ID's status, tries, stage and place back as they stood before an undone command, field for
 // field: an undo is not a reopening.
 type TaskRestore struct {
-	ID       string   `json:"id"`
-	Status   string   `json:"status"`
-	Auto     bool     `json:"auto,omitempty"`
-	StartSeq int64    `json:"start_seq,omitempty"`
-	Merged   bool     `json:"merged,omitempty"`
-	Stage    string   `json:"stage,omitempty"`
-	Loops    int      `json:"loops,omitempty"`
-	StageSeq int64    `json:"stage_seq,omitempty"`
-	Stages   []Staged `json:"stages,omitempty"`
-	Parent   string   `json:"parent,omitempty"`
-	After    []string `json:"after,omitempty"`
-	Held     string   `json:"held,omitempty"`
+	ID       string    `json:"id"`
+	Status   string    `json:"status"`
+	Auto     bool      `json:"auto,omitempty"`
+	StartSeq int64     `json:"start_seq,omitempty"`
+	Merged   bool      `json:"merged,omitempty"`
+	Stage    string    `json:"stage,omitempty"`
+	Loops    int       `json:"loops,omitempty"`
+	StageSeq int64     `json:"stage_seq,omitempty"`
+	Stages   []Staged  `json:"stages,omitempty"`
+	Parent   string    `json:"parent,omitempty"`
+	After    []string  `json:"after,omitempty"`
+	Held     string    `json:"held,omitempty"`
+	DoneAt   time.Time `json:"done_at,omitzero"`
 }
 
 // RestoreOf is what t is now, as a TaskRestore would put it back.
 func RestoreOf(t *Task) TaskRestore {
 	return TaskRestore{ID: t.ID, Status: t.Status, Auto: t.Auto, StartSeq: t.StartSeq, Merged: t.Merged, Stage: t.Stage, Loops: t.Loops,
-		StageSeq: t.StageSeq, Stages: slices.Clone(t.Stages), Parent: t.Parent, After: slices.Clone(t.After), Held: t.Held}
+		StageSeq: t.StageSeq, Stages: slices.Clone(t.Stages), Parent: t.Parent, After: slices.Clone(t.After), Held: t.Held, DoneAt: t.DoneAt}
 }
 
 type RunRef struct {
@@ -273,6 +277,7 @@ type Observation struct {
 	Caps      *agent.RunCaps     `json:"caps,omitempty"`
 	Doing     string             `json:"doing,omitempty"`
 	Turn      int                `json:"turn,omitempty"`
+	OutputAt  *time.Time         `json:"output_at,omitzero"`
 	Verdict   *agent.Verdict     `json:"verdict,omitempty"`
 	Check     *agent.CheckResult `json:"check,omitempty"`
 	Work      *agent.Work        `json:"work,omitempty"`
@@ -427,6 +432,12 @@ func (s *State) apply(e journal.Event, seq int64, at time.Time) error {
 		if Finished(d.Status) && t.Source != nil {
 			t.Source.Reopened = false
 		}
+		switch {
+		case d.Status != StatusDone:
+			t.DoneAt = time.Time{}
+		case t.Status != StatusDone:
+			t.DoneAt = at
+		}
 		t.Status, t.UpdatedAt = d.Status, at
 		t.Rev++
 	case ETaskRestored:
@@ -440,7 +451,7 @@ func (s *State) apply(e journal.Event, seq int64, at time.Time) error {
 		}
 		t.Status, t.Auto, t.StartSeq, t.Merged = d.Status, d.Auto, d.StartSeq, d.Merged
 		t.Stage, t.Loops, t.StageSeq, t.Stages = d.Stage, d.Loops, d.StageSeq, d.Stages
-		t.Parent, t.After, t.Held = d.Parent, d.After, d.Held
+		t.Parent, t.After, t.Held, t.DoneAt = d.Parent, d.After, d.Held, d.DoneAt
 		t.UpdatedAt = at
 		t.Rev++
 	case ERunQueued:
@@ -606,7 +617,7 @@ func (r *Run) observe(o Observation) {
 	}
 	if o.NodeRev > 0 { // what the node says now; the coordinator's own observations carry none of it
 		r.Attention, r.Ask, r.Note, r.Last, r.Usage = o.Attention, o.Ask, o.Note, o.Last, o.Usage
-		r.Stream, r.Requests, r.Caps, r.Doing, r.Turn = o.Stream, o.Requests, o.Caps, o.Doing, o.Turn
+		r.Stream, r.Requests, r.Caps, r.Doing, r.Turn, r.OutputAt = o.Stream, o.Requests, o.Caps, o.Doing, o.Turn, o.OutputAt
 		r.Verdict, r.Checked, r.Worked, r.Plan = o.Verdict, o.Check, o.Work, o.Plan
 		r.Sends = mergeSends(r.Sends, o.Sends)
 		r.Answers = slices.DeleteFunc(slices.Clone(r.Answers), func(a agent.Answer) bool { // taken, or no longer asked
@@ -711,6 +722,13 @@ func (r *Run) Since() time.Time {
 		return *r.StartedAt
 	}
 	return r.QueuedAt
+}
+
+// Asks: r waits on a question it put into words (tend run ask, a question request, a question in its transcript);
+// asked without one, nothing tells what it waits on, and it is shown as waiting for someone, never as a question.
+func (r *Run) Asks() bool {
+	return r.Attention == AttentionAsked && (r.Ask != "" ||
+		slices.ContainsFunc(r.Requests, func(q agent.Request) bool { return q.Kind == agent.RequestQuestion }))
 }
 
 // Blocking: r is holding its agent still, waiting on a permission or a question.

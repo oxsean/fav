@@ -18,6 +18,7 @@ import (
 	"github.com/oxsean/fav/internal/i18n"
 	"github.com/oxsean/fav/internal/node"
 	"github.com/oxsean/fav/internal/remote"
+	"github.com/oxsean/fav/internal/render"
 	"github.com/oxsean/fav/internal/task"
 	"github.com/oxsean/fav/internal/tend"
 	"github.com/oxsean/fav/internal/wire"
@@ -778,7 +779,7 @@ func TestAQuestionShowsOnce(t *testing.T) {
 	q := "Which database for the cache?"
 	r := &task.Run{State: task.Running, Attention: task.AttentionAsked, Ask: q,
 		Requests: []agent.Request{{ID: "q1", Kind: agent.RequestQuestion, Questions: []agent.Question{{Question: q}}}}}
-	if n := strings.Count(ansi.Strip(strings.Join(runFacts(r, 100, 4), "\n")), q); n != 1 {
+	if n := strings.Count(ansi.Strip(strings.Join(runFacts(r, 100, 4, time.Now()), "\n")), q); n != 1 {
 		t.Fatalf("the question shows %d times", n)
 	}
 }
@@ -955,4 +956,151 @@ func TestAnEditRowOpensOnItsFirstHunk(t *testing.T) {
 		t.Fatalf("a click opens that row alone:\n%s", s)
 	}
 	exact("one open")
+}
+
+// hostile is text an agent or a tracker could hand tend: a screen clear, an OSC 52 clipboard write, a bell and a
+// line break, around words that must still show.
+func hostile(word string) string {
+	return word + "\x1b[2J\x1b]52;c;cHduZWQ=\x07\x1b[31m\r\n" + word + "2"
+}
+
+func TestTaskViewsNeverPrintTheEscapesInWhatTasksAndRunsSay(t *testing.T) {
+	m, _ := tasksModel(t)
+	key(m, "5")
+	waitFor(t, m, func() bool { return m.tasks.loaded })
+	now := time.Now()
+	started := now.Add(-time.Minute)
+	st := task.New()
+	st.Tasks["t_run"] = &task.Task{ID: "t_run", Title: hostile("runtitle"), Brief: hostile("brief"), Stage: hostile("stage"),
+		Flow: &task.Flow{Stages: []task.Stage{{Name: hostile("stage")}}}, Dir: hostile("/dir"), Status: task.StatusTodo, CreatedAt: now,
+		Draft: &task.Draft{Plan: &task.Plan{Tasks: []task.PlanTask{{Key: "a", Title: hostile("plantitle"), Role: hostile("role")}},
+			Questions: []string{hostile("planq")}}}}
+	st.Runs["r_run"] = &task.Run{ID: "r_run", Task: "t_run", Agent: "fake", Machine: "local", State: task.Running, Last: hostile("last"),
+		Note: hostile("note"), StartedAt: &started, QueuedAt: now,
+		Sends: []agent.Send{{Text: hostile("sent"), State: agent.SendSent}}}
+	q := agent.Question{Header: hostile("header"), Question: hostile("question"), Options: []string{hostile("opt")}, Descriptions: []string{hostile("says")}}
+	st.Tasks["t_ask"] = &task.Task{ID: "t_ask", Title: hostile("asktitle"), Status: task.StatusTodo, CreatedAt: now}
+	st.Runs["r_ask"] = &task.Run{ID: "r_ask", Task: "t_ask", State: task.Running, Attention: task.AttentionAsked, Ask: q.Question,
+		StartedAt: &started, QueuedAt: now, Requests: []agent.Request{{ID: "q1", Kind: agent.RequestQuestion, Questions: []agent.Question{q}}}}
+	st.Tasks["t_perm"] = &task.Task{ID: "t_perm", Title: hostile("permtitle"), Status: task.StatusTodo, CreatedAt: now}
+	st.Runs["r_perm"] = &task.Run{ID: "r_perm", Task: "t_perm", State: task.Running, Attention: task.AttentionPermission,
+		StartedAt: &started, QueuedAt: now, Requests: []agent.Request{{ID: "p1", Kind: agent.RequestPermission, Tool: hostile("tool"), Summary: hostile("summary")}}}
+	st.Tasks["t_fail"] = &task.Task{ID: "t_fail", Title: hostile("failtitle"), Status: task.StatusTodo, CreatedAt: now}
+	st.Runs["r_fail"] = &task.Run{ID: "r_fail", Task: "t_fail", State: task.Failed, Reason: hostile("reason"), Detail: hostile("detail"),
+		StartedAt: &started, EndedAt: &now, QueuedAt: now}
+	m.tasks.st = st
+
+	clean := func(where string) {
+		t.Helper()
+		s := m.screen()
+		for _, bad := range []string{"\x1b[2J", "\x1b]", "\x07", "\r"} {
+			if strings.Contains(s, bad) {
+				t.Fatalf("%s: the frame carries %q:\n%s", where, bad, ansi.Strip(s))
+			}
+		}
+		lines := strings.Split(s, "\n")
+		if len(lines) != m.h {
+			t.Fatalf("%s: the frame has %d lines, not %d:\n%s", where, len(lines), m.h, ansi.Strip(s))
+		}
+		for i, l := range lines {
+			if w := ansi.StringWidth(l); w != m.w {
+				t.Fatalf("%s: line %d is %d wide, not %d:\n%s", where, i, w, m.w, ansi.Strip(s))
+			}
+		}
+	}
+	for _, l := range []layout{layoutHome, layoutList, layoutTree, layoutBoard} {
+		m.tasks.layout = l
+		m.filterTasks()
+		for i := range m.tasks.list {
+			m.tasks.cursor = i
+			where := i18n.T(layoutKeys[l]) + " " + m.tasks.list[i].ID
+			clean(where)
+			m.openTask()
+			clean(where + " dialog")
+			if x := m.selectedTask(); hasDraft(x) {
+				m.openDraft()
+				clean(where + " draft")
+			}
+			if waitsOn(m.selectedRun()) != nil {
+				m.openAnswer()
+				clean(where + " answer")
+			}
+			m.closeOverlay()
+		}
+	}
+	m.tasks.layout = layoutList
+	m.filterTasks()
+	m.tasks.cursor = slices.IndexFunc(m.tasks.list, func(x *task.Task) bool { return x.ID == "t_fail" })
+	m.openRunDialog()
+	m.ov.preview = &coord.Preview{Blockers: []coord.Why{{Code: hostile("code"), Detail: hostile("why")}}, Notes: []coord.Why{{Code: "slots", Detail: hostile("why")}}}
+	clean("run dialog")
+	m.closeOverlay()
+	m.tasks.watch = "r_run"
+	clean("watch panel")
+	st.Runs["r_run"].Note = ""
+	m.tasks.cursor = slices.IndexFunc(m.tasks.list, func(x *task.Task) bool { return x.ID == "t_run" })
+	clean("last line")
+	if s := screenText(m); !strings.Contains(s, "runtitle runtitle2") {
+		t.Fatalf("the words around the escapes stay, the line break becomes a space:\n%s", s)
+	}
+}
+
+func TestTheThreeWaitsAndTheNeutralOneLookApart(t *testing.T) {
+	now := time.Now()
+	runs := map[string]*task.Run{
+		"permission": {State: task.Running, Attention: task.AttentionPermission, Ask: "Bash: npm test"},
+		"asked":      {State: task.Running, Attention: task.AttentionAsked, Ask: "Which database?"},
+		"neutral":    {State: task.Running, Attention: task.AttentionAsked},
+		"stalled":    {State: task.Running, Attention: task.AttentionStalled},
+	}
+	glyphs := map[string]string{}
+	for name, r := range runs {
+		r.StartedAt = &now
+		g, sty := runGlyph(r)
+		glyphs[name] = sty.Render(g)
+	}
+	if glyphs["permission"] == glyphs["asked"] || glyphs["asked"] == glyphs["stalled"] || glyphs["permission"] == glyphs["stalled"] {
+		t.Fatalf("permission, question and stalled share a look: %q", glyphs)
+	}
+	if g, _ := runGlyph(runs["permission"]); g != render.GlyphWarn {
+		t.Fatalf("permission: %q", g)
+	}
+	if g, _ := runGlyph(runs["asked"]); g != render.GlyphAsk {
+		t.Fatalf("asked: %q", g)
+	}
+	if g, _ := runGlyph(runs["stalled"]); g != render.GlyphStall {
+		t.Fatalf("stalled: %q", g)
+	}
+	for name, want := range map[string]string{"permission": "run.attention.permission", "asked": "run.attention.asked",
+		"neutral": "run.attention.attend", "stalled": "run.attention.stalled"} {
+		if got := render.WaitKind(runs[name]); got != i18n.T(want) {
+			t.Errorf("%s waits as %q, want %q", name, got, i18n.T(want))
+		}
+		if got := render.RunAttention(runs[name]); got != i18n.T(want) {
+			t.Errorf("%s attention %q, want %q", name, got, i18n.T(want))
+		}
+	}
+	facts := ansi.Strip(strings.Join(runFacts(runs["permission"], 100, 4, now), "\n"))
+	if !strings.Contains(facts, i18n.F("tasks.wants", "Bash: npm test")) || strings.Contains(facts, i18n.F("tasks.ask", "Bash: npm test")) {
+		t.Fatalf("a permission says what it wants, never that it asks:\n%s", facts)
+	}
+	if got := render.WaitAsk(runs["permission"]); got != "Bash: npm test" {
+		t.Fatalf("a herdr permission's row shows its tool: %q", got)
+	}
+}
+
+func TestARunningRunSaysWhenItLastPutAnythingOut(t *testing.T) {
+	m, _ := tasksModel(t)
+	key(m, "5")
+	waitFor(t, m, func() bool { return m.tasks.loaded })
+	at := m.now.Add(-5 * time.Minute).Truncate(time.Minute)
+	started := m.now.Add(-time.Hour)
+	st := task.New()
+	st.Tasks["t_1"] = &task.Task{ID: "t_1", Title: "build", Status: task.StatusTodo, CreatedAt: m.now}
+	st.Runs["r_1"] = &task.Run{ID: "r_1", Task: "t_1", State: task.Running, StartedAt: &started, QueuedAt: started, OutputAt: &at}
+	m.tasks.st = st
+	m.filterTasks()
+	if s := screenText(m); !strings.Contains(s, i18n.F("tasks.output_at", render.Elapsed(at, m.now))) {
+		t.Fatalf("the last output time is in the detail:\n%s", s)
+	}
 }

@@ -22,7 +22,7 @@ function observe(r, o) {
   if (o.detail) r.detail = o.detail;
   if ((o.node_rev || 0) > 0) {
     r.attention = o.attention; r.ask = o.ask; r.note = o.note; r.last = o.last; r.usage = o.usage;
-    r.stream = o.stream; r.requests = o.requests; r.caps = o.caps; r.doing = o.doing; r.turn = o.turn; r.verdict = o.verdict; r.checked = o.check; r.worked = o.work; r.plan = o.plan;
+    r.stream = o.stream; r.requests = o.requests; r.caps = o.caps; r.doing = o.doing; r.turn = o.turn; r.output_at = o.output_at; r.verdict = o.verdict; r.checked = o.check; r.worked = o.work; r.plan = o.plan;
     const node = o.sends || [];
     r.sends = [...node, ...(r.sends || []).filter(m => !node.some(x => x.id === m.id))];
     r.answers = (r.answers || []).filter(a => (r.requests || []).some(q => q.id === a.request));
@@ -105,12 +105,13 @@ function applyEvent(s, e, at, seq) {
       const t = need(s.tasks, d.id, 'task');
       if (finished(t.status) && !finished(d.status)) { t.auto = undefined; t.start_seq = seq; t.merged = undefined; } // reopened: what came before no longer stands
       if (finished(d.status) && t.source) t.source.reopened = undefined;
+      if (d.status !== 'done') t.done_at = undefined; else if (t.status !== 'done') t.done_at = at;
       t.status = d.status; t.updated_at = at; t.rev = (t.rev || 0) + 1;
       break;
     }
     case 'task_restored': { // an undo: the task as it stood before the undone command, field for field
       const t = need(s.tasks, d.id, 'task');
-      for (const k of ['status', 'auto', 'start_seq', 'merged', 'stage', 'loops', 'stage_seq', 'stages', 'parent', 'after', 'held']) t[k] = d[k];
+      for (const k of ['status', 'auto', 'start_seq', 'merged', 'stage', 'loops', 'stage_seq', 'stages', 'parent', 'after', 'held', 'done_at']) t[k] = d[k];
       t.updated_at = at; t.rev = (t.rev || 0) + 1;
       break;
     }
@@ -193,6 +194,12 @@ function applyEvent(s, e, at, seq) {
       t.held = d.reason + (d.detail ? ': ' + d.detail : ''); t.updated_at = at;
       break;
     }
+    case 'task_paused': {
+      const t = need(s.tasks, d.id, 'task');
+      t.paused = d.on ? {...(d.by ? {by: d.by} : {}), at} : undefined;
+      t.rev = (t.rev || 0) + 1; t.updated_at = at;
+      break;
+    }
     case 'project_created':
       s.projects[d.id] = {...d, rev: 1, created_at: at, updated_at: at};
       break;
@@ -245,7 +252,7 @@ function applyEvent(s, e, at, seq) {
 const parts = {
   task_created: ['tasks'], task_edited: ['tasks'], task_staged: ['tasks'], task_noted: ['tasks'], task_sourced: ['tasks'],
   task_linked: ['tasks'], task_source_acked: ['tasks'], task_status_set: ['tasks'], task_restored: ['tasks'], task_moved: ['tasks'], task_started: ['tasks'],
-  task_held: ['tasks'], plan_drafted: ['tasks'], plan_applied: ['tasks'],
+  task_held: ['tasks'], task_paused: ['tasks'], plan_drafted: ['tasks'], plan_applied: ['tasks'],
   run_queued: ['runs', 'tasks'], run_observed: ['runs', 'tasks'], run_starting: ['runs'], run_stop_requested: ['runs'],
   run_canceled: ['runs'], run_abandoned: ['runs'], run_answered: ['runs'], run_sent: ['runs'], run_interrupt_requested: ['runs'],
   project_created: ['projects'], project_edited: ['projects'], member_set: ['projects'],
@@ -369,8 +376,25 @@ function sourceWaits(t) {
 const dirHeld = (s, q) => !!q.dir && !q.work && Object.values(s.runs).some(r => r.id !== q.id && r.machine === q.machine &&
   r.dir === q.dir && !r.work && openStates.has(r.state) && r.state !== 'queued');
 
-// situation says how task t stands, as task.State.Situation does: {kind, reason, run}.
+// pausedBy is the task whose pause holds id: id itself or its nearest paused ancestor (task.State.PausedBy).
+function pausedBy(s, id) {
+  const seen = new Set();
+  for (let t = s.tasks[id]; t && !seen.has(t.id); t = s.tasks[t.parent]) {
+    if (t.paused) return t;
+    seen.add(t.id);
+  }
+  return null;
+}
+
+// situation says how task t stands, as task.State.Situation does: {kind, reason, run}. A paused tree keeps what would go
+// on by itself waiting, except a task its run already completes.
 function situation(s, t) {
+  const sit = situationOf(s, t);
+  if (sit.kind === 'queued' && sit.reason !== 'completing' && pausedBy(s, t.id)) return {kind: 'waiting', reason: 'paused', ...(sit.run ? {run: sit.run} : {})};
+  return sit;
+}
+
+function situationOf(s, t) {
   if (t.status === 'backlog' || t.status === 'done' || t.status === 'canceled') return {kind: t.status};
   const runs = Object.values(s.runs).filter(r => r.task === t.id);
   const open = runs.find(r => openStates.has(r.state));
@@ -423,4 +447,4 @@ function conversation(s, id) {
     .sort((a, b) => (a.seq || 0) - (b.seq || 0) || at(a, b) || cmp(a.id, b.id));
 }
 
-export {apply, situation, stageOf, nextStage, parts, conversation};
+export {apply, situation, pausedBy, stageOf, nextStage, parts, conversation};

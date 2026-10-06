@@ -165,7 +165,9 @@ type sup struct {
 
 	transcript string    // an interactive run's transcript, once found
 	liveAt     time.Time // when the pane, hook events and transcript were last read
-	liveAsked  bool      // the attention was set by what they showed, so it goes when they stop showing it
+	liveSize   int64     // the transcript's size when last read: growing is the agent's output
+	liveWait   bool      // the attention was set by what they showed, so it goes when they stop showing it
+	calm       time.Time // when an interactive run last waited for the user or rested between turns: stall counts from it too
 }
 
 // outcome is what the agent's output said about how it ends.
@@ -245,8 +247,11 @@ func (s *sup) exited(code int) error {
 		st.State, st.ExitCode, st.EndedAt = StateExited, &code, &now
 		st.Last, st.Usage, st.Doing = o.last, o.usage, ""
 		s.settleRequests(st)
-		if st.Attention == AttentionStalled {
+		if st.Attention == AttentionStalled || s.liveWait {
 			st.Attention = ""
+		}
+		if s.liveWait {
+			st.Ask = ""
 		}
 		if denied := slices.DeleteFunc(slices.Clone(o.denied), func(t string) bool { return s.userDenied[t] }); len(denied) > 0 {
 			st.Attention, st.Reason, st.Detail = AttentionPermission, agent.ReasonPermission, strings.Join(denied, ", ")
@@ -300,13 +305,13 @@ func (s *sup) reports() {
 }
 
 // stall marks a run whose agent has said nothing for spec.StallAfter, and unmarks it when it speaks again; it never
-// stops it.
+// stops it. An interactive run's quiet time starts again whenever it waits for the user or rests between turns.
 func (s *sup) stall() {
 	if s.spec.StallAfter <= 0 {
 		return
 	}
 	s.mu.Lock()
-	quiet, att := time.Since(s.seen) > s.spec.StallAfter, s.st.Attention
+	quiet, att := time.Since(later(s.seen, s.calm)) > s.spec.StallAfter, s.st.Attention
 	s.mu.Unlock()
 	switch {
 	case quiet && att == "":
@@ -343,35 +348,83 @@ var paneStatus = func(pane string) string {
 	return ""
 }
 
-// watchLive marks an interactive run asked while its agent waits for the user, and unmarks it when it goes on: Herdr
-// shows its pane blocked, its latest Claude hook event is a prompt, or its transcript ends on a question.
+// watchLive marks an interactive run while its agent waits for the user, and unmarks it when it goes on. Its
+// transcript ending on an unanswered AskUserQuestion is a question (asked, with the question); its latest Claude hook
+// event being a permission prompt is a permission (with the tool); a prompt the hooks cannot tell, ExitPlanMode or a
+// pane Herdr shows blocked is asked without a question. The transcript growing is the agent's output.
 func (s *sup) watchLive() {
 	if time.Since(s.liveAt) < liveEvery {
 		return
 	}
 	s.liveAt = time.Now()
 	s.mu.Lock()
-	pane, session, att := s.st.Pane, s.st.Session, s.st.Attention
+	pane, session, att, ask := s.st.Pane, s.st.Session, s.st.Attention, s.st.Ask
 	s.mu.Unlock()
-	waiting := pane != "" && paneStatus(pane) == "blocked"
-	if !waiting && session != "" && s.spec.Provider == tend.ProviderClaude {
+	status := ""
+	if pane != "" {
+		status = paneStatus(pane)
+	}
+	waits, wantAtt, wantAsk, finished := false, "", "", false
+	if session != "" && s.spec.Provider == tend.ProviderClaude {
 		if s.transcript == "" {
 			s.transcript = capture.TranscriptPath(tend.ProviderClaude, session)
 		}
 		if p, ok := capture.ReadPulse(s.transcript); ok {
-			waiting = p.Asking || capture.HookWaiting(session, p.Size)
+			if p.Size != s.liveSize {
+				s.liveSize = p.Size
+				s.heard()
+			}
+			finished = p.Finished
+			if p.Asking {
+				waits, wantAtt, wantAsk = true, AttentionAsked, p.Question
+			} else if w, ok := capture.HookWaiting(session, p.Size); ok {
+				waits, wantAtt = true, AttentionAsked
+				if w.Permission {
+					wantAtt, wantAsk = AttentionPermission, w.Summary
+					if w.Tool != "" && w.Summary != "" {
+						wantAsk = w.Tool + ": " + w.Summary
+					}
+				}
+			}
 		}
 	}
-	switch {
-	case waiting && att == "":
-		s.liveAsked = true
-		s.keep(func(st *State) { st.Attention = AttentionAsked })
-	case !waiting && s.liveAsked && att == AttentionAsked:
-		s.liveAsked = false
-		s.keep(func(st *State) { st.Attention, st.Ask = "", "" })
-	case !waiting:
-		s.liveAsked = false
+	if !waits && status == "blocked" {
+		waits, wantAtt = true, AttentionAsked
 	}
+	if waits || finished || status == "idle" || status == "done" {
+		s.mu.Lock()
+		s.calm = time.Now()
+		s.mu.Unlock()
+	}
+	wantAsk = clip(wantAsk, maxReport)
+	switch {
+	case waits && (att == "" || att == AttentionStalled || s.liveWait && (att != wantAtt || ask != wantAsk)):
+		s.liveWait = true
+		s.keep(func(st *State) { st.Attention, st.Ask = wantAtt, wantAsk })
+	case !waits && s.liveWait && (att == AttentionAsked || att == AttentionPermission):
+		s.liveWait = false
+		s.keep(func(st *State) { st.Attention, st.Ask = "", "" })
+	case !waits:
+		s.liveWait = false
+	}
+}
+
+// outputAt records when the agent last put anything out, to the minute: within a minute nothing is written.
+func (s *sup) outputAt() {
+	s.mu.Lock()
+	at, was := s.seen.Truncate(time.Minute), s.st.OutputAt
+	s.mu.Unlock()
+	if at.IsZero() || was != nil && was.Equal(at) {
+		return
+	}
+	s.keep(func(st *State) { st.OutputAt = &at })
+}
+
+func later(a, b time.Time) time.Time {
+	if b.After(a) {
+		return b
+	}
+	return a
 }
 
 // logTail is the end of output.log, at most n bytes.
@@ -589,9 +642,9 @@ func (s *sup) run() error {
 			}
 			if interactive {
 				s.watchLive()
-			} else {
-				s.stall()
 			}
+			s.stall()
+			s.outputAt()
 			switch {
 			case asked.IsZero() && s.stopAsked():
 				asked, reason = time.Now(), "asked"

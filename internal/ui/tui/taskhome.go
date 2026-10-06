@@ -40,14 +40,14 @@ func (m *Model) homeAskLines(w int) []string {
 	const indent = "    "
 	if q.Kind == agent.RequestQuestion && len(q.Questions) > 0 {
 		x := q.Questions[0]
-		label := x.Question
+		label := render.OneLine(x.Question)
 		if x.Header != "" {
-			label = x.Header + " · " + x.Question
+			label = render.OneLine(x.Header) + " · " + label
 		}
 		m.tasks.askPick = max(0, min(m.tasks.askPick, len(x.Options)-1))
 		var opts []string
 		for i, o := range x.Options {
-			text := strconv.Itoa(i+1) + ") " + o
+			text := strconv.Itoa(i+1) + ") " + render.OneLine(o)
 			if i == m.tasks.askPick {
 				opts = append(opts, selTitle.Render(text))
 			} else {
@@ -59,13 +59,13 @@ func (m *Model) homeAskLines(w int) []string {
 			render.Truncate(indent+strings.Join(opts, "   "), w),
 		}
 		if says := optionSays(x, m.tasks.askPick); says != "" {
-			lines = append(lines, dimmed.Render(render.Truncate(indent+says, w)))
+			lines = append(lines, dimmed.Render(render.Truncate(indent+render.OneLine(says), w)))
 		}
 		return append(lines, dimmed.Render(render.Truncate(indent+i18n.T("tasks.home_ask_hint"), w)))
 	}
 	lines := []string{
-		accent.Render(render.Truncate(indent+i18n.F("tasks.answer_tool", q.Tool), w)),
-		dimmed.Render(render.Truncate(indent+render.Sanitize(q.Summary), w)),
+		accent.Render(render.Truncate(indent+i18n.F("tasks.answer_tool", render.OneLine(q.Tool)), w)),
+		dimmed.Render(render.Truncate(indent+render.OneLine(q.Summary), w)),
 	}
 	if m.tasks.askDeny {
 		lines = append(lines, indent+i18n.T("tasks.home_deny_hint")+" "+inputView(m.tasks.askReason))

@@ -28,6 +28,8 @@ var (
 	GlyphSession = string(rune(0xf10c)) // circle_o            unfavorited session
 	GlyphChars   = string(rune(0xf036)) // align_left          message length
 	GlyphEdit    = string(rune(0xf040)) // pencil              files written
+	GlyphAsk     = string(rune(0xf059)) // question_circle     a question waits
+	GlyphStall   = string(rune(0xf252)) // hourglass_half      no output for long
 )
 
 func init() {
@@ -38,9 +40,9 @@ func IconsFromEnv() bool { return os.Getenv("TEND_ICONS") != "" }
 
 var nerd = [...]string{GlyphActive, GlyphDone, GlyphPinned, GlyphArchive, GlyphArrow, GlyphOpen, GlyphClosed,
 	GlyphOK, GlyphWarn, GlyphErr, GlyphSearch, GlyphProject, GlyphBranch, GlyphDir, GlyphTag, GlyphClock, GlyphTerm,
-	GlyphHerdr, GlyphBrand, GlyphLive, GlyphSession, GlyphChars, GlyphEdit}
+	GlyphHerdr, GlyphBrand, GlyphLive, GlyphSession, GlyphChars, GlyphEdit, GlyphAsk, GlyphStall}
 
-var ascii = [...]string{"*", "✓", "!", "#", "->", "v", ">", "+", "!", "x", "/", "#", "@", "~", "#", "@", ">", "#", "*", ">", "o", "~", "+"}
+var ascii = [...]string{"*", "✓", "!", "#", "->", "v", ">", "+", "!", "x", "/", "#", "@", "~", "#", "@", ">", "#", "*", ">", "o", "~", "+", "?", "z"}
 
 func SetIcons(kind string) {
 	set := ascii
@@ -50,5 +52,5 @@ func SetIcons(kind string) {
 	GlyphActive, GlyphDone, GlyphPinned, GlyphArchive, GlyphArrow, GlyphOpen, GlyphClosed = set[0], set[1], set[2], set[3], set[4], set[5], set[6]
 	GlyphOK, GlyphWarn, GlyphErr, GlyphSearch, GlyphProject, GlyphBranch, GlyphDir = set[7], set[8], set[9], set[10], set[11], set[12], set[13]
 	GlyphTag, GlyphClock, GlyphTerm, GlyphHerdr, GlyphBrand, GlyphLive, GlyphSession, GlyphChars = set[14], set[15], set[16], set[17], set[18], set[19], set[20], set[21]
-	GlyphEdit = set[22]
+	GlyphEdit, GlyphAsk, GlyphStall = set[22], set[23], set[24]
 }

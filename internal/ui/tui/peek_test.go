@@ -2,6 +2,7 @@ package tui
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -23,6 +24,11 @@ func fakeHerdr(t *testing.T) (log string) {
 	log = filepath.Join(bin, "calls")
 	script := "#!/bin/sh\nif [ \"$2\" = read ]; then printf 'Edit a.go?\\n❯ 1. Yes\\n  2. No\\n'; exit 0; fi\necho \"$@\" >> " + log + "\n"
 	os.WriteFile(filepath.Join(bin, "herdr"), []byte(script), 0o755)
+	// ⚠️ macOS checks a new executable on its first run, behind every other new binary under load: paid here, outside
+	// the 5 s that internal/herdr gives a call
+	if b, err := exec.Command(filepath.Join(bin, "herdr"), "agent", "read").Output(); err != nil || !strings.Contains(string(b), "Edit a.go?") {
+		t.Fatalf("the fake herdr runs: %q %v", b, err)
+	}
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	return log
 }

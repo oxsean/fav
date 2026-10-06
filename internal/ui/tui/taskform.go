@@ -257,7 +257,7 @@ func (m *Model) selector(body *[]string, label string, field, i, inner int, focu
 			mm.pending = tea.Batch(mm.pending, mm.previewRun())
 		}
 	})
-	*body = append(*body, sty.Render("<")+" "+render.Truncate(v, inner-6)+" "+sty.Render(">"))
+	*body = append(*body, sty.Render("<")+" "+render.Truncate(render.OneLine(v), inner-6)+" "+sty.Render(">"))
 	*body = append(*body, "")
 }
 
@@ -414,7 +414,7 @@ func (m *Model) renderTaskRun() string {
 	if n := len(m.ov.taskIDs); n > 1 {
 		title = i18n.F("tasks.run_n", n)
 	}
-	body := []string{boldSty.Foreground(cText).Render(render.Truncate(i18n.F("tasks.run_title", title), inner)),
+	body := []string{boldSty.Foreground(cText).Render(render.Truncate(i18n.F("tasks.run_title", render.OneLine(title)), inner)),
 		dimmed.Render(i18n.T("tasks.run_hint")), ""}
 	m.selector(&body, i18n.T("tasks.field_machine"), runMachine, 0, inner, m.ov.field == runMachine)
 	m.selector(&body, i18n.T("tasks.field_agent"), runAgent, 1, inner, m.ov.field == runAgent)
@@ -427,7 +427,7 @@ func (m *Model) renderTaskRun() string {
 	})
 	body = append(body, inputView(m.ov.edit), "")
 	if x != nil && x.Dir != "" {
-		body = append(body, dimmed.Render(render.Truncate(i18n.F("tasks.run_dir", x.Dir), inner)))
+		body = append(body, dimmed.Render(render.Truncate(i18n.F("tasks.run_dir", render.OneLine(x.Dir)), inner)))
 	}
 	body = append(append(body, m.previewLines(inner)...), "")
 	body = append(body, m.buttons(len(body)+1, []btn{

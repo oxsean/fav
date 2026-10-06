@@ -1022,7 +1022,7 @@ func (m *Model) resumeGroups() []btnGroup {
 		}
 		gs[len(gs)-1].end = []btn{cancel}
 		// favorite / done / archive / edit; move and delete are already there
-		return append(gs, btnGroup{label: i18n.T("resume.group.record"), bs: m.recordBtns()[:4]})
+		return append(append(gs, btnGroup{label: i18n.T("resume.group.record"), bs: m.recordBtns()[:4]}), m.taskGroup(m.ov.rec)...)
 	}
 	enter := keyOf(inResume, actEnter)
 	primary := i18n.T("resume.btn_resume")
@@ -1060,11 +1060,12 @@ func (m *Model) resumeGroups() []btnGroup {
 	if ag := m.agentBtns(); len(ag) > 0 {
 		gs = append(gs, btnGroup{label: i18n.T("resume.group.agent"), bs: ag})
 	}
-	return append(gs,
+	gs = append(gs,
 		btnGroup{label: i18n.T("resume.group.new"), bs: []btn{{k(actFork, i18n.T("resume.btn_fork")), false, (*Model).doFork}, {k(actHandoff, i18n.T("resume.btn_handoff")), false, (*Model).doHandoff}, {k(actNew, i18n.T("resume.btn_new")), false, (*Model).askStartFromDialog}}},
 		project,
 		btnGroup{label: i18n.T("resume.group.record"), bs: m.recordBtns()},
 	)
+	return append(gs, m.taskGroup(m.ov.rec)...)
 }
 
 // agentBtns: the running-session actions, so they are reachable where an IME eats letters.

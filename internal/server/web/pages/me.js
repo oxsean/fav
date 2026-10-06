@@ -48,6 +48,7 @@ register('me', {
   'me.devNotices': ['这台设备的通知 · %s', 'Notices on this device · %s'],
   'me.dev.waiting': ['等你的事', 'What waits on you'], 'me.dev.waitingNote': ['权限、提问、待验收、失败', 'Permissions, questions, runs to accept, failures'],
   'me.dev.done': ['任务完成', 'Tasks done'], 'me.dev.doneNote': ['你负责、派发或验收的', 'Yours, dispatched by you or accepted by you'],
+  'me.dev.treeDone': ['完工', 'Trees done'], 'me.dev.treeDoneNote': ['你负责或验收的任务树全部完成，带摘要', 'A task tree you own or accept is all done, with a summary'],
   'me.dev.hide': ['锁屏上隐藏内容', 'Hide the content'], 'me.dev.hideNote': ['只显示「tend：N 项等你」，不带按钮', 'Only "N waiting on you" shows, without buttons'],
   'me.dev.wait': ['升级前的等待', 'Before a push'], 'me.dev.waitNote': ['网页上一直没人处理多久才推到这里', 'How long something waits unhandled on the page before it is pushed here'],
   'me.dev.wait.0': ['默认', 'Default'], 'me.dev.wait.-1': ['立即', 'At once'], 'me.dev.wait.300': ['5 分钟', '5 min'], 'me.dev.wait.900': ['15 分钟', '15 min'],
@@ -191,11 +192,11 @@ function PushSet({push, platform, toasts, onState = () => {}}) {
       <span class=${cx(usable ? 't-muted' : 't-warning')}>${t(usable ? 'me.push.note' : 'me.push.' + shown)}</span></span></div>`;
 }
 
-// ⚠️ The events a device takes (store.EventWaiting, store.EventDone) and the waits offered, in seconds (0 the
-// server's default, -1 at once).
-const waitingEvent = 'task.needs_you', doneEvent = 'task.done';
+// ⚠️ The events a device takes (store.EventWaiting, store.EventDone, store.EventTreeDone; the first and the last by
+// default) and the waits offered, in seconds (0 the server's default, -1 at once).
+const waitingEvent = 'task.needs_you', doneEvent = 'task.done', treeDoneEvent = 'task.tree_done';
 const waits = [0, -1, 300, 900];
-const eventsOf = p => p?.events ?? [waitingEvent];
+const eventsOf = p => p?.events ?? [waitingEvent, treeDoneEvent];
 
 // Switch is one on/off setting.
 function Switch({label, on, onChange}) {
@@ -229,17 +230,19 @@ function useDevices({http, push, toasts, state, ended = 0}) {
   return {list, mine: list?.find(d => d.id === mine) || null, setPrefs, remove};
 }
 
-// DeviceSets is what this device takes of the pushes: what waits, tasks done, the content hidden, how long before.
+// DeviceSets is what this device takes of the pushes: what waits, tasks done, trees done, the content hidden, how long
+// before.
 function DeviceSets({device, onPrefs}) {
   const {t} = useWords();
   const p = device.prefs || {};
   const events = eventsOf(p);
-  const turn = (event, on) => onPrefs({...p, events: [waitingEvent, doneEvent].filter(e => (e === event ? on : events.includes(e)))});
+  const turn = (event, on) => onPrefs({...p, events: [waitingEvent, doneEvent, treeDoneEvent].filter(e => (e === event ? on : events.includes(e)))});
   const row = (key, on, onChange) => html`<div class="me-set"><span class="me-k">${t('me.dev.' + key)}</span>
     <span class="me-inline"><${Switch} label=${t('me.dev.' + key)} on=${on} onChange=${onChange} /><span class="t-muted">${t('me.dev.' + key + 'Note')}</span></span></div>`;
   return html`
     ${row('waiting', events.includes(waitingEvent), v => turn(waitingEvent, v))}
     ${row('done', events.includes(doneEvent), v => turn(doneEvent, v))}
+    ${row('treeDone', events.includes(treeDoneEvent), v => turn(treeDoneEvent, v))}
     ${row('hide', !!p.hide, v => onPrefs({...p, events, hide: v}))}
     <div class="me-set me-set-stack"><span class="me-k">${t('me.dev.wait')}</span>
       <span class="me-inline"><${Segmented} label=${t('me.dev.wait')} value=${p.wait || 0} onChange=${v => onPrefs({...p, events, wait: v})}

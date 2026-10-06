@@ -197,12 +197,12 @@ func (m *Model) previewLines(inner int) []string {
 		out = append(out, dimmed.Render(render.Truncate(i18n.F("tasks.preview_check", pv.Provider, orDash(pv.Check.Version)), inner)))
 	}
 	for _, w := range pv.Blockers {
-		for _, l := range render.Wrap(render.Why(w.Code, w.Detail), inner-2) {
+		for _, l := range render.Wrap(render.OneLine(render.Why(w.Code, w.Detail)), inner-2) {
 			out = append(out, errSty.Render(render.GlyphWarn+" ")+l)
 		}
 	}
 	for _, w := range pv.Notes {
-		out = append(out, dimmed.Render(render.Truncate("- "+render.Why(w.Code, w.Detail), inner)))
+		out = append(out, dimmed.Render(render.Truncate("- "+render.OneLine(render.Why(w.Code, w.Detail)), inner)))
 	}
 	return out
 }

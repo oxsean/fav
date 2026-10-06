@@ -6,7 +6,7 @@ import {useState, useEffect, useRef} from '../vendor/hooks.mjs';
 import {html, cx, usePhone, useWords, useSignalValue, useActions} from '../ui/base.js';
 import {Panel, Stat} from '../ui/panel.js';
 import {Button, Chip, Chips} from '../ui/controls.js';
-import {Status} from '../ui/status.js';
+import {Status, waitOf, runState} from '../ui/status.js';
 import {Icon} from '../ui/icons.js';
 import {ExpandItem} from '../ui/expand.js';
 import {Modal} from '../ui/overlay.js';
@@ -29,9 +29,12 @@ const stepsShown = 3;
 const glyphOf = {shell: '$', read: '+', search: '+', edit: '~'};
 const opGlyph = {add: '+', delete: '−', rename: '→'};
 
-// stateOf is how a waiting item is drawn: its reason when it asks, done when it is to be accepted, failed (or unknown).
+// stateOf is how a waiting item is drawn: its reason when it asks (a wait nothing names is attend, never asked), done
+// when it is to be accepted, failed (or unknown).
 const stateOf = (group, reason) => (group === 'answer' ? reason : group === 'accept' ? 'done' : group === 'error'
   ? (reason === 'unknown' ? 'unknown' : 'failed') : 'waiting');
+// reasonOf is a waiting item's reason as its run tells it: asked without a question in words is attend.
+const reasonOf = v => (v.group === 'answer' && waitOf(v.run) === 'attend' ? 'attend' : v.x.reason);
 
 // endWords is how a run ended, for the lists.
 function endWords(w, r) {
@@ -124,11 +127,14 @@ export function Home({store, commands, toasts, clock = () => Date.now(), fetchOu
     send('run.dispatch', {task: v.task.id, ...(v.run ? {machine: v.run.machine, agent: v.run.agent} : {})}, {key})
       .then(() => toasts.show({text: f('home.reworked', v.task.title)}), () => {});
   };
+  const resume = v => send('task.pause', {id: v.task.id}, {key: 'task:' + v.task.id, hide: v.task.id, until: store.inbox})
+    .then(() => toasts.show({text: f('home.resumed', v.task.title)}), () => {});
   const askStop = (run, task) => setConfirm({title: t('home.confirmStop'), note: f('home.confirmStopNote', task?.title || run.task, run.machine),
     label: t('home.stop'), go: () => send('run.stop', {id: run.id}, {key: 'run:' + run.id}).catch(() => {})});
 
   const canDone = v => !!v && v.group === 'accept' && v.x.reason !== 'draft' && !!v.task && !v.task.flow;
   const canRetry = v => !!v && v.group === 'error' && !!v.task;
+  const canResume = v => !!v?.task && v.x.reason === 'paused' && (aff.tasks?.[v.task.id]?.actions || []).includes('resume');
   const openRun = v => !!v?.run && sel.openStates.includes(v.run.state);
   const busy = v => !!v && (commands.state('task:' + v.task?.id) === 'pending' || commands.state('run:' + v.run?.id) === 'pending');
 
@@ -153,6 +159,7 @@ export function Home({store, commands, toasts, clock = () => Date.now(), fetchOu
     done: {when: () => canDone(current) && !busy(current), run: () => markDone(current)},
     dispatch: {when: () => canRetry(current) && !busy(current), run: () => askRetry(current), label: 'home.retry'},
     stop: {when: () => openRun(current), run: () => askStop(current.run, current.task)},
+    pause: {when: () => canResume(current) && !busy(current), run: () => resume(current), label: 'home.resume'},
   }, {active: !confirm});
 
   const quick = v => {
@@ -163,15 +170,17 @@ export function Home({store, commands, toasts, clock = () => Date.now(), fetchOu
     if (v.group === 'answer') return [{label: t('home.answer'), kind: 'primary', onClick: () => setOpen(v.x.task)}];
     if (canDone(v)) return [{label: t('home.done'), kind: 'primary', keyName: 'Shift+D', onClick: () => markDone(v)}, opening];
     if (canRetry(v)) return [{label: t('home.retry'), keyName: 'd', onClick: () => askRetry(v)}, opening];
+    if (canResume(v)) return [{label: t('home.resume'), keyName: 'p', onClick: () => resume(v)}, opening];
     return [opening];
   };
 
   const title = v => {
-    const reason = why(w, v.x.reason);
+    const reason = why(w, reasonOf(v));
     if (v.group === 'answer') {
       const q = v.req?.questions?.[0]?.question;
       if (q) return q;
       if (v.req?.tool) return f('home.perm', v.req.tool, v.req.summary || '');
+      if (v.run?.ask && reasonOf(v) === 'permission') return f('home.whyDetail', reason, v.run.ask);
       return v.run?.ask || reason;
     }
     const more = v.group === 'error' ? v.run?.detail : v.group === 'accept' ? v.run?.last : '';
@@ -185,6 +194,7 @@ export function Home({store, commands, toasts, clock = () => Date.now(), fetchOu
     if (v.group === 'answer') return isPermission(v.req) ? choices(v).slice(0, 1).map(c => ({label: c.label, onClick: c.go})) : [];
     if (canDone(v)) return [{label: t('home.done'), onClick: () => markDone(v)}];
     if (canRetry(v)) return [{label: t('home.retry'), onClick: () => askRetry(v)}];
+    if (canResume(v)) return [{label: t('home.resume'), onClick: () => resume(v)}];
     return [{label: t('home.openShort'), onClick: () => onOpen(v.x.task)}];
   };
   const body = v => html`<${WaitBody} v=${v} busy=${busy(v)} scope=${allowsRun(v.req, aff.runs?.[v.run?.id])} gone=${v.req && gone[v.run?.id + '\n' + v.req.id]}
@@ -193,7 +203,7 @@ export function Home({store, commands, toasts, clock = () => Date.now(), fetchOu
     onAnswer=${p => answer(v, p)} onReply=${text => reply(v, text)} />`;
   const item = v => html`<${ExpandItem} key=${v.x.task} id=${v.x.task} open=${!phone && open === v.x.task} selected=${selected === v.x.task} page=${phone}
       onToggle=${phone ? () => onWait(v.x.task) : () => { setSelected(v.x.task); setOpen(open === v.x.task ? '' : v.x.task); }}
-      state=${stateOf(v.group, v.x.reason)} title=${phone ? v.task?.title || v.x.title || v.x.task : title(v)} sub=${phone ? title(v) : sub(v)}
+      state=${stateOf(v.group, reasonOf(v))} title=${phone ? v.task?.title || v.x.title || v.x.task : title(v)} sub=${phone ? title(v) : sub(v)}
       age=${duration(now - Date.parse(v.x.since))} agePct=${(now - Date.parse(v.x.since)) / waitFull * 100}
       actions=${busy(v) ? [] : phone ? quickPhone(v) : quick(v)}>
       ${!phone && open === v.x.task && body(v)}
@@ -220,7 +230,7 @@ export function Home({store, commands, toasts, clock = () => Date.now(), fetchOu
         : sel.doing(run);
       const since = Date.parse(run.started_at || run.queued_at);
       return html`<div class="run-row" key=${run.id}>
-        <${Status} state=${run.state} />
+        <${Status} state=${runState(run)} />
         <button type="button" class="run-main" onClick=${() => onOpen(run.task)}>
           <span class="run-title ell">${task?.title || run.task}</span><span class="run-who mono">${who(run)}</span>
         </button>
@@ -261,7 +271,7 @@ export function Home({store, commands, toasts, clock = () => Date.now(), fetchOu
       <section class="home-going">
         <button type="button" class="home-going-head" onClick=${() => onNavigate('runs')}>${f('home.running', c.running, c.queued)} ›</button>
         <div class="home-going-list">${running.length ? running.map(({run, task}) => html`<button type="button" class="going-row" key=${run.id} onClick=${() => onOpen(run.task)}>
-          <${Status} state=${run.state} /><span class="going-title ell">${task?.title || run.task}</span>
+          <${Status} state=${runState(run)} /><span class="going-title ell">${task?.title || run.task}</span>
           <span class="mono t-muted">${duration(now - Date.parse(run.started_at || run.queued_at))}</span>
         </button>`) : html`<p class="empty">${t('home.nothingRuns')}</p>`}</div>
       </section>
@@ -305,7 +315,7 @@ export function Home({store, commands, toasts, clock = () => Date.now(), fetchOu
         ${runsPanel}
         <${Panel} title=${t('home.recent')} count=${recent.length}>
           ${recent.length ? html`<div class="rows">${recent.map(r => html`<div class="end-row" key=${r.id}>
-            <${Status} state=${r.state} />
+            <${Status} state=${runState(r)} />
             <button type="button" class="run-main" onClick=${() => onOpen(r.task)}><span class="run-title ell">${st.tasks[r.task]?.title || r.task}</span><span class="mono t-muted">${r.id}</span></button>
             <span class="run-who mono">${who(r)}</span><span class="t-muted ell">${endWords(w, r)}</span><span class="mono t-muted">${hhmm(r.ended_at)}</span>
           </div>`)}</div>` : html`<p class="empty">${t('home.noRecent')}</p>`}
@@ -336,7 +346,8 @@ export function Home({store, commands, toasts, clock = () => Date.now(), fetchOu
 }
 
 // headOf is what the page of one waiting item is titled by.
-const headOf = v => (v.group === 'answer' ? (isPermission(v.req) ? 'home.wait.permission' : 'home.wait.answer')
+const headOf = v => (v.group === 'answer' ? (isPermission(v.req) || !v.req && reasonOf(v) === 'permission' ? 'home.wait.permission'
+  : reasonOf(v) === 'attend' ? 'home.wait.attend' : 'home.wait.answer')
   : v.group === 'accept' ? 'home.wait.accept' : 'home.wait.error');
 
 // WaitPage is one waiting item with the phone's screen to itself, as a notice or a row of the list opens it: what it
@@ -365,7 +376,7 @@ function WaitPage({wait, list, loaded, title, body, toasts, onWait, onBack, onOp
     </header>
     <div class="page-body">
       ${v ? html`
-        <div class="wait-title"><${Status} state=${stateOf(v.group, v.x.reason)} />
+        <div class="wait-title"><${Status} state=${stateOf(v.group, reasonOf(v))} />
           <span class="wait-name"><b>${v.task?.title || v.x.title || v.x.task}</b><span class="t-muted">${title(v)}</span></span></div>
         ${body(v)}
         <p class="lbl wait-next">${list.length > 1 ? f('home.nextLeft', list.length - 1) : t('home.nextNone')}</p>`

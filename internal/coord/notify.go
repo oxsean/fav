@@ -24,21 +24,22 @@ const (
 
 // NotifyEvent is what config's notify_command reads on stdin, one JSON object.
 type NotifyEvent struct {
-	Event    string    `json:"event"`
-	Run      string    `json:"run,omitempty"`
-	Task     string    `json:"task"`
-	Title    string    `json:"title,omitempty"`
-	Machine  string    `json:"machine,omitempty"`
-	Agent    string    `json:"agent,omitempty"`
-	State    string    `json:"state,omitempty"`
-	ExitCode *int      `json:"exit_code,omitempty"`
-	Reason   string    `json:"reason,omitempty"`
-	Detail   string    `json:"detail,omitempty"`
-	Ask      string    `json:"ask,omitempty"`
-	Session  string    `json:"session,omitempty"`
-	Dir      string    `json:"dir,omitempty"`
-	Stage    string    `json:"stage,omitempty"`
-	At       time.Time `json:"at"`
+	Event    string            `json:"event"`
+	Run      string            `json:"run,omitempty"`
+	Task     string            `json:"task"`
+	Title    string            `json:"title,omitempty"`
+	Machine  string            `json:"machine,omitempty"`
+	Agent    string            `json:"agent,omitempty"`
+	State    string            `json:"state,omitempty"`
+	ExitCode *int              `json:"exit_code,omitempty"`
+	Reason   string            `json:"reason,omitempty"`
+	Detail   string            `json:"detail,omitempty"`
+	Ask      string            `json:"ask,omitempty"`
+	Session  string            `json:"session,omitempty"`
+	Dir      string            `json:"dir,omitempty"`
+	Stage    string            `json:"stage,omitempty"`
+	Summary  *task.TreeSummary `json:"summary,omitempty"` // task.tree_done: how the tree went
+	At       time.Time         `json:"at"`
 }
 
 // maxNotify keeps an event within one pipe buffer (4 KiB on Windows): it is written before the command starts.

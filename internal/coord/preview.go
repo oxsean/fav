@@ -71,6 +71,7 @@ const (
 	WhyOffline      = "offline"               // it queues until the machine answers
 	WhyConnecting   = "connecting"
 	WhyDrain        = "drain"    // it queues until the machine takes new runs again (Detail: who stopped them)
+	WhyPaused       = "paused"   // it queues until its tree is resumed (Detail: the paused task)
 	WhySlots        = "slots"    // it queues until a slot frees (Detail: active/slots)
 	WhyDirBusy      = "dir_busy" // it queues until the run in the same directory ends (Detail: run id)
 	WhyAuthUnknown  = "auth_unknown"
@@ -159,6 +160,9 @@ func (c *Coord) preview(ctx context.Context, run task.Run) Preview {
 	}
 	if d := c.st.Drains[m.name]; d != nil {
 		pv.Notes = append(pv.Notes, Why{WhyDrain, d.By})
+	}
+	if p := c.st.PausedBy(run.Task); p != nil {
+		pv.Notes = append(pv.Notes, Why{WhyPaused, p.ID})
 	}
 	if x.Active >= x.Slots {
 		pv.Notes = append(pv.Notes, Why{WhySlots, strconv.Itoa(x.Active) + "/" + strconv.Itoa(x.Slots)})

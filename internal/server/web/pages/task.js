@@ -5,27 +5,36 @@
 import {useEffect} from '../vendor/hooks.mjs';
 import {html, cx, usePhone, useWords, useSignalValue, useName} from '../ui/base.js';
 import {Button, Tabs} from '../ui/controls.js';
-import {Status} from '../ui/status.js';
+import {Status, waitOf, runState} from '../ui/status.js';
 import {Markdown} from '../ui/markdown.js';
 import {Menu} from '../ui/menu.js';
 import * as tk from '../core/tasks.js';
 import * as sel from '../core/select.js';
-import {situation} from '../core/fold.js';
+import {situation, pausedBy} from '../core/fold.js';
 import {tokens, money, duration, clock, usageTokens} from '../core/format.js';
 import {why} from './words.js';
 import './taskwords.js';
 
 // ⚠️ The keys of the task page's actions, from the action table.
-export const actionKeys = {dispatch: 'd', edit: 'e', stop: 'x', done: 'Shift+D'};
+export const actionKeys = {dispatch: 'd', edit: 'e', stop: 'x', done: 'Shift+D', pause: 'p', resume: 'p'};
 
-// sitState is how a situation is drawn by Status; sitWord what it says.
-export function sitState(sit) {
+// sitState is how a situation is drawn by Status; sitWord what it says. With the state, the run it rests on tells a
+// wait nothing names (attend) and a run with no output for long (stalled).
+const waitIn = (sit, state) => (sit.run ? waitOf(state?.runs?.[sit.run]) : '');
+
+export function sitState(sit, state) {
+  const wait = waitIn(sit, state);
+  if (sit.kind === 'waiting' && wait && wait !== 'stalled') return wait;
+  if (sit.kind === 'running' && wait === 'stalled') return 'stalled';
   if (sit.kind === 'waiting') return ['asked', 'permission', 'unknown'].includes(sit.reason) ? sit.reason
     : ['failed', 'stopped', 'canceled', 'abandoned', 'merge_conflict', 'setup_failed', 'work', 'blocked', 'max_loops', 'budget'].includes(sit.reason) ? 'failed' : 'waiting';
   return {running: 'running', queued: 'queued', backlog: 'backlog', done: 'done', canceled: 'canceled'}[sit.kind] || 'unknown';
 }
 
-export function sitWord(w, sit) {
+export function sitWord(w, sit, state) {
+  const wait = waitIn(sit, state);
+  if (sit.kind === 'waiting' && wait === 'attend') return w.t('why.attend');
+  if (sit.kind === 'running' && wait === 'stalled') return w.t('why.stalled');
   if (sit.kind === 'waiting' || sit.kind === 'queued') return why(w, sit.reason);
   return w.t('status.' + ({backlog: 'backlog', done: 'done', canceled: 'canceled', running: 'running'}[sit.kind] || 'unknown'));
 }
@@ -45,7 +54,7 @@ function Section({title, count, children}) {
 function TaskLink({state, id, onGo}) {
   const x = state.tasks[id];
   if (!x) return html`<span class="mono t-muted">${id}</span>`;
-  return html`<button type="button" class="det-link" onClick=${() => onGo(id)}><${Status} state=${sitState(situation(state, x))} /><span class="ell">${x.title}</span><span class="mono t-muted">${id}</span></button>`;
+  return html`<button type="button" class="det-link" onClick=${() => onGo(id)}><${Status} state=${sitState(situation(state, x), state)} /><span class="ell">${x.title}</span><span class="mono t-muted">${id}</span></button>`;
 }
 
 function RunRow({run, now, onRun, on}) {
@@ -54,12 +63,26 @@ function RunRow({run, now, onRun, on}) {
   const said = sel.doing(run) || run.detail || run.reason || '';
   return html`<div class=${cx('det-run', onRun && 'det-run-go', on && 'on')} role=${onRun ? 'button' : undefined} tabindex=${onRun ? 0 : undefined}
     onClick=${onRun && (() => onRun(run.id))} onKeyDown=${onRun && (e => { if (e.key === 'Enter') { e.preventDefault(); onRun(run.id); } })}>
-    <${Status} state=${run.state} />
+    <${Status} state=${runState(run)} />
     <span class="det-run-main"><span class="mono">${run.id}</span> <span class="t-muted">${who(run)}${run.stage ? ' · ' + run.stage : ''}</span>
       ${said && html`<span class=${cx('det-run-said', 'ell', /^\$ |^go |^npm /.test(said) && 'mono')}>${said}</span>`}
+      ${run.output_at && sel.openStates.includes(run.state) && html`<span class="det-run-said t-muted">${w.f('det.outputAt', clock(run.output_at))}</span>`}
       ${run.verdict && html`<span class="det-run-said">${w.f('det.verdict', run.verdict.verdict)}${run.verdict.summary ? ' · ' + run.verdict.summary : ''}</span>`}</span>
     <span class="det-run-time mono">${Number.isNaN(began) ? '' : duration(ended - began)}</span>
     <span class="det-run-cost mono">${run.usage?.cost_usd >= 0.005 ? money(run.usage.cost_usd) : run.usage ? tokens(usageTokens(run.usage)) : ''}</span>
+  </div>`;
+}
+
+// TreeDone is how a tree done went, as the coordinator sums it up (task.TreeSummary in its affordances).
+function TreeDone({summary: s}) {
+  const {t, f} = useWords();
+  const span = Date.parse(s.done_at) - Date.parse(s.started);
+  const facts = [f('det.treeLeaves', s.done || 0, s.leaves || 0), s.canceled > 0 && f('det.treeCanceled', s.canceled), f('det.treeRuns', s.runs || 0),
+    span > 0 && f('det.treeTook', duration(span))].filter(Boolean);
+  return html`<div class="det-done" role="status">
+    <b><span aria-hidden="true">✓ </span>${t('det.treeDone')}</b>
+    <span>${facts.join(' · ')}</span>
+    ${s.branch && html`<span>${f('det.treeBranch', s.branch)} · <span class="t-muted">${t('det.treeNote')}</span></span>`}
   </div>`;
 }
 
@@ -80,6 +103,8 @@ export function Task({store, task, now, busy = false, offline = false, onAct, on
   useEffect(() => { if (task && brief === undefined) store.brief(task.id).catch(() => {}); }, [task?.id, brief === undefined]);
   if (!task) return html`<p class="empty">${t('det.gone')}</p>`;
   const sit = situation(st, task);
+  const treeDone = aff.tasks?.[task.id]?.tree_done;
+  const paused = !tk.finished(task.status) && pausedBy(st, task.id);
   const acts = tk.actionsOf(st, aff, task);
   const grey = busy || offline;
   const kids = tk.childrenOf(st, task.id);
@@ -104,7 +129,7 @@ export function Task({store, task, now, busy = false, offline = false, onAct, on
     const meta = [task.id, project?.name, stage && f('gate.stage', stage.name, task.loops || 0)].filter(Boolean).join(' · ');
     return html`<article class="det det-out" aria-label=${task.title}>
       <header class="det-bar">
-        <${Status} state=${sitState(sit)} label=${sitWord(w, sit)} />
+        <${Status} state=${sitState(sit, st)} label=${sitWord(w, sit, st)} />
         <h2 class="det-bar-title ell" title=${task.title + ' · ' + meta}>${task.title}</h2>
         ${tabBar}
         <span class="det-bar-acts">${acts.primary && button(acts.primary, 'primary')}${menu([...direct, ...more])}${close}</span>
@@ -113,7 +138,7 @@ export function Task({store, task, now, busy = false, offline = false, onAct, on
     </article>`;
   }
   const top = html`<header class="det-head">
-      <div class="det-sit"><${Status} state=${sitState(sit)} label=${sitWord(w, sit)} />${stage && html`<span class="chip">${f('gate.stage', stage.name, task.loops || 0)}</span>`}${close && html`<span class="det-close">${close}</span>`}</div>
+      <div class="det-sit"><${Status} state=${sitState(sit, st)} label=${sitWord(w, sit, st)} />${stage && html`<span class="chip">${f('gate.stage', stage.name, task.loops || 0)}</span>`}${close && html`<span class="det-close">${close}</span>`}</div>
       <h2 class="det-title">${task.title}</h2>
       <div class="det-meta mono">${task.id}${project ? ' · ' + project.name : ''}${task.kind === 'requirement' ? ' · ' + t('det.requirement') : ''}</div>
     </header>
@@ -128,6 +153,8 @@ export function Task({store, task, now, busy = false, offline = false, onAct, on
     ${task.source?.pending && html`<div class="det-note"><b>${f('det.sourceNew', task.source.pending.rev)}</b><${Markdown} text=${task.source.pending.text} /></div>`}
     ${task.source?.closed && !task.source.closed_acked && html`<div class="det-note">${t('det.sourceClosed')}</div>`}
     ${task.source?.reopened && html`<div class="det-note">${t('det.sourceReopened')}</div>`}
+    ${treeDone && html`<${TreeDone} summary=${treeDone} />`}
+    ${paused && html`<div class="det-note">${paused.id === task.id ? f('det.paused', name(paused.paused.by), clock(paused.paused.at)) : f('det.pausedUnder', paused.title)}</div>`}
     ${task.draft && html`<div class="det-note">${f('det.draft', task.draft.plan?.tasks?.length || 0)}</div>`}
     <dl class="facts det-facts">
       ${task.owner && html`<dt>${t('det.owner')}</dt><dd>${name(task.owner)}</dd>`}

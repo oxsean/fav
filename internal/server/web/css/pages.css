@@ -115,6 +115,8 @@
 .det-title { font-size: 17px; font-weight: 650; overflow-wrap: anywhere; }
 .det-meta { font-size: 11px; color: var(--muted); }
 .det-acts { display: flex; flex-wrap: wrap; gap: 6px; }
+.det-done { display: grid; gap: 4px; padding: 10px 12px; border-radius: 6px; border-left: 3px solid var(--success); background: var(--surface-alt); font-size: 12px; }
+.det-done b { color: var(--success); font-size: 13px; }
 .det-note { display: grid; gap: 6px; padding: 8px 10px; border-radius: 6px; background: var(--accent-soft); font-size: 12px; }
 .det-facts { font-size: 12px; }
 .det-sec { display: grid; gap: 8px; min-width: 0; }
@@ -348,6 +350,13 @@
 .sess-conv-title { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .sess-conv-title h2 { flex: 1; margin: 0; font-size: 14px; }
 .sess-conv-facts { display: flex; flex-wrap: wrap; gap: 2px 12px; font-size: 12px; min-width: 0; }
+.sess-titled { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.sess-titled > .ell:first-child { flex: 0 1 auto; min-width: 0; }
+.sess-task { flex: 0 1 auto; min-width: 0; max-width: 100%; border: 1px solid var(--border); border-radius: 999px; padding: 0 7px; font: inherit; font-size: 11px; line-height: 18px; color: var(--accent); background: transparent; text-align: left; }
+button.sess-task { cursor: pointer; }
+button.sess-task:hover { background: var(--surface-hover); }
+.sess-titled .sess-task { max-width: 55%; }
+.sess-conv-task { display: flex; min-width: 0; }
 .sess-scroll { flex: 1; min-height: 0; overflow-y: auto; padding: 8px var(--pad) 16px; }
 .sess-edge { margin: 0 0 8px; display: flex; justify-content: center; font-size: 12px; }
 .sess-msgs { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }

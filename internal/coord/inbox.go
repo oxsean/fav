@@ -13,25 +13,27 @@ import (
 
 // Task notify events.
 const (
-	NotifyTaskWaiting = "task.needs_you" // a task came to wait for someone
-	NotifyTaskDone    = "task.done"
-	NotifyTaskStage   = "task.stage"  // a task in a workflow moved on to a stage; only the notify command hears it
-	NotifyTaskRework  = "task.rework" // a stage sent a task back; only the notify command hears it
+	NotifyTaskWaiting  = "task.needs_you" // a task came to wait for someone
+	NotifyTaskDone     = "task.done"
+	NotifyTaskStage    = "task.stage"     // a task in a workflow moved on to a stage; only the notify command hears it
+	NotifyTaskRework   = "task.rework"    // a stage sent a task back; only the notify command hears it
+	NotifyTaskTreeDone = "task.tree_done" // a tree's root came to be done, besides its own task.done
 )
 
 // Notice is a task that came to need someone, for the people it concerns.
 type Notice struct {
-	Seq     int64          `json:"seq"`
-	Event   string         `json:"event"`
-	Task    string         `json:"task"`
-	Title   string         `json:"title"`
-	Project string         `json:"project,omitempty"`
-	Reason  string         `json:"reason,omitempty"`
-	Run     string         `json:"run,omitempty"`
-	Stage   string         `json:"stage,omitempty"`
-	Items   []task.Pending `json:"items,omitempty"` // what came to wait: the pending items it did not wait on before
-	To      []string       `json:"to"`              // user ids
-	At      time.Time      `json:"at"`
+	Seq     int64             `json:"seq"`
+	Event   string            `json:"event"`
+	Task    string            `json:"task"`
+	Title   string            `json:"title"`
+	Project string            `json:"project,omitempty"`
+	Reason  string            `json:"reason,omitempty"`
+	Run     string            `json:"run,omitempty"`
+	Stage   string            `json:"stage,omitempty"`
+	Items   []task.Pending    `json:"items,omitempty"`   // what came to wait: the pending items it did not wait on before
+	Summary *task.TreeSummary `json:"summary,omitempty"` // a tree done: how it went
+	To      []string          `json:"to"`                // user ids
+	At      time.Time         `json:"at"`
 }
 
 // InboxItem is a task waiting for the caller.
@@ -169,8 +171,8 @@ func arrived(was, now []task.Pending) []task.Pending {
 	return out
 }
 
-// notices are the tasks among before's that something new came to wait on someone for, or that got done, in env;
-// the caller holds mu.
+// notices are the tasks among before's that something new came to wait on someone for, or that got done, in env, and
+// the trees among them that got done, for their root's owner and approver; the caller holds mu.
 func (c *Coord) notices(env journal.Envelope, before map[string]taskStanding) []Notice {
 	var out []Notice
 	ids := make([]string, 0, len(before))
@@ -218,6 +220,11 @@ func (c *Coord) notices(env journal.Envelope, before map[string]taskStanding) []
 			out = append(out, Notice{Seq: env.Seq, Event: ev, Task: id, Title: t.Title, Project: t.Project, Reason: now.Reason,
 				Run: now.Run, Items: items, To: concerns(c.st, t, now), At: env.At})
 		}
+		if ev == NotifyTaskDone && c.st.TreeDone(t) {
+			sum := c.st.TreeSummary(id)
+			out = append(out, Notice{Seq: env.Seq, Event: NotifyTaskTreeDone, Task: id, Title: t.Title, Project: t.Project, Summary: &sum,
+				To: concerns(c.st, t, task.Situation{Reason: task.WhyAccept}), At: env.At}) // its owner and its approver
+		}
 	}
 	return out
 }
@@ -229,14 +236,15 @@ func (c *Coord) deliver(ns []Notice) {
 			c.opt.Notice(n)
 		}
 		if len(c.opt.Config.NotifyCommand) > 0 && c.notifies(n.Event) {
-			c.runNotifyEvent(NotifyEvent{Event: n.Event, Task: n.Task, Title: clip(n.Title, 300), Reason: n.Reason, Run: n.Run, Stage: n.Stage, At: n.At},
+			c.runNotifyEvent(NotifyEvent{Event: n.Event, Task: n.Task, Title: clip(n.Title, 300), Reason: n.Reason, Run: n.Run, Stage: n.Stage,
+				Summary: n.Summary, At: n.At},
 				"TEND_TASK="+n.Task)
 		}
 	}
 }
 
-// inbox is what waits for p: the tasks waiting for someone (not merely for a dispatch nobody asked for) that concern p
-// and that p may act on, longest waiting first.
+// inbox is what waits for p: the tasks waiting for someone (not merely for a dispatch nobody asked for, nor under a
+// paused tree: only the paused task itself, to be resumed) that concern p and that p may act on, longest waiting first.
 func (c *Coord) inbox(p Principal) Inbox {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -256,7 +264,7 @@ func (c *Coord) inboxItem(p Principal, t *task.Task) (InboxItem, bool) {
 	if r := c.st.Runs[sit.Run]; p.Admin && r != nil && task.Open(r.State) && c.retired(r.Machine) {
 		return InboxItem{Task: t.ID, Title: t.Title, Project: t.Project, Reason: sit.Reason, Run: r.ID, Since: r.Since(), As: []string{AsAdmin}}, true
 	}
-	if sit.Kind != task.SitWaiting || sit.Reason == task.WhyDispatch || !canWrite(c.st, p, t) || !slices.Contains(concerns(c.st, t, sit), p.User) {
+	if sit.Kind != task.SitWaiting || sit.Reason == task.WhyDispatch || sit.Reason == task.WhyPaused && t.Paused == nil || !canWrite(c.st, p, t) || !slices.Contains(concerns(c.st, t, sit), p.User) {
 		return InboxItem{}, false
 	}
 	since := t.UpdatedAt

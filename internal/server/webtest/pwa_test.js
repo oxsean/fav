@@ -180,6 +180,7 @@ function pusher({lang = 'zh-CN', wins = [], answer = url => (url === '/session' 
     location: {origin: 'https://tend.test'}, navigator: {language: lang},
     addEventListener: (type, fn) => { on[type] = fn; },
     registration: {showNotification: async (title, opts) => { shown.push(plain({title, ...opts})); },
+      getNotifications: async ({tag}) => shown.filter(n => n.tag === tag).slice(-1),
       pushManager: {subscribe: async opt => { subscribed.push({userVisibleOnly: opt.userVisibleOnly, applicationServerKey: opt.applicationServerKey}); return {toJSON: () => ({endpoint: 'https://push.example/new', keys: {}})}; }}},
     clients: {matchAll: async () => wins, openWindow: async url => { opened.push(url); }},
   };
@@ -239,6 +240,24 @@ test('a push with its content hidden says only how many wait, and a task done sa
   const en = pusher({lang: 'en'});
   await en.push({v: 1, server: 'c1', seq: 9, to: 'u-ann', event: 'task.needs_you', n: 2});
   eq(en.shown[0].body, '2 waiting on you', 'in English');
+});
+
+test('a tree done says how it went, and its root\'s own done after it leaves it in its place', async () => {
+  const summary = {leaves: 9, done: 9, canceled: 1, runs: 26, started: '2026-10-05T08:00:00Z', done_at: '2026-10-05T11:12:30Z', branch: 'tend/order-v1'};
+  const w = pusher();
+  await w.push({v: 1, server: 'c1', seq: 9, to: 'u-ann', event: 'task.tree_done', task: 't-3', title: '订单链路', link: '#task-t-3', n: 0, summary});
+  await w.push({v: 1, server: 'c1', seq: 9, to: 'u-ann', event: 'task.done', task: 't-3', title: '订单链路', link: '#task-t-3', n: 0});
+  await w.push({v: 1, server: 'c1', seq: 10, to: 'u-ann', event: 'task.tree_done', n: 0});
+  const said = '完工 · 9/9 项完成 · 1 项取消 · 26 次运行 · 用时 3h12m · 汇到 tend/order-v1';
+  eq(w.shown.map(n => [n.title, n.body, n.tag, n.renotify, n.data]), [
+    ['订单链路', said, 't-3', true, {task: 't-3', link: '#task-t-3', tree: true}],
+    ['订单链路', said, 't-3', false, {task: 't-3', link: '#task-t-3', tree: true}],
+    ['tend', '完工了', 'tend-done', true, {link: ''}],
+  ], 'notices');
+  const en = pusher({lang: 'en'});
+  await en.push({v: 1, server: 'c1', seq: 9, to: 'u-ann', event: 'task.tree_done', task: 't-3', title: 'order flow', link: '#task-t-3', n: 0,
+    summary: {leaves: 1, done: 1, runs: 1}});
+  eq(en.shown[0].body, 'All done · 1 of 1 done · 1 run', 'in English, with no time it does not know');
 });
 
 // What the push service still held when the viewer signed out, or someone else signed in here, shows nothing of its

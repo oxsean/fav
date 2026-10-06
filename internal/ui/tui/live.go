@@ -44,7 +44,8 @@ func (m *Model) readPulses() tea.Cmd {
 		out := make(pulseMsg, len(srcs))
 		for id, src := range srcs {
 			if pl, ok := src.Pulse(); ok {
-				pl.Asking = pl.Asking || capture.HookWaiting(id, pl.Size)
+				_, waits := capture.HookWaiting(id, pl.Size)
+				pl.Asking = pl.Asking || waits
 				out[id] = pl
 			}
 		}

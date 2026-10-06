@@ -16,7 +16,7 @@ import {mayRead} from '../core/team.js';
 import {Team} from './team.js';
 import {Me} from './me.js';
 import {Agents} from './agents.js';
-import {useNotices} from './notify.js';
+import {useNotices, useTreesDone} from './notify.js';
 import {createChanges} from '../core/changes.js';
 import {createDrafts} from '../core/drafts.js';
 import {createAgentDefs} from '../core/agents.js';
@@ -68,6 +68,7 @@ export function App({store, commands, toasts, wire, http, router, keys, nav, pre
   const go = (to, o) => router.go(to, o);
   const phone = usePhone();
   useNotices({store, prefs, notices, doc, active: !phone, onOpen: task => go({page: 'tasks', task})});
+  useTreesDone({store, toasts});
   useEffect(() => push.clear(inbox), [inbox]);
   const toTasks = kind => { if (route.page !== 'tasks') go({page: 'tasks', view: 'list'}); intent.value = {kind}; };
 

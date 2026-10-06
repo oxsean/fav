@@ -63,12 +63,13 @@ max_loops: 2
   - `backlog`：还没开始，不算在不变式里，也不派发。
   - `running`：有未结束的 run。
   - `queued`：会自己往下走：`after`（前置任务没完成）、`children`（子任务没完成）、`drain`（run 的机器停止接新运行，见 [../runs/coordinator.md](../runs/coordinator.md)「调度与对账」；先于 `dir` 判断）、`slot`（run 在等机器接手：离线、连接中或并发槽满）、`dir`（同一台机器上另一个不在自己分支或副本上的 run 正在这个目录里跑；判断用的是 run 记下的目录，映射后不同就算作 `slot`）、`ready`（协调器马上派发）、`completing`（run 成功，协调器马上标完成）；workflow 的 `advance`、`rework`、`stale` 见下文「实现」。
-  - `waiting`：要有人动手：`accept`（子任务全部完成等验收，或在人工闸门）、`dispatch`（没开始、也没人派发）、`after_canceled`、`held`（协调器派不出去，`held` 字段写原因）、`ended`（手动派发的 run 正常结束，等人标完成），以及 run 的 `asked`、`permission`、`unknown`、`failed` 等结束原因；workflow 的 `max_loops`、`blocked`、`budget`，拆解的 `draft`、`no_plan`（[planning.md](planning.md)「实现」），合并的 `merge_conflict`（[execution.md](execution.md)「实现」），需求的 `source_changed`、`source_closed`、`source_reopened`（[trackers.md](trackers.md)「导入与需求快照」）。
+  - `waiting`：要有人动手：`accept`（子任务全部完成等验收，或在人工闸门）、`dispatch`（没开始、也没人派发）、`after_canceled`、`held`（协调器派不出去，`held` 字段写原因）、`paused`（它所在的任务树暂停了派发，见下文「暂停」）、`ended`（手动派发的 run 正常结束，等人标完成），以及 run 的 `asked`、`permission`、`unknown`、`failed` 等结束原因；workflow 的 `max_loops`、`blocked`、`budget`，拆解的 `draft`、`no_plan`（[planning.md](planning.md)「实现」），合并的 `merge_conflict`（[execution.md](execution.md)「实现」），需求的 `source_changed`、`source_closed`、`source_reopened`（[trackers.md](trackers.md)「导入与需求快照」）。
 - **开始**：`task.start` 把任务和它整棵子树里未完成的任务标为自动（`auto`，记下 `start_seq`），backlog 的变成 todo。之后由协调器的 `flow()` 在每次提交后推进：`ready` 的以任务主人的身份派发（照常走权限和可见性检查），失败就写 `task_held`；`completing` 的写成 done。没开始的任务照旧手动派发，`waiting: dispatch` 是它们的常态，不进收件箱也不发通知。
+- **暂停**：`task.pause{id, on}` 暂停或恢复一棵任务树（需求，或带子任务的任务；别的任务回 `conflict no subtasks`，已结束的回 `conflict`）的新派发，权限同 `task.start`，写 `task_paused{id, on, by}`，任务上记 `paused{by, at}`，恢复时清掉；和现状一样时不写事件。`task.State.PausedBy(id)` 是管住 id 的那个任务（它自己或最近的暂停的祖先）。被管住的任务里，原本 `queued` 的处境（`ready`、`stale`、`after`、`children`、`advance`、`rework`，以及排队 run 的 `slot`、`drain`、`dir`）都变成 `waiting: paused`（带着原来的 `run`），所以 `flow()` 不派发、workflow 不推进阶段（走到最后一阶段的完成也一样等）；`completing` 不变，run 已经成功的任务照常标完成。已经在等人（`held`、`asked` 等）的处境不变。协调器不启动这棵树下排队的 run（手动派发、续接、合并 run 都照常排队，恢复后才启动），starting / running 的照常跑完；`run.preview` 多一条 note `paused`（`detail` 是暂停的任务）。暂停不发通知（`paused` 没有 `Pending`）；收件箱里一棵暂停的树只有一条：暂停的那个任务自己（处境是 `paused`、带着 `paused` 字段），等它的负责人恢复，下面的任务不进收件箱，TUI 首页同样只列这一行。嵌套的暂停各管各的：恢复根节点不清子树里另一处暂停。暂停是日志里的事件，协调器重启后照样生效。
 - **依赖**：上游 `done` 才算满足；有分支的任务合进父任务的集成分支之后才写 done（见 [execution.md](execution.md)「实现」）。上游被取消，下游进 `waiting: after_canceled`，由人决定改依赖还是取消。
 - **重试** = 再次 `task.start`：`start_seq` 之前的 run 算作更早的尝试，不再决定现状；编辑任务或再次开始都会清掉 `held`。
 - **重开**：已结束（done 或 canceled）的任务改回 todo 或 backlog（`task.set_status`：重新打开、已结束的先不开始）是一条尝试的分界线：任务不再是自动的（`auto` 清掉），`start_seq` 记成这次改状态的 seq，`merged` 清掉。之前的 run（包括合并 run）都算更早的尝试，不再决定现状，所以协调器不会把它再标完成；改回 todo 而没有新 run 时它是 `waiting: dispatch`。走 workflow 的任务在同一条命令里回到当前阶段的 `Flow.Back`（和打回一样，`loops` 不加）。要再跑就再开始或派发。来源 issue 上 tend 自己的关单或标签跟着撤回（[trackers.md](trackers.md)「回写」）。issue 在外面被重新打开时，协调器替人做同一次重开（`waiting: source_reopened`，见 [trackers.md](trackers.md)「导入与需求快照」）。
-- **撤销**不是重开：`task.undo{id, command}` 把任务的状态、`auto`、`start_seq`、`merged`、阶段（`stage`、`loops`、`stage_seq`、`stages`）和位置（`parent`、`after`、`held`）逐项放回被撤销的那条 `task.set_status` 或 `task.move` 之前的样子（`task_restored`），所以撤销完成后任务又落在原来的处境、回到收件箱，撤销重新打开后它原样是 done（workflow 任务也一样）。原位置已经放不下（原父任务结束了、有打开的 run、太深）时拒绝撤销移动。只还原那条命令改过的；协调器因它已经做了的事（派发了下游、父任务往下走）不撤回。完成排的是合并 run 时，撤销在合并还在排队时取消它（`run_canceled`，`reason: undone`，这样的 run 不算任何一次尝试），开跑了就拒绝。撤销完成后，来源 issue 上 tend 自己的关单或标签也撤回（和重开一样）。
+- **撤销**不是重开：`task.undo{id, command}` 把任务的状态、`auto`、`start_seq`、`merged`、`done_at`、阶段（`stage`、`loops`、`stage_seq`、`stages`）和位置（`parent`、`after`、`held`）逐项放回被撤销的那条 `task.set_status` 或 `task.move` 之前的样子（`task_restored`），所以撤销完成后任务又落在原来的处境、回到收件箱，撤销重新打开后它原样是 done（workflow 任务也一样）。原位置已经放不下（原父任务结束了、有打开的 run、太深）时拒绝撤销移动。只还原那条命令改过的；协调器因它已经做了的事（派发了下游、父任务往下走）不撤回。完成排的是合并 run 时，撤销在合并还在排队时取消它（`run_canceled`，`reason: undone`，这样的 run 不算任何一次尝试），开跑了就拒绝。撤销完成后，来源 issue 上 tend 自己的关单或标签也撤回（和重开一样）。
 - **父任务**在子任务完成前从不派 run。子任务全部完成后，没有 workflow 的父任务进 `waiting: accept`，由人标完成；有 workflow 的走自己的阶段。
 - 树最多三层；`task.move` 改 parent 和 after，拒绝成环、跨项目和超过深度。
 - 随机事件序列测试（`internal/task/tree_test.go`）在每一步检查不变式：每个未完成、非 backlog 的任务恰好落在 running / queued / waiting 之一，并带原因。
@@ -93,11 +94,11 @@ max_loops: 2
 |---|---|---|---|
 | 1. tend 生命周期 hooks | 目标机器，工作目录里，由监督进程执行 | `setup`：worktree 建好后跑，比如装依赖；`before_run`：每次运行开工前在任务的 worktree 里跑（只读副本和合并不跑），失败则运行失败（`before_run_failed`），worktree 保留，要节点 feature `before_run`；`check`：阶段结束后跑，比如 `mise run gate`，失败等同 verdict=rework，输出进 workpad；`cleanup` | project（可被 workflow 阶段覆盖） |
 | 2. provider hooks | agent 进程内 | Claude Code 的 `PreToolUse`、`Stop` 等：拦截危险命令、结束前强制跑测试 | AgentDef 的 `hooks`，编译进 `--settings` |
-| 3. 事件 hooks | 协调器 | `notify_command` 扩展到任务事件：`task.needs_you`、`task.stage`、`task.done`、`task.rework` | `config.json` |
+| 3. 事件 hooks | 协调器 | `notify_command` 扩展到任务事件：`task.needs_you`、`task.stage`、`task.done`、`task.tree_done`、`task.rework` | `config.json` |
 
 第 1 类是 tend 独有的：「测试在 Linux 机器上跑 gate，不过就自动打回」不需要 agent 配合。
 
-第 3 类：`task.needs_you`（任务在 `waiting`、`dispatch` 除外，并且有了新的待处理项）、`task.done`、`task.stage`（进入某阶段）和 `task.rework`（被退回，`stage` 是退回到的阶段）。后两个只发给点名了它们的 `notify_command`，不推个人 webhook：它们不需要人动手。模式一的 `notify_command` 默认只听 `run.*`，任务事件要在 `notify_events` 里点名才发，环境变量多一个 `TEND_TASK`；团队模式走个人 webhook（见 [team.md](team.md)「人在任务里」）。
+第 3 类：`task.needs_you`（任务在 `waiting`、`dispatch` 除外，并且有了新的待处理项）、`task.done`、`task.tree_done`（完工：一棵任务树的根变成 done，带摘要，发给根的负责人和验收人，见 [runs/coordinator.md](../runs/coordinator.md)「通知」）、`task.stage`（进入某阶段）和 `task.rework`（被退回，`stage` 是退回到的阶段）。后两个只发给点名了它们的 `notify_command`，不推个人 webhook：它们不需要人动手。模式一的 `notify_command` 默认只听 `run.*`，任务事件要在 `notify_events` 里点名才发，环境变量多一个 `TEND_TASK`；团队模式走个人 webhook（见 [team.md](team.md)「人在任务里」）。
 
 ## 消息与插话
 

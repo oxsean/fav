@@ -262,7 +262,7 @@ func (m *Model) renderAnswer() string {
 		})...)
 		return ovRender(body, w)
 	}
-	body = append(body, accent.Render(render.Truncate(i18n.F("tasks.answer_tool", q.Tool), inner)))
+	body = append(body, accent.Render(render.Truncate(i18n.F("tasks.answer_tool", render.OneLine(q.Tool)), inner)))
 	lines := render.Wrap(render.Sanitize(q.Summary), inner)
 	if len(lines) > 8 {
 		lines = append(lines[:7], dimmed.Render(i18n.F("tasks.more_lines", len(lines)-7)))
@@ -288,15 +288,15 @@ func asked(r *task.Run) bool {
 func requestLines(r *task.Run, inner int) []string {
 	var out []string
 	for _, q := range r.Requests {
-		text := i18n.F("tasks.waits_tool", q.Tool, render.Sanitize(q.Summary))
+		text := i18n.F("tasks.waits_tool", render.OneLine(q.Tool), render.OneLine(q.Summary))
 		if q.Kind == agent.RequestQuestion && len(q.Questions) > 0 {
-			text = i18n.F("tasks.waits_question", render.Sanitize(q.Questions[0].Question))
+			text = i18n.F("tasks.waits_question", render.OneLine(q.Questions[0].Question))
 		}
 		out = append(out, accent.Render(render.Truncate(text, inner)))
 	}
 	for i := max(0, len(r.Sends)-2); i < len(r.Sends); i++ {
 		s := r.Sends[i]
-		out = append(out, dimmed.Render(render.Truncate(i18n.F("tasks.sent_line", render.SendState(s.State), render.Sanitize(s.Text)), inner)))
+		out = append(out, dimmed.Render(render.Truncate(i18n.F("tasks.sent_line", render.SendState(s.State), render.OneLine(s.Text)), inner)))
 	}
 	return out
 }

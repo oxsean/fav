@@ -96,6 +96,28 @@ test('the home draws in both forms and both languages, styled and worded', async
   return sizes;
 });
 
+test('a wait nothing names is to handle, never a question; a permission its node only names is a permission', async () => {
+  const r = await home();
+  const st = r.store.state;
+  Object.assign(st.runs.r2, {ask: '', requests: undefined});
+  Object.assign(st.runs.r3, {ask: 'Bash: npm test', requests: undefined});
+  const a = app(r);
+  for (const lang of ['zh', 'en']) {
+    words.lang.value = lang;
+    const asks = words.t('why.asked'), attend = words.t('why.attend'), perm = words.f('home.whyDetail', words.t('why.permission'), 'Bash: npm test');
+    words.lang.value = 'zh';
+    const d = drawn(a.vnode(), 'desktop', lang);
+    ok(!d.includes(asks), `desktop/${lang}: a neutral wait says ${asks}`);
+    ok(d.includes(attend), `desktop/${lang}: no ${attend}`);
+    ok(d.includes(perm), `desktop/${lang}: no ${perm}`);
+    const w = drawn(app(r, {url: '/?wait=t2'}).vnode(), 'phone', lang);
+    words.lang.value = lang;
+    const head = words.t('home.wait.attend'), answer = words.t('home.wait.answer');
+    words.lang.value = 'zh';
+    ok(w.includes(head) && !w.includes(answer) && !w.includes(asks), `phone/${lang}: the wait page of a neutral wait`);
+  }
+});
+
 test('the phone home: task titles over what they ask, one quick action each, what runs; a row opens its own page', async () => {
   const r = await home();
   const calls = [];
@@ -354,6 +376,28 @@ test('what a run is doing: its node first, then its note, then what it said; que
   ok(s.includes('class="run-doing ell mono">$ go test ./...'), 'doing, in mono');
   ok(s.includes('等机器接手（1/1 在用）'), 'queued for a slot');
   ok(!s.includes('>n<') && !s.includes('>l<'), 'not the note or the last');
+});
+
+test('a paused tree waits on the home as its root, which resumes there; on a phone too', async () => {
+  const calls = [];
+  const mk = () => ({state: {tasks: {p: {id: 'p', title: 'Need', status: 'todo', kind: 'requirement', auto: true, paused: {by: 'local', at: '2026-09-30T14:00:00Z'}},
+    a: {id: 'a', title: 'A', status: 'todo', parent: 'p', auto: true}}, runs: {}},
+  rev: {runs: signal(0), tasks: signal(0)}, machines: signal([]), affordances: signal({runs: {}, tasks: {p: {actions: ['resume']}}}),
+  inbox: signal([{task: 'p', title: 'Need', reason: 'paused', since: '2026-09-30T14:00:00Z', as: ['owner']}])});
+  for (const f of ['desktop', 'phone']) {
+    const commands = createCommands({wire: {call: (method, params) => { calls.push([method, params]); return new Promise(() => {}); }}});
+    form.value = f;
+    try {
+      const keys = createKeys();
+      const root = await mount(html`<${KeysContext.Provider} value=${keys}><${Home} store=${mk()} commands=${commands} toasts=${createToasts()} clock=${() => NOW} onOpen=${() => {}} onNavigate=${() => {}} onWait=${() => {}} /><//>`);
+      eq(root.find('.xi').length, 1, f + ': one line');
+      ok(root.one('.xi').textContent.includes('已暂停派发'), f + ': it says why');
+      const resume = root.one('.xi-actions').find('button').find(b => b.textContent.includes('恢复派发'));
+      ok(!!resume, f + ': it resumes there');
+      await act(() => resume.dispatch('click'));
+      eq(calls.at(-1), ['task.pause', {id: 'p'}], f + ': resumed');
+    } finally { form.value = 'desktop'; }
+  }
 });
 
 test('the palette finds actions by either name and the page\'s own things; ? lists every action', async () => {

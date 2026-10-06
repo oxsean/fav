@@ -21,6 +21,8 @@ type Pulse struct {
 	ModTime time.Time
 	// Asking: the last step is a question to the user (Claude AskUserQuestion / ExitPlanMode) not answered yet.
 	Asking bool
+	// Question: what an AskUserQuestion that Asking stands for asks first, "" for ExitPlanMode.
+	Question string
 	// Finished: the last thing in the file is the AI's reply (Claude text, Codex task_complete), not a tool call.
 	Finished bool
 }
@@ -120,6 +122,9 @@ func (p *Pulse) lastLine(l *transcriptLine) bool {
 		if len(steps) > 0 {
 			last := steps[len(steps)-1]
 			p.Asking = !last.Result && askTools[last.Tool]
+			if p.Asking && last.Tool == "AskUserQuestion" {
+				p.Question = clip(strings.Join(strings.Fields(firstQuestion(l.Message.Content)), " "), pulseTextCap)
+			}
 			return true
 		}
 		if m := l.speech(); m.Text != "" {
@@ -128,4 +133,23 @@ func (p *Pulse) lastLine(l *transcriptLine) bool {
 		}
 	}
 	return false
+}
+
+// firstQuestion is the first question of the last AskUserQuestion call among a message's blocks.
+func firstQuestion(content json.RawMessage) string {
+	var blocks []struct {
+		Name  string `json:"name"`
+		Input struct {
+			Questions []struct {
+				Question string `json:"question"`
+			} `json:"questions"`
+		} `json:"input"`
+	}
+	json.Unmarshal(content, &blocks)
+	for i := len(blocks) - 1; i >= 0; i-- {
+		if b := blocks[i]; b.Name == "AskUserQuestion" && len(b.Input.Questions) > 0 {
+			return b.Input.Questions[0].Question
+		}
+	}
+	return ""
 }

@@ -9,7 +9,7 @@
 | Task 字段、事件、推导的处境 | `internal/task` |
 | 依赖派发、阶段推进、gate、预算、父任务 | `internal/coord`（`tree.go`、`workflow.go`、`work.go`） |
 | Project、AgentDef、Workflow 的加载、校验、编译 | Project 是 `internal/task` 折叠的事件；AgentDef 在 `internal/defs`；Workflow 在 `internal/workflow` |
-| 方法：`project.*`、`agentdef.*`、`task.start|gate|move|plan|plan_save|plan_apply|message|merge` | `internal/coord`，`Methods` 协商 |
+| 方法：`project.*`、`agentdef.*`、`task.start|pause|gate|move|plan|plan_save|plan_apply|message|merge` | `internal/coord`，`Methods` 协商 |
 | `run.start` 的 spec 带工作区（`agent.Workspace`：`checkout, branch, chain, base, remote, read_only, merge, setup, cleanup`）、`check`、`files`（settings、mcp、skills） | `internal/node`；节点方法变了 → `tend hosts install` |
 | `node.agents` 报告各 CLI 的安装、版本、登录，不报告 skills、MCP 名字（见 [agent-definitions.md](agent-definitions.md)「skills、MCP 和密钥怎么到目标机器」） | `internal/node`、`internal/agent` |
 | `tend run verdict`、`tend run plan` | `cmd/tend` |

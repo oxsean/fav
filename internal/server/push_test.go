@@ -180,7 +180,7 @@ func TestSomeoneSetsUpTheirOwnDevicesOnly(t *testing.T) {
 	if got := r.api(annC, "PUT", "/api/push/device", map[string]any{"subscription": sub, "name": "Android"}, &d); got != http.StatusOK {
 		t.Fatal(got)
 	}
-	prefs := store.DevicePrefs{Events: []string{store.EventWaiting, store.EventDone}, Hide: true, Wait: -1}
+	prefs := store.DevicePrefs{Events: []string{store.EventWaiting, store.EventDone, store.EventTreeDone}, Hide: true, Wait: -1}
 	for _, bad := range []store.DevicePrefs{{Events: []string{"task.everything"}}, {Wait: 7200}, {Events: []string{store.EventDone, store.EventDone}}} {
 		if got := r.api(annC, "POST", "/api/push/prefs", map[string]any{"id": d.ID, "prefs": bad}, nil); got != http.StatusBadRequest {
 			t.Fatalf("%+v: %d", bad, got)

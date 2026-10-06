@@ -427,3 +427,13 @@ func Sanitize(s string) string {
 		return -1
 	}, s)
 }
+
+// OneLine is Sanitize for text drawn on a single line: line breaks and tabs become spaces.
+func OneLine(s string) string {
+	return strings.Map(func(r rune) rune {
+		if r == '\n' || r == '\t' {
+			return ' '
+		}
+		return r
+	}, Sanitize(s))
+}

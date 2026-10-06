@@ -13,7 +13,9 @@ import (
 	"github.com/oxsean/fav/internal/capture"
 	"github.com/oxsean/fav/internal/fulltext"
 	"github.com/oxsean/fav/internal/index"
+	"github.com/oxsean/fav/internal/journal"
 	"github.com/oxsean/fav/internal/paths"
+	"github.com/oxsean/fav/internal/task"
 	"github.com/oxsean/fav/internal/tend"
 	"github.com/oxsean/fav/internal/testkit"
 )
@@ -335,5 +337,36 @@ func TestMoveProjectRewritesNativePaths(t *testing.T) {
 	b, err := os.ReadFile(filepath.Join(d.Claude, "projects", index.ClaudeProjectName(moved), pg.ID+".jsonl"))
 	if err != nil || !strings.Contains(string(b), `"cwd":`+q) {
 		t.Errorf("the transcript under the new project dir carries the escaped new cwd: %v", err)
+	}
+}
+
+func TestTheJournalHasATaskWhoseRunUsedASession(t *testing.T) {
+	d, idx, _ := load(t)
+	st := task.New()
+	log, err := journal.Open(filepath.Join(d.Home, "coord", "events.jsonl"), st.Apply)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer log.Close()
+	if err := log.ReadOnly(); err != nil {
+		t.Fatal(err)
+	}
+	s := d.Get("pagination")
+	if _, ok := byKey(idx.Sessions())[key(s)]; !ok || s.Task == "" {
+		t.Fatalf("the linked session is listed and names its task: %+v", s)
+	}
+	var used []*task.Run
+	for _, r := range st.Runs {
+		if r.Session == s.ID {
+			used = append(used, r)
+		}
+	}
+	if len(used) != 1 || used[0].Task != s.Task || used[0].State != task.Exited || st.Tasks[s.Task] == nil {
+		t.Fatalf("one ended run of %s used it: %+v", s.Task, used)
+	}
+	for _, x := range st.Tasks {
+		if x.Auto || st.OpenRun(x.ID) != nil {
+			t.Errorf("%s would be dispatched", x.ID)
+		}
 	}
 }

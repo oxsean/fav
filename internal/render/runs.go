@@ -70,10 +70,11 @@ func UsageShort(u *agent.Usage) string {
 	return i18n.F("run.usage_short", tok)
 }
 
-// WaitAsk is what a waiting run's row shows it asked: the first question, or the tool it wanted to use.
+// WaitAsk is what a waiting run's row shows it asked: the first question, or the tool it wanted to use; without
+// requests (a herdr run, tend run ask) what its node says it asks.
 func WaitAsk(r *task.Run) string {
 	if len(r.Requests) == 0 {
-		return ""
+		return r.Ask
 	}
 	q := r.Requests[0]
 	if q.Kind == agent.RequestQuestion && len(q.Questions) > 0 {
@@ -87,8 +88,10 @@ func WaitKind(r *task.Run) string {
 	switch {
 	case r.Attention == task.AttentionPermission:
 		return i18n.T("run.attention.permission")
-	case r.Attention == task.AttentionAsked:
+	case r.Asks():
 		return i18n.T("run.attention.asked")
+	case r.Attention == task.AttentionAsked:
+		return i18n.T("run.attention.attend")
 	case task.Open(r.State) && r.Attention == task.AttentionStalled:
 		return i18n.T("run.attention.stalled")
 	case r.State == task.Failed:
@@ -164,6 +167,9 @@ func RunHint(r *task.Run) string {
 func RunAttention(r *task.Run) string {
 	switch r.Attention {
 	case task.AttentionAsked:
+		if !r.Asks() {
+			return i18n.T("run.attention.attend")
+		}
 		return i18n.T("run.attention.asked")
 	case task.AttentionPermission:
 		return i18n.T("run.attention.permission")
@@ -196,7 +202,7 @@ func Why(code, detail string) string {
 }
 
 var sitReasons = map[string]string{
-	task.WhyAfter: "sit.after", task.WhyChildren: "sit.children", task.WhySlot: "sit.slot", task.WhyDrain: "sit.drain", task.WhyDir: "sit.dir", task.WhyReady: "sit.ready",
+	task.WhyAfter: "sit.after", task.WhyChildren: "sit.children", task.WhySlot: "sit.slot", task.WhyDrain: "sit.drain", task.WhyPaused: "sit.paused", task.WhyDir: "sit.dir", task.WhyReady: "sit.ready",
 	task.WhyCompleting: "sit.completing", task.WhyAccept: "sit.accept", task.WhyDispatch: "sit.dispatch",
 	task.WhyAfterCanceled: "sit.after_canceled", task.WhyHeld: "sit.held", task.WhyEnded: "sit.ended",
 	task.AttentionAsked: "sit.asked", task.AttentionPermission: "sit.permission", task.Unknown: "sit.unknown",
@@ -222,6 +228,15 @@ func SitText(s task.Situation) string {
 		return i18n.T(k)
 	}
 	return s.Kind
+}
+
+// SitOf is SitText for a task whose situation rests on run r: a wait that asks no question in words is a wait for
+// someone, never a question.
+func SitOf(s task.Situation, r *task.Run) string {
+	if s.Reason == task.AttentionAsked && r != nil && !r.Asks() {
+		return i18n.T("sit.attend")
+	}
+	return SitText(s)
 }
 
 // RunWork is what run r did to its task's branch, in one line; "" when it worked in a plain directory.

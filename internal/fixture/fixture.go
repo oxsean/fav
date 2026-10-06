@@ -13,14 +13,17 @@ import (
 	"time"
 
 	"github.com/oxsean/fav/internal/index"
+	"github.com/oxsean/fav/internal/journal"
 	"github.com/oxsean/fav/internal/paths"
+	"github.com/oxsean/fav/internal/task"
 	"github.com/oxsean/fav/internal/tend"
 )
 
-// Session is one scenario; Listed: shown by `tend sessions status:all`; Agent: a one-shot or scratch run.
+// Session is one scenario; Listed: shown by `tend sessions status:all`; Agent: a one-shot or scratch run; Task: the
+// task whose run used it, in the coordinator's journal.
 type Session struct {
-	Name, Provider, ID, Cwd, Path, Title string
-	Listed, Agent, Favorite              bool
+	Name, Provider, ID, Cwd, Path, Title, Task string
+	Listed, Agent, Favorite                    bool
 }
 
 type Dataset struct {
@@ -85,6 +88,9 @@ func Build(root string, now time.Time) (*Dataset, error) {
 	if err := b.sidecars(); err != nil {
 		return nil, err
 	}
+	if err := b.tasks(); err != nil {
+		return nil, err
+	}
 	var recs []byte
 	for _, r := range b.recs {
 		l, err := json.Marshal(r)
@@ -94,6 +100,32 @@ func Build(root string, now time.Time) (*Dataset, error) {
 		recs = append(append(recs, l...), '\n')
 	}
 	return d, os.WriteFile(filepath.Join(d.Home, "records.jsonl"), recs, 0o600)
+}
+
+// tasks writes the coordinator's journal ("local" is coord.Local; coord's imports reach this package): a task whose ended run used the pagination session, and one that never ran.
+// Neither is started, so a coordinator opening it dispatches nothing.
+func (b *builder) tasks() error {
+	log, err := journal.Open(filepath.Join(b.Home, "coord", "events.jsonl"), func(journal.Envelope) error { return nil })
+	if err != nil {
+		return err
+	}
+	defer log.Close()
+	s := b.Get("pagination")
+	b.set("pagination", func(s *Session) { s.Task = "fx-task1" })
+	at := b.ends["pagination"].t
+	for _, events := range [][]journal.Event{
+		{journal.NewEvent(task.ETaskCreated, task.Task{ID: "fx-task1", Title: "Fix cursor drift on page 3", Dir: s.Cwd, Status: task.StatusTodo})},
+		{journal.NewEvent(task.ETaskCreated, task.Task{ID: "fx-task2", Title: "Document the cursor format", Dir: s.Cwd, Status: task.StatusBacklog})},
+		{journal.NewEvent(task.ERunQueued, task.Run{ID: "fx-run1", Task: "fx-task1", Machine: "local", Agent: "claude",
+			Profile: tend.AgentProfile{Name: "claude", Provider: tend.ProviderClaude}, Dir: s.Cwd})},
+		{journal.NewEvent(task.ERunObserved, task.Observation{ID: "fx-run1", State: task.Exited, ExitCode: new(0), Provider: tend.ProviderClaude,
+			Session: s.ID, StartedAt: new(at.Add(-time.Hour)), EndedAt: &at})},
+	} {
+		if _, err := log.Append(journal.System, nil, events); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (b *builder) dir(parts ...string) string {

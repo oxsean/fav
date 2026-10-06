@@ -166,6 +166,17 @@ func foldScenario() []journal.Envelope {
 	add(ev(task.ETaskStatus, task.TaskStatus{ID: "tr", Status: task.StatusTodo}), ev(task.ETaskStaged, task.TaskStage{ID: "tr", Stage: "review", Back: true}))
 	add(ev(task.ETaskRestored, task.TaskRestore{ID: "tr", Status: task.StatusTodo, Auto: true, StartSeq: 3, Stage: "accept", Loops: 1, StageSeq: 4,
 		Stages: []task.Staged{{At: started, Stage: "accept", Loops: 1}}, After: []string{"tu"}, Held: "bad_request: dir"}))
+	add(ev(task.ETaskCreated, task.Task{ID: "tp", Title: "paused tree", Kind: task.KindRequirement, Status: task.StatusTodo}),
+		ev(task.ETaskCreated, task.Task{ID: "tp1", Title: "ready", Parent: "tp", Dir: "/p", Status: task.StatusTodo}),
+		ev(task.ETaskCreated, task.Task{ID: "tp2", Title: "queued", Parent: "tp", Dir: "/p2", Status: task.StatusTodo}),
+		ev(task.ETaskCreated, task.Task{ID: "tp3", Title: "completing", Parent: "tp", Dir: "/p3", Status: task.StatusTodo}),
+		ev(task.ETaskCreated, task.Task{ID: "tq", Title: "resumed", Dir: "/q", Status: task.StatusTodo}))
+	add(ev(task.ETaskStarted, task.TaskStart{IDs: []string{"tp", "tp1", "tp2", "tp3", "tq"}}))
+	add(ev(task.ERunQueued, task.Run{ID: "rp2", Task: "tp2", Machine: "mba", Agent: "fake", Dir: "/p2"}),
+		ev(task.ERunQueued, task.Run{ID: "rp3", Task: "tp3", Machine: "mba", Agent: "fake", Dir: "/p3"}))
+	add(ev(task.ERunObserved, task.Observation{ID: "rp3", State: task.Exited, NodeRev: 1, ExitCode: &exit0}))
+	add(ev(task.ETaskPaused, task.TaskPause{ID: "tp", On: true, By: "u_a"}), ev(task.ETaskPaused, task.TaskPause{ID: "tq", On: true}))
+	add(ev(task.ETaskPaused, task.TaskPause{ID: "tq"}))
 	add(ev("some_future_event", map[string]string{"id": "t1"}))
 	return envs
 }
@@ -258,7 +269,7 @@ func sameFold(t *testing.T, out []byte, st *task.State) {
 	var goState any
 	gb, _ := json.Marshal(st)
 	json.Unmarshal(gb, &goState)
-	if runs, _ := page.(map[string]any)["runs"].(map[string]any); len(runs) != 18 || len(st.Runs) != 18 {
+	if runs, _ := page.(map[string]any)["runs"].(map[string]any); len(runs) != 20 || len(st.Runs) != 20 {
 		t.Fatalf("the page folded %d runs: %s", len(runs), out)
 	}
 	for id, x := range st.Tasks {

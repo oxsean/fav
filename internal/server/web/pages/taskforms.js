@@ -44,7 +44,7 @@ function taskOptions(state, self) {
     grew = false;
     for (const x of Object.values(state.tasks)) if (x.parent && mine.has(x.parent) && !mine.has(x.id)) { mine.add(x.id); grew = true; }
   }
-  return tk.rows(state, x => !mine.has(x.id) && !tk.finished(x.status)).map(r => ({value: r.task.id, label: r.task.title, sub: r.task.id, state: sitState(r.sit)}));
+  return tk.rows(state, x => !mine.has(x.id) && !tk.finished(x.status)).map(r => ({value: r.task.id, label: r.task.title, sub: r.task.id, state: sitState(r.sit, state)}));
 }
 
 const readDraft = storage => { try { return JSON.parse(storage?.getItem(DRAFT_KEY) || 'null'); } catch { return null; } };

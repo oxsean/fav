@@ -157,6 +157,7 @@ type State struct {
 	Caps      *agent.RunCaps     `json:"caps,omitempty"`     // what it can do, once started
 	Doing     string             `json:"doing,omitempty"`    // the tool call it is at in its turn
 	Turn      int                `json:"turn,omitempty"`     // the turn its output is at (run.interrupt names it)
+	OutputAt  *time.Time         `json:"output_at,omitzero"` // when its agent last put anything out, to the minute
 	StartedAt *time.Time         `json:"started_at,omitzero"`
 	EndedAt   *time.Time         `json:"ended_at,omitzero"`
 }

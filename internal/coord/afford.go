@@ -22,8 +22,9 @@ type Affordances struct {
 }
 
 type TaskAffordance struct {
-	Actions []string   `json:"actions"`
-	Route   task.Route `json:"route"`
+	Actions  []string          `json:"actions"`
+	Route    task.Route        `json:"route"`
+	TreeDone *task.TreeSummary `json:"tree_done,omitempty"` // the task is a tree done: how it went
 }
 
 // dry is do's word on what p asks with params, nothing committed; the caller holds mu.
@@ -80,6 +81,8 @@ func (c *Coord) taskAllows(p Principal, t *task.Task, act string) bool {
 		return dry(p, c.runDispatch, Dispatch{Task: t.ID})
 	case task.ActStart:
 		return dry(p, c.taskStart, TaskRef{ID: t.ID})
+	case task.ActPause, task.ActResume:
+		return dry(p, c.taskPause, task.TaskPause{ID: t.ID, On: act == task.ActPause})
 	case task.ActStop:
 		open := c.st.OpenRun(t.ID)
 		return open != nil && dry(p, c.runStop, task.RunRef{ID: open.ID})
@@ -128,18 +131,24 @@ func (c *Coord) runAffordance(p Principal, r *task.Run) []string {
 	return out
 }
 
-// taskAffordance is what p may do with task t; nil when nothing. The caller holds mu.
+// taskAffordance is what p may do with task t, and how it went when it is a tree done; nil when nothing. The caller
+// holds mu.
 func (c *Coord) taskAffordance(p Principal, t *task.Task) *TaskAffordance {
-	var out []string
+	out := []string{}
 	for _, a := range c.st.TaskActions(t) {
 		if c.taskAllows(p, t, a) {
 			out = append(out, a)
 		}
 	}
-	if len(out) == 0 {
+	var sum *task.TreeSummary
+	if c.st.TreeDone(t) {
+		s := c.st.TreeSummary(t.ID)
+		sum = &s
+	}
+	if len(out) == 0 && sum == nil {
 		return nil
 	}
-	return &TaskAffordance{Actions: out, Route: c.st.Route(t)}
+	return &TaskAffordance{Actions: out, Route: c.st.Route(t), TreeDone: sum}
 }
 
 // affordKeys are the entries a recount of tasks ids (and their runs) covers; nil ids is everything p may see. The

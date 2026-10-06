@@ -12,10 +12,10 @@ test('the board puts each task in the column its situation says, what waits firs
   const {store, errors} = await tasks();
   const b = tk.board(store.state);
   eq(Object.fromEntries(Object.entries(b).map(([c, list]) => [c, list.map(r => r.task.id)])), {
-    waiting: ['q6', 'q4', 'q1', 'q10', 'q9'], running: ['q3'], queued: ['q11'], backlog: ['q5', 'q7'], ended: ['q2', 'q8'],
+    waiting: ['q6', 'q4', 'q1', 'q10', 'q9'], running: ['q3'], queued: ['q11'], backlog: ['q5', 'q7'], ended: ['q12', 'q14', 'q13', 'q2', 'q8'],
   }, 'columns');
   eq(b.waiting.map(r => r.sit.reason), ['draft', 'accept', 'source_changed', 'merge_conflict', 'dispatch'], 'why each waits');
-  eq(tk.rows(store.state).map(r => r.task.id), ['q6', 'q4', 'q1', 'q10', 'q9', 'q3', 'q11', 'q5', 'q7', 'q2', 'q8'], 'rows in the same order');
+  eq(tk.rows(store.state).map(r => r.task.id), ['q6', 'q4', 'q1', 'q10', 'q9', 'q3', 'q11', 'q5', 'q7', 'q12', 'q14', 'q13', 'q2', 'q8'], 'rows in the same order');
   eq(errors, [], 'errors');
 });
 
@@ -36,8 +36,8 @@ test('a drop is one of four commands, marked when task.undo takes it back; the r
 test('the tree: children under parents in after order, folded ones hidden, a filter keeps the ancestors', async () => {
   const {store} = await tasks();
   const st = store.state, line = r => `${'  '.repeat(r.depth)}${r.task.id}${r.kids ? '/' + r.kids : ''}`;
-  eq(tk.tree(st).map(line), ['q1/4', '  q10', '  q2', '  q3/1', '    q5', '  q4', 'q11', 'q6', 'q7', 'q8', 'q9'], 'the whole tree');
-  eq(tk.tree(st, undefined, new Set(['q3'])).map(line), ['q1/4', '  q10', '  q2', '  q3/1', '  q4', 'q11', 'q6', 'q7', 'q8', 'q9'], 'q3 folded');
+  eq(tk.tree(st).map(line), ['q1/4', '  q10', '  q2', '  q3/1', '    q5', '  q4', 'q11', 'q6', 'q7', 'q8', 'q9', 'q12/2', '  q13', '  q14'], 'the whole tree');
+  eq(tk.tree(st, undefined, new Set(['q3'])).map(line), ['q1/4', '  q10', '  q2', '  q3/1', '  q4', 'q11', 'q6', 'q7', 'q8', 'q9', 'q12/2', '  q13', '  q14'], 'q3 folded');
   eq(tk.tree(st, t => t.id === 'q5').map(line), ['q1/1', '  q3/1', '    q5'], 'a match with its ancestors');
   const backlog = tk.matcher(st, {column: 'backlog'});
   eq(tk.tree(st, backlog).map(r => r.task.id), ['q1', 'q3', 'q5', 'q7'], 'by column');
@@ -47,9 +47,9 @@ test('filters, subtask progress and what a task spent', async () => {
   const {store} = await tasks();
   const st = store.state, ids = f => tk.rows(st, tk.matcher(st, f)).map(r => r.task.id).sort();
   eq(ids({q: 'coupon'}), ['q9'], 'by title');
-  eq(ids({q: 'Q1'}), ['q1', 'q10', 'q11'], 'by id, any case');
+  eq(ids({q: 'Q1'}), ['q1', 'q10', 'q11', 'q12', 'q13', 'q14'], 'by id, any case');
   eq(ids({me: 'u_a', mine: true}), [], 'mine: none for another');
-  eq(ids({me: 'u_b', mine: true, column: 'ended'}), ['q2', 'q8'], 'mine and ended');
+  eq(ids({me: 'u_b', mine: true, column: 'ended'}), ['q12', 'q13', 'q14', 'q2', 'q8'], 'mine and ended');
   eq(ids({project: 'p2'}), [], 'another project');
   eq([tk.progress(st, 'q1'), tk.progress(st, 'q3'), tk.progress(st, 'q9')], [{done: 1, of: 4}, {done: 0, of: 1}, null], 'progress');
   eq(tk.spent(st, 'q2'), {usd: 1.1, tokens: 58000}, 'spent');

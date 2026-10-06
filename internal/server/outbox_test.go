@@ -766,3 +766,40 @@ func TestASlowDeviceHoldsUpNoOther(t *testing.T) {
 		t.Fatalf("the other device waited: %v", paths)
 	}
 }
+
+// A tree done goes to the webhook and, at once, to the devices that take it (by default too), saying how it went.
+func TestATreeDoneIsPostedAndPushedWithHowItWent(t *testing.T) {
+	o := newOutbox(t)
+	must(t, o.team.SetWebhook(store.LocalUser, o.svc.srv.URL+"/hook"))
+	o.device(store.LocalUser, "/push/plain")
+	waiting := o.device(store.LocalUser, "/push/waiting")
+	hidden := o.device(store.LocalUser, "/push/hidden")
+	for id, p := range map[string]store.DevicePrefs{waiting.ID: {Events: []string{store.EventWaiting}}, hidden.ID: {Events: []string{store.EventTreeDone}, Hide: true}} {
+		if ok, err := o.team.SetDevicePrefs(store.LocalUser, id, p); err != nil || !ok {
+			t.Fatal(ok, err)
+		}
+	}
+	sum := task.TreeSummary{Leaves: 9, Done: 9, Canceled: 1, Runs: 26, Started: n0.Add(-3*time.Hour - 12*time.Minute), DoneAt: n0, Branch: "tend/order-v1"}
+	o.n.Send(coord.Notice{Seq: 9, Event: coord.NotifyTaskTreeDone, Task: "t_3", Title: "order flow", Project: "shop", Summary: &sum, To: []string{store.LocalUser}, At: n0})
+	o.drain()
+	got := o.svc.taken()
+	by := map[string]pushed{}
+	for _, p := range got {
+		by[p.path] = p
+	}
+	if len(got) != 3 {
+		t.Fatalf("the webhook, the default device and the one that names it: %+v", got)
+	}
+	if h := by["/hook"].hook; h == nil || h.Event != coord.NotifyTaskTreeDone || h.Summary == nil || h.Summary.Runs != 26 ||
+		h.Text != "order flow · tree_done 9/9 · canceled 1 · runs 26 · 3h12m · tend/order-v1" {
+		t.Fatalf("the webhook: %+v", by["/hook"].hook)
+	}
+	m := by["/push/plain"]
+	if m.msg.Event != coord.NotifyTaskTreeDone || m.msg.Task != "t_3" || m.msg.Link != "#task-t_3" || m.msg.Summary == nil || m.msg.Summary.Done != 9 ||
+		!m.msg.Summary.Started.Equal(sum.Started) || m.headers.Get("Topic") != "t_3" {
+		t.Fatalf("the default device: %+v %v", m.msg, m.headers)
+	}
+	if h := by["/push/hidden"]; h.msg.Task != "" || h.msg.Summary != nil || h.msg.Event != coord.NotifyTaskTreeDone || h.headers.Get("Topic") != "tend-done" {
+		t.Fatalf("hidden, it says only that something is done: %+v %v", h.msg, h.headers)
+	}
+}

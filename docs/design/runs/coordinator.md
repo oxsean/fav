@@ -7,7 +7,7 @@
 - `coord/lock`（`filelock.TryLock`）拿到的进程就是协调器：TUI 打开时拿；CLI 发命令时先连 socket，连不上就自己拿锁、执行、跑一轮派发和对账、退出；`tend service` 是一直拿着锁的进程。
 - 拿到锁的进程监听 socket，其它客户端经它办事。
 - 协调器不在时：已派发的 run 照常由节点推进；排队的 run 等下一个协调器；下次持锁时先对账。
-- 关闭时最多等 5 s，让本进程里本机节点正在答的调用（如 `run.stop` 发布墓碑）结束，关闭之后不再写盘。
+- 关闭一开始，本进程里的本机节点就不再接新调用（答 `closed`，包括关闭时还在拨号的连接）；最多等 5 s，让它正在答的调用（如 `run.stop` 发布墓碑）结束，关闭之后不再写盘。
 
 ## 事件日志
 
@@ -25,7 +25,7 @@
 Task { id t_…, title, brief, dir, machine, agent, status backlog|todo|done|canceled, rev, created_at, updated_at }
 Run  { id r_…, task, machine, agent, profile(冻结), brief_sum, def(定义正文在 brief 里的起止), dir(映射后),
        resume(续的会话), parent(回复的 run),
-       want run|stop, state, exit_code, reason, detail, attention asked|permission|stalled, ask, note, last, usage,
+       want run|stop, state, exit_code, reason, detail, attention asked|permission|stalled, ask, note, last, usage, output_at,
        stream, requests[], answers[]（已给、节点还没取走）, sends[]{id, text, state queued|sent|seen|failed},
        caps{steer, after, interrupt, answer_scope, questions, continue, takeover}（节点说的实际能力）, doing（正在做的工具调用）,
        session{provider, sid}, node_rev, queued_at, started_at, ended_at }
@@ -57,12 +57,13 @@ run `state` 转移表（终态单调，重复事件无副作用）：
 - run 冻结 `from`（任务目录所属的机器，模式一默认本机）；派发时从 `from` 映射到目标机器；`from` 还没握过手就先连它，这一轮不派。
 - `want=stop` 持久化；每次连上节点先发 `run.stop`，直到节点快照是终态。
 - 用时：运行时长只用节点时间，排队时长只用协调器时间。
-- `attention` 不是状态，是「需要人」的标记，随节点快照整体覆盖（协调器自己合成的观察不带它）。「等你回复」= 已结束且 attention 是 asked 或 permission（`Run.Waiting`）；asked 也可以出现在运行中（`tend run ask`），stalled 只在运行中有意义。
+- `attention` 不是状态，是「需要人」的标记，随节点快照整体覆盖（协调器自己合成的观察不带它）。「等你回复」= 已结束且 attention 是 asked 或 permission（`Run.Waiting`）；asked 也可以出现在运行中（`tend run ask`），stalled 只在运行中有意义。asked 而没有用文字问出来的问题（`Run.Asks`：`ask` 为空，也没有提问请求）是认不出在等什么的等待，界面写「等你处理」；permission 的 `ask` 是它想用的工具（herdr 方式没有请求时）。
+- `output_at`（agent 最后一次输出，截到分钟）也随节点快照来：活跃的 run 只因它变化的观察每分钟最多一条，照常进日志（`run_observed`），每条也会走一次 `flow()` 和通知判断，但不产生任何通知（notify 命令、`task.needs_you`），也不改 inbox 和 `Pending`。旧节点不报它，界面就不显示，不需要节点 feature：这是节点报上来的字段，不是旧节点会忽略的下发字段。
 - `run.continue`：对已结束、有会话的 run（不必在等）排一个新 run：同任务、同机器、同目录、同档案（可换同 provider 的档案），`brief` 是回复，`resume` 是会话，`runner=background`；任务还有未结束的 run 就 `conflict`。对任意已索引的会话（`session`、`provider`、`dir`、`machine`）则新建一个任务（标题取回复首行）再排 run。
 
 ## 事件
 
-`task_created` `task_edited` `task_status_set` `task_restored{id, status, auto, start_seq, merged, stage, loops, stage_seq, stages, parent, after, held}`（撤销：逐项放回） `machine_drained{machine, on, by}` `run_queued` `run_starting` `run_observed{state, exit_code, reason, detail, attention, ask, note, last, usage, stream, requests, sends, caps, doing, turn, session, node_rev}` `run_stop_requested` `run_canceled` `run_abandoned` `run_answered{id, answer}` `run_sent{id, send}` `run_interrupt_requested{id, turn, ask, by}`。
+`task_created` `task_edited` `task_status_set` `task_restored{id, status, auto, start_seq, merged, stage, loops, stage_seq, stages, parent, after, held}`（撤销：逐项放回） `machine_drained{machine, on, by}` `task_paused{id, on, by}` `run_queued` `run_starting` `run_observed{state, exit_code, reason, detail, attention, ask, note, last, usage, stream, requests, sends, caps, doing, turn, session, node_rev}` `run_stop_requested` `run_canceled` `run_abandoned` `run_answered{id, answer}` `run_sent{id, send}` `run_interrupt_requested{id, turn, ask, by}`。
 
 - `run_observed` 带节点的 `requests` 整体覆盖；`sends` 按 id 合并（节点说的为准，协调器排着的保留）；`answers` 里请求已不在 `requests` 的删掉（节点取走了，或不再等）。run 结束时 `requests`、`answers` 清空，还是 queued 的消息改 failed，但有会话时 `after`、`interrupt` 方式的留着（见下面「续接」）。
 - `run_queued` 带 `takes` 时，父运行里这些消息改 sent。`run_answered` 替换同一请求之前的回答。`run_sent` 的 id 已有时只改它的 `state`（协调器宣布留着的消息失败）。`run_interrupt_requested` 只在 run 未结束时记进 `Run.interrupt`（最新的一次）。
@@ -78,8 +79,9 @@ run `state` 转移表（终态单调，重复事件无副作用）：
 ## 调度与对账
 
 - 协调器循环：启动时、节点 `node.changed`、每 5 s。
-- 派发：机器已连上、没停止接新运行、没超过并发上限（`machines.<名>.slots`，默认 2）、目录不冲突 → `run_starting` → `run.start{spec}`（`command_id` = run id）。
+- 派发：机器已连上、没停止接新运行、run 的任务树没暂停、没超过并发上限（`machines.<名>.slots`，默认 2）、目录不冲突 → `run_starting` → `run.start{spec}`（`command_id` = run id）。
 - 停止接新运行：`machine.drain{machine, on}`，机器主人或管理员（看不见这台的回 `not_found`，看得见不是主人的回 `unauthorized`），写 `machine_drained{machine, on, by}`，状态里 `drains{机器: {machine, by, at}}`，关掉时删掉这一项；和现状一样时不写事件。停着的机器不派发排队的运行（续接、下一阶段也是新运行，一样等），已经 starting / running 的照常跑完，starting 的照常重发；往它派发照样排队，`run.preview` 多一条 note `drain`（`detail` 是停的人），任务的处境是 `queued{drain}`；定义按 `machines.prefer` 挑机器时跳过停着的。只在协调器上生效，节点不知道，旧节点不受影响。看得见机器（`canSee`）的人看得见它停着。
+- 暂停任务树：`task.pause{id, on}` 写 `task_paused`；暂停的树下排队的运行不启动（跳过它，不占位，同机器别的照常），规则见 [../tasks/workflows.md](../tasks/workflows.md)「处境与开始（实现）」的「暂停」。只在协调器上生效，节点不知道。
 - 对账：连上节点或每 5 s，对「有未结束 run、有待 ack 的 run、或有还在节点上跑的 abandoned run」的机器调 `run.list{coordinator, ack, runs}`，按 `node_rev` 差分，生成 `run_observed`。`runs` 只列协调器还关心的 run（这台机器上没 ack 的：未结束、abandoned、没有结束时间、或结束不到 7 天）；一个都没有时发 `["-"]`（不匹配任何 run），旧节点忽略它、照旧全列。每个节点调用各自 20 s 超时；超时只记错误，不断连接。
 - 节点拒绝启动（`conflict`，detail 以 `dir_busy <run>` 或 `slots n/m` 开头，见 [node.md](node.md)「run 目录」）不算失败：run 留在 starting，10 s 后重发。
 - 回答和消息：
@@ -106,7 +108,7 @@ run `state` 转移表（终态单调，重复事件无副作用）：
   - 否则推 `open{mode: snapshot}`，然后按表推 `snapshot{part, items}`（`part` 是 `task.State` 的 JSON 名：`projects`、`tasks`、`runs`、`shares`、`drains`、`agent_defs`，`items` 按 id；每批不超过 `snapshotBatch`（1 MiB），每张表至少推一次，空表也推），接着是 `affordances` 这个 part（这个人能做的事，见下面「能做什么、等谁」），最后 `live{seq}`，之后是实时信封。
   - 实时信封是 `journal`，按人过滤（`visibleEnv`），每个 seq 都到，没有可见事件时是空的。`reshapes` 的信封不单独推：推 `reset{}`，接着推新的快照和 `live`，这个信封只体现在新快照里。所以客户端的副本停在它的 seq 上时一定是它之后做的快照，断线续传不会跳过撤权。
   - 推送用 `PushWait`：客户端读得慢时协调器等，不丢；实时通道积压超过 `stateQueue`（256）条，流以 `lagged` 结束，客户端按自己的 seq 重开。协调器关闭时流以 `gone` 结束。常数在 `internal/coord/limits.go`。
-  - 每推一个实时信封之后，协调器为它碰到的任务（`touched`：提交时、事件折叠之前算好，随信封交给每个流；包括事件点名的任务和它的父任务，新建、移动、撤销移动的还有事件里的新父任务，移动和撤销移动的还有它下面的整棵子树，因为深度变了）和这些任务的运行，按这个人重算 `affordances`，只推变了的：`affordances{runs: {id: [动作] | null}, tasks: {id: {actions, route} | null}}`，`null` 是这一项没了（没有可做的也算没了）。每个流记着自己发过什么。续传的流在回放之后推一次全量（看得见的每一项，空的推 `null`），因为不知道客户端手里的那份。`affordances` 不经 journal 折叠，也不带 seq。
+  - 每推一个实时信封之后，协调器为它碰到的任务（`touched`：提交时、事件折叠之前算好，随信封交给每个流；包括事件点名的任务和它的父任务，新建、移动、撤销移动的还有事件里的新父任务，移动和撤销移动的还有它下面的整棵子树，因为深度变了）和这些任务的运行，按这个人重算 `affordances`，只推变了的：`affordances{runs: {id: [动作] | null}, tasks: {id: {actions, route, tree_done?} | null}}`，`null` 是这一项没了（没有可做的、也不是完工的树才算没了）。`tree_done` 是协调器算好的完工摘要（`task.TreeSummary`，见下面「通知」），客户端不自己算。每个流记着自己发过什么。续传的流在回放之后推一次全量（看得见的每一项，空的推 `null`），因为不知道客户端手里的那份。`affordances` 不经 journal 折叠，也不带 seq。
   - journal 之外的变化也会改动作：机器主人、用户停用（`tend-server` 的 `sweep`）、节点连上换了版本（`hello` 的 feature）。这时调 `Coord.Reaffirm()`，每个流全部重算一遍，只推差异。
   - 客户端这边的折叠是 `coord.StateFold`：`open` 为 snapshot 或收到 `reset` 时开始一份新副本，`live` 时换上，`journal` 按 seq 折进去，`affordances` 的 part 和推送收进 `Aff`；遇到不认识的 part、seq 断档或折叠出错，丢掉副本，不带 `after_seq` 重开。
 - `machines.watch{}` 和 `inbox.watch{}` 是快照型的流（`ClassStream`，`internal/coord/topics.go`）：先推 `open{mode: snapshot}`，然后推整份列表，之后每次都推整份替换，客户端不处理增删，看不见的自然消失。每个订阅记着上次发出的 JSON，重算后一样就不推。
@@ -150,7 +152,8 @@ run `state` 转移表（终态单调，重复事件无副作用）：
 
 ## 通知
 
-- `config.notify_command`（argv）在某个 run 变成「需要人」时由协调器启动，标准输入是一个 JSON 对象 `{event, run, task, title, machine, agent, state, exit_code, reason, detail, ask, session, dir, at}`，环境变量带 `TEND_EVENT` `TEND_RUN` `TEND_TASK`；`notify_events` 限定事件。
+- `config.notify_command`（argv）在某个 run 变成「需要人」时由协调器启动，标准输入是一个 JSON 对象 `{event, run, task, title, machine, agent, state, exit_code, reason, detail, ask, session, dir, stage, summary, at}`（`summary` 只在 `task.tree_done` 上），环境变量带 `TEND_EVENT` `TEND_RUN` `TEND_TASK`；`notify_events` 限定事件。
 - 事件（每次状态迁移一次）：`run.failed`（failed，或非 0 退出且不在等）、`run.waiting`（结束时在等）、`run.asked`（运行中提问）、`run.permission`（运行中等批准）、`run.stalled`（运行中变成 stalled）。只在 commit 新事件时判断，重放日志不触发。
-- 任务事件（见 [tasks/workflows.md](../tasks/workflows.md)「hooks」和 [tasks/team.md](../tasks/team.md)「人在任务里」）：`task.needs_you`（任务在 waiting、没开始的除外，并且有了之前没有的待处理项：出现、被另一个替换、同类的又来一个）、`task.done`、`task.stage` 和 `task.rework`（workflow 进入或退回某阶段，JSON 多一个 `stage`；只给 notify_command，不进个人 webhook）。`notify_events` 为空时只发 `run.*`，任务事件要点名才发。团队模式下协调器把它们作为 `Notice{seq, event, task, title, project, reason, run, items, to, at}`（`items` 是新出现的待处理项） 交给 `Options.Notice`，`tend-server` 投到收件人的个人 webhook。
+- 任务事件（见 [tasks/workflows.md](../tasks/workflows.md)「hooks」和 [tasks/team.md](../tasks/team.md)「人在任务里」）：`task.needs_you`（任务在 waiting、没开始的除外，并且有了之前没有的待处理项：出现、被另一个替换、同类的又来一个）、`task.done`、`task.tree_done`、`task.stage` 和 `task.rework`（workflow 进入或退回某阶段，JSON 多一个 `stage`；只给 notify_command，不进个人 webhook）。`notify_events` 为空时只发 `run.*`，任务事件要点名才发。团队模式下协调器把它们作为 `Notice{seq, event, task, title, project, reason, run, items, summary, to, at}`（`items` 是新出现的待处理项） 交给 `Options.Notice`，`tend-server` 投到收件人的个人 webhook 和 Web Push（见 [tasks/team.md](../tasks/team.md)「人在任务里」）。
+- **完工**（`task.tree_done`）：一棵任务树的根（没有父任务、至少有一个没取消的子任务，`State.TreeDone`）在这次提交里从没完成变成 done。它和根自己的 `task.done` 一起发，在后面。判断和 `task.done` 是同一次处境跳变，所以一棵树每变成 done 一次只发一次：重启时重放日志不经过这里，中间的父任务完成不算，只有一个子任务的树也算，重开后再完成又是一次。收件人是根的负责人和验收人。`summary` 是 `State.TreeSummary`：`leaves`（根下面没有子任务的任务，取消的不算）、`done`（其中完成的）、`canceled`（取消的叶子）、`runs`（树里开跑过的 run，合并 run 不算）、`started`（最早一个 run 开跑的时间）、`done_at`（根变成 done 的时间，`Task.done_at`：变成 done 时记、改回别的状态时清、撤销时按 `task_restored` 还原）、`branch`（有子任务合进根的分支时，就是这个集成分支）。摘要每次从状态算，不进 journal；同一份也放在根的 `affordances` 里（`tree_done`）推给看得见它的人。
 - 命令分离启动、不等它：JSON 先写进管道（控制在 3.5 KB 内，Windows 管道缓冲 4 KB），一次性 CLI 协调器退出也不影响它。

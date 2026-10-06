@@ -63,6 +63,14 @@ func TestPulseAskingAndFinished(t *testing.T) {
 	if p := read("c", user, ask, answer, reply); p.Asking || !p.Finished || p.Size == 0 {
 		t.Errorf("ends with the AI's reply: finished: %+v", p)
 	}
+	q := `{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","name":"AskUserQuestion","input":{"questions":[{"question":"Which  way?\nA or B"}]}}]}}`
+	if p := read("q", user, q); !p.Asking || p.Question != "Which way? A or B" {
+		t.Errorf("an open question says what it asks, on one line: %+v", p)
+	}
+	plan := `{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","name":"ExitPlanMode","input":{"plan":"x"}}]}}`
+	if p := read("p", user, plan); !p.Asking || p.Question != "" {
+		t.Errorf("a plan to approve asks no question: %+v", p)
+	}
 	msg := `{"timestamp":"2026-09-22T10:00:00Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"还在改"}]}}`
 	done := `{"timestamp":"2026-09-22T10:00:01Z","type":"event_msg","payload":{"type":"task_complete","last_agent_message":"好了"}}`
 	if p := read("d", done, msg); p.Finished {

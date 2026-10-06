@@ -15,6 +15,7 @@ const (
 	ETaskMoved   = "task_moved"   // TaskMove
 	ETaskStarted = "task_started" // TaskStart
 	ETaskHeld    = "task_held"    // TaskHold
+	ETaskPaused  = "task_paused"  // TaskPause
 )
 
 // MaxDepth is how deep a task tree goes: a root and two levels under it.
@@ -37,6 +38,19 @@ type TaskHold struct {
 	ID     string `json:"id"`
 	Reason string `json:"reason"`
 	Detail string `json:"detail,omitempty"`
+}
+
+// TaskPause is task.pause, and its event: On pauses dispatch under ID, off resumes it.
+type TaskPause struct {
+	ID string `json:"id"`
+	On bool   `json:"on,omitempty"`
+	By string `json:"by,omitempty"`
+}
+
+// Pause is a task under which nothing new is dispatched while what runs there finishes.
+type Pause struct {
+	By string    `json:"by,omitempty"`
+	At time.Time `json:"at,omitzero"`
 }
 
 func (s *State) applyTree(e journal.Event, seq int64, at time.Time) (bool, error) {
@@ -90,10 +104,93 @@ func (s *State) applyTree(e journal.Event, seq int64, at time.Time) (bool, error
 			t.Held += ": " + d.Detail
 		}
 		t.UpdatedAt = at
+	case ETaskPaused:
+		var d TaskPause
+		if err := json.Unmarshal(e.Data, &d); err != nil {
+			return true, err
+		}
+		t := s.Tasks[d.ID]
+		if t == nil {
+			return true, fmt.Errorf("no task %s", d.ID)
+		}
+		t.Paused = nil
+		if d.On {
+			t.Paused = &Pause{By: d.By, At: at}
+		}
+		t.Rev++
+		t.UpdatedAt = at
 	default:
 		return false, nil
 	}
 	return true, nil
+}
+
+// Tree: t is a task tree, which can be paused: it has subtasks or is a requirement.
+func (s *State) Tree(t *Task) bool { return t.Kind == KindRequirement || len(s.Children(t.ID)) > 0 }
+
+// TreeDone: t is a task tree that came to be done: a root with subtasks, not all of them canceled, itself done.
+func (s *State) TreeDone(t *Task) bool {
+	return t.Parent == "" && t.Status == StatusDone && slices.ContainsFunc(s.Children(t.ID), func(k *Task) bool { return k.Status != StatusCanceled })
+}
+
+// TreeSummary is how a tree came to be done.
+type TreeSummary struct {
+	Leaves   int       `json:"leaves"`             // the tasks under it without subtasks, the canceled ones aside
+	Done     int       `json:"done"`               // the done ones of those
+	Canceled int       `json:"canceled,omitempty"` // the canceled leaves
+	Runs     int       `json:"runs"`               // the runs in it that started, merges aside
+	Started  time.Time `json:"started,omitzero"`   // when the first of them started
+	DoneAt   time.Time `json:"done_at,omitzero"`
+	Branch   string    `json:"branch,omitempty"` // the branch its subtasks were merged into
+}
+
+// TreeSummary sums up the tree under id.
+func (s *State) TreeSummary(id string) TreeSummary {
+	tree := s.Subtree(id)
+	if len(tree) == 0 {
+		return TreeSummary{}
+	}
+	root := tree[0]
+	out := TreeSummary{DoneAt: root.DoneAt}
+	in := map[string]bool{}
+	for i, x := range tree {
+		in[x.ID] = true
+		kids := s.Children(x.ID)
+		if i == 0 || len(kids) > 0 {
+			if i == 0 && root.Branch != "" && slices.ContainsFunc(kids, func(k *Task) bool { return k.Merged }) {
+				out.Branch = root.Branch
+			}
+			continue
+		}
+		switch x.Status {
+		case StatusCanceled:
+			out.Canceled++
+			continue
+		case StatusDone:
+			out.Done++
+		}
+		out.Leaves++
+	}
+	for _, r := range s.Runs {
+		if !in[r.Task] || r.Stage == StageMerge || r.State == Queued || r.State == Canceled {
+			continue
+		}
+		out.Runs++
+		if r.StartedAt != nil && (out.Started.IsZero() || r.StartedAt.Before(out.Started)) {
+			out.Started = *r.StartedAt
+		}
+	}
+	return out
+}
+
+// PausedBy is the task whose pause holds id: id itself or its nearest paused ancestor; nil when none does.
+func (s *State) PausedBy(id string) *Task {
+	for n, t := 0, s.Tasks[id]; t != nil && n <= len(s.Tasks); n, t = n+1, s.Tasks[t.Parent] {
+		if t.Paused != nil {
+			return t
+		}
+	}
+	return nil
 }
 
 // Finished: done or canceled.
@@ -195,6 +292,7 @@ const (
 	WhyAfterCanceled = "after_canceled" // waiting: a task it comes after was canceled
 	WhyHeld          = "held"           // waiting: the coordinator could not dispatch it (Held says why)
 	WhyEnded         = "ended"          // waiting: its run ended well; someone marks it done
+	WhyPaused        = "paused"         // waiting: it would go on by itself, but its tree is paused (PausedBy says where)
 )
 
 // Situation is how a task stands and why.
@@ -215,8 +313,17 @@ func (s *State) Latest(id string) *Run {
 	return out
 }
 
-// Situation says how t stands.
+// Situation says how t stands. A paused tree keeps everything under it that would go on by itself waiting; a run
+// that succeeded still makes its task done.
 func (s *State) Situation(t *Task) Situation {
+	sit := s.situation(t)
+	if sit.Kind == SitQueued && sit.Reason != WhyCompleting && s.PausedBy(t.ID) != nil {
+		return Situation{Kind: SitWaiting, Reason: WhyPaused, Run: sit.Run}
+	}
+	return sit
+}
+
+func (s *State) situation(t *Task) Situation {
 	switch t.Status {
 	case StatusBacklog:
 		return Situation{Kind: SitBacklog}

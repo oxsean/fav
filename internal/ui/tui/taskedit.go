@@ -180,7 +180,7 @@ func draftLines(p *task.Plan, inner int) []string {
 	var out []string
 	line := func(pt task.PlanTask, depth int) {
 		indent := strings.Repeat("  ", depth)
-		out = append(out, indent+accent.Render("•")+" "+render.Truncate(pt.Title, inner-len(indent)-2))
+		out = append(out, indent+accent.Render("•")+" "+render.Truncate(render.OneLine(pt.Title), inner-len(indent)-2))
 		var meta []string
 		for _, s := range []string{pt.Key, pt.Size, pt.Workflow, pt.Role} {
 			if s != "" {
@@ -190,7 +190,7 @@ func draftLines(p *task.Plan, inner int) []string {
 		if len(pt.After) > 0 {
 			meta = append(meta, i18n.F("tasks.draft_after", strings.Join(pt.After, ", ")))
 		}
-		out = append(out, dimmed.Render(render.Truncate(indent+"  "+strings.Join(meta, " · "), inner)))
+		out = append(out, dimmed.Render(render.Truncate(render.OneLine(indent+"  "+strings.Join(meta, " · ")), inner)))
 	}
 	keys := map[string]bool{}
 	for _, pt := range p.Tasks {
@@ -210,7 +210,7 @@ func draftLines(p *task.Plan, inner int) []string {
 	if len(p.Questions) > 0 {
 		out = append(out, "", accent.Render(i18n.F("tasks.draft_questions", len(p.Questions))))
 		for _, q := range p.Questions {
-			for i, l := range render.Wrap(q, inner-2) {
+			for i, l := range render.Wrap(render.Sanitize(q), inner-2) {
 				if i == 0 {
 					out = append(out, "? "+l)
 				} else {
@@ -230,7 +230,7 @@ func (m *Model) renderDraft() string {
 		return ovRender([]string{dimmed.Render(i18n.T("tasks.gone"))}, w)
 	}
 	p := x.Draft.Plan
-	body := []string{boldSty.Foreground(cText).Render(render.Truncate(i18n.F("tasks.draft_title", x.Title), inner)),
+	body := []string{boldSty.Foreground(cText).Render(render.Truncate(i18n.F("tasks.draft_title", render.OneLine(x.Title)), inner)),
 		dimmed.Render(i18n.F("tasks.draft_count", len(p.Tasks), len(p.Questions))), frame.Render(strings.Repeat(hRule, inner))}
 	lines := draftLines(p, inner)
 	end := m.scrollWindow(len(lines), max(3, m.h-14))

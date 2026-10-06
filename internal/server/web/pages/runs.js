@@ -5,7 +5,7 @@
 import {useState, useEffect, useRef} from '../vendor/hooks.mjs';
 import {html, cx, usePhone, useWords, useSignalValue, useActions} from '../ui/base.js';
 import {Button, Chip, Chips, Segmented, Tabs} from '../ui/controls.js';
-import {Status} from '../ui/status.js';
+import {Status, runState} from '../ui/status.js';
 import {Table} from '../ui/table.js';
 import {Drawer, Modal} from '../ui/overlay.js';
 import {Output} from '../ui/output.js';
@@ -29,7 +29,7 @@ register('runs', {
   'runs.noTask': ['这个运行的任务看不到了', 'This run\'s task is out of sight'], 'runs.gone': ['没有这个运行，或者看不到它', 'No such run, or it is out of sight'],
   'runs.fact.task': ['任务', 'Task'], 'runs.fact.state': ['状态', 'State'], 'runs.fact.where': ['在哪跑', 'Runs on'], 'runs.fact.stage': ['阶段', 'Stage'],
   'runs.fact.dir': ['目录', 'Directory'], 'runs.fact.branch': ['分支', 'Branch'], 'runs.fact.time': ['时间', 'Time'], 'runs.fact.spent': ['用量', 'Spent'],
-  'runs.fact.doing': ['在做', 'Doing'], 'runs.fact.exit': ['退出码', 'Exit code'], 'runs.fact.session': ['会话', 'Session'], 'runs.fact.can': ['能做', 'Can'], 'runs.fact.verdict': ['结论', 'Verdict'],
+  'runs.fact.doing': ['在做', 'Doing'], 'runs.fact.output': ['最后输出', 'Last output'], 'runs.fact.exit': ['退出码', 'Exit code'], 'runs.fact.session': ['会话', 'Session'], 'runs.fact.can': ['能做', 'Can'], 'runs.fact.verdict': ['结论', 'Verdict'],
   'runs.cap.steer': ['插话', 'steer'], 'runs.cap.interrupt': ['打断', 'interrupt'], 'runs.cap.answer_scope': ['整次运行都允许', 'allow for the run'],
   'runs.cap.questions': ['运行中作答', 'answer while it runs'], 'runs.cap.continue': ['接着会话再跑', 'go on with its session'], 'runs.cap.takeover': ['在终端接管', 'take over in a terminal'],
   'runs.span': ['%s 开始 · %s', 'began %s · %s'], 'runs.stopped': ['正在停止 %s', 'Stopping %s'],
@@ -99,10 +99,11 @@ function Preview({store, run, now, onOpen, onTask}) {
   const task = store.state.tasks[run.task];
   const parts = o ? [{run, events: o.events.value, head: null}] : [];
   return html`<aside class="runs-preview" aria-label=${run.id}>
-    <header class="runs-pv-head"><${Status} state=${run.state} word /><span class="mono">${run.id}</span><span class="ell runs-pv-task">${task?.title || run.task}</span></header>
+    <header class="runs-pv-head"><${Status} state=${runState(run)} word /><span class="mono">${run.id}</span><span class="ell runs-pv-task">${task?.title || run.task}</span></header>
     <dl class="facts runs-pv-facts">
       <dt>${t('runs.fact.where')}</dt><dd class="mono">${where(run)}</dd>
       ${sel.doing(run) && html`<dt>${t('runs.fact.doing')}</dt><dd class="ell">${sel.doing(run)}</dd>`}
+      ${run.output_at && sel.openStates.includes(run.state) && html`<dt>${t('runs.fact.output')}</dt><dd class="mono">${clock(run.output_at)}</dd>`}
       <dt>${t('runs.fact.time')}</dt><dd class="mono">${took(run, now) || '—'}${spent(run) ? ' · ' + spent(run) : ''}</dd>
     </dl>
     <div class="runs-pv-out"><${Output} bare parts=${parts} density="brief" key=${run.id} /></div>
@@ -121,7 +122,7 @@ function Facts({store, run, now, onTask}) {
   return html`<dl class="facts run-facts">
     <dt>${t('runs.fact.task')}</dt><dd>${task ? html`<button type="button" class="det-link" onClick=${() => onTask(run)}><span class="ell">${task.title}</span><span class="mono t-muted">${task.id}</span></button>`
       : html`<span class="mono t-muted">${run.task}</span>`}</dd>
-    <dt>${t('runs.fact.state')}</dt><dd><${Status} state=${run.state} word />${run.detail || run.reason ? html` <span class="t-muted">${run.detail || run.reason}</span>` : ''}</dd>
+    <dt>${t('runs.fact.state')}</dt><dd><${Status} state=${runState(run)} word />${run.detail || run.reason ? html` <span class="t-muted">${run.detail || run.reason}</span>` : ''}</dd>
     <dt>${t('runs.fact.where')}</dt><dd class="mono">${where(run)}</dd>
     ${run.stage && html`<dt>${t('runs.fact.stage')}</dt><dd class="mono">${run.stage}</dd>`}
     ${run.dir && html`<dt>${t('runs.fact.dir')}</dt><dd class="mono">${run.dir}</dd>`}
@@ -129,6 +130,7 @@ function Facts({store, run, now, onTask}) {
     ${(run.started_at || run.queued_at) && html`<dt>${t('runs.fact.time')}</dt><dd class="mono">${f('runs.span', day(run.started_at || run.queued_at) + ' ' + clock(run.started_at || run.queued_at), took(run, now) || '—')}</dd>`}
     ${spent(run) && html`<dt>${t('runs.fact.spent')}</dt><dd class="mono">${spent(run)}</dd>`}
     ${sel.doing(run) && html`<dt>${t('runs.fact.doing')}</dt><dd>${sel.doing(run)}</dd>`}
+    ${run.output_at && sel.openStates.includes(run.state) && html`<dt>${t('runs.fact.output')}</dt><dd class="mono">${clock(run.output_at)}</dd>`}
     ${run.verdict && html`<dt>${t('runs.fact.verdict')}</dt><dd>${run.verdict.verdict}${run.verdict.summary ? ' · ' + run.verdict.summary : ''}</dd>`}
     ${run.exit_code !== undefined && run.exit_code !== null && html`<dt>${t('runs.fact.exit')}</dt><dd class="mono">${run.exit_code}</dd>`}
     ${run.session && html`<dt>${t('runs.fact.session')}</dt><dd class="mono">${run.session}</dd>`}
@@ -167,7 +169,7 @@ export function RunPage({store, commands, toasts, prefs, copy, changes, drafts, 
   }
   return html`<article class="run det-out" aria-label=${run.id}>
     <header class="det-bar">
-      <${Status} state=${run.state} word />
+      <${Status} state=${runState(run)} word />
       <h2 class="det-bar-title ell" title=${f('runs.of', run.id, task?.title || run.task)}><span class="mono">${run.id}</span> · ${task?.title || run.task}</h2>
       <${Tabs} label=${t('runs.tabs')} value=${tab} onChange=${onTab} idPrefix=${'run-' + run.id} tabs=${tabs} />
       <span class="det-bar-acts">${stop}${abandon}${task && html`<${Button} onClick=${() => onTask(run)}>${t('runs.inTask')}<//>`}
@@ -223,7 +225,7 @@ export function Runs({store, commands, toasts, router, prefs, copy, changes, dra
     <//>`}
   </div>`;
   const columns = [
-    {id: 'state', label: t('runs.c.state'), width: '28px', render: r => html`<${Status} state=${r.state} />`, mobile: 'lead'},
+    {id: 'state', label: t('runs.c.state'), width: '28px', render: r => html`<${Status} state=${runState(r)} />`, mobile: 'lead'},
     {id: 'run', label: t('runs.c.run'), width: '64px', render: r => html`<span class="mono">${r.id}</span>`, sort: (a, b) => a.id.localeCompare(b.id), mobile: 'secondary'},
     {id: 'task', label: t('runs.c.task'), width: 'minmax(0, 2fr)', render: r => html`<span class="ell">${st.tasks[r.task]?.title || r.task}</span>`, mobile: 'primary'},
     {id: 'stage', label: t('runs.c.stage'), width: 'minmax(0, .6fr)', render: r => (r.stage ? html`<span class="mono ell">${r.stage}</span>` : '')},

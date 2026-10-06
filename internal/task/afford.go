@@ -78,6 +78,8 @@ const (
 const (
 	ActDispatch = "dispatch" // run.dispatch
 	ActStart    = "start"    // task.start
+	ActPause    = "pause"    // task.pause on
+	ActResume   = "resume"   // task.pause off
 	ActPass     = "pass"     // task.gate passing its human gate
 	ActRework   = "rework"   // task.gate sending it back
 	ActAck      = "ack"      // task.source_ack taking its issue's new revision
@@ -148,6 +150,8 @@ func (s *State) TaskActions(t *Task) []string {
 	add(t.Status == StatusTodo && open == nil && !unfinished, ActDispatch)
 	add(!finished && (t.Status == StatusBacklog || !t.Auto), ActStart)
 	add(open != nil && (open.State == Queued || open.Want != "stop"), ActStop)
+	add(!finished && t.Paused == nil && s.Tree(t), ActPause)
+	add(!finished && t.Paused != nil, ActResume)
 	add(gate, ActPass)
 	add(gate, ActRework)
 	add(SourceWaits(t) == WhySourceChanged, ActAck)
@@ -281,7 +285,7 @@ func (s *State) Pending(t *Task) []Pending {
 			return nil
 		}
 	}
-	if sit.Kind != SitWaiting || sit.Reason == WhyDispatch {
+	if sit.Kind != SitWaiting || sit.Reason == WhyDispatch || sit.Reason == WhyPaused {
 		return nil
 	}
 	p := Pending{Kind: PendWaiting, Reason: sit.Reason, Task: t.ID}

@@ -115,8 +115,10 @@ const (
 	actSave
 	actPalette
 	actUndo
+	actPause
 	actExtendDown
 	actExtendUp
+	actTask
 	// actViaDialog is not a key: an ime route meaning "a button in the resume dialog".
 	actViaDialog
 )
@@ -183,6 +185,7 @@ var bindings = []binding{
 	{act: actSettings, in: inList, keys: []string{",", "，"}},
 	{act: actPalette, in: inList, keys: []string{":", "："}},
 	{act: actUndo, in: inList, keys: []string{"u", "ctrl+z"}},
+	{act: actPause, in: inList, tier: tierRecord, keys: []string{"b"}, ime: actEnter}, // Enter opens the task dialog, whose button pauses
 	{act: actExtendDown, in: inList, keys: []string{"shift+down"}},
 	{act: actExtendUp, in: inList, keys: []string{"shift+up"}},
 	{act: actBack, in: inList, keys: []string{"esc"}},
@@ -198,6 +201,7 @@ var bindings = []binding{
 	{act: actCode, in: inResume, tier: tierStart, keys: []string{"c"}},
 	{act: actFiles, in: inResume, tier: tierStart, keys: []string{"o"}},
 	{act: actTitle, in: inResume, keys: []string{"n"}},
+	{act: actTask, in: inResume, keys: []string{"g"}}, // the task the session's run worked for
 	{act: actFocusPrev, in: inResume | inConfirm | inStart | inHandoff, keys: []string{"shift+tab", "left", "h"}},
 	{act: actFocusNext, in: inResume | inConfirm | inStart | inHandoff, keys: []string{"tab", "right", "l"}},
 	{act: actClose, in: inResume | inStart | inHandoff | inPeek, keys: []string{"esc", "q"}},
@@ -439,6 +443,7 @@ func helpLayout() []helpSection {
 			{"help.task_edit", inList, false, []act{actEdit}},
 			{"help.task_done", inList, false, []act{actDone}},
 			{"help.task_stop", inList, false, []act{actCloseTab}},
+			{"help.task_pause", inList, false, []act{actPause}},
 			{"help.task_edits", inList, false, []act{actFoldAll, actUnfold, actFold}},
 		}},
 		{"help.group.other", []helpSpec{

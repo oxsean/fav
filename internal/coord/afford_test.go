@@ -130,6 +130,8 @@ func (e *env) act(p Principal, act, taskID, runID string) error {
 		return call(MRunDispatch, Dispatch{Task: taskID})
 	case task.ActStart:
 		return call(MTaskStart, TaskRef{ID: taskID})
+	case task.ActPause, task.ActResume:
+		return call(MTaskPause, task.TaskPause{ID: taskID, On: act == task.ActPause})
 	case task.ActPass, task.ActRework:
 		return call(MTaskGate, TaskGate{ID: taskID, Pass: act == task.ActPass, Notes: "n"})
 	case task.ActAck, task.ActKeep:

@@ -541,6 +541,9 @@ func (m *Model) recLine(r *tend.Rec, sel bool, w int) string {
 	if r.Turns > 0 {
 		turns = " " + i18n.F("card.turns", r.Turns)
 	}
+	if x := m.taskOf(r); x != nil {
+		turns = " " + i18n.F("card.task", x.ID) + turns
+	}
 	if r.Host != "" {
 		turns = " " + hostMark(r) + turns
 	}
@@ -607,6 +610,13 @@ func (m *Model) cardBox(r *tend.Rec, sel bool, w int) []string {
 	tags := fit(render.TagString(r.Tags), inner)
 	if !r.Favorite() && len(r.Tags) == 0 {
 		tags = fit(paths.Tilde(r.Cwd), inner) // cwd when there are no tags
+	}
+	if x := m.taskOf(r); x != nil { // the task its run worked for, after the tags or instead of the cwd
+		label := i18n.F("card.task", taskLabel(x))
+		if len(r.Tags) > 0 {
+			label = render.TagString(r.Tags) + "  ·  " + label
+		}
+		tags = fit(label, inner)
 	}
 	if pulse != "" { // Agents: what it said last, how long this turn has run, how full the context is
 		tags = fit(pulse, inner)
@@ -759,6 +769,9 @@ func (m *Model) fieldLines(r *tend.Rec, w int) []string {
 	}
 	add(render.GlyphEdit+i18n.T("card.files"), render.FilesField(r, 6))
 	add(render.GlyphSession+i18n.T("card.session"), r.SessionID)
+	if x := m.taskOf(r); x != nil {
+		add(render.GlyphArrow+i18n.T("card.task_label"), taskLabel(x))
+	}
 	if r.Turns > 0 {
 		add(render.GlyphClock+i18n.T("card.turns_label"), i18n.F("card.turns_last_write", r.Turns, render.WhenFull(r.LastAt)))
 	}

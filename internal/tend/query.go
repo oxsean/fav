@@ -16,8 +16,9 @@ type Query struct {
 	All      bool   // include non-favorites; default is favorites only
 	// decides status:live; nil matches nothing
 	Live    func(sessionID string) bool
-	Turns   int       // non-favorited sessions need at least this many turns; favorites are exempt
-	After   time.Time // after: / before: — when the session started
+	Also    func(r *Rec) string // more text a keyword may match besides the record's own (the TUI: its linked task)
+	Turns   int                 // non-favorited sessions need at least this many turns; favorites are exempt
+	After   time.Time           // after: / before: — when the session started
 	Before  time.Time
 	Active  time.Time // last: — active since (a session started last week and continued today counts)
 	File    string    // file: — the AI wrote a file whose path contains this (lowercase)
@@ -204,8 +205,12 @@ func (q Query) Match(r *Rec) bool {
 	if q.File != "" && !r.wrote(q.File) {
 		return false
 	}
+	var also string
+	if q.Also != nil && len(q.Words) > 0 {
+		also = strings.ToLower(q.Also(r))
+	}
 	for _, w := range q.Words {
-		if !strings.Contains(r.hay, w) {
+		if !strings.Contains(r.hay, w) && !strings.Contains(also, w) {
 			return false
 		}
 	}

@@ -559,6 +559,8 @@ func (m *Model) navKey(msg tea.KeyPressMsg) tea.Cmd {
 		if m.view == viewLive {
 			m.closeIdle()
 		}
+	case actPause:
+		m.flash(i18n.T("tasks.pause_where"))
 	case actResume:
 		m.askResume()
 	case actTags:
@@ -706,6 +708,8 @@ func (m *Model) overlayKey(msg tea.KeyPressMsg) tea.Cmd {
 			m.copyResume()
 		case actTitle:
 			m.editTitle()
+		case actTask:
+			m.openLinkedTask()
 		case actNew:
 			m.askStartFromDialog()
 		case actPeek:

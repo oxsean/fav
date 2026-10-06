@@ -8,11 +8,11 @@ export const sets = {home: ['home-state', 'output-page', 'home-commands', 'chang
   output: ['output-state', 'output-conv', 'output-item', 'output-send', 'output-answer', 'changes-list'],
   carry: ['output-state', 'output-conv', 'output-item', 'output-send', 'output-carry', 'changes-list'],
   gone: ['output-state', 'output-conv', 'output-item', 'output-answer-gone', 'changes-list'],
-  team: ['team-state', 'team-share', 'team-project', 'team-settings'],
+  team: ['team-state', 'team-share', 'team-project', 'team-settings', 'sessions'],
   agents: ['agents-state', 'agents-edit', 'agents-share']};
 // joins are the files whose pushes on a stream an earlier file opened go on that stream, after what it pushed there.
 const joins = new Set(['output-send', 'output-carry']);
-const keyOf = (f, run = true) => [f.method, run && f.params?.run, f.params?.after, f.params?.path, f.params?.id, ...['hunk', 'line', 'context', 'ignore_space'].map(k => f.params?.[k] && k + f.params[k])]
+const keyOf = (f, run = true) => [f.method, f.method === 'node.call' && f.params?.method, run && f.params?.run, f.params?.after, f.params?.path, f.params?.id, ...['hunk', 'line', 'context', 'ignore_space'].map(k => f.params?.[k] && k + f.params[k])]
   .filter(Boolean).join(' ');
 
 export async function answers(names, text) {

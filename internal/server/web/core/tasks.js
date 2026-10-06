@@ -299,7 +299,7 @@ export function planCheck(plan) {
 
 // pageActs are the task actions the page draws, in its order: the coordinator's (task.Act*), sendBack (its last run's
 // continue), abandon (its open run's, once that run's machine lost it) and copy, which is the page's own.
-const pageActs = ['pass', 'rework', 'ack', 'keep', 'merge', 'sendBack', 'done', 'dispatch', 'start', 'stop', 'abandon', 'review', 'plan', 'backlog',
+const pageActs = ['pass', 'rework', 'ack', 'keep', 'merge', 'sendBack', 'done', 'dispatch', 'start', 'stop', 'abandon', 'pause', 'resume', 'review', 'plan', 'backlog',
   'reopen', 'edit', 'move', 'child', 'copy', 'cancel'];
 
 // actionsOf is what the page offers for task: {primary, more}, ids of pageActs. Which may be done is only what the

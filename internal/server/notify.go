@@ -113,14 +113,14 @@ func (n *Notifier) Send(x coord.Notice) {
 }
 
 func (n *Notifier) keep(o *NotifyOptions, x coord.Notice) {
-	body, _ := json.Marshal(noticeRow{x.Seq, x.Event, x.Task, x.Title, x.Project, x.Reason, x.Run, x.Stage, x.Items, x.At})
+	body, _ := json.Marshal(noticeRow{x.Seq, x.Event, x.Task, x.Title, x.Project, x.Reason, x.Run, x.Stage, x.Items, x.Summary, x.At})
 	var rows []store.Delivery
 	for _, u := range x.To {
 		row := store.Delivery{Seq: x.Seq, User: u, Event: x.Event, Next: x.At, Notice: body, At: x.At}
 		if hook, _ := o.Team.Webhook(u); hook != "" {
 			rows = append(rows, row)
 		}
-		if o.Push == nil || x.Event != coord.NotifyTaskWaiting && x.Event != coord.NotifyTaskDone {
+		if o.Push == nil || x.Event != coord.NotifyTaskWaiting && x.Event != coord.NotifyTaskDone && x.Event != coord.NotifyTaskTreeDone {
 			continue
 		}
 		devices, err := o.Team.Devices(u)
@@ -149,16 +149,17 @@ func (n *Notifier) keep(o *NotifyOptions, x coord.Notice) {
 
 // noticeRow is a notice as the outbox keeps it: without its recipients, each row is one of them.
 type noticeRow struct {
-	Seq     int64          `json:"seq"`
-	Event   string         `json:"event"`
-	Task    string         `json:"task,omitempty"`
-	Title   string         `json:"title,omitempty"`
-	Project string         `json:"project,omitempty"`
-	Reason  string         `json:"reason,omitempty"`
-	Run     string         `json:"run,omitempty"`
-	Stage   string         `json:"stage,omitempty"`
-	Items   []task.Pending `json:"items,omitempty"`
-	At      time.Time      `json:"at"`
+	Seq     int64             `json:"seq"`
+	Event   string            `json:"event"`
+	Task    string            `json:"task,omitempty"`
+	Title   string            `json:"title,omitempty"`
+	Project string            `json:"project,omitempty"`
+	Reason  string            `json:"reason,omitempty"`
+	Run     string            `json:"run,omitempty"`
+	Stage   string            `json:"stage,omitempty"`
+	Items   []task.Pending    `json:"items,omitempty"`
+	Summary *task.TreeSummary `json:"summary,omitempty"`
+	At      time.Time         `json:"at"`
 }
 
 // waitFor is how long a push waits for the page to be enough: as long as the device asks, else less when an agent asks
@@ -483,25 +484,55 @@ func answer(res *http.Response, deviceGoes bool) (gone bool, err error) {
 
 // WebhookPayload is what a user's webhook receives.
 type WebhookPayload struct {
-	Event   string    `json:"event"`
-	Task    string    `json:"task"`
-	Title   string    `json:"title"`
-	Project string    `json:"project,omitempty"`
-	Reason  string    `json:"reason,omitempty"`
-	Run     string    `json:"run,omitempty"`
-	URL     string    `json:"url,omitempty"` // the task on the web page
-	At      time.Time `json:"at"`
-	Text    string    `json:"text"` // one line, for chat webhooks
+	Event   string            `json:"event"`
+	Task    string            `json:"task"`
+	Title   string            `json:"title"`
+	Project string            `json:"project,omitempty"`
+	Reason  string            `json:"reason,omitempty"`
+	Run     string            `json:"run,omitempty"`
+	URL     string            `json:"url,omitempty"`     // the task on the web page
+	Summary *task.TreeSummary `json:"summary,omitempty"` // task.tree_done: how the tree went
+	At      time.Time         `json:"at"`
+	Text    string            `json:"text"` // one line, for chat webhooks
 }
 
 // webhook posts x to hook.
 func (n *Notifier) webhook(ctx context.Context, hook string, x noticeRow) error {
-	p := WebhookPayload{Event: x.Event, Task: x.Task, Title: x.Title, Project: x.Project, Reason: x.Reason, Run: x.Run, At: x.At,
+	p := WebhookPayload{Event: x.Event, Task: x.Task, Title: x.Title, Project: x.Project, Reason: x.Reason, Run: x.Run, Summary: x.Summary, At: x.At,
 		Text: x.Title + " · " + strings.TrimPrefix(x.Event, "task.") + " " + x.Reason}
+	if s := x.Summary; s != nil {
+		p.Text = summaryText(x.Title, *s)
+	}
 	if n.o.Base != "" && x.Task != "" {
 		p.URL = strings.TrimRight(n.o.Base, "/") + "/#task-" + x.Task
 	}
 	return postWebhook(ctx, n.client, hook, p)
+}
+
+// summaryText is a tree done in one line: done of its leaves, the canceled ones, its runs, how long it took and where
+// it went.
+func summaryText(title string, s task.TreeSummary) string {
+	parts := []string{title, fmt.Sprintf("tree_done %d/%d", s.Done, s.Leaves)}
+	if s.Canceled > 0 {
+		parts = append(parts, fmt.Sprintf("canceled %d", s.Canceled))
+	}
+	parts = append(parts, fmt.Sprintf("runs %d", s.Runs))
+	if !s.Started.IsZero() && s.DoneAt.After(s.Started) {
+		parts = append(parts, took(s.DoneAt.Sub(s.Started)))
+	}
+	if s.Branch != "" {
+		parts = append(parts, s.Branch)
+	}
+	return strings.Join(parts, " · ")
+}
+
+// took is a span to the minute: 3h12m, 45m, 0m.
+func took(d time.Duration) string {
+	m := int(d / time.Minute)
+	if m >= 60 {
+		return fmt.Sprintf("%dh%02dm", m/60, m%60)
+	}
+	return fmt.Sprintf("%dm", m)
 }
 
 // postWebhook posts p to hook: nil for a 2xx answer, a *sendError with the status for another.
@@ -524,21 +555,22 @@ func postWebhook(ctx context.Context, client *http.Client, hook string, p Webhoo
 // PushMessage is what a push to a browser carries (encrypted end to end): what waits on its recipient now about a
 // task, for the service worker to show.
 type PushMessage struct {
-	V       int          `json:"v"`
-	Server  string       `json:"server"`
-	Seq     int64        `json:"seq"`
-	To      string       `json:"to"` // whom it is for: the worker shows the rest only while they are signed in there
-	Event   string       `json:"event"`
-	Task    string       `json:"task,omitempty"`
-	Item    string       `json:"item,omitempty"`
-	Kind    string       `json:"kind,omitempty"`
-	Title   string       `json:"title,omitempty"`
-	What    string       `json:"what,omitempty"` // what a permission would do: its command or file
-	Project string       `json:"project,omitempty"`
-	N       int          `json:"n"` // how many things of the task wait on them; with the content hidden, how many wait at all
-	Link    string       `json:"link,omitempty"`
-	At      time.Time    `json:"at,omitzero"`
-	Actions []PushAction `json:"actions,omitempty"` // the buttons that act, besides the one that opens the page
+	V       int               `json:"v"`
+	Server  string            `json:"server"`
+	Seq     int64             `json:"seq"`
+	To      string            `json:"to"` // whom it is for: the worker shows the rest only while they are signed in there
+	Event   string            `json:"event"`
+	Task    string            `json:"task,omitempty"`
+	Item    string            `json:"item,omitempty"`
+	Kind    string            `json:"kind,omitempty"`
+	Title   string            `json:"title,omitempty"`
+	What    string            `json:"what,omitempty"` // what a permission would do: its command or file
+	Project string            `json:"project,omitempty"`
+	Summary *task.TreeSummary `json:"summary,omitempty"` // a tree done: how it went
+	N       int               `json:"n"`                 // how many things of the task wait on them; with the content hidden, how many wait at all
+	Link    string            `json:"link,omitempty"`
+	At      time.Time         `json:"at,omitzero"`
+	Actions []PushAction      `json:"actions,omitempty"` // the buttons that act, besides the one that opens the page
 }
 
 // PushAction is a button of a push: the service worker sends its token to /api/act.
@@ -560,9 +592,9 @@ func (n *Notifier) message(user string, dev store.PushDevice, x noticeRow, item 
 		}
 		return m
 	}
-	if x.Event == coord.NotifyTaskDone {
+	if x.Event == coord.NotifyTaskDone || x.Event == coord.NotifyTaskTreeDone {
 		return PushMessage{V: 1, Server: n.o.Coord.ID(), Seq: x.Seq, To: user, Event: x.Event, Task: x.Task, Title: clipRunes(x.Title, 200), Project: x.Project,
-			Link: "#task-" + x.Task, At: x.At}
+			Summary: x.Summary, Link: "#task-" + x.Task, At: x.At}
 	}
 	m := PushMessage{V: 1, Server: n.o.Coord.ID(), Seq: x.Seq, To: user, Event: x.Event, Task: x.Task, Title: clipRunes(item.Title, 200),
 		Project: item.Project, N: len(item.Pending), Link: "#wait-" + x.Task, At: x.At}
@@ -641,7 +673,7 @@ func (n *Notifier) webpush(ctx context.Context, user string, dev store.PushDevic
 	}
 	req.Header.Set("Urgency", urgency)
 	switch {
-	case m.Task == "" && m.Event == coord.NotifyTaskDone:
+	case m.Task == "" && (m.Event == coord.NotifyTaskDone || m.Event == coord.NotifyTaskTreeDone):
 		req.Header.Set("Topic", "tend-done")
 	case m.Task == "":
 		req.Header.Set("Topic", "tend") // one count takes the last one's place

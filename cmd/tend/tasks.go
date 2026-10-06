@@ -187,7 +187,7 @@ func absDir(d string) (string, error) {
 	return filepath.Abs(paths.Expand(d))
 }
 
-// cmdTask manages tasks: add, list, show, edit, done, reopen, cancel.
+// cmdTask manages tasks: add, list, show, edit, done, reopen, cancel, start, pause, resume.
 func cmdTask(args []string) error {
 	switch first(args) {
 	case "add":
@@ -205,6 +205,8 @@ func cmdTask(args []string) error {
 		return cmdTaskStatus(args[0], args[1:])
 	case "start":
 		return cmdTaskStart(args[1:])
+	case "pause", "resume":
+		return cmdTaskPause(args[0], args[1:])
 	case "move":
 		return cmdTaskMove(args[1:])
 	case "gate":
@@ -912,6 +914,35 @@ func cmdTaskStart(args []string) error {
 			return err
 		}
 		fmt.Print(i18n.F("cli.task.started", t.ID, len(st.Subtree(t.ID))))
+		return nil
+	})
+}
+
+// cmdTaskPause stops new dispatch under a task tree, or lets it go on: what runs there finishes either way.
+func cmdTaskPause(verb string, args []string) error {
+	fs := newFlags("task")
+	pos, err := parseWithArgs(fs, args, 1)
+	if err != nil {
+		return err
+	}
+	return withCoord(wire.Options{}, func(cl *coord.Client) error {
+		st, err := readState(cl)
+		if err != nil {
+			return err
+		}
+		id, err := taskID(st, pos[0])
+		if err != nil {
+			return err
+		}
+		var t task.Task
+		if err := write(cl, coord.MTaskPause, task.TaskPause{ID: id, On: verb == "pause"}, &t); err != nil {
+			return err
+		}
+		if t.Paused != nil {
+			fmt.Print(i18n.F("cli.task.paused", t.ID))
+		} else {
+			fmt.Print(i18n.F("cli.task.resumed", t.ID))
+		}
 		return nil
 	})
 }

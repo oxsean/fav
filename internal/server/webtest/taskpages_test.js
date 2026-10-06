@@ -18,7 +18,7 @@ import {html, KeysContext} from '../web/ui/base.js';
 import {App} from '../web/pages/app.js';
 import {DRAFT_KEY, TaskForm, Dispatch, Move, PlanReview, Gate} from '../web/pages/taskforms.js';
 import {FILTER_KEY, PANE_KEY} from '../web/pages/tasks.js';
-import {keptWord} from '../web/pages/task.js';
+import {keptWord, sitState, sitWord} from '../web/pages/task.js';
 import {install} from './dom.js';
 import {settle} from './fake.js';
 import {NOW, tasks} from './rig.js';
@@ -108,6 +108,29 @@ test('the task pages draw in both forms and both languages, styled and worded', 
   for (const want of ['class="sect"', 'class="fab"', 'class="tabbar"']) ok(phone.includes(want), `phone: no ${want}`);
   ok(!phone.includes('class="board"') && !phone.includes('>看板<'), 'no board on a phone');
   return sizes;
+});
+
+test('a tree done says how it went on its root, and a toast says so when it comes to be done while the page is live', async () => {
+  const r = await tasks();
+  for (const f of ['desktop', 'phone']) for (const lang of ['zh', 'en']) styled(drawn(app(r, {url: '/?page=tasks&task=q12'}).vnode(), f, lang), `q12 ${f}/${lang}`);
+  const root = drawn(app(r, {url: '/?page=tasks&task=q12'}).vnode(), 'desktop', 'zh');
+  for (const want of ['class="det-done"', '完工', '2 / 2 项完成 · 2 次运行 · 墙钟用时 3h 18m', '成果汇到 tend/q12']) ok(root.includes(want), `q12: no ${want}`);
+  ok(!drawn(app(r, {url: '/?page=tasks&task=q13'}).vnode(), 'desktop', 'zh').includes('det-done'), 'not on a subtask');
+  const en = drawn(app(r, {url: '/?page=tasks&task=q12'}).vnode(), 'desktop', 'en');
+  ok(en.includes('2 of 2 done · 2 runs · 3h 18m on the clock'), 'in English');
+
+  const a = app(r, {url: '/?page=tasks&task=q9'});
+  await mount(a.vnode());
+  eq(a.toasts.list.value.map(t => t.text), [], 'a tree done already is no news');
+  const aff = r.store.affordances.value;
+  const done = {leaves: 4, done: 3, canceled: 1, runs: 5, started: '2026-09-30T09:00:00Z', done_at: '2026-09-30T14:40:00Z'};
+  await act(() => { r.store.affordances.value = {...aff, tasks: {...aff.tasks, q1: {...aff.tasks.q1, tree_done: done}}}; });
+  eq(a.toasts.list.value.map(t => t.text), [words.f('toast.treeDone', 'Checkout rework', 3, 4)], 'one tree came to be done');
+  await act(() => { r.store.affordances.value = {...r.store.affordances.value}; });
+  eq(a.toasts.list.value.length, 1, 'told once');
+  await act(() => { r.store.affordances.value = aff; });
+  await act(() => { r.store.affordances.value = {...aff, tasks: {...aff.tasks, q1: {...aff.tasks.q1, tree_done: {...done, done_at: '2026-09-30T15:00:00Z'}}}}; });
+  eq(a.toasts.list.value.length, 2, 'reopened and done again: told again');
 });
 
 test('each form draws in both forms and both languages, styled and worded', async () => {
@@ -368,6 +391,20 @@ test('on a phone a task is its own page, with the previous and next of the list;
 await test('keeping on says what was kept: the scope against a changed issue, the task itself against one closed or reopened', () => {
   eq(['source_changed', 'source_closed', 'source_reopened'].map(reason => keptWord({kind: 'waiting', reason})),
     ['toast.kept', 'toast.goesOn', 'toast.goesOn'], 'words');
+});
+
+test('a task draws what its run waits on: a wait nothing names to handle, a quiet run stalled', () => {
+  const state = {runs: {r1: {id: 'r1', state: 'running', attention: 'asked'}, r2: {id: 'r2', state: 'running', attention: 'stalled'},
+    r3: {id: 'r3', state: 'running', attention: 'asked', ask: 'Which one?'}, r4: {id: 'r4', state: 'running', attention: 'permission', ask: 'Bash: ls'}}};
+  const waiting = run => ({kind: 'waiting', reason: state.runs[run].attention, run});
+  eq([sitState(waiting('r1'), state), sitState({kind: 'running', reason: 'running', run: 'r2'}, state), sitState(waiting('r3'), state),
+    sitState(waiting('r4'), state), sitState(waiting('r1'))], ['attend', 'stalled', 'asked', 'permission', 'asked'], 'drawn');
+  for (const lang of ['zh', 'en']) {
+    words.lang.value = lang;
+    eq([sitWord(words, waiting('r1'), state), sitWord(words, {kind: 'running', reason: 'running', run: 'r2'}, state), sitWord(words, waiting('r3'), state)],
+      [words.t('why.attend'), words.t('why.stalled'), words.t('why.asked')], lang);
+  }
+  words.lang.value = 'zh';
 });
 
 run();

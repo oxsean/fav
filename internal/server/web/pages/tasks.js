@@ -116,6 +116,8 @@ export function Tasks({store, commands, toasts, wire, router, session, clock = (
       case 'sendBack': return open({kind: 'gate', task, reply: last?.id});
       case 'ack': return quiet(send('task.source_ack', {id: task.id, accept: true}, 'task:' + task.id).then(() => toasts.show({text: t('toast.acked')})));
       case 'keep': return quiet(send('task.source_ack', {id: task.id}, 'task:' + task.id).then(() => toasts.show({text: t(keptWord(situation(st, task)))})));
+      case 'pause': return quiet(send('task.pause', {id: task.id, on: true}, 'task:' + task.id).then(() => toasts.show({text: f('toast.paused', task.title)})));
+      case 'resume': return quiet(send('task.pause', {id: task.id}, 'task:' + task.id).then(() => toasts.show({text: f('toast.resumed', task.title)})));
       case 'merge': return quiet(send('task.merge', {id: task.id}, 'task:' + task.id).then(() => toasts.show({text: f('toast.merging', task.title)})));
       case 'done': return setStatus(task, 'done', f('toast.done', task.title));
       case 'reopen': return setStatus(task, 'todo', f('toast.reopened', task.title));
@@ -165,6 +167,7 @@ export function Tasks({store, commands, toasts, wire, router, session, clock = (
     edit: {when: () => can('edit'), run: () => act('edit', task)},
     stop: {when: () => can('stop'), run: () => act('stop', task)},
     done: {when: () => can('done'), run: () => act('done', task)},
+    pause: {when: () => can('pause') || can('resume'), run: () => act(can('pause') ? 'pause' : 'resume', task)},
   }, {active: !modal});
 
   const toggle = id => setCollapsed(s => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
@@ -173,10 +176,10 @@ export function Tasks({store, commands, toasts, wire, router, session, clock = (
   const count = c => Object.values(st.tasks).filter(x => tk.matcher(st, {...filter, column: c, me})(x)).length;
 
   const columns = [
-    {id: 'sit', label: '', width: '18px', mobile: 'lead', render: r => html`<${Status} state=${sitState(r.sit)} />`},
+    {id: 'sit', label: '', width: '18px', mobile: 'lead', render: r => html`<${Status} state=${sitState(r.sit, st)} />`},
     {id: 'title', label: t('tasks.col.title'), mobile: 'primary', sort: (a, b) => a.task.title.localeCompare(b.task.title),
       render: r => html`<span class="task-cell"><span class="ell">${r.task.title}</span><span class="mono t-muted">${r.task.id}</span>${prog(r.task) && html`<span class="chip mono">${prog(r.task)}</span>`}</span>`},
-    {id: 'why', label: t('tasks.col.why'), width: 'minmax(0, .8fr)', mobile: 'secondary', render: r => sitWord(w, r.sit)},
+    {id: 'why', label: t('tasks.col.why'), width: 'minmax(0, .8fr)', mobile: 'secondary', render: r => sitWord(w, r.sit, st)},
     {id: 'who', label: t('tasks.col.who'), width: '170px', render: r => html`<span class="mono t-muted">${whoOf(r.task)}</span>`},
     {id: 'updated', label: t('tasks.col.updated'), width: '56px', align: 'right', mobile: 'trailing',
       sort: (a, b) => String(a.task.updated_at).localeCompare(String(b.task.updated_at)), render: r => html`<span class="mono t-muted">${when(r.task.updated_at, now)}</span>`},
@@ -187,7 +190,7 @@ export function Tasks({store, commands, toasts, wire, router, session, clock = (
   if (view === 'tree') {
     body = html`<${TreeList} label=${t('tasks.view.tree')} selected=${picked} onSelect=${id => go(id)} onOpen=${id => go(id, {push: phone})} onFold=${toggle}
       active=${listKeys} empty=${t('tasks.none')} rows=${treeRows.map(r => ({id: r.task.id, depth: r.depth, kids: r.kids, open: r.open,
-        lead: html`<${Status} state=${sitState(r.sit)} />`, title: r.task.title, sub: [sitWord(w, r.sit), whoOf(r.task)].filter(Boolean).join(' · '), trail: prog(r.task)}))} />`;
+        lead: html`<${Status} state=${sitState(r.sit, st)} />`, title: r.task.title, sub: [sitWord(w, r.sit, st), whoOf(r.task)].filter(Boolean).join(' · '), trail: prog(r.task)}))} />`;
   } else if (view === 'board') {
     body = html`<${Board} label=${t('tasks.view.board')} selected=${picked} onSelect=${id => go(id)} onOpen=${id => go(id)} active=${listKeys}
       canDrop=${(id, c) => { const d = tk.drop(st, st.tasks[id], c); return !!d && !d.why; }}
@@ -204,7 +207,7 @@ export function Tasks({store, commands, toasts, wire, router, session, clock = (
           ${cost >= 0.005 && html`<span class="mono t-muted">${money(cost)}</span>`}${prog(r.task) && html`<span class="chip mono">${prog(r.task)}</span>`}</span>
           <span class="bc-title">${r.task.title}</span>
           ${r.task.stage && html`<span class="chip">${f('gate.stage', r.task.stage, r.task.loops || 0)}</span>`}
-          <span class="bc-sit"><${Status} state=${sitState(r.sit)} label=${sitWord(w, r.sit)} /></span>
+          <span class="bc-sit"><${Status} state=${sitState(r.sit, st)} label=${sitWord(w, r.sit, st)} /></span>
           <span class="bc-who mono">${whoOf(r.task)}</span>`};
       })}))} />`;
   } else if (phone) {

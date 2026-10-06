@@ -239,6 +239,7 @@ Keys that start a process, a tab or an app only focus their button; the same key
 | `s` | hand off: a new Claude / Codex session reads a summary pack |
 | `i / c / o` | open the project directory in the IDE / VS Code / file manager |
 | `n` | edit just the title |
+| `g` | open the task a run of this session worked for (shown only then) |
 
 **Dialogs**
 
@@ -365,9 +366,14 @@ tend journal verify · tend journal repair    # check the coordinator's journal;
 ```
 
 In the TUI, view `5` lists the tasks: `w` new task, `e` edit, `x` done / reopen, `Enter` the task dialog (run it on a machine
-with a profile, stop, abandon, take over), `X` stops the run, `Space` shows the run's conversation in the Sessions view.
+with a profile, stop, abandon, take over), `X` stops the run, `b` pauses dispatch under a task tree or resumes it,
+`Space` shows the run's conversation in the Sessions view.
 The right pane shows the brief, the latest runs and the last run's output. Taking over opens the resume dialog of the run's
 session; while the run still drives it, the dialog says to stop the run first.
+The other way round, a session some run used carries its task's label (id, title, stage) on its card and in the right
+pane, the resume dialog's `g` opens that task, and `/` finds the session by the task's title or id; the labels appear
+once the TUI has reached the coordinator (the Tasks view was opened). The Web UI's sessions page shows the same label and
+opens the task from it.
 `o` arranges the tasks as the home (what waits for you, then what runs, with the machines and 7 days of usage below
 when the terminal is taller than 24 rows), a list, a tree with subtasks under their parents, or a board with a column
 per situation (`h` / `l` move between columns). `:` opens a command palette that finds any list action by its Chinese or
@@ -386,6 +392,9 @@ dispatched as soon as what it comes after is done, a task whose run succeeds is 
 once its subtasks are done it waits for someone to accept it. Every open task says where it stands: running, queued (and
 for what: tasks before it, its subtasks, its machine, another run in its directory) or waiting for someone (and why). A task that could not be
 dispatched says why and waits; start it again to retry. `tend task move <id> --parent … --after …` changes its place.
+`tend task pause <id>` pauses a tree (a requirement or a task with subtasks): what runs under it finishes, nothing new is
+dispatched there (no ready task, no next workflow stage, no queued run starting), and its tasks wait as "dispatch paused";
+`tend task resume <id>` lets it go on. The pause is kept in the journal, so a restarted coordinator keeps it.
 
 **Agents.** Built in: `claude` (headless `claude -p` talking stream-json both ways, or an interactive Claude in a new Herdr
 tab when a Herdr workspace holds the directory), `codex` (`codex app-server`) and `fake` (for tests). More go into
@@ -473,20 +482,25 @@ while it works (claude reads it in its current turn, codex steers the turn). The
 has spent so far (tokens, and claude's cost estimate). A background agent is also told how to end on a question: a final
 message starting `ASK:`, or `tend run ask "…"` (`tend run note "…"` reports progress; both reach the run's state through
 `TEND_RUN_DIR`). Tools denied without asking (by the permission mode) are named. A run that ends like that shows as
-*waiting for your reply* or *needs your permission*;
+*asks you* or *needs your permission*;
 `tend run continue <run> "…"` (the TUI's and the web page's **Reply**) starts a new background run in the same session
 with your answer. `tend run continue --session <id> "…"` does the same for any indexed session. A failed run says why:
 `cli_missing`, `auth_missing`, `auth`, `quota`, `rate_limit`, `overloaded`, `context_overflow`, `network`,
 `session_missing`, `permission_denied`, with what the CLI said and what to do next (`tend run show`). A run silent
-for 15 minutes is marked stalled (`node.stall_after`, `"off"`), never stopped. A run in a Herdr tab is marked as asking
-while Herdr shows its pane blocked, its transcript ends on a question, or (with `tend install-hook`) Claude's latest hook
-event is a prompt. `tend inbox`, the top of the TUI's task list and the web page's **Attention** count gather every run
+for 15 minutes is marked as maybe stuck (`node.stall_after`, `"off"`), never stopped; a running run shows when it last
+put anything out, to the minute. A run in a Herdr tab asks you while its transcript ends on a question; needs your
+permission, with the tool, while (with `tend install-hook`) Claude's latest hook event is a permission prompt; and needs
+you while another prompt shows or Herdr shows its pane blocked. Its transcript not growing while it neither waits nor
+rests between turns marks it as maybe stuck too. `tend inbox`, the top of the TUI's task list and the web page's **Attention** count gather every run
 that needs you, longest waiting first.
 
 To hear about it, set a command: `"notify_command": ["my-notifier"]` runs with one JSON object on stdin
 (`event`: `run.waiting`, `run.asked`, `run.permission`, `run.failed` or `run.stalled`, plus run, task, title, machine, agent, state,
 reason, detail, ask) whenever a run comes to want someone; `notify_events` narrows the events. Task events,
-`task.needs_you` and `task.done`, go out only when `notify_events` names them.
+`task.needs_you`, `task.done` and `task.tree_done`, go out only when `notify_events` names them. `task.tree_done` is a task
+tree's root coming to be done (all done, besides its own `task.done`): its JSON carries a `summary` of the leaves done,
+the canceled ones, the runs, when the first one started, when the tree was done and the branch its subtasks were merged
+into. The TUI tells it at the bottom and the web page in a toast; the root's detail keeps the summary.
 
 **Who coordinates.** One process at a time keeps the task journal and sends runs out: whichever holds the lock in
 `~/.agent/tend/coord/` — the TUI while its Tasks view is used, a `tend task|run …` command for its length, or `tend service`
@@ -584,7 +598,7 @@ right there to answer, allow or deny, then what runs and on which machines, each
 board, 7 days of tokens and cost, and the latest sessions. Tasks show as a list or as a board by where they stand, filtered by status,
 machine, project, stage and run; the view, filters, selected task and tab are in the address, so a reload or a shared
 link shows the same thing. `⌘K` (`Ctrl+K`) opens a command palette that finds any action or task by its Chinese
-or English name; every action also has a key (`?` lists them: `n` new task, `g h` home, `g b` board, `d` dispatch, …).
+or English name; every action also has a key (`?` lists them: `n` new task, `g h` home, `g b` board, `d` dispatch, `p` pause or resume a task tree, …).
 **Needs you** says why each item is yours (you own it, accept it or dispatched it), filters by kind and role, and
 answers in place: `1` allows, `2` denies with an optional reason, a digit picks an option, or give your own words.
 **Runs** (`g r`) lists every run by state and machine with a preview of its latest output. A task's detail shows its

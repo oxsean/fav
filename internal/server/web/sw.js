@@ -35,7 +35,8 @@ self.addEventListener('fetch', e => {
 });
 
 // A push is what waits on the viewer about a task (tend-server's PushMessage): it always shows a notice (a browser
-// takes the permission back from a worker that shows none), one per task, the newer taking the older's place. A push
+// takes the permission back from a worker that shows none), one per task, the newer taking the older's place, except
+// that a tree done stays before its root's own done. A push
 // with its content hidden says only how many things wait, all under one notice. What it says shows only once the
 // page's session here is the person it is for (to): one the push service kept since they signed out, or since someone
 // else signed in here, shows a plain notice. The words follow the browser's
@@ -44,13 +45,15 @@ const WORDS = {
   zh: {
     permission: '要你允许：%s', permissionAny: '要你允许它用一个工具', question: 'agent 有问题问你', continue: '运行停在一个问题上，等你回复后接着跑',
     gate: '等你验收', ended: '跑完了，等你标完成', failed: '运行没成功，等你处理', waiting: '等你处理', more: '%s · %d 项等你',
-    hidden: '%d 项等你', done: '任务完成了', plain: '打开 tend 查看', view: '查看', reject: '拒绝',
+    hidden: '%d 项等你', done: '任务完成了', tree: '完工了', treeDone: '完工', leaves: '%d/%d 项完成', canceled: '%d 项取消', runs: '%d 次运行', run: '1 次运行',
+    took: '用时 %s', branch: '汇到 %s', plain: '打开 tend 查看', view: '查看', reject: '拒绝',
     rejected: '已拒绝', handledBy: '已被 %s 处理', gone: '已经不等你了', signIn: '请打开 tend 重新登录后处理', failedAct: '没能拒绝，打开 tend 处理',
   },
   en: {
     permission: 'Asks to run: %s', permissionAny: 'Asks to use a tool', question: 'The agent has a question for you', continue: 'Its run stopped on a question; reply to go on',
     gate: 'Waiting for you to accept it', ended: 'Its run ended; mark it done', failed: 'Its run did not succeed', waiting: 'Waiting for you', more: '%s · %d waiting on you',
-    hidden: '%d waiting on you', done: 'The task is done', plain: 'Open tend to see it', view: 'View', reject: 'Deny',
+    hidden: '%d waiting on you', done: 'The task is done', tree: 'A task tree is done', treeDone: 'All done', leaves: '%d of %d done', canceled: '%d canceled',
+    runs: '%d runs', run: '1 run', took: 'took %s', branch: 'merged into %s', plain: 'Open tend to see it', view: 'View', reject: 'Deny',
     rejected: 'Denied', handledBy: 'Already handled by %s', gone: 'No longer waits on you', signIn: 'Open tend and sign in again to handle it', failedAct: 'Could not deny it; open tend to handle it',
   },
 };
@@ -61,14 +64,29 @@ function words() {
 
 const icon = '/icon-192.png';
 
+// took is a span to the minute: 3h12m, 45m.
+function took(ms) {
+  const m = Math.floor(ms / 60000);
+  return m >= 60 ? `${Math.floor(m / 60)}h${String(m % 60).padStart(2, '0')}m` : `${m}m`;
+}
+
+// summed is how a tree went (tend-server's task.TreeSummary) in one line.
+function summed(w, s) {
+  const fill = (text, ...vs) => vs.reduce((t, v) => t.replace(/%[ds]/, String(v)), text);
+  const span = Date.parse(s.done_at) - Date.parse(s.started);
+  return [w.treeDone, fill(w.leaves, s.done || 0, s.leaves || 0), s.canceled > 0 && fill(w.canceled, s.canceled), s.runs === 1 ? w.run : fill(w.runs, s.runs || 0),
+    span > 0 && fill(w.took, took(span)), s.branch && fill(w.branch, s.branch)].filter(Boolean).join(' · ');
+}
+
 // noticeOf is how a push shows: its title, and the options of showNotification. A notice's data keeps what a click
 // needs: the link to open and the token of its deny button.
 function noticeOf(m) {
   const w = words();
   if (!m.task) {
-    if (m.event === 'task.done') return ['tend', {body: w.done, tag: 'tend-done', renotify: true, icon, data: {link: ''}}];
+    if (m.event === 'task.done' || m.event === 'task.tree_done') return ['tend', {body: m.event === 'task.done' ? w.done : w.tree, tag: 'tend-done', renotify: true, icon, data: {link: ''}}];
     return ['tend', {body: w.hidden.replace('%d', String(Math.max(1, m.n || 0))), tag: 'tend', renotify: true, icon, data: {count: true, link: ''}}];
   }
+  if (m.event === 'task.tree_done') return [m.title, {body: m.summary ? summed(w, m.summary) : w.tree, tag: m.task, renotify: true, icon, data: {task: m.task, link: m.link, tree: true}}];
   if (m.event === 'task.done') return [m.title, {body: w.done, tag: m.task, renotify: true, icon, data: {task: m.task, link: m.link}}];
   const title = m.n > 1 ? w.more.replace('%s', m.title).replace('%d', String(m.n)) : m.title;
   const body = m.kind === 'permission' ? (m.what ? w.permission.replace('%s', m.what) : w.permissionAny) : w[m.kind] || w.waiting;
@@ -92,8 +110,12 @@ self.addEventListener('push', e => {
   let m = null;
   try { m = e.data?.json(); } catch {}
   e.waitUntil((async () => {
-    const [title, opts] = m?.v !== 1 ? ['tend', {body: words().waiting, tag: 'tend', icon, data: {count: true, link: ''}}]
+    let [title, opts] = m?.v !== 1 ? ['tend', {body: words().waiting, tag: 'tend', icon, data: {count: true, link: ''}}]
       : await forViewer(m) ? noticeOf(m) : ['tend', {body: words().plain, tag: 'tend', icon, data: {count: true, link: ''}}];
+    if (m?.event === 'task.done') { // a tree's own done, come after its tree done, keeps that one in its place
+      const tree = (await self.registration.getNotifications?.({tag: opts.tag}) || []).find(n => n.data?.tree);
+      if (tree) [title, opts] = [tree.title, {body: tree.body, tag: tree.tag, renotify: false, icon, data: tree.data}];
+    }
     await self.registration.showNotification(title, opts);
   })());
 });

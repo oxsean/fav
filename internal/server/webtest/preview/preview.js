@@ -2,7 +2,7 @@
 // files by method, a fetch that answers the sign-in and device calls, and the clock of the home frames. ?frames=tasks
 // plays the task pages' frames instead of the home's, ?frames=output a conversation's and its changes (open
 // ?page=tasks&task=t1), ?frames=carry that conversation carried on into a third run, ?frames=gone with its question
-// answered by someone else first, ?frames=team the machines and team pages' data (?as=admin signs in as its admin),
+// answered by someone else first, ?frames=team the machines, team and mba's sessions pages' data (?as=admin signs in as its admin),
 // ?frames=agents the agent page's (open ?page=agents).
 // /api/* answers come from webtest/api.json by method and path; a write it has no answer for succeeds empty.
 import {boot} from '../../web/pages/boot.js';

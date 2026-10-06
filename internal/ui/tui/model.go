@@ -352,7 +352,7 @@ func (m *Model) query() tend.Query {
 		_, s = fulltext.Split(rest)
 	}
 	q := tend.Parse(s)
-	q.All, q.Live = m.view != viewFavorites, m.isLive
+	q.All, q.Live, q.Also = m.view != viewFavorites, m.isLive, m.taskText
 	if m.view == viewLive {
 		q.Status, q.Turns = tend.StatusLive, 0
 	}

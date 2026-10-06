@@ -5,6 +5,9 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
+	"fmt"
+	"maps"
+	"slices"
 	"strings"
 	"time"
 
@@ -57,8 +60,11 @@ type tasksState struct {
 	askPick    int                 // the home layout's inline answer: the option highlighted for its question
 	askDeny    bool                // it is composing a deny reason
 	askReason  textinput.Model
-	editsOpen  bool            // the output's edit rows show their first hunks
-	openEdits  map[string]bool // edit rows clicked the other way, by run and row key
+	editsOpen  bool                  // the output's edit rows show their first hunks
+	openEdits  map[string]bool       // edit rows clicked the other way, by run and row key
+	links      map[string]*task.Task // by session id: the task its newest run worked for (taskOf)
+	linkedAt   linkKey
+	treesDone  map[string]time.Time // the trees the state stream says are done, by when; nil before its first state
 }
 
 const tasksWait = 20 * time.Second
@@ -299,6 +305,7 @@ func (msg tasksPushMsg) apply(m *Model) tea.Cmd {
 	if changed {
 		t.err, t.st, t.loaded = nil, t.fold.St, true
 		m.filterTasks()
+		m.announceTreesDone()
 	}
 	switch {
 	case msg.err == nil:
@@ -318,6 +325,55 @@ func (msg tasksPushMsg) apply(m *Model) tea.Cmd {
 	t.stream = nil
 	t.err = msg.err
 	return nil
+}
+
+// announceTreesDone tells at the bottom of each tree the state stream says came to be done since the last look; the
+// first look only sees what is done already.
+func (m *Model) announceTreesDone() {
+	t := &m.tasks
+	now := map[string]time.Time{}
+	for id, a := range t.fold.Aff.Tasks {
+		if a != nil && a.TreeDone != nil {
+			now[id] = a.TreeDone.DoneAt
+		}
+	}
+	if t.treesDone != nil {
+		for _, id := range slices.Sorted(maps.Keys(now)) {
+			if was, ok := t.treesDone[id]; ok && was.Equal(now[id]) {
+				continue
+			}
+			s, title := t.fold.Aff.Tasks[id].TreeDone, id
+			if x := t.st.Tasks[id]; x != nil {
+				title = render.OneLine(x.Title)
+			}
+			m.flash(render.GlyphDone + i18n.F("tasks.tree_done_flash", render.Truncate(title, 40), s.Done, s.Leaves))
+		}
+	}
+	t.treesDone = now
+}
+
+// treeDoneLine is how a tree done went, in one line.
+func treeDoneLine(s task.TreeSummary) string {
+	parts := []string{i18n.F("tasks.tree_done_line", s.Done, s.Leaves, s.Runs)}
+	if s.Canceled > 0 {
+		parts = append(parts, i18n.F("tasks.tree_done_canceled", s.Canceled))
+	}
+	if !s.Started.IsZero() && s.DoneAt.After(s.Started) {
+		d := s.DoneAt.Sub(s.Started)
+		m := int(d / time.Minute)
+		span := fmt.Sprintf("%dm", m)
+		switch {
+		case m == 0:
+			span = d.Round(time.Second).String()
+		case m >= 60:
+			span = fmt.Sprintf("%dh %02dm", m/60, m%60)
+		}
+		parts = append(parts, i18n.F("tasks.tree_done_took", span))
+	}
+	if s.Branch != "" {
+		parts = append(parts, i18n.F("tasks.tree_done_branch", render.OneLine(s.Branch)))
+	}
+	return strings.Join(parts, " · ")
 }
 
 func (msg tasksConnMsg) apply(m *Model) tea.Cmd {
@@ -353,7 +409,7 @@ func reasonText(err error) string {
 	}
 	r := remote.Reason(err)
 	if detail != "" {
-		return r + " — " + detail
+		return r + " — " + render.OneLine(detail)
 	}
 	return r
 }
@@ -539,6 +595,8 @@ func (m *Model) taskKey(a act) (tea.Cmd, bool) {
 		return m.editTask(), true
 	case actDone:
 		return m.toggleTaskDone(), true
+	case actPause:
+		return m.toggleTaskPause(), true
 	case actCloseTab:
 		m.askStopRun()
 	case actFoldAll:
@@ -574,16 +632,37 @@ func (m *Model) toggleTaskDone() tea.Cmd {
 		return nil
 	}
 	id, cmd := x.ID, commandID()
-	status, note := task.StatusDone, i18n.F("tasks.done", render.Truncate(x.Title, 40))
+	status, note := task.StatusDone, i18n.F("tasks.done", render.Truncate(render.OneLine(x.Title), 40))
 	if x.Status != task.StatusTodo {
-		status, note = task.StatusTodo, i18n.F("tasks.reopened", render.Truncate(x.Title, 40))
+		status, note = task.StatusTodo, i18n.F("tasks.reopened", render.Truncate(render.OneLine(x.Title), 40))
 	}
 	return m.writeAs(cmd, coord.MTaskStatus, task.TaskStatus{ID: id, Status: status}, "", func(mm *Model) tea.Cmd {
 		mm.offerUndo(note, func(mm *Model) tea.Cmd {
-			return mm.write(coord.MTaskUndo, coord.TaskUndo{ID: id, Command: cmd}, i18n.F("undo.done", render.Truncate(x.Title, 40)), nil)
+			return mm.write(coord.MTaskUndo, coord.TaskUndo{ID: id, Command: cmd}, i18n.F("undo.done", render.Truncate(render.OneLine(x.Title), 40)), nil)
 		})
 		return nil
 	})
+}
+
+// toggleTaskPause pauses dispatch under the selected task tree, or resumes it: what runs there finishes either way.
+func (m *Model) toggleTaskPause() tea.Cmd {
+	x := m.selectedTask()
+	if x == nil {
+		return nil
+	}
+	switch {
+	case task.Finished(x.Status):
+		m.flash(i18n.T("tasks.pause_finished"))
+		return nil
+	case x.Paused == nil && !m.tasks.st.Tree(x):
+		m.flash(i18n.T("tasks.pause_no_tree"))
+		return nil
+	}
+	on, note := x.Paused == nil, i18n.F("tasks.resumed", render.Truncate(x.Title, 40))
+	if on {
+		note = i18n.F("tasks.paused", render.Truncate(x.Title, 40))
+	}
+	return m.write(coord.MTaskPause, task.TaskPause{ID: x.ID, On: on}, note, nil)
 }
 
 func (m *Model) askStopRun() {
@@ -717,6 +796,13 @@ func (m *Model) taskButtons() []btn {
 		bs = append(bs, btn{i18n.T("tasks.btn_take_over"), !open && x.Status != task.StatusTodo, (*Model).takeOver})
 		bs = append(bs, btn{keyed(keyName("space"), i18n.T("tasks.btn_view_session")), false, (*Model).viewRunSession})
 	}
+	if !task.Finished(x.Status) && (x.Paused != nil || m.tasks.st.Tree(x)) {
+		label := i18n.T("tasks.btn_pause")
+		if x.Paused != nil {
+			label = i18n.T("tasks.btn_resume")
+		}
+		bs = append(bs, btn{keyed(keyOf(inList, actPause), label), false, func(mm *Model) { mm.closeOverlay(); mm.pending = mm.toggleTaskPause() }})
+	}
 	bs = append(bs, btn{keyed(keyOf(inList, actEdit), i18n.T("key.edit")), false, func(mm *Model) {
 		mm.closeOverlay()
 		mm.pending = mm.editTask()
@@ -739,12 +825,12 @@ func (m *Model) renderTask() string {
 	if x == nil {
 		return ovRender([]string{dimmed.Render(i18n.T("tasks.gone"))}, w)
 	}
-	body := []string{boldSty.Foreground(cText).Render(render.Truncate(x.Title, inner))}
+	body := []string{boldSty.Foreground(cText).Render(render.Truncate(render.OneLine(x.Title), inner))}
 	body = append(body, dimmed.Render(render.Truncate(m.taskWhere(x), inner)))
 	body = append(body, frame.Render(strings.Repeat(hRule, inner)))
 	if r := m.selectedRun(); r != nil {
 		body = append(body, m.runLine(r, inner, false))
-		body = append(body, runFacts(r, inner, 4)...)
+		body = append(body, runFacts(r, inner, 4, m.now)...)
 	} else {
 		body = append(body, dimmed.Render(i18n.T("tasks.never_ran")))
 	}
@@ -765,6 +851,9 @@ func (m *Model) taskDialogKey(msg tea.KeyPressMsg) tea.Cmd {
 	case actDone:
 		m.closeOverlay()
 		return m.toggleTaskDone()
+	case actPause:
+		m.closeOverlay()
+		return m.toggleTaskPause()
 	case actSpace:
 		m.viewRunSession()
 		return nil
@@ -792,17 +881,20 @@ var runStateKeys = map[string]string{
 	task.Failed: "tasks.run_failed", task.Canceled: "tasks.run_canceled", task.Abandoned: "tasks.run_abandoned",
 }
 
-// runFacts: why r ended, what it asked or last noted, and what to do next, at most room lines of question.
-func runFacts(r *task.Run, inner, room int) []string {
+// runFacts: why r ended, what it asked, wants or last noted, when it last put anything out, and what to do next, at
+// most room lines of question.
+func runFacts(r *task.Run, inner, room int, now time.Time) []string {
 	var out []string
 	if r.Reason != "" && !task.Open(r.State) {
-		why := render.RunReason(r.Reason)
+		why := render.OneLine(render.RunReason(r.Reason))
 		if r.Detail != "" && r.Detail != r.Reason {
-			why += " — " + render.Sanitize(r.Detail)
+			why += " — " + render.OneLine(r.Detail)
 		}
 		out = append(out, dimmed.Render(render.Truncate(i18n.F("tasks.reason", why), inner)))
 	}
-	if r.Ask != "" && !asked(r) {
+	if r.Ask != "" && r.Attention == task.AttentionPermission && len(r.Requests) == 0 {
+		out = append(out, accent.Render(render.Truncate(i18n.F("tasks.wants", render.OneLine(r.Ask)), inner)))
+	} else if r.Ask != "" && !asked(r) {
 		lines := render.Wrap(i18n.F("tasks.ask", render.Sanitize(r.Ask)), inner)
 		if len(lines) > room {
 			lines = append(lines[:room-1], dimmed.Render(i18n.F("tasks.more_lines", len(lines)-room+1)))
@@ -811,9 +903,12 @@ func runFacts(r *task.Run, inner, room int) []string {
 			out = append(out, accent.Render(l))
 		}
 	} else if r.Note != "" && task.Open(r.State) {
-		out = append(out, dimmed.Render(render.Truncate(i18n.F("tasks.note", render.Sanitize(r.Note)), inner)))
+		out = append(out, dimmed.Render(render.Truncate(i18n.F("tasks.note", render.OneLine(r.Note)), inner)))
 	} else if r.Last != "" && task.Open(r.State) {
-		out = append(out, dimmed.Render(render.Truncate(i18n.F("tasks.last", render.Sanitize(r.Last)), inner)))
+		out = append(out, dimmed.Render(render.Truncate(i18n.F("tasks.last", render.OneLine(r.Last)), inner)))
+	}
+	if r.OutputAt != nil && task.Open(r.State) {
+		out = append(out, dimmed.Render(render.Truncate(i18n.F("tasks.output_at", render.Elapsed(*r.OutputAt, now)), inner)))
 	}
 	if u := render.RunUsage(r.Usage); u != "" {
 		out = append(out, dimmed.Render(render.Truncate(u, inner)))
@@ -839,7 +934,7 @@ func (m *Model) taskWhere(x *task.Task) string {
 	if x.Dir != "" {
 		parts = append(parts, paths.Tilde(x.Dir))
 	}
-	return strings.Join(parts, " · ")
+	return render.OneLine(strings.Join(parts, " · "))
 }
 
 // runLine: one run — state, machine, agent, how long.
@@ -853,18 +948,32 @@ func (m *Model) runLine(r *task.Run, w int, dim bool) string {
 		}
 		took = render.Elapsed(*r.StartedAt, end)
 	}
-	text := i18n.F("tasks.run_line", runStateText(r), r.Machine, r.Agent, took)
+	text := render.OneLine(i18n.F("tasks.run_line", runStateText(r), r.Machine, r.Agent, took))
 	if dim {
 		sty = dimmed
 	}
 	return sty.Render(glyph+" ") + render.Truncate(text, max(1, w-3))
 }
 
+// waitGlyph is how a run that wants someone looks, by what it wants: a permission, a question (or a wait nothing
+// names), or no output for long; ok is false when it wants nobody.
+func waitGlyph(r *task.Run) (glyph string, sty lipgloss.Style, ok bool) {
+	switch {
+	case r.Attention == task.AttentionPermission:
+		return render.GlyphWarn, warnSty, true
+	case r.Attention == task.AttentionAsked:
+		return render.GlyphAsk, accent, true
+	case r.Attention == task.AttentionStalled && task.Open(r.State):
+		return render.GlyphStall, errSty, true
+	}
+	return "", lipgloss.Style{}, false
+}
+
 func runGlyph(r *task.Run) (string, lipgloss.Style) {
 	switch r.State {
 	case task.Running, task.Starting:
-		if r.Attention != "" {
-			return render.GlyphWarn, accent
+		if g, sty, ok := waitGlyph(r); ok {
+			return g, sty
 		}
 		return render.GlyphLive, accent
 	case task.Queued:
@@ -897,6 +1006,9 @@ func runStateText(r *task.Run) string {
 func taskGlyph(m *Model, x *task.Task) (string, lipgloss.Style) {
 	switch {
 	case m.needsYou(x):
+		if g, sty, ok := waitGlyph(m.lastRun(x.ID)); ok {
+			return g, sty
+		}
 		return render.GlyphWarn, errSty
 	case m.tasks.st != nil && m.tasks.st.Running(x.ID):
 		return render.GlyphLive, accent
@@ -971,7 +1083,7 @@ func (m *Model) watchPanel(r *task.Run, x0, y0, w, h int) []string {
 	if x := m.tasks.st.Tasks[r.Task]; x != nil {
 		title = x.Title
 	}
-	body := []string{boldSty.Foreground(cText).Render(render.Truncate(title, inner)), m.runLine(r, inner, false)}
+	body := []string{boldSty.Foreground(cText).Render(render.Truncate(render.OneLine(title), inner)), m.runLine(r, inner, false)}
 	if room := h - 2 - len(body); room > 0 {
 		body = append(body, m.outputLines(r, x0+2, y0+1+len(body), inner, room)...)
 	}
@@ -988,11 +1100,11 @@ func (m *Model) watchedRun() *task.Run {
 func (m *Model) taskDetailIn(x *task.Task, x0, y0, w, h int) []string {
 	inner := w - 4
 	var body []string
-	body = append(body, boldSty.Foreground(cText).Render(render.Truncate(x.Title, inner)))
+	body = append(body, boldSty.Foreground(cText).Render(render.Truncate(render.OneLine(x.Title), inner)))
 	body = append(body, dimmed.Render(render.Truncate(m.taskWhere(x), inner)))
 	if brief := strings.TrimSpace(x.Brief); brief != "" && brief != x.Title {
 		body = append(body, "")
-		lines := render.Wrap(brief, inner)
+		lines := render.Wrap(render.Sanitize(brief), inner)
 		if len(lines) > 6 {
 			lines = append(lines[:5], dimmed.Render(i18n.F("tasks.more_lines", len(lines)-5)))
 		}
@@ -1001,13 +1113,23 @@ func (m *Model) taskDetailIn(x *task.Task, x0, y0, w, h int) []string {
 	if hasDraft(x) {
 		body = append(body, "", accent.Render(render.Truncate(i18n.F("tasks.draft_line", len(x.Draft.Plan.Tasks), len(x.Draft.Plan.Questions)), inner)))
 	}
+	if p := m.tasks.st.PausedBy(x.ID); p != nil && !task.Finished(x.Status) {
+		line := i18n.T("tasks.paused_line")
+		if p.ID != x.ID {
+			line = i18n.F("tasks.paused_under", render.Sanitize(p.Title))
+		}
+		body = append(body, "", warnSty.Render(render.Truncate(line, inner)))
+	}
+	if a := m.tasks.fold.Aff.Tasks[x.ID]; a != nil && a.TreeDone != nil {
+		body = append(body, "", okSty.Render(render.Truncate(render.GlyphDone+" "+treeDoneLine(*a.TreeDone), inner)))
+	}
 	runs := m.tasks.st.RunsOf(x.ID)
 	if len(runs) > 0 {
 		body = append(body, "", accent.Render(i18n.F("tasks.runs", len(runs))))
 		for i := len(runs) - 1; i >= 0 && i >= len(runs)-4; i-- {
 			body = append(body, m.runLine(runs[i], inner, i != len(runs)-1))
 			if i == len(runs)-1 {
-				body = append(body, runFacts(runs[i], inner, 3)...)
+				body = append(body, runFacts(runs[i], inner, 3, m.now)...)
 			}
 		}
 	}

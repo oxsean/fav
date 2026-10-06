@@ -29,14 +29,15 @@ type PushDevice struct {
 	Credential string `json:"-"`
 }
 
-// ⚠️ The events a device may take: what waits on its user (the default) and a task of theirs done.
+// ⚠️ The events a device may take: what waits on its user and a tree of theirs done (the default), a task of theirs done.
 const (
-	EventWaiting = "task.needs_you"
-	EventDone    = "task.done"
+	EventWaiting  = "task.needs_you"
+	EventDone     = "task.done"
+	EventTreeDone = "task.tree_done"
 )
 
-// DevicePrefs is what a device wants of the notices; the zero value is the defaults. Events nil is EventWaiting
-// alone; Hide leaves a push saying only how many things wait; Wait is how long, in seconds, a push waits for the page:
+// DevicePrefs is what a device wants of the notices; the zero value is the defaults. Events nil is EventWaiting and
+// EventTreeDone; Hide leaves a push saying only how many things wait; Wait is how long, in seconds, a push waits for the page:
 // 0 the default (30 s for a permission, 60 s else), -1 none.
 type DevicePrefs struct {
 	Events []string `json:"events"` // null: the default; [] none
@@ -47,7 +48,7 @@ type DevicePrefs struct {
 // Wants: the device takes pushes of event.
 func (p DevicePrefs) Wants(event string) bool {
 	if p.Events == nil {
-		return event == EventWaiting
+		return event == EventWaiting || event == EventTreeDone
 	}
 	return slices.Contains(p.Events, event)
 }
@@ -55,7 +56,7 @@ func (p DevicePrefs) Wants(event string) bool {
 // Check: p names only events a device takes, each once, and a wait of -1, 0 or 1 s to an hour.
 func (p DevicePrefs) Check() error {
 	for i, e := range p.Events {
-		if e != EventWaiting && e != EventDone || slices.Contains(p.Events[:i], e) {
+		if e != EventWaiting && e != EventDone && e != EventTreeDone || slices.Contains(p.Events[:i], e) {
 			return errors.New("events")
 		}
 	}

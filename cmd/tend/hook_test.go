@@ -103,15 +103,42 @@ func TestHookEventMarksWaitingUntilTheTranscriptMoves(t *testing.T) {
 		os.Stdin = old
 	}
 	feed("Notification")
-	if !capture.HookWaiting("s1", 3) {
+	if _, ok := capture.HookWaiting("s1", 3); !ok {
 		t.Fatal("a permission question marks it waiting")
 	}
-	if capture.HookWaiting("s1", 40) {
+	if _, ok := capture.HookWaiting("s1", 40); ok {
 		t.Fatal("the transcript grew: answered")
 	}
 	feed("Stop")
-	if capture.HookWaiting("s1", 3) {
+	if _, ok := capture.HookWaiting("s1", 3); ok {
 		t.Fatal("Stop clears it")
+	}
+}
+
+func TestHookEventKeepsWhatThePromptIsAbout(t *testing.T) {
+	t.Setenv("TEND_HOME", t.TempDir())
+	tr := filepath.Join(t.TempDir(), "s.jsonl")
+	os.WriteFile(tr, []byte("{}\n"), 0o644)
+	feed := func(fields string) {
+		r, w, _ := os.Pipe()
+		w.WriteString(`{"session_id":"s2","transcript_path":` + testkit.JSONString(tr) + `,` + fields + `}`)
+		w.Close()
+		old := os.Stdin
+		os.Stdin = r
+		cmdHookEvent(nil)
+		os.Stdin = old
+	}
+	feed(`"hook_event_name":"PermissionRequest","tool_name":"Bash","tool_input":{"command":"rm -rf /tmp/build","description":"Clean"},"permission_suggestions":["Bash(rm /tmp/**)"]`)
+	if w, ok := capture.HookWaiting("s2", 3); !ok || !w.Permission || w.Tool != "Bash" || w.Summary != "rm -rf /tmp/build" {
+		t.Fatalf("PermissionRequest: %+v %v", w, ok)
+	}
+	feed(`"hook_event_name":"Notification","notification_type":"permission_prompt","message":"Claude needs your permission to use Bash"`)
+	if w, _ := capture.HookWaiting("s2", 3); !w.Permission || w.Tool != "Bash" {
+		t.Fatalf("its notification keeps the tool: %+v", w)
+	}
+	feed(`"hook_event_name":"Notification","notification_type":"elicitation_dialog","message":"An MCP server asks for input"`)
+	if w, ok := capture.HookWaiting("s2", 3); !ok || w.Permission || w.Summary != "" {
+		t.Fatalf("a dialog is a wait the hook cannot tell: %+v %v", w, ok)
 	}
 }
 

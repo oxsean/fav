@@ -37,7 +37,7 @@ type Config struct {
 	Coordinator *CoordinatorConfig       `json:"coordinator,omitempty"` // mode 2: the server this machine's clients use
 	// NotifyCommand runs when a run wants someone (waiting, asked, failed, stalled) with the event as JSON on stdin;
 	// NotifyEvents narrows which (run.waiting, run.asked, run.failed, run.stalled, run.permission), or adds the
-	// task events (task.needs_you, task.done, task.stage, task.rework), which are heard only when named.
+	// task events (task.needs_you, task.done, task.tree_done, task.stage, task.rework), which are heard only when named.
 	NotifyCommand []string `json:"notify_command,omitempty"`
 	NotifyEvents  []string `json:"notify_events,omitempty"`
 	// Server is tend-server's own settings (its home's config.json).
@@ -103,7 +103,7 @@ type NodeConfig struct {
 	AllowBypass   bool     `json:"allow_bypass,omitempty"`
 	AllowProfiles []string `json:"allow_profiles,omitempty"`
 	AllowHooks    bool     `json:"allow_hooks,omitempty"` // run a project's hooks and a definition's claude hooks (allow_bypass does too)
-	StallAfter    string   `json:"stall_after,omitempty"` // a background run silent this long is marked stalled; default 15m, "off"
+	StallAfter    string   `json:"stall_after,omitempty"` // a run silent this long is marked stalled; default 15m, "off"
 	Slots         int      `json:"slots,omitempty"`       // runs this node takes at once, whoever sends them; 0 no bound
 	// MCP are the MCP servers a definition may name, as claude's mcpServers entries; their values stay on this machine.
 	MCP map[string]json.RawMessage `json:"mcp,omitempty"`

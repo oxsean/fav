@@ -82,7 +82,11 @@ const styled = (root, what) => {
   eq(wordsLeft(root.textContent), null, `${what}: words not found`);
 };
 // rows are the titles listed: a desktop's table rows or a phone's cards.
-const rowsOf = root => root.find('.tr').map(x => x.find('.td')[1].textContent).concat(root.find('.card-row').map(x => x.one('.card-primary').textContent));
+const rowsOf = root => root.find('.tr').map(x => x.find('.td')[1].find('.ell')[0].textContent)
+  .concat(root.find('.card-row').map(x => x.one('.card-primary').find('.ell')[0].textContent));
+// labels are the task labels listed, by the title of their row.
+const labelsOf = root => Object.fromEntries([...root.find('.tr').map(x => x.find('.td')[1]), ...root.find('.card-row').map(x => x.one('.card-primary'))]
+  .filter(c => c.find('.sess-task').length).map(c => [c.find('.ell')[0].textContent, c.one('.sess-task').textContent]));
 const msgsOf = root => root.find('.sess-msg').map(m => m.one('.sess-text').textContent);
 
 for (const f of ['desktop', 'phone']) for (const lang of ['zh', 'en']) {
@@ -98,11 +102,16 @@ for (const f of ['desktop', 'phone']) for (const lang of ['zh', 'en']) {
           eq(rowsOf(root), ['Draft the release notes', 'Fix the checkout total', 'Port the importer', 'Tidy the README'], 'newest first, a running one the index lacks too');
           ok(root.textContent.includes(words.f('sess.summary', 4, 2)), 'how many and how many run');
           eq(root.find('.sess-share').length, 0, 'a machine sharing all says nothing of it');
+          eq(labelsOf(root), {'Draft the release notes': 't1 Refund emails', 'Fix the checkout total': 't2 Cart totals'}, 'the tasks whose runs used them');
           styled(root, `${f}/${lang} list`);
           await type(root.one('input'), 'shop fix');
           eq(rowsOf(root), ['Fix the checkout total'], 'every word of the filter');
           await type(root.one('input'), 'codex');
           eq(rowsOf(root), ['Port the importer'], 'by agent');
+          await type(root.one('input'), 'cart totals');
+          eq(rowsOf(root), ['Fix the checkout total'], 'by its task\'s title');
+          await type(root.one('input'), 'T1');
+          eq(rowsOf(root), ['Draft the release notes'], 'by its task\'s id');
           await type(root.one('input'), '');
         },
         async open() {
@@ -122,6 +131,7 @@ for (const f of ['desktop', 'phone']) for (const lang of ['zh', 'en']) {
           ok(resume.textContent.includes(words.f('sess.resume', 'mba')), 'where it resumes');
           await click(resume.one('button'));
           eq(a.copied, ['cd /Users/ann/dev/shop && claude --resume c-fix'], 'copied');
+          eq(root.one('.sess-conv-task').textContent, 't2 Cart totals', 'its task over the conversation');
           styled(root, `${f}/${lang} conversation`);
         },
         async earlier() { await click(buttonOf(root, words.t('sess.earlier'))); },
@@ -257,6 +267,36 @@ test('the sessions page goes back where it came from: a phone to its home, a des
   } finally { form.value = 'desktop'; }
 });
 
+for (const f of ['desktop', 'phone']) {
+  test(`a session's task label on a ${f} opens the task`, async () => {
+    const r = await team();
+    let a, root;
+    try {
+      await r.srv.play('sessions', {
+        async mount() { a = app(r); root = await mount(a.vnode(), f); },
+        async listed() {
+          await act(() => settle());
+          if (f === 'phone') eq(root.find('.card-row').flatMap(c => c.find('button')).length, 0, 'a card is one button: its label is text');
+          else eq(root.find('.tr')[1].one('.sess-task').localName, 'button', 'a row\'s label is a button');
+        },
+        async open() { await click(f === 'phone' ? root.find('.card-row')[1] : root.find('.tr')[1]); },
+        async opened() {
+          await act(() => settle());
+          eq(root.one('.sess-conv-task').one('button').getAttribute('aria-label'), words.f('sess.openTask', 't2'), 'named for what it does');
+        },
+        async earlier() { await click(buttonOf(root, words.t('sess.earlier'))); },
+        async older() {},
+        async full() { await click(buttonOf(root, words.t('sess.full'))); },
+        async fulled() { await act(() => settle()); },
+      });
+      eq(r.errors, [], 'errors');
+      await click(f === 'phone' ? root.one('.sess-conv-task').one('button') : root.find('.tr')[1].one('.sess-task'));
+      eq(a.router.route.value, {page: 'tasks', view: 'list', task: 't2'}, f === 'phone' ? 'the conversation\'s label opens it' : 'the row\'s label opens it, not the row');
+      ok(root.find('.sess').length === 0 && root.textContent.includes('Cart totals'), 'the task page in its place');
+    } finally { form.value = 'desktop'; }
+  });
+}
+
 test('the phone home has no machine rows for a viewer who reads none, nor without node.call; the desktop has none', async () => {
   const r = await team();
   try {
@@ -279,6 +319,28 @@ test('the list merges who runs and filters by every word', () => {
   eq(ss.older([{Off: 9}], {Msgs: [{Off: 5}, {Off: 1}]}).map(m => m.Off), [1, 5, 9], 'an earlier page goes above, oldest first');
   eq([ss.cut({Text: 'abc', Chars: 3}), ss.cut({Text: 'ab', Chars: 9})], [false, true], 'a shortened text');
   eq(ss.refOf('claude:x:y'), {provider: 'claude', session_id: 'x:y'}, 'a key back to its ref');
+});
+
+test('a session links to the task of the newest run that used it, and is found by it', () => {
+  const state = {
+    tasks: {old: {id: 'old', title: 'Old try'}, neu: {id: 'neu', title: 'New try', stage: 'review'}, many: {id: 'many', title: 'Many runs'}, none: {id: 'none', title: 'No session'}},
+    runs: {
+      r1: {id: 'r1', task: 'old', session: 's1', seq: 1, queued_at: '2026-09-30T08:00:00Z'},
+      r2: {id: 'r2', task: 'neu', session: 's1', seq: 5, queued_at: '2026-09-30T09:00:00Z'},
+      r3: {id: 'r3', task: 'old', seq: 6, queued_at: '2026-09-30T10:00:00Z'},
+      r4: {id: 'r4', task: 'many', session: 's2', seq: 2}, r5: {id: 'r5', task: 'many', session: 's2', seq: 3},
+      r6: {id: 'r6', task: 'none', seq: 4}, r7: {id: 'r7', task: 'gone', session: 's3', seq: 7},
+    },
+  };
+  const ls = ss.links(state);
+  eq(ls, {s1: {id: 'neu', title: 'New try', stage: 'review'}, s2: {id: 'many', title: 'Many runs', stage: ''}},
+    'the newest run decides; runs without a session and a task not held link nothing');
+  eq(ss.links({tasks: {}, runs: {}}), {}, 'no runs');
+  const rows = ss.linked([{key: 'claude:s1', session_id: 's1', title: 'One'}, {key: 'claude:s9', session_id: 's9', title: 'Nine'}], ls);
+  eq(rows.map(r => r.task?.id || null), ['neu', null], 'a session no run used has no task');
+  eq(ss.matches(rows, 'new TRY').map(r => r.key), ['claude:s1'], 'by the task\'s title');
+  eq(ss.matches(rows, 'neu one').map(r => r.key), ['claude:s1'], 'by its id and the session\'s own words together');
+  eq(ss.matches(rows, 'review').map(r => r.key), [], 'not by the stage');
 });
 
 // The resume lines for the Go test to type with internal/shell: [os, dir, argv, the page's line].

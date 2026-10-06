@@ -1,5 +1,6 @@
 // sessions is one machine's own Claude / Codex sessions (?page=machines&sessions=<machine>), read through node.call by
-// its owner and admins: every session its node shares with who of them is running, a text filter, and one of them open
+// its owner and admins: every session its node shares with who of them is running and the task a run of it worked for
+// (its label opens the task), a text filter, and one of them open
 // (&session=<provider>:<id>), its conversation paged from the newest with the earlier on demand and the line that
 // resumes it on that machine. Read only; nothing is polled: the list and a conversation are read when they open and
 // again on Refresh. On a desktop the list and the open conversation sit side by side; on a phone the list is cards and
@@ -21,7 +22,7 @@ import {apiText} from './words.js';
 
 register('sessions', {
   'sess.title': ['%s 的会话', 'Sessions on %s'], 'sess.refresh': ['刷新', 'Refresh'],
-  'sess.filter': ['筛选会话', 'Filter the sessions'], 'sess.filterHint': ['标题、目录、agent、分支', 'Title, directory, agent, branch'],
+  'sess.filter': ['筛选会话', 'Filter the sessions'], 'sess.filterHint': ['标题、目录、agent、分支、任务', 'Title, directory, agent, branch, task'],
   'sess.summary': ['%d 个会话 · %d 个在跑', '%d {session|sessions} · %d running'], 'sess.shown': ['显示 %d 个', '%d shown'],
   'sess.loading': ['正在读…', 'Reading…'], 'sess.none': ['这台机器上没有可看的会话', 'No sessions to read on this machine'],
   'sess.noMatch': ['没有符合的会话', 'No sessions match'], 'sess.pick': ['选一个会话看对话', 'Pick a session to read it'],
@@ -43,6 +44,7 @@ register('sessions', {
   'sess.you': ['你', 'You'], 'sess.full': ['全文', 'Full text'], 'sess.fold': ['收起', 'Fold'],
   'sess.steps': ['%d 步：%s', '%d {step|steps}: %s'], 'sess.turns': ['%d 轮', '%d {turn|turns}'], 'sess.branch': ['分支 %s', 'branch %s'],
   'sess.gone': ['没有这个会话，或者节点不让读它', 'No such session, or its node does not let it be read'],
+  'sess.openTask': ['打开任务 %s', 'Open task %s'],
 });
 
 const when = (at, now) => {
@@ -53,6 +55,16 @@ const when = (at, now) => {
 const why = (w, machine, e) => (['offline', 'unauthorized', 'unknown_method', 'timeout'].includes(e?.code) ? w.f('sess.why.' + e.code, machine) : apiText(w, e));
 const liveState = l => (!l ? '' : l.Status === 'blocked' ? 'waiting' : 'running');
 const liveWord = (t, l) => (l?.Status === 'blocked' ? t('sess.blocked') : t('sess.running'));
+const taskText = x => [x.id, x.title].filter(Boolean).join(' ') + (x.stage ? ' · ' + x.stage : '');
+
+// TaskLabel is the task a run of the session worked for; with onOpen it opens that task.
+function TaskLabel({task, onOpen}) {
+  const {f} = useWords();
+  if (!onOpen) return html`<span class="sess-task ell">${taskText(task)}</span>`;
+  return html`<button type="button" class="sess-task ell" title=${f('sess.openTask', task.id)} aria-label=${f('sess.openTask', task.id)}
+    onClick=${e => { e.stopPropagation(); onOpen(task.id); }}>${taskText(task)}</button>`;
+}
+
 // ⚠️ How far a message's folded text runs before it offers its full text (the node keeps up to 16 KiB of one).
 const LONG = 600;
 
@@ -76,7 +88,7 @@ function Message({m, agent, onFull}) {
 }
 
 // Conversation is a session's messages, oldest at the top: the newest page when it opens, earlier pages on demand.
-function Conversation({wire, machine, row, os, copy, toasts, now}) {
+function Conversation({wire, machine, row, os, copy, toasts, now, onTask}) {
   const w = useWords();
   const {t, f} = w;
   const ref = {provider: row.provider, session_id: row.session_id};
@@ -123,6 +135,7 @@ function Conversation({wire, machine, row, os, copy, toasts, now}) {
         <h2 class="ell">${row.title || t('sess.untitled')}</h2>
         <${Button} kind="quiet" disabled=${s.loading} onClick=${() => setRev(n => n + 1)}>${t('sess.refresh')}<//></div>
       <div class="sess-conv-facts t-muted"><span class="mono ell">${row.cwd}</span><span>${facts.join(' · ')}</span></div>
+      ${row.task && html`<div class="sess-conv-task"><${TaskLabel} task=${row.task} onOpen=${onTask} /></div>`}
       ${resume ? html`<${Secret} label=${f('sess.resume', machine)} value=${resume} copy=${copy} />` : html`<p class="t-muted">${t('sess.noResume')}</p>`}
     </header>
     <div class="sess-scroll" ref=${box}>
@@ -143,6 +156,8 @@ export function Sessions({store, wire, router, toasts, machine, open = '', may =
   const {t, f} = w;
   const phone = usePhone();
   const machines = useSignalValue(store.machines);
+  useSignalValue(store.rev.tasks);
+  useSignalValue(store.rev.runs);
   const m = machines.find(x => x.name === machine);
   const [rows, setRows] = useState(null);
   const [error, setError] = useState(null);
@@ -157,8 +172,10 @@ export function Sessions({store, wire, router, toasts, machine, open = '', may =
     ss.readList(wire, machine).then(r => !gone && setRows(r), e => !gone && setError(e));
     return () => { gone = true; };
   }, [machine, rev, may]);
-  const shown = rows ? ss.matches(rows, q) : [];
-  const row = rows?.find(r => r.key === open);
+  const all = rows && ss.linked(rows, ss.links(store.state));
+  const shown = all ? ss.matches(all, q) : [];
+  const row = all?.find(r => r.key === open);
+  const toTask = id => router.go({page: 'tasks', task: id});
   const go = (key, replace) => router.go({page: 'machines', sessions: machine, ...(key ? {session: key} : {})}, {replace});
   const back = () => router.back({page: 'machines'});
   const share = m?.share_sessions === 'runs' || m?.share_sessions === 'none';
@@ -166,7 +183,8 @@ export function Sessions({store, wire, router, toasts, machine, open = '', may =
 
   const columns = [
     {id: 'state', label: t('sess.c.state'), width: '28px', render: r => (r.live ? html`<${Status} state=${liveState(r.live)} />` : ''), mobile: 'lead'},
-    {id: 'title', label: t('sess.c.title'), width: 'minmax(0, 2fr)', render: r => html`<span class="ell">${r.title || t('sess.untitled')}</span>`, mobile: 'primary'},
+    {id: 'title', label: t('sess.c.title'), width: 'minmax(0, 2fr)', mobile: 'primary', render: r => (!r.task ? html`<span class="ell">${r.title || t('sess.untitled')}</span>`
+      : html`<span class="sess-titled"><span class="ell">${r.title || t('sess.untitled')}</span><${TaskLabel} task=${r.task} onOpen=${phone ? null : toTask} /></span>`)},
     {id: 'dir', label: t('sess.c.dir'), width: 'minmax(0, 1.4fr)', render: r => html`<span class="mono ell">${r.cwd}</span>`, mobile: 'secondary'},
     {id: 'agent', label: t('sess.c.agent'), width: '64px', render: r => html`<span class="mono">${r.provider}</span>`, mobile: 'secondary'},
     {id: 'last', label: t('sess.c.last'), width: '88px', align: 'right', render: r => html`<span class="mono t-muted">${when(r.last_at, at)}</span>`, mobile: 'trailing',
@@ -188,7 +206,7 @@ export function Sessions({store, wire, router, toasts, machine, open = '', may =
     : html`<${Table} label=${f('sess.title', machine)} columns=${columns} rows=${shown} rowKey=${r => r.key} selected=${row?.key || ''}
         onSelect=${phone ? null : k => go(k, true)} onOpen=${k => go(k, !phone)} active=${!(phone && row)}
         empty=${rows.length ? t('sess.noMatch') : t('sess.none')} />`;
-  const conv = row && html`<${Conversation} key=${row.key} wire=${wire} machine=${machine} row=${row} os=${m?.os || ''} copy=${copy} toasts=${toasts} now=${at} />`;
+  const conv = row && html`<${Conversation} key=${row.key} wire=${wire} machine=${machine} row=${row} os=${m?.os || ''} copy=${copy} toasts=${toasts} now=${at} onTask=${toTask} />`;
 
   if (phone) {
     return html`<div class="sess sess-phone">${head}${body}

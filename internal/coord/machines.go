@@ -224,12 +224,25 @@ func (c *Coord) seen(m *machine, at time.Time) {
 func (c *Coord) local() Conn {
 	handle := c.opt.Node.Handler(c.opt.Sessions)
 	a, b := wire.Pipe(c.nodeOptions(), wire.Options{Handler: func(ctx context.Context, r *wire.Request) (any, error) {
-		c.localCalls.Add(1)
+		if !c.admitLocal() {
+			return nil, &wire.Error{Code: wire.CodeClosed}
+		}
 		defer c.localCalls.Done()
 		return handle(ctx, r)
 	}})
 	go c.opt.Node.Watch(b.Done(), func(runs []string) { b.Push(node.MChanged, node.Changed{Runs: runs}) })
 	return a
+}
+
+// admitLocal counts a call this machine's node is to answer; false once Close began.
+func (c *Coord) admitLocal() bool {
+	c.localMu.Lock()
+	defer c.localMu.Unlock()
+	if c.localClosed {
+		return false
+	}
+	c.localCalls.Add(1)
+	return true
 }
 
 // failed records why m cannot be reached and when to try again; the caller holds mu.
@@ -513,6 +526,9 @@ func (c *Coord) converge(ctx context.Context, m *machine) {
 		if used >= c.slots(m.name) || c.st.Drains[m.name] != nil {
 			break
 		}
+		if c.st.PausedBy(r.Task) != nil {
+			continue
+		}
 		if lack := missingFeatures(m.hello, runFeatures(r)); len(lack) > 0 {
 			starting = append(starting, journal.NewEvent(task.ERunObserved,
 				task.Observation{ID: r.ID, State: task.Failed, Reason: ReasonNodeOutdated, Detail: strings.Join(lack, ", ")}))
@@ -634,7 +650,7 @@ func observation(s node.Snapshot) task.Observation {
 	}
 	return task.Observation{Plan: plan, ID: s.Run, State: s.State.State, ExitCode: s.ExitCode, Reason: s.Reason, Detail: s.Detail,
 		Attention: s.Attention, Ask: s.Ask, Note: s.Note, Last: s.Last, Usage: s.Usage, Stream: s.Stream, Requests: s.Requests,
-		Sends: s.Sends, Caps: s.Caps, Doing: s.Doing, Turn: s.Turn, Verdict: s.Verdict, Check: s.Check, Work: s.Work, Provider: s.Provider, Session: s.Session, Pane: s.Pane, NodeRev: s.Rev,
+		Sends: s.Sends, Caps: s.Caps, Doing: s.Doing, Turn: s.Turn, OutputAt: s.OutputAt, Verdict: s.Verdict, Check: s.Check, Work: s.Work, Provider: s.Provider, Session: s.Session, Pane: s.Pane, NodeRev: s.Rev,
 		StartedAt: s.StartedAt, EndedAt: s.EndedAt}
 }
 

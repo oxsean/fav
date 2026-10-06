@@ -54,6 +54,7 @@ func (m *Model) arrange(needs, open, closed []*task.Task) {
 		for _, x := range append(append(needs, open...), closed...) {
 			sit := t.st.Situation(x)
 			switch {
+			case sit.Kind == task.SitWaiting && sit.Reason == task.WhyPaused && x.Paused == nil: // its paused root stands for it
 			case sit.Kind == task.SitWaiting:
 				waits = append(waits, x)
 			case sit.Kind == task.SitRunning:
@@ -141,15 +142,15 @@ func (m *Model) rowCell(x *task.Task, r *task.Run, w int) string {
 	sit := m.tasks.st.Situation(x)
 	switch {
 	case sit.Kind == task.SitWaiting:
-		kind := render.SitText(sit)
+		kind := render.SitOf(sit, r)
 		if r != nil {
 			if k := render.WaitKind(r); k != "" {
 				kind = k
 			}
 		}
-		fields := []string{kind, render.ShortID(x.ID)}
+		fields := []string{render.OneLine(kind), render.ShortID(x.ID)}
 		if r != nil {
-			if ask := render.WaitAsk(r); ask != "" {
+			if ask := render.OneLine(render.WaitAsk(r)); ask != "" {
 				fields = append(fields, render.Truncate(ask, 60))
 			}
 		}
@@ -158,7 +159,7 @@ func (m *Model) rowCell(x *task.Task, r *task.Run, w int) string {
 	case sit.Kind == task.SitRunning && r != nil:
 		fields := []string{render.ShortID(x.ID)}
 		if x.Stage != "" {
-			fields = append(fields, x.Stage)
+			fields = append(fields, render.OneLine(x.Stage))
 		}
 		if r.Machine != "" {
 			fields = append(fields, r.Machine)
@@ -167,7 +168,7 @@ func (m *Model) rowCell(x *task.Task, r *task.Run, w int) string {
 			fields = append(fields, am)
 		}
 		if r.Last != "" {
-			fields = append(fields, render.Truncate(r.Last, 60))
+			fields = append(fields, render.Truncate(render.OneLine(r.Last), 60))
 		}
 		if r.StartedAt != nil {
 			fields = append(fields, render.Elapsed(*r.StartedAt, m.now))
@@ -179,7 +180,7 @@ func (m *Model) rowCell(x *task.Task, r *task.Run, w int) string {
 	case sit.Reason == task.WhyDispatch:
 		return ""
 	}
-	return render.SitText(sit)
+	return render.OneLine(render.SitOf(sit, r))
 }
 
 // waitedSince is when x's row started waiting: its run's end (or start, still running), else its own creation.
@@ -201,13 +202,14 @@ func (m *Model) taskRow(x *task.Task, depth int, selected bool, w int) string {
 	cellBudget := max(8, (w-4-len(indent))/2)
 	cell := m.rowCell(x, m.lastRun(x.ID), cellBudget)
 	titleW := max(4, w-4-len(indent)-render.Width(cell)-2)
+	title := render.Pad(render.OneLine(x.Title), titleW)
 	if selected {
-		return selTitle.Render(render.Pad(lead+indent+glyph+" "+render.Pad(render.Truncate(x.Title, titleW), titleW)+"  "+cell, w))
+		return selTitle.Render(render.Pad(lead+indent+glyph+" "+title+"  "+cell, w))
 	}
 	if lead != " " {
 		lead = accent.Render(lead)
 	}
-	return lead + indent + sty.Render(glyph) + " " + render.Pad(render.Truncate(x.Title, titleW), titleW) + "  " + dimmed.Render(cell)
+	return lead + indent + sty.Render(glyph) + " " + title + "  " + dimmed.Render(cell)
 }
 
 // taskRows draws the list, the tree or the home from the list's scroll position.
@@ -295,7 +297,7 @@ const cardHeight = 4
 func (m *Model) cardLines(x *task.Task, colW int, selected bool) []string {
 	glyph, sty := taskGlyph(m, x)
 	id := render.ShortID(x.ID)
-	title := render.Truncate(x.Title, max(1, colW-render.Width(id)-3))
+	title := render.Truncate(render.OneLine(x.Title), max(1, colW-render.Width(id)-3))
 	l1 := " " + glyph + " " + id + " " + title
 	l2 := " " + m.cardStageLine(x, colW-1)
 	l3 := " " + m.cardMetaLine(x, colW-1)
@@ -308,13 +310,13 @@ func (m *Model) cardLines(x *task.Task, colW int, selected bool) []string {
 // cardStageLine is a card's second line: its workflow's stages with the current one marked, else its situation.
 func (m *Model) cardStageLine(x *task.Task, w int) string {
 	if x.Flow == nil || len(x.Flow.Stages) == 0 {
-		return render.Truncate(render.SitText(m.tasks.st.Situation(x)), w)
+		return render.Truncate(render.OneLine(m.sitText(x)), w)
 	}
 	names := make([]string, len(x.Flow.Stages))
 	for i, s := range x.Flow.Stages {
-		names[i] = s.Name
+		names[i] = render.OneLine(s.Name)
 		if s.Name == x.Stage {
-			names[i] = "[" + s.Name + "]"
+			names[i] = "[" + names[i] + "]"
 		}
 	}
 	return render.Truncate(strings.Join(names, " > "), w)
@@ -333,7 +335,7 @@ func (m *Model) cardMetaLine(x *task.Task, w int) string {
 	if am != "" {
 		fields = append(fields, am)
 	}
-	fields = append(fields, render.SitText(m.tasks.st.Situation(x)))
+	fields = append(fields, render.OneLine(m.sitText(x)))
 	if x.Loops > 0 {
 		fields = append(fields, i18n.F("tasks.rework_n", x.Loops))
 	}
@@ -341,6 +343,12 @@ func (m *Model) cardMetaLine(x *task.Task, w int) string {
 		fields = append(fields, i18n.F("tasks.subtasks_n", done, total))
 	}
 	return render.Fields(fields, 1, w)
+}
+
+// sitText is how x stands, as a phrase.
+func (m *Model) sitText(x *task.Task) string {
+	sit := m.tasks.st.Situation(x)
+	return render.SitOf(sit, m.tasks.st.Runs[sit.Run])
 }
 
 // subtaskProgress is how many of x's subtasks are done (canceled counts as done) and how many there are.

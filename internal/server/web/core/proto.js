@@ -124,6 +124,7 @@ export const methods = Object.freeze([
   'machine.share',
   'machine.drain',
   'task.start',
+  'task.pause',
   'task.move',
   'agentdef.list',
   'agentdef.get',

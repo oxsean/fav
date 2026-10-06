@@ -12,7 +12,7 @@ import {createToasts, UNDO_WAIT} from '../web/core/toasts.js';
 import {words} from '../web/core/i18n.js';
 import {html, KeysContext} from '../web/ui/base.js';
 import {Button, Chip, Chips, Segmented, Tabs, Kbd} from '../web/ui/controls.js';
-import {Status, statuses} from '../web/ui/status.js';
+import {Status, statuses, waitOf, runState} from '../web/ui/status.js';
 import {Panel, Stat} from '../web/ui/panel.js';
 import {Modal, Drawer} from '../web/ui/overlay.js';
 import {Toasts, floorOf} from '../web/ui/toast.js';
@@ -397,6 +397,30 @@ test('a board drops a card only where it may, and says why elsewhere', async () 
   await act(() => root.one('.board-card').dispatch('dragstart', {dataTransfer: {setData() {}}}));
   await act(() => root.find('.board-col')[2].dispatch('drop'));
   eq([dropped, refused, root.find('.board-col').map(c => c.className)], [['xb'], ['xc'], ['board-col', 'board-col', 'board-col']], 'dropped, refused, cleared');
+});
+
+test('permission, a question and stalled differ in shape and tone; a wait nothing names is never a question', () => {
+  const [p, q, z] = [statuses.permission, statuses.asked, statuses.stalled];
+  eq([p.tone, q.tone, z.tone], ['warning', 'accent', 'danger'], 'tones');
+  ok(new Set([p.glyph, q.glyph, z.glyph]).size === 3, 'shapes');
+  const run = more => ({state: 'running', ...more});
+  eq([
+    waitOf(run({attention: 'permission'})),
+    waitOf(run({attention: 'asked', ask: 'Which one?'})),
+    waitOf(run({attention: 'asked', requests: [{id: 'q1', kind: 'question'}]})),
+    waitOf(run({attention: 'asked'})),
+    waitOf(run({attention: 'asked', requests: [{id: 'p1', kind: 'permission'}]})),
+    waitOf(run({attention: 'stalled'})),
+    waitOf({state: 'exited', attention: 'stalled'}),
+    waitOf(run({})),
+    waitOf(undefined),
+  ], ['permission', 'asked', 'asked', 'attend', 'attend', 'stalled', '', '', ''], 'waits');
+  eq([runState(run({attention: 'asked'})), runState({state: 'failed'})], ['attend', 'failed'], 'drawn');
+  for (const lang of ['zh', 'en']) {
+    words.lang.value = lang;
+    ok(words.t('status.attend') !== words.t('status.asked'), `${lang}: attend is not asked`);
+  }
+  words.lang.value = 'zh';
 });
 
 run();

@@ -16,7 +16,7 @@ import (
 	"github.com/oxsean/fav/internal/shell"
 )
 
-// hookEvents: the Claude Code hooks tend installs; the matcher narrows Notification to questions for the user.
+// hookEvents: the Claude Code hooks tend installs; the matcher narrows Notification to prompts for the user.
 var hookEvents = []struct{ event, matcher string }{
 	{"Notification", "permission_prompt|elicitation_dialog|agent_needs_input"},
 	{"PermissionRequest", ""},
@@ -218,12 +218,17 @@ func hookInstalled() bool {
 func cmdHookEvent(args []string) error {
 	b, _ := io.ReadAll(io.LimitReader(os.Stdin, 1<<20))
 	var in struct {
-		SessionID      string `json:"session_id"`
-		TranscriptPath string `json:"transcript_path"`
-		Event          string `json:"hook_event_name"`
+		SessionID      string          `json:"session_id"`
+		TranscriptPath string          `json:"transcript_path"`
+		Event          string          `json:"hook_event_name"`
+		Kind           string          `json:"notification_type"`
+		Message        string          `json:"message"`
+		Tool           string          `json:"tool_name"`
+		Input          json.RawMessage `json:"tool_input"`
 	}
 	if json.Unmarshal(b, &in) == nil {
-		capture.RecordHookEvent(in.SessionID, in.Event, in.TranscriptPath)
+		capture.RecordHookEvent(capture.HookCall{Session: in.SessionID, Transcript: in.TranscriptPath, Event: in.Event, Kind: in.Kind,
+			Message: in.Message, Tool: in.Tool, Input: in.Input})
 	}
 	return nil
 }

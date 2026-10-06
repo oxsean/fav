@@ -152,6 +152,32 @@ func (c *Coord) taskStart(who Principal, r *wire.Request) (string, []journal.Eve
 	return t.ID, []journal.Event{journal.NewEvent(task.ETaskStarted, task.TaskStart{IDs: ids})}, nil
 }
 
+// taskPause is task.pause: who may write a task stops new dispatch under it, or lets it go on.
+func (c *Coord) taskPause(who Principal, r *wire.Request) (string, []journal.Event, error) {
+	var p task.TaskPause
+	if err := r.Decode(&p); err != nil {
+		return "", nil, err
+	}
+	t, err := c.writableTask(who, p.ID)
+	if err != nil {
+		return "", nil, err
+	}
+	if task.Finished(t.Status) {
+		return "", nil, conflict("task " + t.Status)
+	}
+	if (t.Paused != nil) == p.On {
+		return t.ID, nil, nil
+	}
+	if p.On && !c.st.Tree(t) {
+		return "", nil, conflict("no subtasks")
+	}
+	p.By = ""
+	if p.On {
+		p.By = who.User
+	}
+	return t.ID, []journal.Event{journal.NewEvent(task.ETaskPaused, p)}, nil
+}
+
 func (c *Coord) taskMove(who Principal, r *wire.Request) (string, []journal.Event, error) {
 	var p task.TaskMove
 	if err := r.Decode(&p); err != nil {

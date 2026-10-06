@@ -236,6 +236,7 @@ TUI 里的 `?` 只列简短版；这里是逐条的完整说明，包括操作�
 | `s` | 交接：写交接包，新开 Claude / Codex 会话先读它 |
 | `i / c / o` | 用 IDE / VS Code / 文件管理器打开项目目录 |
 | `n` | 只改标题 |
+| `g` | 打开用过这个会话的 run 所属的任务（只在有时显示） |
 
 **弹窗**
 
@@ -361,8 +362,10 @@ tend journal verify · tend journal repair    # 检查协调器的任务日志�
 ```
 
 TUI 里第 `5` 页是任务：`w` 新建，`e` 编辑，`x` 标完成 / 重新打开，`Enter` 打开任务对话框（选机器和档案跑起来、停止、放弃、接手），
-`X` 停止当前 run，`Space` 到会话页看这次 run 的对话。右栏是任务书、最近几次 run 和最近一次 run 的输出。
+`X` 停止当前 run，`b` 暂停或恢复任务树下的派发，`Space` 到会话页看这次 run 的对话。右栏是任务书、最近几次 run 和最近一次 run 的输出。
 接手就是打开这次 run 会话的恢复框；run 还在驱动它时，恢复框会提示先停掉 run。
+反过来，某个 run 用过的会话在卡片和右栏带上它的任务标签（id、标题、阶段），恢复框里 `g` 打开那个任务，`/` 按任务的标题或 id 也能搜到这个会话；
+TUI 连上协调器（打开过任务页）之后才有标签。Web 的会话页也显示这个标签，点它打开任务。
 `o` 轮换任务的排列：首页（等你的在上，在跑的在下；终端高于 24 行时底部再加机器和 7 天用量各一行）、列表、树（子任务在父任务下面）、
 看板（按处境分列，`h` / `l` 在列间移动）。`:` 打开命令面板，用中文或英文说明都能找到任意列表操作；设置（`,`）里可以选皮肤、强调色（`#rrggbb`）
 和标准或高对比度，和网页用同一个生成器。
@@ -376,6 +379,8 @@ agent 的定义或新建一个（Markdown）；协调器没收下的内容会留
 开始之前不动它。`tend task start <id>` 开始一个任务和它下面的全部任务：前置任务完成后立刻派发，run 成功就标完成；父任务自己从不跑，
 子任务都完成后等人验收。每个未完成的任务都写明现在的处境：运行中、排队（在等什么：前置任务、子任务、机器、同一目录里的另一个运行）或等人（为什么）。
 派不出去的任务写明原因并停下，再开始一次就是重试。`tend task move <id> --parent … --after …` 调整位置。
+`tend task pause <id>` 暂停一棵任务树（需求，或带子任务的任务）：下面在跑的照常跑完，不再派新的（就绪的任务、workflow 的下一阶段、排队的运行都不启动），
+它的任务处境是「已暂停派发」；`tend task resume <id>` 恢复。暂停记在日志里，协调器重启后照样生效。
 
 **档案。** 内置 `claude`（无界面的 `claude -p`，stream-json 双向收发；目录在某个 Herdr workspace 里时，改在新 Herdr tab 里开交互式
 Claude）、`codex`（`codex app-server`）、`fake`（测试用）。更多的写进 `config.json`：
@@ -442,17 +447,20 @@ issue 版本。
 `tend run send` 在它干活时给它发消息（claude 在当前这一轮读到，codex 会调整正在跑的这一轮）。run 会显示它最新说的话和到目前的花费
 （tokens，claude 另有估算的费用）。后台 agent 也会被告知怎么以提问结束：最后一条消息以 `ASK:` 开头，或者执行 `tend run ask "…"`
 （`tend run note "…"` 报告进展；两者都经 `TEND_RUN_DIR` 写进 run 的状态）。权限模式没问就拒掉的工具会列出来。
-这样结束的 run 显示为「等你回复」或「等你批准」；`tend run continue <run> "…"`（TUI 和网页里的
+这样结束的 run 显示为「在问你」或「等你批准」；`tend run continue <run> "…"`（TUI 和网页里的
 **回复**）带着你的回答，在同一个会话里起一个新的后台 run。`tend run continue --session <id> "…"` 对任意已索引的会话也一样。
 失败的 run 会说明原因：`cli_missing`、`auth_missing`、`auth`、`quota`、`rate_limit`、`overloaded`、`context_overflow`、`network`、
-`session_missing`、`permission_denied`，附上命令行的原话和下一步（`tend run show`）。15 分钟没有输出的 run 标为「长时间没有输出」
-（`node.stall_after`，`"off"` 关闭），只标记，不会停掉。在 Herdr tab 里跑的 run，Herdr 显示它的 pane 卡住、transcript
-停在一个提问上，或（装了 `tend install-hook` 时）Claude 最新的 hook 事件是提示，都会标成在问你。`tend inbox`、TUI 任务列表顶部和网页的
+`session_missing`、`permission_denied`，附上命令行的原话和下一步（`tend run show`）。15 分钟没有输出的 run 标为「疑似卡住」
+（`node.stall_after`，`"off"` 关闭），只标记，不会停掉；运行中的 run 显示最后一次输出的时间（到分钟）。在 Herdr tab 里跑的 run：
+transcript 停在一个提问上标成「在问你」；（装了 `tend install-hook` 时）Claude 最新的 hook 事件是权限提示，标成「等你批准」并写出工具；
+别的提示或 Herdr 显示它的 pane 卡住，标成「等你处理」；transcript 一直不长、又不在等人、这一轮也没结束，同样标「疑似卡住」。`tend inbox`、TUI 任务列表顶部和网页的
 **待处理**计数把所有需要你的 run 放在一起，等得最久的在前。
 
 想收到通知就配一个命令：`"notify_command": ["my-notifier"]` 会在 run 需要人的时候运行，标准输入是一个 JSON 对象（`event` 为
 `run.waiting`、`run.asked`、`run.permission`、`run.failed` 或 `run.stalled`，还有 run、task、title、machine、agent、state、reason、detail、ask）；
-`notify_events` 可以只选其中几种。任务事件 `task.needs_you` 和 `task.done` 只有在 `notify_events` 里点名才发。
+`notify_events` 可以只选其中几种。任务事件 `task.needs_you`、`task.done` 和 `task.tree_done` 只有在 `notify_events` 里点名才发。
+`task.tree_done` 是「完工」：一棵任务树的根变成完成（根自己的 `task.done` 照发），JSON 带 `summary`：完成的叶子数、取消的、运行次数、
+第一个 run 开始的时间、完工的时间和子任务合进去的分支。TUI 在底栏、网页用一条提示告诉你，根的详情里一直留着这份摘要。
 
 **谁在协调。** 同一时刻只有一个进程记任务日志、派发 run：谁拿到 `~/.agent/tend/coord/` 里的锁就是谁——打开任务页的 TUI、
 执行期间的 `tend task|run …` 命令，或你常驻的 `tend service`。其它进程经本机 socket 找它。run 不依赖它：
@@ -524,7 +532,7 @@ issue 改了，需求会停下来等人选「采用新版本」或「维持本�
 准入规则、邀请和审计日志。它实时跟随任务日志，断线后自动重连。**首页**最上面是等你的事，问题和工具请求就在那里回答、批准或拒绝；下面是在跑的 run 和机器、
 每个项目的进度（点计数进看板）、7 天的 token 和花费、最近的会话。任务可以看列表，也可以看按处境分列的看板，按状态、机器、项目、阶段、运行状态筛选；
 视图、筛选、选中的任务和标签页都在地址里，刷新或把链接发给别人看到的是同一个画面。`⌘K`（`Ctrl+K`）打开命令面板，用中文或英文名都能找到任意操作或任务；每个操作也都有键
-（`?` 列出全部：`n` 新建任务、`g h` 首页、`g b` 看板、`d` 派发……）。**等你**页写明每条为什么是你（你负责、你验收或你派发），
+（`?` 列出全部：`n` 新建任务、`g h` 首页、`g b` 看板、`d` 派发、`p` 暂停或恢复任务树的派发……）。**等你**页写明每条为什么是你（你负责、你验收或你派发），
 按类型和身份筛选，并就地作答：`1` 允许、`2` 拒绝（可附理由）、数字选第几个选项，或者自己写。**运行**页（`g r`）按状态和机器列出全部 run，
 选中一条预览它最近的输出。任务详情写出 workflow 预算和各 run 已花的对比；agent 定义页写出它被哪些项目和任务用着、运行时启动的命令，
 可以导入导出 Markdown；项目设置能逐台检查仓库目录；工单绑定的**同步记录**列出它跟着的 issue，并预览进度评论；

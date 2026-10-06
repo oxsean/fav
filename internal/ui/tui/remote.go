@@ -356,7 +356,7 @@ func (m *Model) remoteGroups() []btnGroup {
 		bs = append(bs, btn{k(actTerminal, "resume.btn_terminal"), false, func(mm *Model) { mm.remoteResume(true) }})
 	}
 	bs = append(bs, btn{k(actCopy, "resume.btn_copy"), false, (*Model).copyResume})
-	return []btnGroup{{label: i18n.T("resume.group.resume"), bs: bs, end: []btn{cancelBtn()}}}
+	return append([]btnGroup{{label: i18n.T("resume.group.resume"), bs: bs, end: []btn{cancelBtn()}}}, m.taskGroup(m.ov.rec)...)
 }
 
 // remoteResume runs the ssh resume in a new tab of this Herdr workspace, or quits and runs it in this terminal.

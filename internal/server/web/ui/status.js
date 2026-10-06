@@ -12,9 +12,10 @@ export const statuses = {
   failed: {glyph: '!', tone: 'failed'},
   canceled: {glyph: '×', tone: 'canceled'},
   abandoned: {glyph: '⊘', tone: 'abandoned'},
-  asked: {glyph: '?', tone: 'unknown'},
-  permission: {glyph: '!', tone: 'unknown'},
-  stalled: {glyph: '…', tone: 'unknown'},
+  asked: {glyph: '?', tone: 'accent'},
+  attend: {glyph: '?', tone: 'accent'},
+  permission: {glyph: '!', tone: 'warning'},
+  stalled: {glyph: '…', tone: 'danger'},
   backlog: {glyph: '○', tone: 'muted'},
   todo: {glyph: '○', tone: 'muted'},
   done: {glyph: '✓', tone: 'exited'},
@@ -22,6 +23,21 @@ export const statuses = {
   online: {glyph: '●', tone: 'success'},
   offline: {glyph: '×', tone: 'failed'},
 };
+
+const open = new Set(['queued', 'starting', 'running', 'unknown']);
+
+// waitOf is what a run that wants someone waits on, as Status draws it: permission; asked, a question it put into
+// words; attend, a wait nothing names, never drawn or worded as a question; stalled, no output for long while it
+// runs. '' when it wants nobody.
+export function waitOf(run) {
+  if (run?.attention === 'permission') return 'permission';
+  if (run?.attention === 'asked') return run.ask || (run.requests || []).some(q => q.kind === 'question') ? 'asked' : 'attend';
+  if (run?.attention === 'stalled' && open.has(run.state)) return 'stalled';
+  return '';
+}
+
+// runState is how a run is drawn: what it waits on, else its state.
+export const runState = run => waitOf(run) || run.state;
 
 // Status draws state; word shows its name, or label says something of its own ("运行中 12m") in the state's colour.
 // Without either the name is still there for screen readers.

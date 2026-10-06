@@ -64,6 +64,7 @@ const (
 	MMachineShare       = "machine.share"
 	MMachineDrain       = "machine.drain" // a machine takes no new runs, or takes them again (task.DrainSet)
 	MTaskStart          = "task.start"
+	MTaskPause          = "task.pause" // nothing new is dispatched under a task, or it is again (task.TaskPause)
 	MTaskSync           = "task.sync"
 	MTaskLink           = "task.link"
 	MTaskSourceAck      = "task.source_ack"
@@ -167,8 +168,11 @@ type Coord struct {
 	topics   map[*wire.Stream]*topic            // machines.watch and inbox.watch subscribers
 	passMu   sync.Mutex
 	wake     chan struct{}
-	// localCalls are the calls this machine's node is answering in this process: Close lets them finish
-	localCalls sync.WaitGroup
+	// localCalls are the calls this machine's node is answering in this process: Close lets them finish; from when
+	// Close begins (localClosed, under localMu) the node takes no new call (⚠️ an Add while Wait returns panics)
+	localMu     sync.Mutex
+	localClosed bool
+	localCalls  sync.WaitGroup
 }
 
 // Open takes the coordinator lock and reads the journal; ErrLocked when another process has it.
@@ -228,6 +232,9 @@ func (c *Coord) ID() string { return c.id }
 
 // Close ends every connection and gives up the lock.
 func (c *Coord) Close() {
+	c.localMu.Lock()
+	c.localClosed = true
+	c.localMu.Unlock()
 	c.mu.Lock()
 	now := time.Now()
 	for _, m := range c.ms {

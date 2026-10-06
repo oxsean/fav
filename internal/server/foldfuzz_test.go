@@ -222,6 +222,9 @@ func (g *journalGen) event() journal.Event {
 	case 17:
 		return ev(task.ETaskStarted, task.TaskStart{IDs: g.some(g.tasks, "t")})
 	case 18:
+		if g.chance(40) {
+			return ev(task.ETaskPaused, task.TaskPause{ID: g.pick(g.tasks, "t"), On: g.chance(60), By: g.user()})
+		}
 		return ev(task.ETaskHeld, task.TaskHold{ID: g.pick(g.tasks, "t"), Reason: "no_agent", Detail: g.of("", "d")})
 	case 19:
 		if g.chance(50) {

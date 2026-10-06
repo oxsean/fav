@@ -1,6 +1,6 @@
 // sessions reads one machine's own Claude / Codex sessions through node.call (its owner and admins): the list with who
-// is running, a conversation paged from the newest, a message's full text, and the line that resumes a session there.
-// No DOM.
+// is running, the task whose run used each, a conversation paged from the newest, a message's full text, and the line
+// that resumes a session there. No DOM.
 
 // ⚠️ The node's session reads (internal/remote) and the size of a page of messages.
 export const M = {list: 'list', live: 'live', messages: 'messages', text: 'text'};
@@ -31,12 +31,31 @@ export function rowsOf(list, live) {
   return rows.sort((a, b) => at(b) - at(a) || a.key.localeCompare(b.key));
 }
 
-// matches keeps the rows whose title, directory, agent, branch or id hold every word of q.
+// links: by session id, the task of the newest run that used it, from the state as the store holds it.
+export function links(state) {
+  const newest = {};
+  for (const r of Object.values(state?.runs || {})) {
+    if (!r.session || !state.tasks?.[r.task]) continue;
+    const o = newest[r.session];
+    if (!o || (r.seq || 0) > (o.seq || 0) || (r.seq || 0) === (o.seq || 0) && String(r.queued_at || '') > String(o.queued_at || '')) newest[r.session] = r;
+  }
+  const out = {};
+  for (const [s, r] of Object.entries(newest)) {
+    const t = state.tasks[r.task];
+    out[s] = {id: t.id, title: t.title || '', stage: t.stage || ''};
+  }
+  return out;
+}
+
+// linked gives each row task: its entry in links, or null.
+export const linked = (rows, ls) => rows.map(r => ({...r, task: ls[r.session_id] || null}));
+
+// matches keeps the rows whose title, directory, agent, branch, id or linked task hold every word of q.
 export function matches(rows, q) {
   const words = String(q || '').toLowerCase().split(/\s+/).filter(Boolean);
   if (!words.length) return rows;
   return rows.filter(r => {
-    const s = [r.title, r.label, r.summary, r.cwd, r.provider, r.git_branch, r.session_id].filter(Boolean).join(' ').toLowerCase();
+    const s = [r.title, r.label, r.summary, r.cwd, r.provider, r.git_branch, r.session_id, r.task?.id, r.task?.title].filter(Boolean).join(' ').toLowerCase();
     return words.every(w => s.includes(w));
   });
 }

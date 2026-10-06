@@ -366,21 +366,23 @@ test("this device's settings go to the server as they change, one refused is put
     const http = fakeHTTP();
     const a = await app({f, http, push: fakePush('on'), platform: {kind: 'pwa', os: 'android', name: 'Android', secure: true}});
     await until(() => switchOf(a.el, 'me.dev.waiting'), `${f}: the settings`);
-    eq(['me.dev.waiting', 'me.dev.done', 'me.dev.hide'].map(k => on(switchOf(a.el, k))), [true, false, false], `${f}: the defaults`);
+    eq(['me.dev.waiting', 'me.dev.done', 'me.dev.treeDone', 'me.dev.hide'].map(k => on(switchOf(a.el, k))), [true, false, true, false], `${f}: the defaults`);
     const wait = a.el.find('[role=radiogroup]').find(g => g.getAttribute('aria-label') === words.t('me.dev.wait'));
     eq(wait.find('[aria-checked=true]')[0].textContent, words.t('me.dev.wait.0'), `${f}: the default wait`);
     await click(switchOf(a.el, 'me.dev.done'));
+    await click(switchOf(a.el, 'me.dev.treeDone'));
     await click(switchOf(a.el, 'me.dev.waiting'));
     await click(switchOf(a.el, 'me.dev.hide'));
     await click(wait.find('button').find(b => b.textContent === words.t('me.dev.wait.-1')));
     await settled();
     eq(http.calls.filter(c => c[0] === 'POST /api/push/prefs').map(c => c[1]), [
+      {id: 'd_mac', prefs: {events: ['task.needs_you', 'task.done', 'task.tree_done']}},
       {id: 'd_mac', prefs: {events: ['task.needs_you', 'task.done']}},
       {id: 'd_mac', prefs: {events: ['task.done']}},
       {id: 'd_mac', prefs: {events: ['task.done'], hide: true}},
       {id: 'd_mac', prefs: {events: ['task.done'], hide: true, wait: -1}},
     ], `${f}: each change sent`);
-    eq(['me.dev.waiting', 'me.dev.done', 'me.dev.hide'].map(k => on(switchOf(a.el, k))), [false, true, true], `${f}: as changed`);
+    eq(['me.dev.waiting', 'me.dev.done', 'me.dev.treeDone', 'me.dev.hide'].map(k => on(switchOf(a.el, k))), [false, true, false, true], `${f}: as changed`);
 
     const devices = a.el.find('.panel').find(p => p.textContent.includes(words.t('me.devices')));
     eq(devices.find('.me-row').map(r => [r.one('.me-main').find('span')[0].textContent, r.textContent.includes(words.t('me.dev.this'))]),
