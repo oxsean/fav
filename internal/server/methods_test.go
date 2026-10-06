@@ -16,6 +16,10 @@ import (
 // there; a card that does removes its line.
 var comingMethods = map[string]string{}
 
+// leavingMethods are methods the Web UI still calls after the coordinator dropped them (it asks has() first), each with
+// the card that removes the call; that card removes its line.
+var leavingMethods = map[string]string{"sessions.list": "B6-4"}
+
 var methodCall = regexp.MustCompile(`\b(?:call|watch|has|send)\(\s*'([a-z_]+(?:\.[a-z_]+)+)'`)
 
 // Every method the Web UI calls, watches or asks hello about is one the coordinator answers (proto.js's methods).
@@ -32,7 +36,7 @@ func TestTheWebUICallsTheCoordinatorsMethods(t *testing.T) {
 			}
 			for _, m := range methodCall.FindAllStringSubmatch(string(b), -1) {
 				seen[m[1]] = true
-				if !slices.Contains(coord.Methods, m[1]) && comingMethods[m[1]] == "" {
+				if !slices.Contains(coord.Methods, m[1]) && comingMethods[m[1]] == "" && leavingMethods[m[1]] == "" {
 					t.Errorf("%s calls %s: the coordinator has no such method", p, m[1])
 				}
 			}
@@ -45,6 +49,11 @@ func TestTheWebUICallsTheCoordinatorsMethods(t *testing.T) {
 	for m, card := range comingMethods {
 		if slices.Contains(coord.Methods, m) {
 			t.Errorf("%s is the coordinator's now (%s): remove it from comingMethods", m, card)
+		}
+	}
+	for m, card := range leavingMethods {
+		if !seen[m] || slices.Contains(coord.Methods, m) {
+			t.Errorf("the Web UI no longer calls %s, or the coordinator answers it (%s): remove it from leavingMethods", m, card)
 		}
 	}
 	if len(seen) < 20 {

@@ -3,6 +3,7 @@ package tend
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -35,7 +36,10 @@ func Home() string {
 	return filepath.Join(home, ".agent", "tend")
 }
 
-func Open() (*Store, error) { return OpenAt(filepath.Join(Home(), "records.jsonl")) }
+// RecordsFile is the favorites store's name in the data directory.
+const RecordsFile = "records.jsonl"
+
+func Open() (*Store, error) { return OpenAt(filepath.Join(Home(), RecordsFile)) }
 
 func OpenAt(path string) (*Store, error) {
 	s := &Store{Path: path}
@@ -46,8 +50,11 @@ func (s *Store) Changed() bool { return s.stamp() != s.seen }
 
 func (s *Store) Reload() error { return s.load() }
 
-func (s *Store) stamp() string {
-	st, err := os.Stat(s.Path)
+func (s *Store) stamp() string { return Stamp(s.Path) }
+
+// Stamp tells a file's writes apart: its modification time and size, "" while it is missing.
+func Stamp(path string) string {
+	st, err := os.Stat(path)
 	if err != nil {
 		return ""
 	}
@@ -202,6 +209,12 @@ func (s *Store) put(r *Rec) error {
 // Update reloads under the lock, applies change to the stored copy of r (by ID, else session) and saves it.
 // ⚠️ A reload replaces every record object: callers holding records re-resolve them (Changed tells).
 func (s *Store) Update(r *Rec, change func(*Rec)) (*Rec, error) {
+	return s.Edit(r, func(r *Rec) error { change(r); return nil })
+}
+
+// Edit is Update whose change may refuse, before it changes anything: its error is returned and nothing is written.
+// A record deleted meanwhile answers an error that is ErrDeleted.
+func (s *Store) Edit(r *Rec, change func(*Rec) error) (*Rec, error) {
 	if err := os.MkdirAll(filepath.Dir(s.Path), 0o755); err != nil {
 		return r, err
 	}
@@ -220,7 +233,7 @@ func (s *Store) Update(r *Rec, change func(*Rec)) (*Rec, error) {
 	}
 	if r.ID != "" {
 		if r = s.Get(r.ID); r == nil {
-			return nil, i18n.E("store.record_deleted")
+			return nil, deleted{i18n.T("store.record_deleted")}
 		}
 	} else if cur := s.BySession(r.Provider, r.SessionID); cur != nil {
 		r = cur
@@ -229,15 +242,23 @@ func (s *Store) Update(r *Rec, change func(*Rec)) (*Rec, error) {
 	if fresh {
 		r.ID = NewID()
 	}
-	change(r)
-	if err := s.put(r); err != nil {
-		if fresh {
-			r.ID = ""
-		}
-		return r, err
+	err = change(r)
+	if err == nil {
+		err = s.put(r)
 	}
-	return r, nil
+	if err != nil && fresh {
+		r.ID = ""
+	}
+	return r, err
 }
+
+// ErrDeleted: the record an edit names was deleted.
+var ErrDeleted = errors.New("record deleted")
+
+type deleted struct{ msg string }
+
+func (e deleted) Error() string      { return e.msg }
+func (deleted) Is(target error) bool { return target == ErrDeleted }
 
 func (s *Store) NeedsCompact() bool { return s.raw > 2*len(s.recs)+50 }
 

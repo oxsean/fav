@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/oxsean/fav/internal/i18n"
 	"github.com/oxsean/fav/internal/shell"
@@ -175,6 +176,17 @@ func SessionProvider(name string) string {
 	}
 	return name
 }
+
+// CanContinue: prof can go on with a session of provider on machine in the background: its CLI continues sessions,
+// they are provider's, and prof is bound to no other machine.
+func CanContinue(prof Profile, provider, machine string) bool {
+	p, ok := Get(prof.Provider)
+	return ok && p.Caps().Continue && SessionProvider(prof.Provider) == provider && (prof.Machine == "" || prof.Machine == machine)
+}
+
+// CodexQuiet: a Codex session written to more recently than this counts as running even without a thread lock (codex
+// exec and app-server threads hold none that capture.LocalLive counts).
+const CodexQuiet = 15 * time.Second
 
 // AttachOf builds the command that attaches to a Claude background session (they cannot be resumed).
 func AttachOf(r *tend.Rec, backgroundID string) CommandSpec {

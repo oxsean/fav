@@ -6,6 +6,8 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -17,6 +19,7 @@ import (
 	"github.com/oxsean/fav/internal/node"
 	"github.com/oxsean/fav/internal/remote"
 	"github.com/oxsean/fav/internal/task"
+	"github.com/oxsean/fav/internal/tend"
 	"github.com/oxsean/fav/internal/wire"
 )
 
@@ -124,7 +127,7 @@ func TestFzfListKeepsTheThirtySecondRule(t *testing.T) {
 	if err != nil || strings.Contains(string(b), "session") && !strings.Contains(string(b), "failed_at") {
 		t.Fatalf("the failure is recorded, nothing else: %s %v", b, err)
 	}
-	if info, err := os.Stat(serverDownPath()); err != nil || info.Mode().Perm()&0o077 != 0 {
+	if info, err := os.Stat(serverDownPath()); err != nil || runtime.GOOS != "windows" && info.Mode().Perm()&0o077 != 0 {
 		t.Fatalf("mode: %v %v", info.Mode(), err)
 	}
 }
@@ -145,5 +148,42 @@ func ageList(t *testing.T, machine string, age time.Duration) {
 	b, _ = json.Marshal(c)
 	if err := os.WriteFile(path, b, 0o600); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// TestServedWritesGoToTheViewersOwnMachines: host:sid writes go through the server's node.call put on the viewer's
+// own machine; a machine shared with the viewer is refused, and so is any write while the server is down.
+func TestServedWritesGoToTheViewersOwnMachines(t *testing.T) {
+	_, down := servedCLI(t)
+	all, _ := listedBy(t, "sessions", "host:all", "--json")
+	sidOn := func(host string) string {
+		for _, r := range all {
+			if r.Host == host {
+				return r.SessionID
+			}
+		}
+		t.Fatalf("no row on %s", host)
+		return ""
+	}
+	mba, bobs := sidOn("mba"), sidOn("bobs")
+	var err error
+	stdoutOf(t, func() { err = run([]string{"done", "mba:" + mba}) })
+	if err != nil {
+		t.Fatal(err)
+	}
+	st, err := tend.Open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if i := slices.IndexFunc(st.All(), func(r *tend.Rec) bool { return r.SessionID == mba }); i < 0 || st.All()[i].Status != tend.StatusDone {
+		t.Fatal("mba's node wrote it (every node here answers with this fixture machine)")
+	}
+	if err := run([]string{"favorite", "bobs:" + bobs}); err == nil || err.Error() != i18n.F("cli.remote.shared_write", "bobs") {
+		t.Fatalf("a shared machine: %v", err)
+	}
+	down.Store(true)
+	want := i18n.F("remote.put_server_down", remote.Reason(&wire.Error{Code: wire.CodeOffline}))
+	if err := run([]string{"favorite", "mba:" + mba}); err == nil || err.Error() != want {
+		t.Fatalf("the server down: %v, want %q", err, want)
 	}
 }

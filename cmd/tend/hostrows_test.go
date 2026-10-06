@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -18,14 +20,37 @@ import (
 )
 
 type fakeHost struct {
-	sessions []remote.Session
+	sessions []remote.Session // put rewrites them in place
 	live     map[string]capture.Live
+	old      bool // a tend from before put
 }
 
-func (f fakeHost) Handle(_ context.Context, method string, _ json.RawMessage) (any, error) {
+func (f fakeHost) Handle(_ context.Context, method string, params json.RawMessage) (any, error) {
 	switch method {
 	case remote.MHello:
-		return remote.Hello{Proto: wire.Proto}, nil
+		h := remote.Hello{Proto: wire.Proto, Version: "v0.0.9"}
+		if !f.old {
+			h.Methods = []string{remote.MHello, remote.MList, remote.MLive, remote.MPut}
+		}
+		return h, nil
+	case remote.MPut:
+		if f.old {
+			break
+		}
+		var p remote.PutParams
+		json.Unmarshal(params, &p)
+		i := slices.IndexFunc(f.sessions, func(s remote.Session) bool { return s.Provider == p.Provider && s.SessionID == p.SessionID })
+		if i < 0 {
+			return nil, &wire.Error{Code: wire.CodeNotFound}
+		}
+		if p.Expect != nil && !f.sessions[i].UpdatedAt.Equal(*p.Expect) {
+			return nil, &wire.Error{Code: wire.CodeStale}
+		}
+		r := f.sessions[i].Rec("")
+		p.Patch.Apply(r, time.Now())
+		r.UpdatedAt = time.Now()
+		f.sessions[i] = remote.SessionOf(r)
+		return remote.Row{Session: f.sessions[i]}, nil
 	case remote.MList:
 		return remote.List{Sessions: f.sessions}, nil
 	case remote.MLive:
@@ -42,6 +67,13 @@ const (
 // fakeHosts: mba answers with two sessions (one favorited, one running), down never answers; dials counts reaching either.
 func fakeHosts(t *testing.T, mbaUp bool) *atomic.Int32 {
 	t.Helper()
+	dials, _ := fakeMBA(t, mbaUp, false)
+	return dials
+}
+
+// fakeMBA is fakeHosts with mba's sessions, which put rewrites; old: its tend has no put.
+func fakeMBA(t *testing.T, mbaUp, old bool) (*atomic.Int32, []remote.Session) {
+	t.Helper()
 	now := time.Now()
 	mba := fakeHost{
 		sessions: []remote.Session{
@@ -50,6 +82,7 @@ func fakeHosts(t *testing.T, mbaUp bool) *atomic.Int32 {
 			{Provider: tend.ProviderCodex, SessionID: farOther, Title: "far session", UpdatedAt: now, LastAt: now, Turns: 9},
 		},
 		live: map[string]capture.Live{farOther: {Status: "working"}},
+		old:  old,
 	}
 	dials := &atomic.Int32{}
 	h := remote.NewHostsDial([]tend.Host{{Name: "mba", SSH: "mba"}, {Name: "down", SSH: "down"}}, i18n.EN,
@@ -60,10 +93,10 @@ func fakeHosts(t *testing.T, mbaUp bool) *atomic.Int32 {
 			}
 			return nil, &wire.Error{Code: wire.CodeOffline}
 		})
-	old := remoteHosts
+	was := remoteHosts
 	remoteHosts = func() *remote.Hosts { return h }
-	t.Cleanup(func() { remoteHosts = old; h.Close() })
-	return dials
+	t.Cleanup(func() { remoteHosts = was; h.Close() })
+	return dials, mba.sessions
 }
 
 type listed struct {
@@ -175,20 +208,73 @@ func TestPickHostRef(t *testing.T) {
 	}
 }
 
+// TestHostRecordsWriteThroughPut: favorite, archive, status, done, edit and fzf's toggles take host:sid and write on
+// that machine; an old tend there says how to update it.
+func TestHostRecordsWriteThroughPut(t *testing.T) {
+	d := machine(t)
+	_, mba := fakeMBA(t, true, false)
+	at := func(sid string) remote.Session {
+		return mba[slices.IndexFunc(mba, func(s remote.Session) bool { return s.SessionID == sid })]
+	}
+	editor := filepath.Join(t.TempDir(), "editor.sh")
+	os.WriteFile(editor, []byte("#!/bin/sh\nsed -i.bak -e 's/\"title\": \"far favorite\"/\"title\": \"edited far away\"/' -e 's/\"summary\": \"\"/\"summary\": \"s\"/' \"$1\"\n"), 0o755)
+	t.Setenv("VISUAL", "")
+	t.Setenv("EDITOR", editor)
+	for _, step := range []struct {
+		args []string
+		ok   func() bool
+	}{
+		{[]string{"favorite", "mba:" + farOther}, func() bool { return at(farOther).FavoritedAt != nil }},
+		{[]string{"archive", "mba:" + farOther}, func() bool { return at(farOther).ArchivedAt != nil }},
+		{[]string{"unarchive", "mba:" + farOther}, func() bool { return at(farOther).ArchivedAt == nil }},
+		{[]string{"status", "mba:" + farFavorite, "todo"}, func() bool { return at(farFavorite).Status == tend.StatusTodo }},
+		{[]string{"done", "mba:" + farFavorite}, func() bool { return at(farFavorite).Status == tend.StatusDone }},
+		{[]string{"fzf-pick", "togglefav", "mba:" + farFavorite}, func() bool { return at(farFavorite).FavoritedAt == nil }},
+		{[]string{"fzf-pick", "toggledone", "mba:" + farFavorite}, func() bool { return at(farFavorite).Status == tend.StatusDoing }},
+		{[]string{"edit", "mba:" + farFavorite}, func() bool { return at(farFavorite).Title == "edited far away" }},
+	} {
+		if step.args[0] == "edit" && runtime.GOOS == "windows" { // the editor is a shell script
+			continue
+		}
+		var err error
+		stdoutOf(t, func() { err = run(step.args) })
+		if err != nil || !step.ok() {
+			t.Fatalf("%v: %v", step.args, err)
+		}
+	}
+	if b, _ := os.ReadFile(filepath.Join(d.Home, "records.jsonl")); strings.Contains(string(b), farFavorite) || strings.Contains(string(b), farOther) {
+		t.Fatal("nothing of mba's is written here")
+	}
+	cached, _ := remoteHosts().Cached("mba")
+	i := slices.IndexFunc(cached, func(r *tend.Rec) bool { return r.SessionID == farFavorite })
+	if i < 0 || cached[i].Status != tend.StatusDoing || cached[i].FavoritedAt != nil {
+		t.Fatal("the kept list takes the answered rows")
+	}
+	if runtime.GOOS != "windows" && cached[i].Title != "edited far away" {
+		t.Fatal("the kept list takes the edited title")
+	}
+}
+
+func TestHostRecordsOnAnOldTendSayHowToUpdateIt(t *testing.T) {
+	machine(t)
+	fakeMBA(t, true, true)
+	want := i18n.F("remote.put_old", "mba", "mba")
+	for _, args := range [][]string{{"favorite", "mba:" + farOther}, {"fzf-pick", "togglefav", "mba:" + farFavorite}} {
+		if err := run(args); err == nil || err.Error() != want {
+			t.Errorf("%v: %v, want %q", args, err, want)
+		}
+	}
+}
+
 func TestHostRecordsAreReadOnly(t *testing.T) {
 	machine(t)
 	fakeHosts(t, true)
 	want := i18n.F("cli.remote.read_only", "mba")
 	for _, args := range [][]string{
-		{"archive", "mba:" + farFavorite},
-		{"status", "mba:" + farFavorite, "done"},
-		{"favorite", "mba:" + farOther},
 		{"pin", "mba:" + farFavorite},
 		{"rm", "-y", "mba:" + farFavorite},
-		{"edit", "mba:" + farFavorite},
 		{"handoff", "mba:" + farFavorite},
 		{"resume", "--fork", "mba:" + farFavorite},
-		{"fzf-pick", "togglefav", "mba:" + farFavorite},
 	} {
 		if err := run(args); err == nil || err.Error() != want {
 			t.Errorf("%v: %v, want %q", args, err, want)

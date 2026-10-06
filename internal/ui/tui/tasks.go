@@ -302,6 +302,9 @@ func (msg tasksPushMsg) apply(m *Model) tea.Cmd {
 	t.stream = msg.w
 	changed := false
 	for _, p := range msg.pushes {
+		if p.Method == coord.PushReset {
+			m.forgetNames()
+		}
 		c, err := t.fold.Apply(p)
 		if err != nil {
 			tracef("tasks: state push %s refused: %v", p.Method, err)

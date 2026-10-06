@@ -1,6 +1,6 @@
 # 收藏
 
-收藏流程、`/tend` skill 的职责与输出协议、收藏记录的结构与读写语义。实现：`internal/tend`（`Rec`、`Store`）、`cmd/tend`（`add`）、`skills/tend/SKILL.md`。
+收藏流程、`/tend` skill 的职责与输出协议、收藏记录的结构与读写语义。实现：`internal/tend`（`Rec`、`Store`、`Patch`）、`cmd/tend`（`add`）、`skills/tend/SKILL.md`。
 
 ## 收藏流程
 
@@ -92,7 +92,8 @@ type Rec struct {
 
 ### 读写语义
 
-- 写入：追加一行；同 `ID` 后写的覆盖先写的；并发写用 flock 串行化。改一条记录一律走 `Store.Update`：持锁、文件被别的进程改过就先重载，再按 ID（没有 ID 按会话）找到最新那份、改、追加，新会话这时才分配 ID（写失败收回）；按 ID 找不到（别的进程删了）就报错，不把记录写回来。`Put` 写之前文件已被别人改过时不更新「已同步」标记，下一次 `Update` 照样重载。收藏 / 归档 / 完成的切换规则只在 `Rec.ToggleFavorite` / `ToggleArchived` / `ToggleStatus`。
+- 写入：追加一行；同 `ID` 后写的覆盖先写的；并发写用 flock 串行化。改一条记录一律走 `Store.Update`：持锁、文件被别的进程改过就先重载，再按 ID（没有 ID 按会话）找到最新那份、改、追加，新会话这时才分配 ID（写失败收回）；按 ID 找不到（别的进程删了）就报错（`ErrDeleted`），不把记录写回来。`Store.Edit` 是同一件事，只是改之前可以拒绝（节点的 `put` 用它判 `expect`），拒绝时什么都不写。`Put` 写之前文件已被别人改过时不更新「已同步」标记，下一次 `Update` 照样重载。
+- 改什么一律是补丁 `tend.Patch`：每个非空字段是「设成这个值」，同一个补丁执行两次结果不变；TUI、CLI（`favorite` / `archive` / `status` / `done` / `edit`）、fzf 和节点的 `put` 都是 `Store.Update(r, func(r) { patch.Apply(r, now) })` 这一句。收藏、归档设为真且原来没有时记当前时间，原来有就保留；补丁带了 `favorited_at` / `archived_at` 时记这个时间（CLI 的 `favorite` / `archive` 每次都记当下，撤销放回原来的时间）。标题、摘要、短标题去掉首尾空白，标签过 `Normalize`。`Patch.Undo(改之前的记录)` 是放回这些字段原值的补丁，TUI 和 Web 的撤销都用它。收藏 / 归档 / 完成的切换只有一处：`Rec.ToggleFavorite` / `ToggleArchived` / `ToggleStatus` 按当前值算出补丁（再按一次「完成」回到 `doing`）。
 - 状态文件（索引缓存、回收站清单、配置、全文库状态、词表、worktree 表）整份替换时一律 `fileio.WriteAtomic`：同目录唯一临时名 + rename，进程崩溃或并发写不会留半截（不 fsync）；目标是软链接时写到它指向的文件。索引缓存有读不了的行不算错误，余下的重扫，下一次保存整份重写。
 - 读取：全量载入，按 `ID` 去重取最后一条，丢弃墓碑，按 `Rec.When()`（会话创建时间，缺失退到收藏时间）倒序。
 - `tend doctor` 顺手给缺 `session_started_at` 的老记录补上（文件还在才补得到）。

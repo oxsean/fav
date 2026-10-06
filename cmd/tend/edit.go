@@ -34,10 +34,11 @@ func cmdEdit(args []string) error {
 	if err != nil {
 		return err
 	}
-	r, err := pickLocal(s, first(pos))
+	r, err := remotePick(s, first(pos))
 	if err != nil {
 		return err
 	}
+	r = fresh(r)
 
 	before := editable{r.Title, r.Label, r.Summary, r.Tags, r.Project, r.WorkType, r.Status}
 	raw, err := json.MarshalIndent(before, "", "  ")
@@ -75,13 +76,9 @@ func cmdEdit(args []string) error {
 		return i18n.E("cli.edit.bad_status", strings.Join(tend.Statuses, "|"), after.Status)
 	}
 
-	r, err = s.Update(r, func(r *tend.Rec) {
-		r.Title = strings.TrimSpace(after.Title)
-		r.Label = strings.TrimSpace(after.Label)
-		r.Summary = strings.TrimSpace(after.Summary)
-		r.Tags = tend.Normalize(after.Tags)
-		r.Project, r.WorkType, r.Status = after.Project, after.WorkType, after.Status
-	})
+	p := tend.Patch{Title: &after.Title, Label: &after.Label, Summary: &after.Summary, Tags: &after.Tags,
+		Project: &after.Project, WorkType: &after.WorkType, Status: &after.Status}
+	r, err = writeRec(s, r, p, &r.UpdatedAt)
 	if err != nil {
 		return err
 	}

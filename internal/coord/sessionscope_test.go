@@ -43,19 +43,18 @@ func scoped(t *testing.T) (*env, *string) {
 	return e, &owner
 }
 
-// reads is what p gets reading this machine's sessions: "" read, else the error code, the same through node.call and
-// sessions.list.
+// reads is what p gets reading this machine's sessions through node.call: "" read, else the error code; sessions.query
+// asks the machine exactly when node.call reads it.
 func (e *env) reads(p Principal) string {
 	e.t.Helper()
 	var list remote.List
 	err := callAs(e.as(p), MNodeCall, "", NodeCall{Machine: Local, Method: remote.MList}, &list)
-	var sl SessionsList
-	err2 := callAs(e.as(p), MSessionsList, "", SessionsParams{Machine: Local}, &sl)
-	if wire.Code(err) != wire.Code(err2) {
-		e.t.Fatalf("%s: node.call %v, sessions.list %v", p.User, err, err2)
+	listed, read := projectsOn(e.t, e.as(p))
+	if read != (err == nil) {
+		e.t.Fatalf("%s: node.call %v, asked by sessions.query: %v", p.User, err, read)
 	}
-	if err == nil && (len(list.Sessions) == 0 || len(sl.Sessions) != len(list.Sessions)) {
-		e.t.Fatalf("%s read %d sessions, %d through sessions.list", p.User, len(list.Sessions), len(sl.Sessions))
+	if err == nil && (len(list.Sessions) == 0 || len(listed) == 0) {
+		e.t.Fatalf("%s read %d sessions, %d through sessions.query", p.User, len(list.Sessions), len(listed))
 	}
 	return wire.Code(err)
 }
@@ -185,9 +184,15 @@ func TestAProjectScopeOpensEveryShareOfTheMachine(t *testing.T) {
 	if err := callAs(e.as(ann), MMachineSessions, "ms", task.SessionsSet{Machine: Local, Projects: []string{"p1"}}, nil); err != nil {
 		t.Fatal(err)
 	}
-	var sl SessionsList
-	if err := callAs(e.as(bob), MSessionsList, "", SessionsParams{Machine: Local}, &sl); err != nil || len(sl.Sessions) < 5 || len(sl.Projects) != 0 {
-		t.Fatalf("bob reads every session of the machine, none of them in p1: %d sessions, %v, %v", len(sl.Sessions), sl.Projects, err)
+	listed, read := projectsOn(t, e.as(bob))
+	in := 0
+	for _, id := range listed {
+		if id != "" {
+			in++
+		}
+	}
+	if !read || len(listed) < 5 || in != 0 {
+		t.Fatalf("bob reads every session of the machine, none of them in p1: %d sessions, %d in a project, %v", len(listed), in, read)
 	}
 }
 
@@ -222,8 +227,8 @@ func TestModeOneReadsItsMachinesAsBefore(t *testing.T) {
 	if err := e.call(MNodeCall, NodeCall{Machine: Local, Method: remote.MList}, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := e.call(MSessionsList, SessionsParams{Machine: Local}, nil); err != nil {
-		t.Fatal(err)
+	if _, read := projectsOn(t, e.cli); !read {
+		t.Fatal("sessions.query does not ask this machine")
 	}
 	var ms Machines
 	e.must(MMachineList, MachinesParams{}, &ms)

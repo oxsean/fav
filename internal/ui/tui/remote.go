@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"slices"
 	"strings"
 	"time"
 
@@ -11,6 +12,7 @@ import (
 	"github.com/oxsean/fav/internal/capture"
 	"github.com/oxsean/fav/internal/herdr"
 	"github.com/oxsean/fav/internal/i18n"
+	"github.com/oxsean/fav/internal/index"
 	"github.com/oxsean/fav/internal/remote"
 	"github.com/oxsean/fav/internal/render"
 	"github.com/oxsean/fav/internal/shell"
@@ -19,8 +21,8 @@ import (
 )
 
 // Other machines' sessions: each host's cached list at start, fetched once in the background, then every hostsEvery
-// while the host: filter shows the host (longer after failures, up to hostsMaxEvery). They are read-only here: resume
-// (over ssh) and copy the command, nothing that writes or opens local things.
+// while the host: filter shows the host (longer after failures, up to hostsMaxEvery). Their records are written through
+// the machine's put (put.go); they resume over ssh or copy the command, and nothing opens local things for them.
 
 const (
 	hostsEvery    = 30 * time.Second
@@ -39,6 +41,7 @@ type hostRows struct {
 	fails   int       // fetches failed in a row
 	loading bool
 	idle    bool // not polled: the filter does not show the host
+	old     bool // its tend has no put, as its last hello said: its rows are read only
 }
 
 func (hr *hostRows) merge(fresh []*tend.Rec) {
@@ -79,6 +82,8 @@ type hostMsg struct {
 	live    map[string]capture.Live
 	liveErr error
 	os      string // its GOOS, as its hello said
+	hello   bool   // it said hello: old is known
+	old     bool   // its tend has no put
 }
 
 type hostTickMsg string
@@ -108,7 +113,7 @@ func (m *Model) fetchHost(name string) tea.Cmd {
 		if msg.st.Err == nil {
 			msg.live, msg.liveErr = h.Live(ctx, name)
 			if hello, err := h.Hello(ctx, name); err == nil { // reached just now: no dial
-				msg.os = hello.OS
+				msg.os, msg.hello, msg.old = hello.OS, true, !slices.Contains(hello.Methods, remote.MPut)
 			}
 		}
 		return msg
@@ -122,6 +127,9 @@ func (m *Model) applyHost(msg hostMsg) tea.Cmd {
 	}
 	hr.loading, hr.err = false, msg.st.Err
 	m.noteHostOS(msg.name, msg.os)
+	if msg.hello {
+		hr.old = msg.old
+	}
 	if hr.liveErr = msg.liveErr; msg.liveErr == nil { // unknown is not "nothing runs": keep the last answer
 		hr.live = msg.live
 	}
@@ -184,12 +192,7 @@ func (m *Model) remoteList(q tend.Query) []*tend.Rec {
 		hr := m.remote[name]
 		hq := q
 		hq.Live = func(id string) bool { _, ok := hr.live[id]; return ok }
-		m.lists.Place(hr.recs...)
-		for _, r := range hr.recs {
-			if hq.Match(r) {
-				out = append(out, r)
-			}
-		}
+		out = append(out, index.Select(&m.lists, hr.recs, hq, index.Page{}).Rows...)
 	}
 	return out
 }
@@ -269,9 +272,9 @@ func (m *Model) pickHost() {
 		label := name
 		switch s := m.hostDown(name); {
 		case m.shared(name) && m.remote[name].err != nil:
-			label = i18n.F("remote.shared_host_down", name, m.ownerOf(name), remote.Reason(m.remote[name].err))
+			label = i18n.F("remote.shared_host_down", name, m.ownerName(name), remote.Reason(m.remote[name].err))
 		case m.shared(name):
-			label = i18n.F("remote.shared_host", name, m.ownerOf(name))
+			label = i18n.F("remote.shared_host", name, m.ownerName(name))
 		case s != "":
 			label = s
 		}
@@ -313,7 +316,8 @@ func (m *Model) remoteRow() bool {
 	return false
 }
 
-// remoteBlocked: what writes tend's records or opens local things; not offered on another machine's session.
+// remoteBlocked: what writes tend's records or opens local things; on another machine's session only those put carries
+// (putAct) are offered, while its machine takes them.
 func remoteBlocked(a act) bool {
 	switch a {
 	case actFavorite, actDone, actArchive, actEdit, actMove, actDelete, actNew, actPeek, actHandled, actSnooze, actCloseTab, actTitle:

@@ -143,9 +143,10 @@ func (m *Model) saveEdit() {
 		return
 	}
 	m.closeOverlay()
-	if m.editRec(r, func(r *tend.Rec) { r.Title, r.Tags, r.Summary = title, tags, summary }) != nil {
+	seen := r.UpdatedAt
+	m.editRec(r, tend.Patch{Title: &title, Tags: &tags, Summary: &summary}, &seen, func(m *Model, _ *tend.Rec) {
 		m.flash(i18n.F("edit.saved", render.Truncate(title, 40)))
-	}
+	})
 }
 
 func (m *Model) renderEdit() string {

@@ -4,7 +4,6 @@ import (
 	"context"
 	"slices"
 	"strings"
-	"time"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -26,10 +25,6 @@ const (
 	makeProject
 	makeButtons
 )
-
-// codexQuiet: a Codex session written to more recently than this counts as running even without a thread lock (codex
-// exec and app-server threads hold none that LocalLive counts).
-const codexQuiet = 15 * time.Second
 
 // makeTaskWhy is the i18n key of why r cannot become a task now, "" when it can.
 func (m *Model) makeTaskWhy(r *tend.Rec) string {
@@ -66,7 +61,7 @@ func (m *Model) sessionBusy(r *tend.Rec) bool {
 			}
 		}
 	}
-	return r.Provider == tend.ProviderCodex && !m.now.IsZero() && !r.LastAt.IsZero() && m.now.Sub(r.LastAt) < codexQuiet
+	return r.Provider == tend.ProviderCodex && !m.now.IsZero() && !r.LastAt.IsZero() && m.now.Sub(r.LastAt) < agent.CodexQuiet
 }
 
 // makeMachine is this machine's name to the coordinator.
@@ -80,18 +75,14 @@ func (m *Model) makeMachine() string {
 // continueAgents are the profiles that can go on with r's session here, the one named after its provider first; before
 // the coordinator listed them, the provider's own.
 func (m *Model) continueAgents(r *tend.Rec) []string {
-	can := func(provider string) bool {
-		p, ok := agent.Get(provider)
-		return ok && p.Caps().Continue && agent.SessionProvider(provider) == r.Provider
-	}
 	machine := m.makeMachine()
 	var out []string
 	for _, p := range m.tasks.agents {
-		if can(p.Provider) && (p.Machine == "" || p.Machine == machine) {
+		if agent.CanContinue(p, r.Provider, machine) {
 			out = append(out, p.Name)
 		}
 	}
-	if len(m.tasks.agents) == 0 && can(r.Provider) {
+	if len(m.tasks.agents) == 0 && agent.CanContinue(tend.AgentProfile{Name: r.Provider, Provider: r.Provider}, r.Provider, machine) {
 		out = []string{r.Provider}
 	}
 	if i := slices.Index(out, r.Provider); i > 0 {
@@ -149,7 +140,7 @@ func (m *Model) makeTaskBtn(r *tend.Rec) btn {
 // makeTask opens the form on r once the coordinator is reached, or says why it cannot.
 func (m *Model) makeTask(r *tend.Rec) tea.Cmd {
 	if r != nil && m.shared(r.Host) {
-		m.flash(i18n.F("remote.shared_note", m.ownerOf(r.Host)))
+		m.flash(i18n.F("remote.shared_note", m.ownerName(r.Host)))
 		return nil
 	}
 	if why := m.makeTaskWhy(r); why != "" {

@@ -2,7 +2,9 @@ package index
 
 import (
 	"maps"
+	"slices"
 
+	"github.com/oxsean/fav/internal/paths"
 	"github.com/oxsean/fav/internal/tend"
 )
 
@@ -58,6 +60,38 @@ func Restore(s *tend.Store, provider, sessionID string) (e tend.TrashEntry, forc
 		err = s.Put(e.Record)
 	}
 	return e, rescanAfterRestore(e), err
+}
+
+// TrashSession moves r's session files into the trash (SessionFilesOf, Trash); next is idx without the files no longer
+// there, also after a failed move (nil for a nil idx). The caller refuses a running session first.
+func TrashSession(s *tend.Store, idx *Index, r *tend.Rec) (e tend.TrashEntry, next *Index, err error) {
+	files := SessionFilesOf(idx, r)
+	e, err = Trash(s, r, files)
+	if idx != nil {
+		next = idx.Forget(slices.DeleteFunc(files, paths.Exists))
+	}
+	return e, next, err
+}
+
+// RestoreSession puts a trashed session back; next is idx without the files the next refresh must read from scratch
+// (Restore's force), idx itself when there are none.
+func RestoreSession(s *tend.Store, idx *Index, provider, sessionID string) (e tend.TrashEntry, next *Index, err error) {
+	e, force, err := Restore(s, provider, sessionID)
+	next = idx
+	if idx != nil && len(force) > 0 {
+		next = idx.Forget(slices.Collect(maps.Keys(force)))
+	}
+	return e, next, err
+}
+
+// Trashed is the trash's row of a session (as Rows lists it, its transcript the copy in the trash), nil when it is not
+// there.
+func Trashed(provider, sessionID string) (*tend.Rec, error) {
+	entries, err := tend.LoadTrash()
+	if i := slices.IndexFunc(entries, func(e tend.TrashEntry) bool { return e.Provider == provider && e.SessionID == sessionID }); i >= 0 {
+		return trashRec(entries[i]), nil
+	}
+	return nil, err
 }
 
 // Forget drops files just moved away from the index in memory; the next Refresh agrees without rescanning them.

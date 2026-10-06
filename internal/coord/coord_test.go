@@ -78,6 +78,7 @@ type env struct {
 	usersM sync.Mutex
 	notice func(Notice)
 	seen   func(machine string, at time.Time)
+	served bool // mode 2: no machine but those attached
 }
 
 func newEnv(t *testing.T, cfg tend.Config) *env {
@@ -138,7 +139,7 @@ func (e *env) start() {
 	n.Probe = e.probe
 	n.Limits.AllowHooks = e.cfg.Node.AllowHooks
 	opt := Options{Home: e.home, Version: "test", Config: e.cfg, Node: n, Sessions: remote.NewLocal("test"), Dial: e.dial, MachineOwner: e.owner,
-		Notice: e.notice, Seen: e.seen}
+		Notice: e.notice, Seen: e.seen, Remote: e.served}
 	if e.users != nil {
 		opt.Users = func(id string) (User, bool) {
 			e.usersM.Lock()
@@ -415,7 +416,7 @@ func (f *far) dial(h tend.Host, opt wire.Options) (Conn, error) {
 		}
 		return res, err
 	}})
-	go n.Watch(b.Done(), func(runs []string) { b.Push(node.MChanged, node.Changed{Runs: runs}) })
+	go n.Watch(b.Done(), func(ch node.Changed) { b.Push(node.MChanged, ch) })
 	f.conns = append(f.conns, b)
 	return a, nil
 }
@@ -483,7 +484,7 @@ func TestAnOfflineMachineSaysWhenItWasLastConnected(t *testing.T) {
 	if m := machine("n2"); m.State != MachineOffline || m.LastSeen != nil {
 		t.Fatalf("never connected: %+v", m)
 	}
-	conn, _ := f.dial(tend.Host{Name: "n1"}, e.c.NodeOptions())
+	conn, _ := f.dial(tend.Host{Name: "n1"}, e.c.NodeOptionsFor("n1"))
 	if err := e.c.Attach("n1", conn, nil); err != nil {
 		t.Fatal(err)
 	}
@@ -530,7 +531,7 @@ func TestAMachinesOfflineTimeOutlivesItsCoordinator(t *testing.T) {
 	e.start()
 	for _, name := range []string{"n1", "n2"} {
 		e.c.Expect(name, time.Time{})
-		conn, _ := f.dial(tend.Host{Name: name}, e.c.NodeOptions())
+		conn, _ := f.dial(tend.Host{Name: name}, e.c.NodeOptionsFor(name))
 		if err := e.c.Attach(name, conn, nil); err != nil {
 			t.Fatal(err)
 		}
@@ -586,7 +587,7 @@ func TestADroppedNodeThatDialedInHasNoRetryTime(t *testing.T) {
 	f := newFar(t)
 	e := newEnv(t, tend.Config{})
 	e.start()
-	conn, _ := f.dial(tend.Host{Name: "n1"}, e.c.NodeOptions())
+	conn, _ := f.dial(tend.Host{Name: "n1"}, e.c.NodeOptionsFor("n1"))
 	if err := e.c.Attach("n1", conn, nil); err != nil {
 		t.Fatal(err)
 	}

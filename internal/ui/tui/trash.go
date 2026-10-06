@@ -1,13 +1,10 @@
 package tui
 
 import (
-	"slices"
-
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/oxsean/fav/internal/i18n"
 	"github.com/oxsean/fav/internal/index"
-	"github.com/oxsean/fav/internal/paths"
 	"github.com/oxsean/fav/internal/render"
 	"github.com/oxsean/fav/internal/tend"
 )
@@ -68,12 +65,12 @@ func (m *Model) askDelete(r *tend.Rec) {
 	if d := m.cfg.TrashDays; d > 0 {
 		body = append(body, i18n.F("trash.confirm_purge", d))
 	}
-	m.openConfirm(i18n.T("trash.title"), i18n.T("trash.btn_delete"), body, func(m *Model) { m.deleteSession(r, files) }, nil)
+	m.openConfirm(i18n.T("trash.title"), i18n.T("trash.btn_delete"), body, func(m *Model) { m.deleteSession(r) }, nil)
 }
 
-func (m *Model) deleteSession(r *tend.Rec, files []string) {
-	_, err := index.Trash(m.store, r, files)
-	m.adopt(m.idx.Forget(slices.DeleteFunc(files, paths.Exists)))
+func (m *Model) deleteSession(r *tend.Rec) {
+	_, next, err := index.TrashSession(m.store, m.idx, r)
+	m.adopt(next)
 	if err != nil {
 		m.flash(i18n.F("flash.delete_failed", err))
 		return
@@ -82,8 +79,11 @@ func (m *Model) deleteSession(r *tend.Rec, files []string) {
 }
 
 func (m *Model) restoreTrash(r *tend.Rec) {
-	e, force, err := index.Restore(m.store, r.Provider, r.SessionID)
-	m.pending = tea.Batch(m.pending, m.reindex(force))
+	e, next, err := index.RestoreSession(m.store, m.idx, r.Provider, r.SessionID)
+	if next != m.idx {
+		m.adopt(next)
+	}
+	m.pending = tea.Batch(m.pending, m.reindex(nil))
 	m.recount()
 	m.refresh()
 	if err != nil {

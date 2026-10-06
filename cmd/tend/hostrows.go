@@ -20,6 +20,7 @@ import (
 	"github.com/oxsean/fav/internal/fileio"
 	"github.com/oxsean/fav/internal/herdr"
 	"github.com/oxsean/fav/internal/i18n"
+	"github.com/oxsean/fav/internal/index"
 	"github.com/oxsean/fav/internal/paths"
 	"github.com/oxsean/fav/internal/projects"
 	"github.com/oxsean/fav/internal/remote"
@@ -315,7 +316,6 @@ func hostRows(q tend.Query) ([]*tend.Rec, map[string]map[string]capture.Live) {
 		if _, known := snap.OS[name]; a.goos != "" && !known && snap.OS != nil {
 			snap.OS[name] = a.goos
 		}
-		rows.Place(a.recs...)
 		switch {
 		case far.down != nil:
 		case a.st.Err != nil && !a.st.At.IsZero():
@@ -325,11 +325,7 @@ func hostRows(q tend.Query) ([]*tend.Rec, map[string]map[string]capture.Live) {
 		}
 		hq := q
 		hq.Live = func(id string) bool { _, ok := a.live[id]; return ok }
-		for _, r := range a.recs {
-			if hq.Match(r) {
-				out = append(out, r)
-			}
-		}
+		out = append(out, index.Select(&rows, a.recs, hq, index.Page{}).Rows...)
 		live[name] = a.live
 	}
 	return out, live
@@ -379,6 +375,60 @@ func pickLocal(s *tend.Store, ref string) (*tend.Rec, error) {
 }
 
 func readOnly(r *tend.Rec) error { return i18n.E("cli.remote.read_only", r.Host) }
+
+// remotePick is pick for commands that write a record: another machine's goes through its put (writeRec), refused
+// on a machine shared with the viewer and while the server cannot be reached.
+func remotePick(s *tend.Store, ref string) (*tend.Rec, error) {
+	r, err := pick(s, ref)
+	if err != nil || r.Host == "" {
+		return r, err
+	}
+	if far := farHosts(); far.Server != nil {
+		if err := far.reach(); err != nil {
+			return nil, i18n.E("remote.put_server_down", remote.Reason(err))
+		}
+		if !far.mine(r.Host) {
+			return nil, i18n.E("cli.remote.shared_write", r.Host)
+		}
+	}
+	return r, nil
+}
+
+// fresh is another machine's r as its machine lists it now, r itself when that cannot be read: an edit starts from
+// what is there, not from a cached list.
+func fresh(r *tend.Rec) *tend.Rec {
+	if r.Host == "" {
+		return r
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), hostTimeout)
+	defer cancel()
+	recs, st := remoteHosts().Sessions(ctx, r.Host)
+	if i := slices.IndexFunc(recs, func(x *tend.Rec) bool { return x.Key() == r.Key() }); st.Err == nil && i >= 0 {
+		return recs[i]
+	}
+	return r
+}
+
+// writeRec writes p to r: this machine's through the store, another's through its put. expect: the record's
+// updated_at the editor saw (another machine's only).
+func writeRec(s *tend.Store, r *tend.Rec, p tend.Patch, expect *time.Time) (*tend.Rec, error) {
+	if r.Host == "" {
+		now := time.Now()
+		return s.Update(r, func(r *tend.Rec) { p.Apply(r, now) })
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), hostTimeout)
+	defer cancel()
+	saved, err := remoteHosts().Put(ctx, r.Host, remote.Ref{Provider: r.Provider, SessionID: r.SessionID}, p, expect)
+	switch wire.Code(err) {
+	case "":
+		return saved, nil
+	case wire.CodeUnknownMethod:
+		return nil, i18n.E("remote.put_old", r.Host, r.Host)
+	case wire.CodeStale:
+		return nil, i18n.E("remote.put_stale", r.Host)
+	}
+	return nil, i18n.E("remote.put_failed", r.Host, remote.Reason(err))
+}
 
 // remoteResume is `ssh -t <host> tend resume …` for r, as a command spec. Mode 2 resumes over ssh only the viewer's
 // own machine whose host of the same name here is that machine; otherwise there is the command to run on it.

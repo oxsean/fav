@@ -16,11 +16,16 @@ const (
 	ShareNone = "none"
 )
 
-// sessionRefs are the session reads that name one session.
-var sessionRefs = map[string]bool{remote.MMessages: true, remote.MText: true, remote.MSteps: true, remote.MPulse: true, remote.MChecks: true}
+// sessionRefs are the session reads and writes that name one session.
+var sessionRefs = map[string]bool{remote.MMessages: true, remote.MText: true, remote.MSteps: true, remote.MPulse: true, remote.MChecks: true,
+	remote.MPut: true, remote.MHits: true, remote.MTrash: true, remote.MRestore: true}
 
-// shareSessions answers a session read under share: a list and who is running keep its runs' sessions, a read of
-// another session is refused. Even a server that forwards every read can then reach only the runs' sessions.
+// scopedMethods count, rank or page sessions: the handler leaves the others out before it does (remote.Scoped).
+var scopedMethods = map[string]bool{remote.MQuery: true, remote.MGrep: true}
+
+// shareSessions answers a session read or write under share: a list and who is running keep its runs' sessions, a
+// query or message search sees only them, a call naming another session is refused, and none refuses a query or search
+// outright. Even a server that forwards every call can then reach only the runs' sessions.
 func shareSessions(ctx context.Context, share string, sessions remote.Handler, method string, params json.RawMessage) (any, error) {
 	if share == "" || share == ShareAll {
 		return sessions.Handle(ctx, method, params)
@@ -30,6 +35,12 @@ func shareSessions(ctx context.Context, share string, sessions remote.Handler, m
 		runs = capture.RunSessions()
 	}
 	switch {
+	case scopedMethods[method]:
+		sc, ok := sessions.(remote.Scoped)
+		if share == ShareNone || !ok {
+			return nil, &wire.Error{Code: wire.CodeUnauthorized, Detail: "sessions"}
+		}
+		return sc.HandleIn(ctx, method, params, func(id string) bool { _, ok := runs[id]; return ok })
 	case sessionRefs[method]:
 		var ref remote.Ref
 		json.Unmarshal(params, &ref)

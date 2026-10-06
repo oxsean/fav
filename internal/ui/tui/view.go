@@ -981,7 +981,7 @@ func (m *Model) targetBox(w int) []string {
 	// ⚠️ content cut at w-4 (Width w includes border and padding); two more columns wrap
 	content := accent.Render(i18n.T("card.resume_target")) + "\n" + fit(render.Truncate(m.resumeTargetLine(r), w-4), w-4)
 	if m.shared(r.Host) {
-		content = accent.Render(i18n.T("remote.read_title")) + "\n" + fit(render.Truncate(i18n.F("remote.shared_note", m.ownerOf(r.Host)), w-4), w-4)
+		content = accent.Render(i18n.T("remote.read_title")) + "\n" + fit(render.Truncate(i18n.F("remote.shared_note", m.ownerName(r.Host)), w-4), w-4)
 	}
 	return strings.Split(panelSty.Width(w).Render(content), "\n")
 }

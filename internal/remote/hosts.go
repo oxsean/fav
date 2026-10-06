@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sync"
 	"time"
 
@@ -25,6 +26,7 @@ import (
 type Hosts struct {
 	t       Transport
 	mu      sync.Mutex
+	putMu   sync.Mutex
 	files   map[string]string // host + session key → the transcript's fileio.ID as last read from the end
 	mem     map[string]cache  // the lists of machines not kept on disk
 	memLive map[string]liveCache
@@ -116,6 +118,36 @@ func (h *Hosts) Sessions(ctx context.Context, name string) ([]*tend.Rec, State) 
 	v := hello.Version
 	h.save(name, cache{At: now, Version: v, Sessions: l.Sessions})
 	return recs(name, l.Sessions), State{At: now, Version: v}
+}
+
+// Put writes p to the session ref on name and returns the row as name wrote it, which also replaces the cached one.
+// expect is the record's updated_at the editor saw: name answers stale when it has been written since. A tend whose
+// hello lists no put is not sent it: unknown_method, with its version as the detail.
+func (h *Hosts) Put(ctx context.Context, name string, ref Ref, p tend.Patch, expect *time.Time) (*tend.Rec, error) {
+	hello, err := h.t.Hello(ctx, name)
+	if err != nil {
+		return nil, err
+	}
+	if !slices.Contains(hello.Methods, MPut) {
+		return nil, &wire.Error{Code: wire.CodeUnknownMethod, Detail: hello.Version}
+	}
+	var row Row
+	if err := h.Call(ctx, name, MPut, PutParams{Ref: ref, Patch: p, Expect: expect}, &row); err != nil {
+		return nil, err
+	}
+	h.putMu.Lock() // one rewrite of a cached list at a time
+	defer h.putMu.Unlock()
+	c := h.load(name)
+	if c.At.IsZero() { // no list kept: the next fetch brings the whole one
+		return row.Session.Rec(name), nil
+	}
+	if i := slices.IndexFunc(c.Sessions, func(s Session) bool { return s.Provider == row.Provider && s.SessionID == row.SessionID }); i >= 0 {
+		c.Sessions[i] = row.Session
+	} else {
+		c.Sessions = append(c.Sessions, row.Session)
+	}
+	h.save(name, c)
+	return row.Session.Rec(name), nil
 }
 
 // Cached is name's list from the last fetch, without reaching it.

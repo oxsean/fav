@@ -34,12 +34,10 @@ func (m *Model) doUndo() tea.Cmd {
 	return u.back(m)
 }
 
-// restoreRec takes a record's change back: fields as they were before it.
-func (m *Model) restoreRec(r *tend.Rec, back func(*tend.Rec)) func(*Model) tea.Cmd {
+// restoreRec takes a record's change back with back, the change's Undo.
+func (m *Model) restoreRec(r *tend.Rec, back tend.Patch) func(*Model) tea.Cmd {
 	return func(mm *Model) tea.Cmd {
-		if mm.editRec(r, back) != nil {
-			mm.flash(i18n.F("undo.done", r.Title))
-		}
+		mm.editRec(r, back, nil, func(mm *Model, r *tend.Rec) { mm.flash(i18n.F("undo.done", r.Title)) })
 		return nil
 	}
 }

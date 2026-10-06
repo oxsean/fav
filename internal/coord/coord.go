@@ -63,7 +63,9 @@ const (
 	MProjectMember       = "project.member"
 	MProjectAttach       = "project.attach" // a directory on a machine joins a project's repositories (ProjectAttach)
 	MProjectDetach       = "project.detach" // a directory leaves them (ProjectDetach)
-	MSessionsList        = "sessions.list"  // a machine's sessions with the project each belongs to (SessionsParams)
+	MSessionsQuery       = "sessions.query" // the sessions of every machine the caller reads, one page (SessionsQuery)
+	MSessionsGrep        = "sessions.grep"  // message search over them (SessionsGrep)
+	MPeopleNames         = "people.names"   // the names of users the caller knows of (PeopleParams)
 	MMachineShare        = "machine.share"
 	MMachineDrain        = "machine.drain"    // a machine takes no new runs, or takes them again (task.DrainSet)
 	MMachineSessions     = "machine.sessions" // who else reads a machine's sessions (task.SessionsSet)

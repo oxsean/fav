@@ -1,6 +1,6 @@
 # 节点
 
-一台机器上的 run：run 目录、监督进程 `tend _run`、观察、会话绑定、双向流。实现：`internal/node`（run 目录、`run.*` 方法、监督进程、快照）、`internal/proc`（分离启动、进程树、存活检查，按 OS）。
+一台机器上的 run：run 目录、监督进程 `tend _run`、观察、会话的可见范围、会话绑定、双向流。实现：`internal/node`（run 目录、`run.*` 方法、监督进程、快照）、`internal/proc`（分离启动、进程树、存活检查，按 OS）。
 
 ## run 目录
 
@@ -127,8 +127,17 @@ claude 的工具结果里带着整份文件，codex 反复推一轮的全部 dif
 
 ## 观察
 
-- 节点连接存活期间，每 3 s 看本机未结束的 run：监督进程锁、`state.json` 的 `rev`；有变化推 `node.changed`。
+- 节点连接存活期间，每 3 s 看本机未结束的 run：监督进程锁、`state.json` 的 `rev`；有变化推 `node.changed{runs}`。同一个循环里 stat 一次收藏库 `records.jsonl`（大小 + 修改时间，`tend.Stamp`），变了推 `node.changed{records: true}`：TUI、CLI、`/tend`、经 `put` 的网页改了这台的记录，协调器由此知道（旧协调器不认这个字段，照样只当有变化）。新会话出现、最近活动变了不推：那要持续刷新索引，等于轮询。
 - 「需要人」用 `attention`（见 [coordinator.md](coordinator.md)「状态」）表达，来源：run 自己的输出、报告、沉默时长，herdr 方式另有 Herdr 的 pane 状态、transcript 和 Claude hook 事件（见上文「监督进程 `tend _run <dir>`」）。
+
+## 会话的可见范围
+
+节点配置 `share_sessions: runs | all | none`（模式二默认 `runs`，见 [team.md](../tasks/team.md) 第 7 条），节点自己再筛一遍会话方法（`share.go`），即使 server 把调用转过来：
+
+- 列表（`list`）和谁在跑（`live`）只留 run 登记过的会话（`capture.RunSessions()`）；`none` 一条不留。
+- 指名一个会话的方法（`messages`、`text`、`steps`、`pulse`、`checks`、`hits`、写记录的 `put`、删除和还原的 `trash` / `restore`）对别的会话回 `unauthorized`，`none` 对每个会话都这样：`runs` 只能删、还原 run 留下的会话。
+- 要计数、排序、分页的方法（`query`，`status:trash` 的回收站也在内；搜消息的 `grep`）在分页和排序之前筛：处理器实现 `remote.Scoped`，`HandleIn(…, keep)` 先按 `keep`（会话 id 在不在 run 登记里）去掉别的会话，再算 `total`、`matched`、`facets`、分页或排名，所以页、计数和命中只算放出的会话；`none` 直接回 `unauthorized`。
+- `all`（ssh 和模式一的默认）不筛。
 
 ## 会话绑定
 

@@ -200,30 +200,6 @@ func (r *Rec) Relink(src string) error {
 	return nil
 }
 
-func (r *Rec) ToggleFavorite(now time.Time) {
-	if r.Favorite() {
-		r.FavoritedAt = nil
-		return
-	}
-	r.FavoritedAt = &now
-}
-
-func (r *Rec) ToggleArchived(now time.Time) {
-	if r.Archived() {
-		r.ArchivedAt = nil
-		return
-	}
-	r.ArchivedAt = &now
-}
-
-func (r *Rec) ToggleStatus(target string) {
-	if r.Status == target {
-		r.Status = StatusDoing
-		return
-	}
-	r.Status = target
-}
-
 // ActiveAt: the last activity the index saw, else When.
 func (r *Rec) ActiveAt() time.Time {
 	if r.LastAt.After(r.When()) {

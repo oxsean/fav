@@ -55,6 +55,7 @@ type machine struct {
 	checks    map[string]agent.Check // node.agents, when it last answered
 	checkedAt time.Time              // when node.agents last probed afresh
 	probing   *probe                 // a fresh node.agents under way
+	records   int                    // its node told this many changes of its session records (records_rev)
 }
 
 // probe is one fresh node.agents; checks asked meanwhile wait for it.
@@ -85,15 +86,35 @@ func (c *Coord) slots(name string) int {
 	return defaultSlots
 }
 
-func (c *Coord) nodeOptions() wire.Options {
+// nodeOptions are the options of a connection to machine name's node: a change of its runs wakes the coordinator, a
+// change of its session records reaches those who read its sessions.
+func (c *Coord) nodeOptions(name string) wire.Options {
 	return wire.Options{
-		OnPush: func(method string, _ json.RawMessage) {
-			if method == node.MChanged {
+		OnPush: func(method string, params json.RawMessage) {
+			if method != node.MChanged {
+				return
+			}
+			var ch node.Changed
+			json.Unmarshal(params, &ch)
+			if ch.Records {
+				go c.recordsMoved(name)
+			}
+			if !ch.Records || len(ch.Runs) > 0 {
 				c.poke()
 			}
 		},
 		OnClose:   func(error) { c.poke() },
 		Keepalive: nodeKeepAliv,
+	}
+}
+
+// recordsMoved: machine name's session records changed; whoever reads its sessions is told its next records_rev.
+func (c *Coord) recordsMoved(name string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if m := c.ms[name]; m != nil {
+		m.records++
+		c.kick(PushMachines, func(p Principal) bool { return c.readsSessions(p, name) })
 	}
 }
 
@@ -114,9 +135,9 @@ func (c *Coord) dial(m *machine) {
 	case m.host == nil:
 		conn = c.local()
 	case c.opt.Dial != nil:
-		conn, err = c.opt.Dial(*m.host, c.nodeOptions())
+		conn, err = c.opt.Dial(*m.host, c.nodeOptions(m.name))
 	default:
-		conn, err = remote.DialWith(*m.host, c.nodeOptions())
+		conn, err = remote.DialWith(*m.host, c.nodeOptions(m.name))
 	}
 	var h remote.Hello
 	if err == nil {
@@ -165,8 +186,9 @@ func greet(conn Conn) (remote.Hello, error) {
 	return h, nil
 }
 
-// NodeOptions are the options of a connection to a node: its pushes wake the coordinator.
-func (c *Coord) NodeOptions() wire.Options { return c.nodeOptions() }
+// NodeOptionsFor are the options of a connection to machine name's node (Attach): its pushes wake the coordinator and
+// move the machine's records_rev.
+func (c *Coord) NodeOptionsFor(name string) wire.Options { return c.nodeOptions(name) }
 
 // Attach makes conn machine name's connection (mode 2: the node dialed in); a connection it already had is closed.
 // check, when set, may refuse the node by its hello.
@@ -223,14 +245,14 @@ func (c *Coord) seen(m *machine, at time.Time) {
 // local is this machine's node, served in this process.
 func (c *Coord) local() Conn {
 	handle := c.opt.Node.Handler(c.opt.Sessions)
-	a, b := wire.Pipe(c.nodeOptions(), wire.Options{Handler: func(ctx context.Context, r *wire.Request) (any, error) {
+	a, b := wire.Pipe(c.nodeOptions(Local), wire.Options{Handler: func(ctx context.Context, r *wire.Request) (any, error) {
 		if !c.admitLocal() {
 			return nil, &wire.Error{Code: wire.CodeClosed}
 		}
 		defer c.localCalls.Done()
 		return handle(ctx, r)
 	}})
-	go c.opt.Node.Watch(b.Done(), func(runs []string) { b.Push(node.MChanged, node.Changed{Runs: runs}) })
+	go c.opt.Node.Watch(b.Done(), func(ch node.Changed) { b.Push(node.MChanged, ch) })
 	return a
 }
 

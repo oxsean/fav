@@ -2,18 +2,14 @@ package coord
 
 import (
 	"cmp"
-	"context"
-	"encoding/json"
 	"maps"
 	"slices"
 	"strconv"
 	"strings"
 	"unicode/utf8"
 
-	"github.com/oxsean/fav/internal/capture"
 	"github.com/oxsean/fav/internal/journal"
 	"github.com/oxsean/fav/internal/pathmap"
-	"github.com/oxsean/fav/internal/remote"
 	"github.com/oxsean/fav/internal/task"
 	"github.com/oxsean/fav/internal/wire"
 )
@@ -31,18 +27,6 @@ type ProjectDetach struct {
 	Project string `json:"project"`
 	Machine string `json:"machine"`
 	Dir     string `json:"dir"`
-}
-
-type SessionsParams struct {
-	Machine string `json:"machine"`
-}
-
-// SessionsList answers sessions.list: the machine's sessions and who of them runs as its node answers list and live,
-// and the project each belongs to among those the caller sees ("provider:session_id" → project id; none: in no project).
-type SessionsList struct {
-	Sessions []json.RawMessage          `json:"sessions"`
-	Live     map[string]json.RawMessage `json:"live"`
-	Projects map[string]string          `json:"projects"`
 }
 
 // attachable is project id when who may change its directories on machine: its owner and admins anywhere, a
@@ -179,80 +163,4 @@ func (c *Coord) projectDetach(who Principal, r *wire.Request) (string, []journal
 		}
 	}
 	return pr.ID, []journal.Event{journal.NewEvent(task.EProjectEdited, task.ProjectEdit{ID: pr.ID, Repos: &kept})}, nil
-}
-
-// sessionsList asks machine's node for its sessions and who of them runs, as node.call would for whoever may read
-// them, and tells which project each belongs to (task.ProjectOf: its main checkout, else its cwd). A failed live
-// counts as none running.
-func (c *Coord) sessionsList(ctx context.Context, who Principal, r *wire.Request) (any, error) {
-	var p SessionsParams
-	if err := r.Decode(&p); err != nil {
-		return nil, err
-	}
-	c.mu.Lock()
-	reads := c.readsSessions(who, p.Machine)
-	c.mu.Unlock()
-	if !reads {
-		return nil, forbidden(MSessionsList)
-	}
-	var list struct {
-		Sessions []json.RawMessage `json:"sessions"`
-	}
-	var live struct {
-		Live map[string]json.RawMessage `json:"live"`
-	}
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		if c.call(ctx, p.Machine, remote.MLive, nil, &live) != nil {
-			live.Live = nil
-		}
-	}()
-	err := c.call(ctx, p.Machine, remote.MList, nil, &list)
-	<-done
-	if err != nil {
-		return nil, err
-	}
-	out := SessionsList{Sessions: list.Sessions, Live: live.Live, Projects: map[string]string{}}
-	if out.Sessions == nil {
-		out.Sessions = []json.RawMessage{}
-	}
-	if out.Live == nil {
-		out.Live = map[string]json.RawMessage{}
-	}
-
-	c.mu.Lock()
-	projects := map[string]*task.Project{}
-	for id, pr := range c.st.Projects {
-		if c.seesProject(who, pr) {
-			projects[id] = &task.Project{ID: pr.ID, Repos: pr.Repos} // a project edit replaces Repos, never changes it in place
-		}
-	}
-	goos := c.osOf(p.Machine)
-	c.mu.Unlock()
-	belongs := func(key, dir string) {
-		if pr := task.ProjectOf(projects, p.Machine, goos, dir); pr != nil {
-			out.Projects[key] = pr.ID
-		}
-	}
-	listed := map[string]bool{}
-	for _, raw := range out.Sessions {
-		var s remote.Session
-		if json.Unmarshal(raw, &s) != nil {
-			continue
-		}
-		key := s.Provider + ":" + s.SessionID
-		listed[key] = true
-		belongs(key, cmp.Or(s.Repo, s.Cwd))
-	}
-	for id, raw := range out.Live {
-		var l capture.Live
-		if json.Unmarshal(raw, &l) != nil {
-			continue
-		}
-		if key := l.Agent + ":" + id; !listed[key] && l.Cwd != "" {
-			belongs(key, l.Cwd)
-		}
-	}
-	return out, nil
 }

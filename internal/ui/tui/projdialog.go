@@ -312,7 +312,7 @@ func (m *Model) renderProject() string {
 		case x.machine == s.Here:
 			tail = errSty.Render(i18n.T("project.not_here"))
 		case d.note != "" && s.Owner(x.machine) != "" && s.Owner(x.machine) != s.Viewer.User:
-			tail = dimmed.Render(i18n.F("project.someones", s.Owner(x.machine)))
+			tail = dimmed.Render(i18n.F("project.someones", m.nameOf(s.Owner(x.machine))))
 		}
 		head := mark + box + render.Pad(m.machineLabel(x.machine), machW) + "  "
 		dir := render.Truncate(paths.Tilde(x.dir), max(8, inner-render.Width(head)-render.Width(tail)-2))
@@ -402,9 +402,9 @@ func (m *Model) projectKindLine(p *task.Project, long bool) string {
 		return i18n.T("project.kind_personal")
 	}
 	if long {
-		return i18n.F("project.edit_sub", p.Owner, projects.Participants(p))
+		return i18n.F("project.edit_sub", m.nameOf(p.Owner), projects.Participants(p))
 	}
-	return i18n.F("project.kind_team", p.Owner, projects.Participants(p))
+	return i18n.F("project.kind_team", m.nameOf(p.Owner), projects.Participants(p))
 }
 
 func (m *Model) pickProjectChoice(i int) {

@@ -256,7 +256,7 @@ func (s *Server) handleNode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ws.SetReadLimit(wire.MaxFrame + 1)
-	opt := s.opt.Coord.NodeOptions()
+	opt := s.opt.Coord.NodeOptionsFor(cred.Name)
 	opt.Keepalive = keepalive
 	c := wire.New(websocket.NetConn(r.Context(), ws, websocket.MessageText), opt)
 	s.track(c, held{cred: cred.ID})

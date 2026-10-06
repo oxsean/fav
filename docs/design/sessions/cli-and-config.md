@@ -82,6 +82,7 @@ tend uninstall-skill                    只删 ~/.claude、~/.codex 下的 tend 
 
 - 单机：`config.hosts` 经 ssh。
 - server（`coordinator.url`）：第一次要读别的机器时拨 server 一次（5 秒为限，`hello` + `machine.list`），经 `node.call` 读它让看的人读的机器（去掉本机），`host:` 用 server 的机器名，不退回 ssh。拨不上时 stderr 一行「连不上 server：原因 · 别的机器显示缓存」，只列自己机器的缓存。fzf 守 30 秒规则、不列别人共享的机器，`tend resume` 的规则，都见 [remote.md](remote.md)「server 模式」「恢复」「fzf」。
+- 写记录：`favorite` / `unfavorite` / `archive` / `unarchive` / `status` / `done` / `edit` 和 fzf 的 `fzf-pick toggle*` 接受 `host:sid`，经那台机器的 `put` 写（`remotePick`、`writeRec`）；`edit` 先从那台重读这一行，再开编辑器，存时带它的 `updated_at`，那边改过就失败。server 模式下拨不上 server、或机器是别人共享的，就拒绝；那台的 tend 旧（没有 `put`）时提示先 `tend hosts install <机器>`。`pin`、`rm`、`open`、`resume --fork`、`handoff` 等仍只对本机的记录。见 [remote.md](remote.md)「远端行的写入」。
 
 fzf 的项目选择器先列项目（`<id>  # <名字>  (N)`，选了写 `project:<id>`），再列自动组；卡片和行里的项目写项目名（`Rec.Group()`）。`--json` 输出里的 `project` 仍是记录自己的字段。
 

@@ -73,8 +73,10 @@ var methodAccess = map[string]access{
 	MRunBlob:             reader,
 	MProjectDirs:         reader, // who may run the project's tasks on the machine (projectDirs)
 	MRunPreview:          reader,
-	MNodeCall:            reader, // a machine's own sessions: its owner and whom its scope names (readsSessions); node.dirs: its owner and admins
-	MSessionsList:        reader, // the same as node.call's session reads (readsSessions)
+	MNodeCall:            reader, // a machine's own sessions: its owner and whom its scope names (readsSessions); node.dirs: its owner and admins; writes: its owner only
+	MSessionsQuery:       reader, // the machines whose sessions the caller reads (readsSessions)
+	MSessionsGrep:        reader,
+	MPeopleNames:         reader, // only whom the caller has reason to know (knows)
 	MTaskCreate:          writer,
 	MTaskEdit:            writer,
 	MTaskStatus:          writer,
@@ -227,8 +229,8 @@ func (c *Coord) seesProject(p Principal, pr *task.Project) bool {
 	return pr.Role(p.User) != "" || p.Admin && (c.seesAll(p) || !pr.Personal())
 }
 
-// readsSessions: p may read machine's own sessions, through node.call or sessions.list: its owner, or whom its session
-// scope names. Admins are not exempt, nor are machines under local. The caller holds mu.
+// readsSessions: p may read machine's own sessions, through node.call, sessions.query or sessions.grep: its owner, or
+// whom its session scope names. Admins are not exempt, nor are machines under local. The caller holds mu.
 func (c *Coord) readsSessions(p Principal, machine string) bool {
 	return c.ownerOf(machine) == p.User || c.st.Shares[machine] != nil && c.st.Shares[machine].Sessions.Opens(c.st.Projects, p.User)
 }

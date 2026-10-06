@@ -239,10 +239,31 @@ func TestAProjectDirectoryWrittenWithTheHomeStaysAsItIs(t *testing.T) {
 	}
 }
 
-// TestSessionsListSaysWhichProjectEachSessionIsIn: sessions.list answers the machine's sessions and who of them runs,
-// with the project each belongs to among those the caller sees; only the machine's owner and admins read it, as
-// node.call. Machines carry their node's id.
-func TestSessionsListSaysWhichProjectEachSessionIsIn(t *testing.T) {
+// projectsOn is the project of each of this machine's sessions as sessions.query lists them to cli; read: the machine
+// was asked.
+func projectsOn(t *testing.T, cli *wire.Conn) (projects map[string]string, read bool) {
+	t.Helper()
+	projects = map[string]string{}
+	sq := SessionsQuery{Q: "host:" + Local + " status:all turns:0", All: true, Limit: pageMax}
+	for {
+		page := query(t, cli, sq)
+		if answerOf(page, Local) == nil {
+			return projects, false
+		}
+		for _, r := range page.Rows {
+			projects[r.Provider+":"+r.SessionID] = r.Project
+		}
+		if page.Next == nil {
+			return projects, true
+		}
+		sq.After = page.Next
+	}
+}
+
+// TestSessionsQuerySaysWhichProjectEachSessionIsIn: sessions.query lists the machine's sessions with the project each
+// belongs to among those the caller sees; only whom the machine's owner lets read it is asked, as node.call. Machines
+// carry their node's id.
+func TestSessionsQuerySaysWhichProjectEachSessionIsIn(t *testing.T) {
 	d, err := fixture.Build(filepath.Join(t.TempDir(), "machine"), time.Now())
 	if err != nil {
 		t.Fatal(err)
@@ -280,38 +301,40 @@ func TestSessionsListSaysWhichProjectEachSessionIsIn(t *testing.T) {
 			}
 		}
 
-		var got SessionsList
-		if err := callAs(e.as(mine), MSessionsList, "", SessionsParams{Machine: Local}, &got); err != nil {
-			t.Fatalf("team %v: %v", teamMode, err)
-		}
-		if len(got.Sessions) == 0 || got.Live == nil {
-			t.Fatalf("team %v: the machine's sessions and who runs: %d %v", teamMode, len(got.Sessions), got.Live)
+		got, read := projectsOn(t, e.as(mine))
+		if !read || len(got) == 0 {
+			t.Fatalf("team %v: the machine's sessions: %d %v", teamMode, len(got), read)
 		}
 		want := map[string]string{"oauth": "web", "worktree": "web", "webapp-sub": "web", "codex-cli": "web", "same-name": "", "pagination": ""}
 		if gitErr == nil {
 			want["linked-worktree"] = "web" // by its main checkout
 		}
 		for name, id := range want {
-			if got.Projects[key(name)] != id {
-				t.Errorf("team %v, %s: project %q, want %q", teamMode, name, got.Projects[key(name)], id)
+			if got[key(name)] != id {
+				t.Errorf("team %v, %s: project %q, want %q", teamMode, name, got[key(name)], id)
 			}
 		}
 		if !teamMode {
 			continue
 		}
-		if err := callAs(e.as(admin), MSessionsList, "", SessionsParams{Machine: Local}, nil); wire.Code(err) != wire.CodeUnauthorized {
-			t.Errorf("an admin reads no one else's machine unless its owner says so: %v", err)
+		if _, read := projectsOn(t, e.as(admin)); read {
+			t.Errorf("an admin reads no one else's machine unless its owner says so")
 		}
 		if err := callAs(e.as(mine), MMachineSessions, "scope", task.SessionsSet{Machine: Local, Users: []string{admin.User}}, nil); err != nil {
 			t.Fatal(err)
 		}
-		if err := callAs(e.as(admin), MSessionsList, "", SessionsParams{Machine: Local}, &got); err != nil || got.Projects[key("webapp-sub")] != "deep" ||
-			got.Projects[key("oauth")] != "web" {
-			t.Errorf("an admin the scope names sees deep too, the deeper directory wins: %v %v", got.Projects, err)
+		if got, read := projectsOn(t, e.as(admin)); !read || got[key("webapp-sub")] != "deep" || got[key("oauth")] != "" {
+			t.Errorf("an admin the scope names sees its own deep, not ann's personal web: %v %v", got, read)
+		}
+		if err := callAs(e.as(mine), MProjectMember, "m-bob", task.MemberSet{Project: "web", User: bob.User, Role: task.RoleParticipant}, nil); err != nil {
+			t.Fatal(err)
+		}
+		if got, read := projectsOn(t, e.as(admin)); !read || got[key("webapp-sub")] != "deep" || got[key("oauth")] != "web" {
+			t.Errorf("an admin sees a team's web too, the deeper directory wins: %v %v", got, read)
 		}
 		for _, p := range []Principal{bob, cy} {
-			if err := callAs(e.as(p), MSessionsList, "", SessionsParams{Machine: Local}, nil); wire.Code(err) != wire.CodeUnauthorized {
-				t.Errorf("%s reads another's machine: %v", p.User, err)
+			if _, read := projectsOn(t, e.as(p)); read {
+				t.Errorf("%s reads another's machine", p.User)
 			}
 		}
 

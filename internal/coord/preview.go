@@ -322,13 +322,10 @@ func (c *Coord) runContinue(who Principal, r *wire.Request) (string, []journal.E
 	if !ok {
 		return "", nil, notFound("agent " + name)
 	}
-	if agent.SessionProvider(prof.Provider) != p.Provider {
-		return "", nil, bad("agent " + name + " is not " + p.Provider)
+	if !agent.CanContinue(prof, p.Provider, machine) {
+		return "", nil, bad("agent " + name + " cannot continue a " + p.Provider + " session on " + machine)
 	}
-	if prof.Machine != "" && prof.Machine != machine {
-		return "", nil, bad("agent " + name + " runs on " + prof.Machine)
-	}
-	if err := c.canContinue(prof, machine); err != nil {
+	if err := c.resumes(machine); err != nil {
 		return "", nil, err
 	}
 	if err := c.continuesIn(who, machine, p.Project); err != nil {
@@ -414,6 +411,11 @@ func (c *Coord) canContinue(prof tend.AgentProfile, machine string) error {
 	if pr, ok := agent.Get(prof.Provider); !ok || !pr.Caps().Continue {
 		return bad("agent " + prof.Name + " cannot continue a session")
 	}
+	return c.resumes(machine)
+}
+
+// resumes: machine's tend can start a run in a session, as far as is known; the caller holds mu.
+func (c *Coord) resumes(machine string) error {
 	if m := c.ms[machine]; m != nil && m.conn != nil && !slices.Contains(m.hello.Methods, node.MRunResume) {
 		return &wire.Error{Code: wire.CodeProto, Detail: ReasonNodeOutdated}
 	}

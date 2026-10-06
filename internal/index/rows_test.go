@@ -1,6 +1,7 @@
 package index
 
 import (
+	"path"
 	"path/filepath"
 	"testing"
 	"time"
@@ -26,7 +27,7 @@ func TestRowsPlaceEachRowBeforeMatching(t *testing.T) {
 	unfav := []*tend.Rec{{Provider: tend.ProviderCodex, SessionID: "u", Title: "u", Cwd: "/src/shop", Project: "shop", Turns: 9}}
 	live := map[string]capture.Live{"l": {Agent: tend.ProviderClaude, Cwd: "/src/shop/api", Title: "running"}}
 	rows := Rows{Belong: func(r *tend.Rec) (string, string) {
-		if filepath.Dir(r.Cwd) == "/src/shop" || r.Cwd == "/src/shop" {
+		if path.Dir(r.Cwd) == "/src/shop" || r.Cwd == "/src/shop" {
 			return "p_shop", "Shop"
 		}
 		return "", ""

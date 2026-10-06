@@ -157,6 +157,7 @@ type Model struct {
 	hosts  *remote.Hosts        // other machines; nil = none configured, nothing is contacted
 	remote map[string]*hostRows // by host name
 	far    servedHosts          // mode 2: how the other machines are read through the server
+	people people               // users' names, as the coordinator gives them
 
 	tasks tasksState
 	proj  projectsState
@@ -785,73 +786,73 @@ func (m *Model) toggleFavorite(r *tend.Rec) {
 	if r == nil {
 		return
 	}
-	title, fresh, now, was := render.Truncate(r.Title, 30), r.ID == "", time.Now(), r.FavoritedAt
-	r = m.editRec(r, func(r *tend.Rec) { r.ToggleFavorite(now) })
-	if r == nil {
-		return
-	}
-	back := m.restoreRec(r, func(r *tend.Rec) { r.FavoritedAt = was })
-	switch {
-	case !r.Favorite():
-		m.offerUndo(i18n.F("flash.unfavorited", title), back)
-	case fresh:
-		m.flash(i18n.F("flash.favorited_fresh", title))
-		m.undo = &undoable{at: time.Now(), seq: m.noticeSeq, back: back}
-	default:
-		m.offerUndo(i18n.F("flash.favorited", title), back)
-	}
+	title, fresh, p := render.Truncate(r.Title, 30), r.ID == "", r.ToggleFavorite()
+	back := p.Undo(r)
+	m.editRec(r, p, nil, func(m *Model, r *tend.Rec) {
+		undo := m.restoreRec(r, back)
+		switch {
+		case !r.Favorite():
+			m.offerUndo(i18n.F("flash.unfavorited", title), undo)
+		case fresh:
+			m.flash(i18n.F("flash.favorited_fresh", title))
+			m.undo = &undoable{at: time.Now(), seq: m.noticeSeq, back: undo}
+		default:
+			m.offerUndo(i18n.F("flash.favorited", title), undo)
+		}
+	})
 }
 
 func (m *Model) toggleArchive(r *tend.Rec) {
 	if r == nil {
 		return
 	}
-	now, was := time.Now(), r.ArchivedAt
-	r = m.editRec(r, func(r *tend.Rec) { r.ToggleArchived(now) })
-	if r == nil {
-		return
-	}
-	back := m.restoreRec(r, func(r *tend.Rec) { r.ArchivedAt = was })
-	if r.Archived() {
-		m.offerUndo(i18n.F("flash.archived", r.Title), back)
-	} else {
-		m.offerUndo(i18n.F("flash.unarchived", r.Title), back)
-	}
+	p := r.ToggleArchived()
+	back := p.Undo(r)
+	m.editRec(r, p, nil, func(m *Model, r *tend.Rec) {
+		undo := m.restoreRec(r, back)
+		if r.Archived() {
+			m.offerUndo(i18n.F("flash.archived", r.Title), undo)
+		} else {
+			m.offerUndo(i18n.F("flash.unarchived", r.Title), undo)
+		}
+	})
 }
 
 func (m *Model) toggleStatus(r *tend.Rec, target string) {
 	if r == nil {
 		return
 	}
-	was := r.Status
-	r = m.editRec(r, func(r *tend.Rec) { r.ToggleStatus(target) })
+	p := r.ToggleStatus(target)
+	back := p.Undo(r)
+	m.editRec(r, p, nil, func(m *Model, r *tend.Rec) {
+		undo := m.restoreRec(r, back)
+		if r.Status == target {
+			m.offerUndo(i18n.F("flash.status_set", render.StatusLabel(target), r.Title), undo)
+		} else {
+			m.offerUndo(i18n.F("flash.back_to_doing", r.Title), undo)
+		}
+	})
+}
+
+// editRec writes p to r, then done runs with the record written; nothing runs when the write fails. This machine's
+// record goes through Store.Update at once (an unsaved session gets a record, not a favorite); another machine's goes
+// through that machine's put in the background (putRec), and done runs when it answers. expect, for another
+// machine's: the record's updated_at the editor saw.
+func (m *Model) editRec(r *tend.Rec, p tend.Patch, expect *time.Time, done func(*Model, *tend.Rec)) {
 	if r == nil {
 		return
 	}
-	back := m.restoreRec(r, func(r *tend.Rec) { r.Status = was })
-	if r.Status == target {
-		m.offerUndo(i18n.F("flash.status_set", render.StatusLabel(target), r.Title), back)
-	} else {
-		m.offerUndo(i18n.F("flash.back_to_doing", r.Title), back)
-	}
-}
-
-// editRec saves change through Store.Update and returns the record written (nil on failure).
-// An unsaved session gets a record, not a favorite.
-func (m *Model) editRec(r *tend.Rec, change func(*tend.Rec)) *tend.Rec {
-	if r == nil {
-		return nil
-	}
 	if r.Host != "" {
-		m.flash(m.readOnlyNote(r))
-		return nil
+		m.putRec(r, p, expect, done)
+		return
 	}
 	m.syncStore()
 	unsaved := r.ID == ""
-	saved, err := m.store.Update(r, change)
+	now := time.Now()
+	saved, err := m.store.Update(r, func(r *tend.Rec) { p.Apply(r, now) })
 	if err != nil {
 		m.flash(i18n.F("flash.write_failed", err))
-		return nil
+		return
 	}
 	if unsaved {
 		m.dropUnfav(r)
@@ -859,7 +860,9 @@ func (m *Model) editRec(r *tend.Rec, change func(*tend.Rec)) *tend.Rec {
 	m.pin, m.pinKey = saved, m.pinContext()
 	m.recount()
 	m.refresh()
-	return saved
+	if done != nil {
+		done(m, saved)
+	}
 }
 
 func (m *Model) dropUnfav(r *tend.Rec) {

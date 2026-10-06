@@ -64,7 +64,7 @@ func (tm *Team) Attach(name, owner string, n *node.Node) {
 	tm.owners[name] = owner
 	tm.mu.Unlock()
 	n.Probe = func(string) agent.Check { return agent.Check{Installed: true, Auth: agent.AuthUnknown} }
-	toNode, nodeEnd := wire.Pipe(tm.C.NodeOptions(), wire.Options{Handler: n.Handler(remote.NewLocal("test"))})
+	toNode, nodeEnd := wire.Pipe(tm.C.NodeOptionsFor(name), wire.Options{Handler: n.Handler(remote.NewLocal("test"))})
 	tm.t.Cleanup(func() { nodeEnd.Close() })
 	if err := tm.C.Attach(name, toNode, nil); err != nil {
 		tm.t.Fatal(err)

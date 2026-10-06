@@ -9,7 +9,7 @@
 | Task 字段、事件、推导的处境 | `internal/task` |
 | 依赖派发、阶段推进、gate、预算、父任务 | `internal/coord`（`tree.go`、`workflow.go`、`work.go`） |
 | Project、AgentDef、Workflow 的加载、校验、编译 | Project 是 `internal/task` 折叠的事件；AgentDef 在 `internal/defs`；Workflow 在 `internal/workflow` |
-| 方法：`project.*`（含 `project.attach|detach`）、`sessions.list`、`machine.sessions`、`user.offboard.preview`（交接的预览，见 [team.md](team.md)「成员离开」）、`agentdef.*`、`task.start|pause|gate|move|plan|plan_save|plan_apply|message|merge` | `internal/coord`，`Methods` 协商 |
+| 方法：`project.*`（含 `project.attach|detach`）、`sessions.query|grep`（多台机器的会话合成一页、搜消息，见 [runs/coordinator.md](../runs/coordinator.md)「调度与对账」）、`people.names`、`machine.sessions`、`user.offboard.preview`（交接的预览，见 [team.md](team.md)「成员离开」）、`agentdef.*`、`task.start|pause|gate|move|plan|plan_save|plan_apply|message|merge` | `internal/coord`，`Methods` 协商 |
 | `run.start` 的 spec 带工作区（`agent.Workspace`：`checkout, branch, chain, base, remote, read_only, merge, setup, cleanup`）、`check`、`files`（settings、mcp、skills） | `internal/node`；节点方法变了 → `tend hosts install` |
 | `node.agents` 报告各 CLI 的安装、版本、登录，不报告 skills、MCP 名字（见 [agent-definitions.md](agent-definitions.md)「skills、MCP 和密钥怎么到目标机器」） | `internal/node`、`internal/agent` |
 | `tend run verdict`、`tend run plan` | `cmd/tend` |
@@ -44,6 +44,8 @@ Web 在客户端折叠信封（`web/core/fold.js`），规则逐条照搬 `task.
   - 缺 feature 就标 `node_outdated`，不降级执行；
   - feature 名字是稳定的字符串，节点现有八个：`dispatcher` `agentdef` `verdict` `check` `worktree` `files` `plan` `before_run`；
   - 节点在 hello 里报告 `node.Features`；一个 run 需要哪些由协调器的 `runFeatures(run)` 按 run 的发起人、档案、阶段和工作区推算。每加一种执行语义就各加一个名字。
+- 协调器只在节点的 hello 报了 `query`、`grep` 时才调它们：`sessions.query` 遇到没有 `query` 的旧节点，取整份 `list` 和 `live` 在协调器里筛，那台标 `old`、不可写；`sessions.grep` 跳过没有 `grep` 的节点，同样标 `old`。没有 `put` 的节点，行不可写；没有 `trash` 的节点不能删除、还原，`status:trash` 下那台标 `old`、不问。
+- `node.call` 转发两张表里的方法：读会话的 `readMethods`（含 `query`、`grep`、`hits`）和写记录的 `writeMethods`（`put`、`trash`、`restore`）。写的只给机器主人（见 [team.md](team.md) 第 6 条），往后的写方法加进同一张表。
 - 协调器不读客户端的 `hello.features`，不按它剥掉事件：推送对所有客户端一样，只按人过滤。
 - 协调器回给客户端的 hello 带 `caller{user, admin}`：它把这条连接当成谁（`HandlerFor` 的那个人），节点的 hello 不带。TUI 靠它判断自己能往哪些项目加目录；server 模式下 hello 里没有 `caller` 或 `methods` 里没有 `project.attach`，TUI 就当它是旧 server，项目对话框不画按钮（见 [sessions/tui.md](../sessions/tui.md)「项目对话框」）。
 - 客户端折叠时跳过未知的事件类型，只推进 `seq`。协调器自己的折叠仍然遇到未知类型就报错。

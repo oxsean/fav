@@ -34,59 +34,108 @@ func (q Query) Scope() Query {
 	return q
 }
 
-func Parse(s string) Query {
-	q := Query{Status: StatusOpen, Turns: DefaultTurns}
-	now := time.Now()
+// Token is one word of a query as Parse reads it: Text as typed, Value lowercased (a status normalized).
+type Token struct {
+	Kind  string `json:"kind"`
+	Text  string `json:"text"`
+	Value string `json:"value"`
+}
+
+// Token kinds. TokUnknown is a qualifier Parse does not know, or one whose value it cannot read: matched as a word.
+const (
+	TokTag      = "tag"
+	TokProject  = "project"
+	TokProvider = "provider"
+	TokStatus   = "status"
+	TokAfter    = "after"
+	TokBefore   = "before"
+	TokLast     = "last"
+	TokTurns    = "turns"
+	TokFile     = "file"
+	TokHost     = "host"
+	TokWord     = "word"
+	TokUnknown  = "unknown"
+)
+
+// ProjectNone is the project: value of the sessions in no project.
+const ProjectNone = "none"
+
+// Tokens splits s into the tokens Parse reads; a lone # is none.
+func Tokens(s string) []Token { return tokens(s, time.Now()) }
+
+func tokens(s string, now time.Time) []Token {
+	var out []Token
 	for f := range strings.FieldsSeq(s) {
 		low := strings.ToLower(f)
-		if after, ok := strings.CutPrefix(low, "#"); ok {
-			if t := after; t != "" {
-				q.Tags = append(q.Tags, t)
+		if tag, ok := strings.CutPrefix(low, "#"); ok {
+			if tag != "" {
+				out = append(out, Token{TokTag, f, tag})
 			}
 			continue
 		}
 		k, v, isKV := strings.Cut(low, ":")
 		if !isKV || v == "" {
-			q.Words = append(q.Words, low)
+			out = append(out, Token{TokWord, f, low})
 			continue
 		}
+		kind := TokUnknown
 		switch k {
 		case "project", "p":
-			q.Project = v
+			kind = TokProject
 		case "provider", "source":
-			q.Provider = v
+			kind = TokProvider
 		case "file":
-			q.File = v
+			kind = TokFile
 		case "host", "machine":
-			q.Host = v
+			kind = TokHost
 		case "status":
-			q.Status = normalizeStatus(v)
+			kind, v = TokStatus, normalizeStatus(v)
 		case "turns":
 			if n, err := strconv.Atoi(v); err == nil && n >= 0 {
-				q.Turns = n
-			} else {
-				q.unknown(low)
+				kind = TokTurns
 			}
-		case "after", "since":
-			if t, ok := ParseWhen(v, now); ok {
-				q.After = t
-			} else {
-				q.unknown(low)
+		case "after", "since", "before", "until", "last":
+			if _, ok := ParseWhen(v, now); ok {
+				kind = map[string]string{"after": TokAfter, "since": TokAfter, "before": TokBefore, "until": TokBefore, "last": TokLast}[k]
 			}
-		case "before", "until":
-			if t, ok := ParseWhen(v, now); ok {
-				q.Before = t
-			} else {
-				q.unknown(low)
-			}
-		case "last":
-			if t, ok := ParseWhen(v, now); ok {
-				q.Active = t
-			} else {
-				q.unknown(low)
-			}
-		default:
-			q.unknown(low)
+		}
+		if kind == TokUnknown {
+			v = low
+		}
+		out = append(out, Token{kind, f, v})
+	}
+	return out
+}
+
+func Parse(s string) Query {
+	q := Query{Status: StatusOpen, Turns: DefaultTurns}
+	now := time.Now()
+	for _, t := range tokens(s, now) {
+		switch t.Kind {
+		case TokTag:
+			q.Tags = append(q.Tags, t.Value)
+		case TokWord:
+			q.Words = append(q.Words, t.Value)
+		case TokUnknown:
+			q.unknown(t.Value)
+		case TokProject:
+			q.Project = t.Value
+		case TokProvider:
+			q.Provider = t.Value
+		case TokFile:
+			q.File = t.Value
+		case TokHost:
+			q.Host = t.Value
+		case TokStatus:
+			q.Status = t.Value
+		case TokTurns:
+			q.Turns, _ = strconv.Atoi(t.Value)
+		case TokAfter:
+			q.After, _ = ParseWhen(t.Value, now)
+		case TokBefore:
+			q.Before, _ = ParseWhen(t.Value, now)
+		case TokLast:
+			q.Active, _ = ParseWhen(t.Value, now)
 		}
 	}
 	return q
@@ -218,8 +267,12 @@ func (q Query) Match(r *Rec) bool {
 	return true
 }
 
-// inProject: project: names the project r belongs to (its name or id), or r's automatic group when it is in none.
+// inProject: project: names the project r belongs to (its name or id), or r's automatic group when it is in none;
+// project:none picks every row in none.
 func (q Query) inProject(r *Rec) bool {
+	if q.Project == ProjectNone {
+		return r.ProjectID == ""
+	}
 	if r.ProjectID != "" {
 		return strings.EqualFold(r.ProjectID, q.Project) || strings.EqualFold(r.ProjectName, q.Project)
 	}

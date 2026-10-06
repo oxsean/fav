@@ -3,9 +3,11 @@ package remote
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"sync"
 	"testing"
@@ -275,6 +277,77 @@ func TestSessionReadsOverEachTransport(t *testing.T) {
 				t.Fatal("nor who ran there")
 			}
 		}},
+		{"put", false, func(t *testing.T, d *fixture.Dataset, r machineRig) {
+			h := r.open("a", true)
+			if _, st := h.Sessions(ctx, "m"); st.Err != nil {
+				t.Fatal(st.Err)
+			}
+			oauth := d.Get("oauth")
+			ref := Ref{oauth.Provider, oauth.ID}
+			title := "renamed over put"
+			got, err := h.Put(ctx, "m", ref, tend.Patch{Title: &title, Favorite: new(true)}, nil)
+			if err != nil || got.Title != title || !got.Favorite() || got.Host != "m" {
+				t.Fatalf("the row the machine wrote: %+v %v", got, err)
+			}
+			st, err := tend.OpenAt(filepath.Join(d.Home, "records.jsonl"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if rec := st.BySession(oauth.Provider, oauth.ID); rec == nil || rec.Title != title || !rec.Favorite() {
+				t.Fatalf("written to the machine's records: %+v", rec)
+			}
+			cached, _ := h.Cached("m")
+			n := 0
+			for _, c := range cached {
+				if c.SessionID == oauth.ID {
+					n++
+					if c.Title != title {
+						t.Fatalf("the cached row is the answered one: %q", c.Title)
+					}
+				}
+			}
+			if n != 1 {
+				t.Fatalf("the row replaced, not added: %d", n)
+			}
+			if got := cacheFiles(t, "m"); len(got) != 1 || got[0] != "sessions.json" {
+				t.Fatalf("the viewer's own machine keeps it on disk: %v", got)
+			}
+			old := got.UpdatedAt.Add(-time.Hour)
+			if _, err := h.Put(ctx, "m", ref, tend.Patch{Title: &title}, &old); code(err) != wire.CodeStale {
+				t.Fatalf("an edit over a record written since is stale: %v", err)
+			}
+			if again, err := h.Put(ctx, "m", ref, tend.Patch{Summary: new("s")}, &got.UpdatedAt); err != nil || again.Summary != "s" {
+				t.Fatalf("an edit over the record seen: %+v %v", again, err)
+			}
+		}},
+		{"put unreached", false, func(t *testing.T, d *fixture.Dataset, r machineRig) {
+			h := r.open("a", true)
+			r.down()
+			oauth := d.Get("oauth")
+			if _, err := h.Put(ctx, "m", Ref{oauth.Provider, oauth.ID}, tend.Patch{Favorite: new(true)}, nil); code(err) != wire.CodeOffline {
+				t.Fatalf("%v", err)
+			}
+			if _, err := os.Stat(CacheDir("m")); !os.IsNotExist(err) {
+				t.Fatalf("a failed put leaves the cache alone: %v", err)
+			}
+		}},
+		{"put on a machine kept in memory", true, func(t *testing.T, d *fixture.Dataset, r machineRig) {
+			h := r.open("a", false)
+			if _, st := h.Sessions(ctx, "m"); st.Err != nil {
+				t.Fatal(st.Err)
+			}
+			oauth := d.Get("oauth")
+			if _, err := h.Put(ctx, "m", Ref{oauth.Provider, oauth.ID}, tend.Patch{Status: new(tend.StatusDone)}, nil); err != nil {
+				t.Fatal(err)
+			}
+			cached, _ := h.Cached("m")
+			if i := slices.IndexFunc(cached, func(c *tend.Rec) bool { return c.SessionID == oauth.ID }); i < 0 || cached[i].Status != tend.StatusDone {
+				t.Fatal("the row held in memory is the answered one")
+			}
+			if _, err := os.Stat(CacheDir("m")); !os.IsNotExist(err) {
+				t.Fatalf("nothing on disk: %v", err)
+			}
+		}},
 		{"a shared machine writes nothing", true, func(t *testing.T, d *fixture.Dataset, r machineRig) {
 			h := r.open("a", false)
 			recs, st := h.Sessions(ctx, "m")
@@ -408,5 +481,47 @@ func TestForgetDropsWhatIsNoLongerTheViewers(t *testing.T) {
 	NewNodeCall(server, nil).Forget(nil)
 	if len(kept()) != 0 {
 		t.Fatalf("not listed any more: kept %v", kept())
+	}
+}
+
+type handlerFunc func(ctx context.Context, method string, params json.RawMessage) (any, error)
+
+func (f handlerFunc) Handle(ctx context.Context, method string, params json.RawMessage) (any, error) {
+	return f(ctx, method, params)
+}
+
+// oldNode answers as a tend from before put: its hello lists no put.
+type oldNode struct{ Handler }
+
+func (o oldNode) Handle(ctx context.Context, method string, params json.RawMessage) (any, error) {
+	if method == MPut {
+		return nil, &wire.Error{Code: wire.CodeUnknownMethod, Detail: method}
+	}
+	a, err := o.Handler.Handle(ctx, method, params)
+	if hello, ok := a.(Hello); ok {
+		hello.Methods = slices.DeleteFunc(hello.Methods, func(m string) bool { return m == MPut })
+		hello.Version = "v0.0.9"
+		return hello, err
+	}
+	return a, err
+}
+
+func TestPutToAnOldNodeSaysSoWithoutSending(t *testing.T) {
+	d := fixtureMachine(t)
+	var sent int
+	h := NewHostsDial([]tend.Host{{Name: "m"}}, "", func(tend.Host) (*Client, error) {
+		return Pipe(handlerFunc(func(ctx context.Context, method string, params json.RawMessage) (any, error) {
+			if method == MPut {
+				sent++
+			}
+			return oldNode{NewLocal("t")}.Handle(ctx, method, params)
+		})), nil
+	})
+	t.Cleanup(h.Close)
+	oauth := d.Get("oauth")
+	_, err := h.Put(context.Background(), "m", Ref{oauth.Provider, oauth.ID}, tend.Patch{Favorite: new(true)}, nil)
+	var e *wire.Error
+	if !errors.As(err, &e) || e.Code != wire.CodeUnknownMethod || e.Detail != "v0.0.9" || sent != 0 {
+		t.Fatalf("an old node: %v, %d sent", err, sent)
 	}
 }

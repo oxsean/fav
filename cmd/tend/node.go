@@ -44,7 +44,7 @@ func cmdNode(args []string) error {
 	os.Stdout = os.Stderr
 	defer func() { os.Stdout = out }()
 	c := wire.New(stdPipes{os.Stdin, out}, wire.Options{Handler: n.Handler(remote.NewLocal(version)), Keepalive: nodeKeepalive})
-	go n.Watch(c.Done(), func(runs []string) { c.Push(node.MChanged, node.Changed{Runs: runs}) })
+	go n.Watch(c.Done(), func(ch node.Changed) { c.Push(node.MChanged, ch) })
 	<-c.Done()
 	return nil
 }
@@ -75,7 +75,7 @@ func connectNode(n *node.Node, url, tokenFile string) error {
 		if err == nil {
 			fmt.Fprint(os.Stderr, i18n.F("cli.node.connected", url))
 			since := time.Now()
-			go n.Watch(c.Done(), func(runs []string) { c.Push(node.MChanged, node.Changed{Runs: runs}) })
+			go n.Watch(c.Done(), func(ch node.Changed) { c.Push(node.MChanged, ch) })
 			select {
 			case <-c.Done():
 			case <-ctx.Done():

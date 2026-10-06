@@ -221,7 +221,7 @@ func TestUpdateSeesAnotherProcessesWrites(t *testing.T) {
 		}
 	}
 	now := time.Now()
-	ra, err := a.Update(&Rec{Provider: ProviderClaude, SessionID: "s1"}, func(r *Rec) { r.ToggleFavorite(now) })
+	ra, err := a.Update(&Rec{Provider: ProviderClaude, SessionID: "s1"}, func(r *Rec) { r.ToggleFavorite().Apply(r, now) })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -232,7 +232,7 @@ func TestUpdateSeesAnotherProcessesWrites(t *testing.T) {
 	if rb.ID != ra.ID || !rb.Favorite() {
 		t.Fatalf("second process made its own record or lost the first's change: %+v vs %+v", rb, ra)
 	}
-	if _, err := a.Update(ra, func(r *Rec) { r.ToggleArchived(now) }); err != nil {
+	if _, err := a.Update(ra, func(r *Rec) { r.ToggleArchived().Apply(r, now) }); err != nil {
 		t.Fatal(err)
 	}
 	c := &Store{Path: path}

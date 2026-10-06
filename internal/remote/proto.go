@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/oxsean/fav/internal/capture"
+	"github.com/oxsean/fav/internal/index"
 	"github.com/oxsean/fav/internal/tend"
 )
 
@@ -20,6 +21,12 @@ const (
 	MChecks   = "checks"
 	MLive     = "live"
 	MEcho     = "echo"
+	MQuery    = "query"
+	MPut      = "put"
+	MGrep     = "grep"
+	MHits     = "hits"
+	MTrash    = "trash"
+	MRestore  = "restore"
 )
 
 type HelloParams struct {
@@ -139,6 +146,7 @@ type MessagesParams struct {
 	Before int64  `json:"before"` // < 0: from the end
 	N      int    `json:"n"`
 	File   string `json:"file,omitempty"`
+	Find   string `json:"find,omitempty"` // message-search keywords: each message carries the spans they match
 }
 
 type TextParams struct {
@@ -173,4 +181,131 @@ type Checks struct {
 
 type Live struct {
 	Live map[string]capture.Live `json:"live"`
+}
+
+// ProjectDirs is a project the viewer sees and its directories on the machine that answers.
+type ProjectDirs struct {
+	ID   string   `json:"id"`
+	Name string   `json:"name"`
+	Dirs []string `json:"dirs"`
+}
+
+// Cursor is where a row falls in an order (tend.Cursor): a page resumes after one.
+type Cursor = tend.Cursor
+
+// QueryParams is a query of this machine's sessions, read with tend.Parse as this machine's own (host: is the
+// caller's to apply; this machine ignores it).
+type QueryParams struct {
+	Q        string            `json:"q"`
+	All      bool              `json:"all,omitempty"`  // not only favorites
+	Sort     string            `json:"sort,omitempty"` // active (default) | started | favorited | turns
+	Limit    int               `json:"limit"`          // 1..500
+	After    *Cursor           `json:"after,omitempty"`
+	Projects []ProjectDirs     `json:"projects,omitempty"`
+	Also     map[string]string `json:"also,omitempty"`  // session id → its task's text, which keywords match too
+	Fresh    bool              `json:"fresh,omitempty"` // refresh the index first
+}
+
+// Row is a listed session.
+type Row struct {
+	Session
+	Project   string        `json:"project_id,omitempty"` // the project it belongs to, of those given
+	Live      *capture.Live `json:"live,omitempty"`
+	DeletedAt *time.Time    `json:"deleted_at,omitzero"` // status:trash: when it was moved into the trash
+}
+
+// Facets count the rows in the query's scope by what each picker offers (index.Facets).
+type Facets = index.Facets
+
+type QueryResult struct {
+	Rows    []Row        `json:"rows"`
+	Next    *Cursor      `json:"next,omitempty"`
+	Total   int          `json:"total"`   // rows in scope
+	Matched int          `json:"matched"` // rows q picks
+	Running int          `json:"running"` // of those, running now
+	Facets  Facets       `json:"facets"`
+	Tokens  []tend.Token `json:"tokens"`
+	Status  string       `json:"status,omitempty"` // agent: rows not listed here (the TUI's only)
+	// TrashDays: this machine's trash_days, after which a trashed session is purged (0: never).
+	TrashDays int `json:"trash_days,omitempty"`
+}
+
+// PutParams writes a patch to a session's record; a session without one gets one (not a favorite).
+type PutParams struct {
+	Ref
+	Patch  tend.Patch `json:"patch"`
+	Expect *time.Time `json:"expect,omitempty"` // the record's updated_at the editor saw; another answers wire.CodeStale
+}
+
+// TrashParams moves a session's files into this machine's trash, as the TUI's delete does; a running session answers
+// wire.CodeBusy.
+type TrashParams struct{ Ref }
+
+type TrashResult struct {
+	Title string `json:"title"`
+	Files int    `json:"files"` // moved into the trash
+}
+
+// RestoreParams puts a session in this machine's trash back.
+type RestoreParams struct{ Ref }
+
+type RestoreResult struct {
+	Title string `json:"title"`
+	Files int    `json:"files"` // moved back
+}
+
+type GrepParams struct {
+	Q        string            `json:"q"` // the text after >
+	All      bool              `json:"all,omitempty"`
+	Limit    int               `json:"limit"`
+	BudgetMS int               `json:"budget_ms"`
+	Projects []ProjectDirs     `json:"projects,omitempty"`
+	Also     map[string]string `json:"also,omitempty"`
+}
+
+type GrepHit struct {
+	Row      Row       `json:"row"`
+	Hits     int       `json:"hits"`
+	AllInOne bool      `json:"all_in_one"`
+	Snippet  string    `json:"snippet"`
+	Spans    [][2]int  `json:"spans,omitempty"` // byte ranges of the snippet to highlight
+	Off      int64     `json:"off"`
+	File     string    `json:"file"` // fileio.ID of the transcript the hit is in
+	At       time.Time `json:"at"`
+	Latest   time.Time `json:"latest"`
+}
+
+// Progress is how far the message-search store is built: Done of Total transcripts read.
+type Progress struct {
+	Done  int `json:"done"`
+	Total int `json:"total"`
+}
+
+type GrepResult struct {
+	Hits     []GrepHit `json:"hits"` // ranked on this machine
+	Building *Progress `json:"building,omitempty"`
+	Busy     bool      `json:"busy,omitempty"`
+	TooLong  bool      `json:"too_long,omitempty"`
+	Fixes    []string  `json:"fixes,omitempty"` // the spellings searched besides the keywords
+}
+
+type HitsParams struct {
+	Ref
+	Q     string `json:"q"`
+	Limit int    `json:"limit"`
+}
+
+// Hit is a message of one session matching the keywords.
+type Hit struct {
+	Off   int64     `json:"off"`
+	Role  string    `json:"role"` // user | assistant | tool
+	At    time.Time `json:"at"`
+	Text  string    `json:"text"`
+	Spans [][2]int  `json:"spans,omitempty"`
+	File  string    `json:"file"`
+}
+
+type HitsResult struct {
+	Hits  []Hit `json:"hits"`
+	Total int   `json:"total"`
 }

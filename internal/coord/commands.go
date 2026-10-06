@@ -100,6 +100,9 @@ type Machine struct {
 	// Sessions: the viewer may read its sessions (readsSessions); SessionShare: who else may, told its owner only.
 	Sessions     bool               `json:"sessions,omitempty"`
 	SessionShare *task.SessionShare `json:"session_share,omitempty"`
+	// RecordsRev counts the changes of its session records its node told since this coordinator started: whoever reads
+	// its sessions is pushed each one (machines.watch) and lists them again.
+	RecordsRev int `json:"records_rev,omitempty"`
 }
 
 // How a machine is reached, in Machine.Via.
@@ -134,14 +137,18 @@ const (
 
 // readMethods are the session reads node.call forwards.
 var readMethods = []string{remote.MHello, remote.MList, remote.MMessages, remote.MText, remote.MSteps, remote.MPulse,
-	remote.MChecks, remote.MLive, remote.MEcho, node.MDirs}
+	remote.MChecks, remote.MLive, remote.MEcho, remote.MQuery, remote.MGrep, remote.MHits, node.MDirs}
+
+// writeMethods are the session writes node.call forwards: the machine's owner's alone, admins and whom its sessions
+// are shared with included.
+var writeMethods = []string{remote.MPut, remote.MTrash, remote.MRestore}
 
 // Methods are the client methods.
 var Methods = []string{MStateGet, MTaskGet, MTaskCreate, MTaskEdit, MTaskStatus, MTaskUndo, MRunDispatch, MRunStop, MRunAbandon, MRunTail, MRunOutputPage, MRunOutputWatch,
 	MAgentList, MMachineList, MMachineCheck, MStateWatch, MNodeCall, MRunPreview, MRunContinue, MRunAnswer, MRunSend, MRunMessages,
 	MProjectCreate, MProjectEdit, MProjectMember, MMachineShare, MMachineDrain, MTaskStart, MTaskPause, MTaskMove,
 	MAgentDefList, MAgentDefGet, MAgentDefSave, MAgentDefCheck, MAgentDefRemove, MAgentDefShare, MAgentDefLeave, MAgentDefTransfer, MInboxList, MUserOffboard, MUserOffboardPreview, MTaskSync, MTaskLink, MTaskSourceAck, MTaskGate, MTaskMerge, MTaskPlan, MTaskPlanSave, MTaskPlanApply, MTaskMessage, MTaskMessagePreview, MRunInterrupt, MMachinesWatch, MInboxWatch,
-	MRunOutputItem, MRunOutputFind, MRunChanges, MRunDiff, MRunBlob, MProjectDirs, MProjectAttach, MProjectDetach, MSessionsList, MMachineSessions}
+	MRunOutputItem, MRunOutputFind, MRunChanges, MRunDiff, MRunBlob, MProjectDirs, MProjectAttach, MProjectDetach, MSessionsQuery, MSessionsGrep, MPeopleNames, MMachineSessions}
 
 // Bulk marks the methods whose answers are large pieces fetched on demand: a connection writes them after everything
 // else (wire.Options.Bulk).
@@ -270,12 +277,16 @@ func (c *Coord) HandlerFor(p Principal) wire.Handler {
 			if err := r.Decode(&np); err != nil {
 				return nil, err
 			}
-			if !slices.Contains(readMethods, np.Method) {
+			write := slices.Contains(writeMethods, np.Method)
+			if !write && !slices.Contains(readMethods, np.Method) {
 				return nil, forbidden(np.Method)
 			}
 			c.mu.Lock()
 			may := c.readsSessions(p, np.Machine)
-			if np.Method == node.MDirs {
+			switch {
+			case write:
+				may = c.ownerOf(np.Machine) == p.User
+			case np.Method == node.MDirs:
 				may = p.Admin || c.ownerOf(np.Machine) == p.User
 			}
 			c.mu.Unlock()
@@ -349,8 +360,12 @@ func (c *Coord) HandlerFor(p Principal) wire.Handler {
 			return c.command(p, r, c.projectAttach, projectView)
 		case MProjectDetach:
 			return c.command(p, r, c.projectDetach, projectView)
-		case MSessionsList:
-			return c.sessionsList(ctx, p, r)
+		case MSessionsQuery:
+			return c.sessionsQuery(ctx, p, r)
+		case MSessionsGrep:
+			return c.sessionsGrep(ctx, p, r)
+		case MPeopleNames:
+			return c.peopleNames(p, r)
 		case MMachineShare:
 			return c.command(p, r, c.machineShare, shareView)
 		case MMachineDrain:
@@ -872,7 +887,7 @@ func (c *Coord) machineList() []Machine {
 // machineView is how m stands; the caller holds mu.
 func (c *Coord) machineView(m *machine) Machine {
 	x := Machine{Name: m.name, Slots: c.slots(m.name), OS: m.hello.OS, NodeID: m.hello.NodeID, Hostname: m.hello.Hostname, Version: m.hello.Version, Share: m.hello.Share,
-		Agents: m.checks, Via: ViaLocal}
+		Agents: m.checks, Via: ViaLocal, RecordsRev: m.records}
 	if !m.checkedAt.IsZero() {
 		at := m.checkedAt
 		x.CheckedAt = &at
@@ -941,6 +956,9 @@ func (c *Coord) machinesFor(p Principal, ms []Machine) []Machine {
 			continue
 		}
 		m.Sessions = c.readsSessions(p, m.Name)
+		if !m.Sessions {
+			m.RecordsRev = 0
+		}
 		if sh := c.st.Shares[m.Name]; sh != nil && sh.Sessions != nil && c.ownerOf(m.Name) == p.User {
 			cp := *sh.Sessions
 			m.SessionShare = &cp

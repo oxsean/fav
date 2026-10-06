@@ -124,6 +124,30 @@ func TestMessagesPaging(t *testing.T) {
 	}
 }
 
+// TestMessagesBeforeInsideALineEndWithIt: a page read to just past a message's offset (a search hit's) ends with that
+// message; one read to a line start (a page's From) leaves the line there out, as before.
+func TestMessagesBeforeInsideALineEndWithIt(t *testing.T) {
+	p := writeFile(t, "hit.jsonl", `{"type":"user","timestamp":"2026-09-12T15:15:38Z","message":{"content":"第一句"}}
+{"type":"assistant","timestamp":"2026-09-12T15:16:00Z","message":{"content":[{"type":"text","text":"命中这句"},{"type":"tool_use","name":"Bash"}]}}
+{"type":"user","timestamp":"2026-09-12T15:17:00Z","message":{"content":[{"type":"tool_result","content":"ok"}]}}
+{"type":"user","timestamp":"2026-09-12T15:18:00Z","message":{"content":"第三句"}}`)
+	all := Messages(p, -1, 10).Msgs
+	if len(all) != 3 || all[1].Text != "命中这句" {
+		t.Fatalf("%+v", all)
+	}
+	for _, before := range []int64{all[1].Off + 1, all[0].Off - 1} {
+		if got := Messages(p, before, 2); len(got.Msgs) != 2 || got.Msgs[0].Text != "命中这句" || got.From != all[2].Off || !got.Done {
+			t.Errorf("before %d: %+v", before, got)
+		}
+	}
+	if got := Messages(p, all[1].Off, 1).Msgs; len(got) != 1 || got[0].Text != "第一句" {
+		t.Errorf("before a line start: %+v", got)
+	}
+	if got := Messages(p, all[0].Off+3, 1).Msgs; len(got) != 1 || got[0].Text != "第三句" || len(got[0].Steps) != 0 {
+		t.Errorf("before inside the last line, which has no newline: %+v", got)
+	}
+}
+
 // over 16KB is truncated in memory and re-read by offset for the full text
 func TestTextFull(t *testing.T) {
 	long := strings.Repeat("长", 20000)

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/oxsean/fav/internal/remote"
+	"github.com/oxsean/fav/internal/tend"
 	"github.com/oxsean/fav/internal/wire"
 )
 
@@ -23,7 +24,7 @@ const (
 	MRunSend      = "run.send"      // a message for a running stream run (SendParams)
 	MRunInterrupt = "run.interrupt" // end a turn of a running stream run (InterruptParams)
 	MAgents       = "node.agents"   // how each agent CLI stands here
-	MChanged      = "node.changed"  // push: a run's state changed
+	MChanged      = "node.changed"  // push: a run's state changed, or the favorites store
 )
 
 type RunRef struct {
@@ -163,12 +164,14 @@ var Methods = []string{MRunStart, MRunStop, MRunList, MRunTail, MRunLine, MRunRe
 var Features = []string{FeatureDispatcher, FeatureAgentDef, FeatureVerdict, FeatureCheck, FeatureWorktree, FeatureFiles, FeaturePlan, FeatureBeforeRun,
 	FeatureInputMarks, FeatureInterrupt, FeatureAnswerScope, FeatureIgnoreSpace}
 
-// watchEvery is how often Watch looks at the runs.
-const watchEvery = 3 * time.Second
+// watchEvery is how often Watch looks at the runs and the favorites store.
+var watchEvery = 3 * time.Second
 
-// Watch calls changed with the runs whose state moved, until done closes.
-func (n *Node) Watch(done <-chan struct{}, changed func(runs []string)) {
+// Watch pushes what changed (runs whose state moved, records.jsonl written) until done closes.
+func (n *Node) Watch(done <-chan struct{}, push func(Changed)) {
 	var revs map[string]int
+	records := filepath.Join(filepath.Dir(n.Dir), tend.RecordsFile)
+	stamp := tend.Stamp(records)
 	t := time.NewTicker(watchEvery)
 	defer t.Stop()
 	for {
@@ -178,7 +181,7 @@ func (n *Node) Watch(done <-chan struct{}, changed func(runs []string)) {
 		case <-t.C:
 		}
 		ents, _ := os.ReadDir(filepath.Join(n.Dir, "runs"))
-		var moved []string
+		var ch Changed
 		first := revs == nil
 		if first {
 			revs = map[string]int{}
@@ -193,17 +196,21 @@ func (n *Node) Watch(done <-chan struct{}, changed func(runs []string)) {
 				key = -1
 			}
 			if old, ok := revs[e.Name()]; !first && (!ok || old != key) {
-				moved = append(moved, e.Name())
+				ch.Runs = append(ch.Runs, e.Name())
 			}
 			revs[e.Name()] = key
 		}
-		if len(moved) > 0 {
-			changed(moved)
+		if st := tend.Stamp(records); st != stamp {
+			stamp, ch.Records = st, true
+		}
+		if len(ch.Runs) > 0 || ch.Records {
+			push(ch)
 		}
 	}
 }
 
 // Changed is a node.changed push.
 type Changed struct {
-	Runs []string `json:"runs"`
+	Runs    []string `json:"runs"`
+	Records bool     `json:"records,omitempty"` // this machine's favorites store was written
 }

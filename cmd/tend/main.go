@@ -549,7 +549,7 @@ func cmdStatus(cmd string, args []string) error {
 	if len(pos) != 2 || !tend.ValidStatus(pos[1]) {
 		return errors.New(i18n.T("cli.status.usage"))
 	}
-	r, err := update(pos[0], func(r *tend.Rec) { r.Status = pos[1] })
+	r, err := update(pos[0], tend.Patch{Status: &pos[1]})
 	if err != nil {
 		return err
 	}
@@ -565,18 +565,11 @@ func cmdFlag(cmd string, args []string) error {
 	}
 	now := time.Now()
 	msg := map[string]string{"favorite": "cli.favorited", "unfavorite": "cli.unfavorited", "archive": "status.archived", "unarchive": "cli.unarchived"}[cmd]
-	r, err := update(first(pos), func(r *tend.Rec) {
-		switch cmd {
-		case "favorite":
-			r.FavoritedAt = &now
-		case "unfavorite":
-			r.FavoritedAt = nil
-		case "archive":
-			r.ArchivedAt = &now
-		case "unarchive":
-			r.ArchivedAt = nil
-		}
-	})
+	p := map[string]tend.Patch{ // favorite and archive take the time again
+		"favorite": {Favorite: new(true), FavoritedAt: &now}, "unfavorite": {Favorite: new(false)},
+		"archive": {Archived: new(true), ArchivedAt: &now}, "unarchive": {Archived: new(false)},
+	}[cmd]
+	r, err := update(first(pos), p)
 	if err != nil {
 		return err
 	}
@@ -584,17 +577,17 @@ func cmdFlag(cmd string, args []string) error {
 	return nil
 }
 
-func update(ref string, change func(*tend.Rec)) (*tend.Rec, error) {
+// update writes p to the record ref names, here or on its machine.
+func update(ref string, p tend.Patch) (*tend.Rec, error) {
 	s, err := tend.Open()
 	if err != nil {
 		return nil, err
 	}
-	r, err := pickLocal(s, ref)
+	r, err := remotePick(s, ref)
 	if err != nil {
 		return nil, err
 	}
-	r, err = s.Update(r, change)
-	return r, err
+	return writeRec(s, r, p, nil)
 }
 
 func cmdPin(cmd string, args []string) error {

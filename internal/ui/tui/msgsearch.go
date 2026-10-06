@@ -155,14 +155,18 @@ func (m *Model) runMsgSearch(seq int) tea.Cmd {
 	ctx, cancel := context.WithCancel(context.Background())
 	m.msg.cancel = cancel
 	recs := append([]*tend.Rec(nil), m.msg.cands...)
-	cands := fulltext.Cands(recs, m.idx.PathsBySession())
-	kw, key, dir := m.msgKeywords(), m.msg.want, fulltext.Dir()
+	copies := make([]*tend.Rec, len(recs)) // ⚠️ the search runs off the main loop, which keeps editing the records
+	for i, r := range recs {
+		cp := *r
+		copies[i] = &cp
+	}
+	bySession, kw, key, dir := m.idx.PathsBySession(), m.msgKeywords(), m.msg.want, fulltext.Dir()
 	return func() tea.Msg {
-		res := fulltext.Search(ctx, dir, cands, kw)
+		found := fulltext.Find(ctx, dir, copies, bySession, kw)
 		if ctx.Err() != nil {
 			return nil
 		}
-		return msgResultMsg{seq, key, recs, res}
+		return msgResultMsg{seq, key, recs, found.Results}
 	}
 }
 

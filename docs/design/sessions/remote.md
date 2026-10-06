@@ -42,7 +42,7 @@
 - 机器名单：`machine.list` 里 `sessions` 为真的机器（看的人能读它的会话），去掉本机（`node_id` 等于本机 `<数据目录>/node/id` 的那台）；主人是看的人（`hello.caller`）的算「自己的」，可以写盘。名单变了随时换。还没连上时先用盘上缓存目标是「这个 server + 机器名」的那几台（都是自己的）。
 - 连不上 server：自己的机器显示缓存，标「离线 · n 分钟前」；顶栏不再一台台列，合成一句「连不上 server：原因 · 别的机器显示缓存」（项目页写「项目分组暂时按目录」）；别人共享的机器不显示；本机会话照常。命令行只在 stderr 打这一句。
 - 旧 server（机器名单里没有 `node_id`）：认不出本机，本机会话照样本地读，不归项目，底栏提示一次；它也不给 `sessions`，所以别的机器一台都不列。
-- 别人共享的机器（`sessions` 为真、主人不是看的人）只读：卡片、右栏状态行在 `@机器` 后写「只读 · <主人>」，右栏的「恢复目标」和恢复前的检查换成「只读」和「<主人> 共享给你的会话：不能在这里恢复，也不能建成任务」；Enter（和 Space）打开对话，底栏写「Enter 看对话」；`r` 和命令面板的「建成任务」闪这一句，不开对话框；写记录的键见「远端行只读」。主人写 `Machine.owner`（用户 id：协调器不给客户端用户名）。
+- 别人共享的机器（`sessions` 为真、主人不是看的人）只读：卡片、右栏状态行在 `@机器` 后写「只读 · <主人>」，右栏的「恢复目标」和恢复前的检查换成「只读」和「<主人> 共享给你的会话：不能在这里恢复，也不能建成任务」；Enter（和 Space）打开对话，底栏写「Enter 看对话」；`r` 和命令面板的「建成任务」闪这一句，不开对话框；写记录的键见「远端行的写入」。主人是 `Machine.owner` 经协调器 `people.names` 换成的名字（每条连接缓存，没缓存的 id 一次批量问；连接换了或状态流推 `reset` 时清空；旧 server 没有这个方法，照旧写 id）。
 - server 给出完整名单（有 `hello.caller`、不是旧 server）时，盘上缓存目标是这个 server、而名单里已不是自己的机器（换了主人、改成别人共享给你、或不在名单里了），整个缓存目录删掉（`NodeCall.Forget`）；连不上 server、只剩自己的机器时不删。
 
 ## 远端协议
@@ -58,10 +58,17 @@
   - 时间一律用 RFC3339 格式并带时区偏移，到本机后转成本机时区；路径一律按字符串传递，不经过任何一端的 `filepath` 处理。
 - **握手**：`hello` 先行，返回协议号、tend 版本、操作系统、架构、端点 id、主机名、WSL 发行版、home、路径分隔符、Claude / Codex 的配置目录、支持的方法列表（见 [wire.md](../runs/wire.md)「握手与版本」）。协议号不兼容时，本机提示「远端 tend 需要更新」，不强行读取。
 - **方法**：
-  - 已有：`hello`、`list`（整份返回）、`messages`、`text`（全文，按偏移读）、`steps`、`pulse`、`checks`、`live`、`echo`（中文往返自检）。
-  - 未实现：`list` 的 since 游标增量、`grep`（跨机器搜消息）、`memory.ls`、`env`；写 `put`（字段补丁，带预期版本号和请求 id）；迁移 `import.*`（见 [migration.md](migration.md)「Claude 完整迁移」）。
+  - 已有：`hello`、`list`（整份返回）、`query`（筛选、排序、分页后的一页，见「列表与写入」）、`put`（写一条记录，同上）、`trash` / `restore`（删除到那台机器的回收站、还原，同上）、`grep`（搜消息，`{q, all, limit, budget_ms, projects, also}` → `{hits, building, busy, too_long, fixes}`）、`hits`（一个会话里的命中，`{provider, session_id, q, limit}` → `{hits, total}`）、`messages`（带 `find` 时每条消息带高亮的 `spans`）、`text`（全文，按偏移读）、`steps`、`pulse`、`checks`、`live`、`echo`（中文往返自检）。搜消息这三处的做法见 [index-and-search.md](index-and-search.md)「搜消息」的「节点」。
+  - 未实现：`list` 的 since 游标增量、`memory.ls`、`env`；迁移 `import.*`（见 [migration.md](migration.md)「Claude 完整迁移」）。
   - 新方法按 `hello.methods` 协商；新方法要在 `methods` 里登记名字、在 `local.go` 里有处理函数，读 transcript 的还要在 `local` 和 `far` 两个 `Source` 上各有一个方法。
-- **预算与部分结果**（未实现）：每个读请求都带时间预算。远端索引或全文库没准备好时，先返回已有数据和进度，并标记为部分结果，不在前台等它补建完；请求可以取消。现在只有调用方超时：等不到就放弃这一次调用。
+- **预算与部分结果**：`grep` 带 `budget_ms`，正文库在预算内没建完就先回已搜到的和进度 `building`，节点在后台接着建。其余读请求（索引没准备好时的 `list` / `query` 等）未实现：只有调用方超时，等不到就放弃这一次调用。
+- **列表与写入**（`query`、`put`、`trash`、`restore`；类型在 `proto.go`）：
+  - `query{q, all, sort, limit, after, projects, also, fresh}` → `{rows, next, total, matched, running, facets, tokens, status, trash_days}`。节点按本机列表的做法回答：`tend.Parse(q)` 读成本机的查询（`host:` 是调用方用来挑机器的，节点忽略），`all` 是 `Query.All`；`projects`（看的人看得见的项目和它们在这台机器上的目录）组成 `Rows.Belong`（`task.ProjectOf`，和协调器同一条规则），`also`（会话 id → 关联任务的文字）给关键词匹配；先 `Rows.List(…, q.Scope())`，再 `index.Select` 排序、分页、计数（见 [index-and-search.md](index-and-search.md)「查询语法」）。默认值照 TUI：未归档、没收藏的至少 3 轮。`limit` 1–500，`sort` 是 `active`（默认）/ `started` / `favorited` / `turns`，别的回 `bad_request`；`after` 是上一页的 `next`（keyset 游标）。`rows` 是 `Row{Session, project_id, live, deleted_at}`。`status:trash` 列这台机器的回收站：走 `Rows.List` 的回收站分支，行和 TUI 回收站里的一样（`updated_at` 是删除时间，对话指向回收站里的那份），每行另带 `deleted_at`。`status:agent` 回空的 `rows` 和 `status`：一次性 agent 会话只在 TUI 里看。`trash_days` 是这台机器配置的天数（超过就清掉，0 不清），每个回答都带，删除确认要写它。`tokens` 是 `tend.Tokens(q)`。索引在上次刷新 5 秒内不再刷新（几千个文件就是几千次 stat），带 `fresh` 时强制刷新；收藏库有变化每次都重载。
+  - `put{provider, session_id, patch, expect}` → 写后的那一行（`Row`，不带 `project_id`：调用方没给项目，补丁也改不了目录）。补丁是 `tend.Patch`（设值语义，见 [favorites.md](favorites.md)「读写语义」），经 `Store.Edit` 写：没收藏的会话写下去就有了记录，但不是收藏，和 TUI 的 `editRec` 一样。带 `expect`（编辑的人看到的 `updated_at`）而记录的不同时回 `stale`，什么都不写；会话原来没有记录时 `expect` 不比，除非这期间有了记录。记录被删回 `not_found`；空补丁、不认识的状态、空标题回 `bad_request`。只有编辑框带 `expect`；收藏、完成、归档的补丁重复执行结果一样，不需要请求 id。
+  - `trash{provider, session_id}` → `{title, files}`（移进回收站的文件数）：和 TUI 的删除同一个函数 `index.TrashSession`（续接链上每个 id 的文件、钉住的副本一起移走，记录留墓碑，索引忘掉移走的文件）。在跑的会话（`capture.LocalLive`）回 `busy`，什么都不动；找不到回 `not_found`。
+  - `restore{provider, session_id}` → `{title, files}`：和 TUI 的还原同一个函数 `index.RestoreSession`，之后刷新索引，下一次 `query` 就列出它。不在回收站回 `not_found`。
+  - 回收站里的会话照样能读：`messages`、`text`、`steps`、`pulse`、`checks` 找不到记录时看回收站，读那里的那份；`put` 和 `hits` 不看，`put` 回 `not_found`。
+  - 节点的 `share_sessions` 对这几个方法的约束见 [node.md](../runs/node.md)「会话的可见范围」。
 - **协议数据结构单独定义**：不直接把存储里的 `Rec` 拿来当协议。`Session` 是字段白名单（标题、摘要、标签、路径、时间、轮数等，不含消息）；存储里带 `json:"-"` 的字段（轮数、最后活动时间、改过的文件等）在 `Session` 里都有。列表或筛选要用的新字段加进 `SessionOf` 和 `Session.Rec`（时间转成本机时区）。
 
 ## 标识
@@ -124,11 +131,11 @@
 
 | 功能 | 做法 |
 |---|---|
-| 列表 | 整份拉取，不做增量游标（since 游标和在远端执行过滤：未实现）。卡片多一个「机器」标记；筛选 `host:` / `machine:`：不写 = 只看本机，`all` = 所有机器，其余是机器名（CLI 遇到没配置的名字会提示） |
+| 列表 | TUI 和 CLI 整份拉取（`list`），不做增量游标，缓存的整份列表在本机经 `index.Select` 筛选；节点也能在那边筛选、分页（`query`，见「列表与写入」）。卡片多一个「机器」标记；筛选 `host:` / `machine:`：不写 = 只看本机，`all` = 所有机器，其余是机器名（CLI 遇到没配置的名字会提示） |
 | 右栏对话 | 经记录来源接口按页读取，每次取 40 句；按偏移读取的游标带上文件身份，文件变了就重新定位 |
-| 搜消息 | 未实现。打字时只搜本机；按 Enter 提交后，才并行去问各台机器。远端返回「是否全中、机内排名、命中数、命中偏移」，本机按档位和名次交错合并（各机器的分数按各自语料算，不能直接比）；能取消，也能只显示已返回的部分。现在远端行上 `\` 和 `→` 不查本机正文库，只在右栏已加载的消息里一处处跳 |
+| 搜消息 | 节点回答 `grep`（本机排名、命中数、是否一条全中、片段和高亮、偏移，不回分数）、`hits` 和 `messages` 的 `find`（见「方法」）。Web 的会话页按 Enter 才搜，协调器 `sessions.grep` 并行问各台读得了会话的机器，按档位和名次交错合并（各机器的分数按各自语料算，不能直接比），没建完正文库的那台标进度。TUI 照旧只搜本机：远端行上 `\` 和 `→` 不查本机正文库，只在右栏已加载的消息里一处处跳 |
 | Agents | 各机器在跑的会话合在一起，标出机器。远端 Agents 卡片只显示远端自己的运行状态，不查本机按 session id 记的 pulse 和关注状态 |
-| 收藏 / 状态 / 编辑 | 远端行只读（见「远端行只读」）。计划：写到会话所在的那台机器，走 `put`：字段补丁 + 预期版本号（对不上就拒绝，本机刷新后重试）+ 请求 id（重试不会重复执行）；Windows 上的记录文件锁已是进程间锁（`LockFileEx`） |
+| 收藏 / 状态 / 编辑 / 删除 | 经节点的 `put`、`trash`、`restore`（见「列表与写入」）写到会话所在的那台机器；TUI 和 CLI 的远端行见「远端行的写入」（删除和还原还不经节点）。Windows 上的记录文件锁是进程间锁（`LockFileEx`） |
 | 恢复 | 见「恢复」 |
 | 项目对应关系 | 未实现。用户确认过一次的「这台机器的哪个目录对应那台机器的哪个目录」，记下来以后直接用。首次猜测时先读 `~/.claude.json` 的 `githubRepoPaths` 和 Codex 的 `git_origin_url`，读不到再扫描目录；同一个 remote 对应多个目录时让用户选 |
 
@@ -142,9 +149,17 @@
   - 没有同名项或对不上：对话框给在那台机器上执行的恢复命令（`cd <目录> && <agent> resume <id>`，引号按 server 报的那台机器的系统：Windows 用 PowerShell，其余 POSIX），主按钮复制，同网页；命令行的 `tend resume` 打印这条命令并失败退出，fzf 的复制复制它。
   - 别人共享的机器不给恢复：TUI 里 Enter 打开对话，命令行拒绝。
 
-### 远端行只读
+### 远端行的写入
 
-收藏、状态、标签、归档、删除、搬目录、在本机打开都拒绝，并提示到那台机器上做；拦截不看焦点，删除和搬目录的入口再各拦一次。`Store` 也拒绝写入 `Rec.Host` 非空的记录。别人共享的机器的行提示换成「<主人> 共享给你的会话在这里只读：只能看对话」（原句说可以恢复，对它不成立）。
+- 自己的机器（单机模式下 `config.hosts` 的全部；server 模式下主人是看的人的）：收藏、状态（`x` 和 `tend status` / `done`）、归档、编辑（标题、标签、摘要）经那台机器的 `put` 写，补丁和本机行同一个 `tend.Patch`。`Hosts.Put(ctx, 机器, ref, patch, expect)` 经传输的 `Call` 发出，ssh 和 `node.call` 一样；回答的行换掉缓存里那一行（没有就补上），缓存照「两种传输」的写盘规则落盘。只有编辑框带 `expect`（打开时那条记录的 `updated_at`），对不上回 `stale`；开关和撤销不带。
+- TUI：按键时取补丁，后台发 `put`，后台只读值的拷贝；回答回来才把新值原地拷进同一行（指针不变），再闪一句、给撤销，和本机行同一段代码，所以撤销窗口从回答到达时算起，撤销也是一次 `put`。之前这一行仍是旧值。
+- 写不了时按键只闪一句，不开编辑框：
+  - 别人共享的机器：「<主人> 共享给你的会话在这里只读：只能看对话」；
+  - server 模式下连不上 server：「连不上 server，改不了别的机器上的会话：<原因>」；
+  - 那台的 tend 旧（上次 `hello` 的 `methods` 里没有 `put`；没取到过 `hello` 的，`Hosts.Put` 不发请求，回 `unknown_method`）：「<机器> 的 tend 旧：先 `tend hosts install <机器>`」；
+  - 发出去失败：`stale` 说「这条记录刚被别处改过」，其余写「改不了 <机器> 上的会话：<原因>」，行不变。
+- CLI：`favorite` / `unfavorite` / `archive` / `unarchive` / `status` / `done` / `edit` 和 fzf 的 `fzf-pick toggle*` 接受 `host:sid`（`remotePick`、`writeRec`）。server 模式下先拨 server，拨不上、或机器是别人共享的就拒绝；`edit` 先从那台重读这一行，再开编辑器。
+- 删除、搬目录、钉住、在本机打开、交接、分叉仍只在本机做：TUI 提示「其它机器上的会话在这里能收藏、改状态、归档和编辑，其余到那台机器上做」，拦截不看焦点，删除和搬目录的入口再各拦一次；CLI 拒绝。节点虽然有 `trash` / `restore`（网页经 `node.call` 用），TUI 的 `D`、回收站里的还原和 `tend rm` / `tend trash --restore` 不对远端行发它们。`Store` 拒绝写入 `Rec.Host` 非空的记录。
 
 ### TUI
 
@@ -209,4 +224,4 @@ server 模式下同样守 30 秒：
 
 ## 未实现
 
-记忆、项目对应关系、远端写（`put`）、跨机器搜消息、迁移、环境诊断、增量列表、读请求的时间预算与部分结果、`cache: meta | none`。迁移、记忆和环境诊断的设计见 [migration.md](migration.md)。
+记忆、项目对应关系、TUI 跨机器搜消息、迁移、环境诊断、增量列表、`grep` 以外读请求的时间预算与部分结果、`cache: meta | none`。迁移、记忆和环境诊断的设计见 [migration.md](migration.md)。

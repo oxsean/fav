@@ -18,6 +18,7 @@ import (
 	"github.com/oxsean/fav/internal/i18n"
 	"github.com/oxsean/fav/internal/index"
 	"github.com/oxsean/fav/internal/projects"
+	"github.com/oxsean/fav/internal/remote"
 	"github.com/oxsean/fav/internal/skin"
 	"github.com/oxsean/fav/internal/task"
 	"github.com/oxsean/fav/internal/tend"
@@ -30,12 +31,12 @@ func TestFrameLinesFillWidth(t *testing.T) {
 	states := []string{"", "detail", "projects", "syntax", "picker", "help", "help-input", "resume", "resume-edit", "edit",
 		"edit-summary", "settings", "settings-ide", "palette", "status", "delete", "start", "message", "handoff", "peek", "remote", "remote-resume",
 		"projects-grouped", "project-file", "project-edit", "server", "server-down", "server-down-projects", "server-picker",
-		"server-shared", "server-shared-refused", "server-old", "run-there", "make-task", "make-task-project", "make-task-busy"}
+		"server-shared", "server-shared-refused", "server-old", "remote-put", "remote-old", "run-there", "make-task", "make-task-project", "make-task-busy"}
 	for _, size := range []struct{ w, h int }{{140, 40}, {120, 34}, {80, 24}, {80, 18}, {56, 20}, {50, 16}} {
 		for _, state := range states {
 			m := newModel(t, st, size.w, size.h)
 			openOverlay(m, state)
-			if layout := state == "" || state == "detail" || state == "projects" || state == "projects-grouped" || state == "syntax" || state == "remote" || strings.HasPrefix(state, "server") && state != "server-picker"; layout == m.ov.active() {
+			if layout := state == "" || state == "detail" || state == "projects" || state == "projects-grouped" || state == "syntax" || state == "remote" || state == "remote-put" || state == "remote-old" || strings.HasPrefix(state, "server") && state != "server-picker"; layout == m.ov.active() {
 				t.Fatalf("%q did not open (overlay %d)", state, m.ov.kind)
 			}
 			lines := strings.Split(m.screen(), "\n")
@@ -79,6 +80,18 @@ func openOverlay(m *Model, kind string) {
 	case "remote-resume":
 		withRemote(m)
 		m.askResume()
+	case "remote-put", "remote-old":
+		f := newFakeHost()
+		if kind == "remote-old" {
+			f.methods = []string{remote.MHello, remote.MList, remote.MLive, remote.MMessages}
+		}
+		m.useHosts(remote.NewHostsDial([]tend.Host{{Name: "mba"}}, i18n.ZH, func(tend.Host) (*remote.Client, error) { return remote.Pipe(f), nil }))
+		m.setView(viewSessions)
+		pump(m, m.fetchHost("mba"))
+		m.search.SetValue("host:mba")
+		m.refresh()
+		m.cursor = slices.IndexFunc(m.rows, func(r row) bool { return r.rec != nil && r.rec.SessionID == "r-a" })
+		key(m, map[string]string{"remote-put": "x", "remote-old": "f"}[kind])
 	case "server":
 		withServer(m)
 	case "server-down":

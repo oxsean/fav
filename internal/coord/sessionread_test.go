@@ -41,7 +41,7 @@ func TestHostsReadAMachineThroughATeamCoordinator(t *testing.T) {
 
 	n := node.New(t.TempDir())
 	n.Probe = func(string) agent.Check { return agent.Check{Installed: true, Auth: agent.AuthUnknown} }
-	toNode, nodeEnd := wire.Pipe(c.NodeOptions(), wire.Options{Handler: n.Handler(remote.NewLocal("t"))})
+	toNode, nodeEnd := wire.Pipe(c.NodeOptionsFor("mba"), wire.Options{Handler: n.Handler(remote.NewLocal("t"))})
 	t.Cleanup(func() { nodeEnd.Close() })
 	if err := c.Attach("mba", toNode, nil); err != nil {
 		t.Fatal(err)

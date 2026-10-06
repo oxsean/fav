@@ -158,7 +158,9 @@ export const methods = Object.freeze([
   'project.dirs',
   'project.attach',
   'project.detach',
-  'sessions.list',
+  'sessions.query',
+  'sessions.grep',
+  'people.names',
   'machine.sessions',
 ]);
 

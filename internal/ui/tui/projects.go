@@ -93,6 +93,7 @@ func (m *Model) setProjects(s projects.Snapshot) {
 
 // syncServed builds mode 2's snapshot from the connection: its hello, the state and the machines it pushed.
 func (m *Model) syncServed() {
+	m.pending = tea.Batch(m.pending, m.askNames())
 	if !m.served() {
 		return
 	}

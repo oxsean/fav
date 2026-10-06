@@ -187,10 +187,10 @@ func (m *Model) ownerOf(name string) string {
 	return ""
 }
 
-// hostMark: "@mba"; on a shared machine "@bobs  ·  read only · u_bob".
+// hostMark: "@mba"; on a shared machine "@bobs  ·  read only · Bob".
 func (m *Model) hostMark(r *tend.Rec) string {
 	if m.shared(r.Host) {
-		return "@" + r.Host + "  ·  " + i18n.F("remote.shared", m.ownerOf(r.Host))
+		return "@" + r.Host + "  ·  " + i18n.F("remote.shared", m.ownerName(r.Host))
 	}
 	return "@" + r.Host
 }
@@ -198,7 +198,7 @@ func (m *Model) hostMark(r *tend.Rec) string {
 // readOnlyNote is why r cannot be changed here: another machine's session, or one shared with the viewer.
 func (m *Model) readOnlyNote(r *tend.Rec) string {
 	if r != nil && m.shared(r.Host) {
-		return i18n.F("remote.shared_read_only", m.ownerOf(r.Host))
+		return i18n.F("remote.shared_read_only", m.ownerName(r.Host))
 	}
 	return i18n.T("remote.read_only")
 }

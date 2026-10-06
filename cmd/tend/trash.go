@@ -39,7 +39,7 @@ func cmdRm(args []string) error {
 	if ok, err := confirmErr(i18n.F("cli.rm.confirm", r.Title, len(files)), *yes); !ok {
 		return err
 	}
-	if _, err := index.Trash(s, r, files); err != nil {
+	if _, _, err := index.TrashSession(s, idx, r); err != nil {
 		return err
 	}
 	fmt.Print(i18n.F("cli.rm.done", r.Title, len(files)))
@@ -78,14 +78,13 @@ func cmdTrash(args []string) error {
 		if err != nil {
 			return err
 		}
-		e, force, err := index.Restore(s, hit.Provider, hit.SessionID)
+		idx, _ := index.Open()
+		e, next, err := index.RestoreSession(s, idx, hit.Provider, hit.SessionID)
 		if err != nil {
 			return err
 		}
-		if len(force) > 0 {
-			if idx, err := index.Open(); err == nil {
-				rescanned(idx, force)
-			}
+		if next != idx {
+			rescanned(next, nil)
 		}
 		fmt.Print(i18n.F("cli.trash.restored", e.Title, len(e.Files)))
 		return nil

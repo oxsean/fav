@@ -347,7 +347,8 @@ type Message struct {
 	Chars int // rune count before truncation
 	Off   int64
 	At    time.Time
-	Steps []Step // what the AI did after this message and before the next, offsets only
+	Steps []Step   // what the AI did after this message and before the next, offsets only
+	Spans [][2]int `json:"spans,omitempty"` // byte ranges of Text a message search's keywords match (messages' find)
 }
 
 func (l *transcriptLine) speech() Message {
@@ -388,8 +389,9 @@ type Page struct {
 	Err  error  `json:"-"`              // the read failed (another machine out of reach): nothing is known about the rest
 }
 
-// Messages reads chunks backwards from before (< 0 = file end) until n messages or the head;
-// lines longer than a chunk are skipped, tool steps attach to the preceding message.
+// Messages reads chunks backwards from before (< 0 = file end) until n messages or the head; before inside a line (just
+// past a search hit's offset) reads that line too. Lines longer than a chunk are skipped, tool steps attach to the
+// preceding message.
 func Messages(path string, before int64, n int) Page {
 	const chunk = 1024 * 1024
 	f, err := os.Open(path)
@@ -403,6 +405,8 @@ func Messages(path string, before int64, n int) Page {
 	}
 	if before < 0 || before > st.Size() {
 		before = st.Size()
+	} else if before > 0 {
+		before = lineEnd(f, before, st.Size(), chunk)
 	}
 	page := Page{From: before}
 	var pending []Step // tool steps newer than the current message, attached once their message is read
@@ -465,6 +469,24 @@ func Messages(path string, before int64, n int) Page {
 		page.From = 0
 	}
 	return page
+}
+
+// lineEnd is where the line holding the byte before off ends (past its newline, or the file's end): off itself when off
+// starts a line, or when the line runs on for more than limit bytes.
+func lineEnd(f *os.File, off, size, limit int64) int64 {
+	last := make([]byte, 1)
+	if _, err := f.ReadAt(last, off-1); err != nil || last[0] == '\n' {
+		return off
+	}
+	rest := make([]byte, min(size-off, limit))
+	k, _ := f.ReadAt(rest, off)
+	if i := bytes.IndexByte(rest[:k], '\n'); i >= 0 {
+		return off + int64(i) + 1
+	}
+	if size-off <= limit {
+		return size
+	}
+	return off
 }
 
 func interesting(b []byte) bool {

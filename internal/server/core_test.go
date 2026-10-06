@@ -338,6 +338,10 @@ func strictInto(t *testing.T, name string, items json.RawMessage, table any) {
 	}
 }
 
+// unplayedFrames are frame files written ahead of the page that plays them, each with the card that plays it; that
+// card removes its line.
+var unplayedFrames = map[string]string{"sessions-query": "B6-4"}
+
 // Every frame file is played by a core test, every line is one the player knows, and the frames are wire frames.
 func TestEveryFrameFileIsPlayed(t *testing.T) {
 	files, _ := filepath.Glob(filepath.Join("webtest", "frames", "*.jsonl"))
@@ -350,7 +354,10 @@ func TestEveryFrameFileIsPlayed(t *testing.T) {
 	keys := []string{"c", "s", "raw", "connect", "refuse", "drop", "dialing", "wait_ms", "step", "note"}
 	for _, f := range files {
 		name := strings.TrimSuffix(filepath.Base(f), ".jsonl")
-		if !strings.Contains(src.String(), "play('"+name+"'") {
+		played := strings.Contains(src.String(), "play('"+name+"'")
+		if card := unplayedFrames[name]; card != "" && played {
+			t.Errorf("%s is played now (%s): remove it from unplayedFrames", name, card)
+		} else if card == "" && !played {
 			t.Errorf("%s: no test plays it", name)
 		}
 		b, _ := os.ReadFile(f)
@@ -506,6 +513,7 @@ func TestFrameWritesAndListsAreTheCoordinatorsShapes(t *testing.T) {
 		coord.MAgentDefSave: func() any { return new(coord.AgentDefSave) }, coord.MAgentDefShare: func() any { return new(task.AgentDefShare) },
 		coord.MAgentDefRemove: func() any { return new(task.AgentDefRef) }, coord.MMachineCheck: func() any { return new(coord.MachineCheck) },
 		coord.MMachineDrain: func() any { return new(task.DrainSet) }, coord.MAgentDefCheck: func() any { return new(coord.AgentDefSave) },
+		coord.MSessionsQuery: func() any { return new(coord.SessionsQuery) }, coord.MPeopleNames: func() any { return new(coord.PeopleParams) },
 	}
 	results := map[string]func() any{
 		coord.MTaskStatus: func() any { return new(task.Task) }, coord.MTaskUndo: func() any { return new(task.Task) },
@@ -526,7 +534,8 @@ func TestFrameWritesAndListsAreTheCoordinatorsShapes(t *testing.T) {
 		coord.MProjectDirs: func() any { return new(coord.ProjectDirs) }, coord.MAgentDefList: func() any { return new(coord.AgentDefList) },
 		coord.MAgentDefSave: func() any { return new(coord.AgentDefView) }, coord.MAgentDefShare: func() any { return new(coord.AgentDefView) },
 		coord.MMachineCheck: func() any { return new(coord.MachineChecks) }, coord.MMachineDrain: func() any { return new(task.Drain) },
-		coord.MAgentDefCheck:        func() any { return new(coord.AgentDefCheck) },
+		coord.MAgentDefCheck: func() any { return new(coord.AgentDefCheck) },
+		coord.MSessionsQuery: func() any { return new(coord.SessionsPage) }, coord.MPeopleNames: func() any { return new(coord.People) },
 		"node.call:" + remote.MList: func() any { return new(remote.List) }, "node.call:" + remote.MLive: func() any { return new(remote.Live) },
 		"node.call:" + remote.MMessages: func() any { return new(capture.Page) }, "node.call:" + remote.MText: func() any { return new(remote.Text) },
 	}
@@ -591,7 +600,8 @@ func TestFrameWritesAndListsAreTheCoordinatorsShapes(t *testing.T) {
 		coord.MTaskStart, coord.MTaskMerge, coord.MTaskMove, coord.MTaskPlanSave, coord.MTaskPlanApply, coord.MTaskGate, coord.MTaskSourceAck,
 		coord.MRunPreview, coord.MAgentList, coord.MTaskMessage, coord.MRunInterrupt, coord.MRunChanges, coord.MRunDiff, coord.MRunOutputItem, coord.MMachineShare, coord.MProjectCreate, coord.MProjectMember, coord.MProjectEdit, coord.MProjectDirs,
 		coord.MAgentDefList, coord.MAgentDefSave, coord.MAgentDefShare, coord.MAgentDefRemove, coord.MMachineCheck, coord.MMachineDrain, coord.MAgentDefCheck, "machines", "inbox",
-		"node.call:" + remote.MList, "node.call:" + remote.MLive, "node.call:" + remote.MMessages, "node.call:" + remote.MText, coord.PushAffordances, "affordances part"} {
+		"node.call:" + remote.MList, "node.call:" + remote.MLive, "node.call:" + remote.MMessages, "node.call:" + remote.MText, coord.PushAffordances, "affordances part",
+		coord.MSessionsQuery, coord.MPeopleNames} {
 		if seen[m] == 0 {
 			t.Errorf("no frame file has %s", m)
 		}

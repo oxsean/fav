@@ -29,11 +29,14 @@ type fakeHost struct {
 	live     map[string]capture.Live
 	msgs     []capture.Message
 	calls    map[string]int
+	methods  []string    // what its hello lists
+	expects  []time.Time // the expect each put carried, zero for none
 }
 
 func newFakeHost() *fakeHost {
 	now := time.Now()
-	f := &fakeHost{calls: map[string]int{}, live: map[string]capture.Live{"r-live": {Status: "working"}}}
+	f := &fakeHost{calls: map[string]int{}, live: map[string]capture.Live{"r-live": {Status: "working"}},
+		methods: []string{remote.MHello, remote.MList, remote.MLive, remote.MMessages, remote.MPut}}
 	for i, title := range []string{"远端分页排障", "remote websocket fix", "远端正在跑的"} {
 		id := []string{"r-a", "r-b", "r-live"}[i]
 		f.sessions = append(f.sessions, remote.Session{Provider: tend.ProviderClaude, SessionID: id, Title: title,
@@ -53,7 +56,33 @@ func (f *fakeHost) Handle(_ context.Context, method string, params json.RawMessa
 	f.calls[method]++
 	switch method {
 	case remote.MHello:
-		return remote.Hello{Proto: wire.Proto, Version: "test"}, nil
+		return remote.Hello{Proto: wire.Proto, Version: "test", Methods: f.methods}, nil
+	case remote.MPut:
+		if !slices.Contains(f.methods, remote.MPut) {
+			break
+		}
+		var p remote.PutParams
+		json.Unmarshal(params, &p)
+		var at time.Time
+		if p.Expect != nil {
+			at = *p.Expect
+		}
+		f.expects = append(f.expects, at)
+		i := slices.IndexFunc(f.sessions, func(s remote.Session) bool { return s.Provider == p.Provider && s.SessionID == p.SessionID })
+		if i < 0 {
+			return nil, &wire.Error{Code: wire.CodeNotFound}
+		}
+		if p.Expect != nil && !f.sessions[i].UpdatedAt.Equal(*p.Expect) {
+			return nil, &wire.Error{Code: wire.CodeStale}
+		}
+		r := f.sessions[i].Rec("")
+		p.Patch.Apply(r, time.Now())
+		if r.ID == "" {
+			r.ID = "rec-" + r.SessionID
+		}
+		r.UpdatedAt = time.Now()
+		f.sessions[i] = remote.SessionOf(r)
+		return remote.Row{Session: f.sessions[i]}, nil
 	case remote.MList:
 		return remote.List{Sessions: slices.Clone(f.sessions)}, nil
 	case remote.MLive:
@@ -252,10 +281,15 @@ func TestRemoteResumeDialogOffersOnlyRemoteActions(t *testing.T) {
 	if !slices.Equal(labels, want) {
 		t.Fatalf("resume and copy only: %q", labels)
 	}
-	m.Update(press("f"))
-	if m.ov.kind != ovResume || m.notice != i18n.T("remote.read_only") || r.Favorite() || len(m.store.All()) != 4 {
-		t.Fatalf("f in the dialog only flashes: notice=%q", m.notice)
+	key(m, "D")
+	if m.ov.kind != ovResume || m.notice != i18n.T("remote.read_only") || len(m.store.All()) != 4 {
+		t.Fatalf("D in the dialog only flashes: notice=%q", m.notice)
 	}
+	key(m, "f")
+	if m.ov.active() || !r.Favorite() || f.called(remote.MPut) != 1 || len(m.store.All()) != 4 {
+		t.Fatalf("f in the dialog favorites it on its machine, as in the list: overlay %d, notice %q", m.ov.kind, m.notice)
+	}
+	m.Update(press("enter"))
 	_, cmd := m.Update(press("enter"))
 	s := m.result.Start
 	if !m.quitting || cmd == nil || s == nil || s.Exec != "tend" || !slices.Equal(s.Args, []string{"resume", "--terminal", "--no-herdr", "r-a"}) {
@@ -263,13 +297,14 @@ func TestRemoteResumeDialogOffersOnlyRemoteActions(t *testing.T) {
 	}
 }
 
-func TestWriteKeysOnARemoteRowOnlyFlash(t *testing.T) {
+// TestKeysPutCannotCarryOnARemoteRowOnlyFlash: moving, deleting and what opens local things stay this machine's.
+func TestKeysPutCannotCarryOnARemoteRowOnlyFlash(t *testing.T) {
 	f := newFakeHost()
 	m := remoteModel(t, f, nil)
 	fetch(t, m)
 	showHosts(m, "host:mba")
 	r := cursorOn(t, m, "r-a")
-	for _, k := range []string{"f", "*", "x", "a", "e", "M", "D", "w", "`", ".", "H", "X"} {
+	for _, k := range []string{"M", "D", "w", "`", ".", "H", "X"} {
 		m.notice = ""
 		m.Update(press(k))
 		if m.ov.active() || m.notice != i18n.T("remote.read_only") {
@@ -277,11 +312,8 @@ func TestWriteKeysOnARemoteRowOnlyFlash(t *testing.T) {
 		}
 		m.closeOverlay()
 	}
-	if r.Favorite() || r.Archived() || len(m.store.All()) != 4 {
+	if r.Favorite() || r.Archived() || len(m.store.All()) != 4 || f.called(remote.MPut) != 0 {
 		t.Fatal("nothing is written for another machine's session")
-	}
-	if m.editRec(r, func(r *tend.Rec) { r.Title = "x" }) != nil {
-		t.Fatal("editRec refuses a remote record")
 	}
 }
 
@@ -352,6 +384,7 @@ func withServer(m *Model) {
 		m.remote[host].at = now.Add(-4 * time.Minute)
 	}
 	m.remote["win"].err = &wire.Error{Code: wire.CodeOffline}
+	m.people = people{names: map[string]string{"u_ann": "Ann", "u_bob": "Bo Lin"}}
 	m.setView(viewSessions)
 	m.search.SetValue("host:all")
 	m.refresh()
@@ -394,7 +427,7 @@ func TestRemoteRowsStayReadOnlyWithAChipFocused(t *testing.T) {
 	fetch(t, m)
 	showHosts(m, "host:mba")
 	cursorOn(t, m, "r-a")
-	for _, k := range []string{"D", "M", "f"} {
+	for _, k := range []string{"D", "M"} {
 		m.chipFocus, m.notice = 0, ""
 		m.Update(press(k))
 		if m.ov.active() || m.notice != i18n.T("remote.read_only") {

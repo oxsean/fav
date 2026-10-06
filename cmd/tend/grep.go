@@ -52,11 +52,11 @@ func cmdGrep(args []string) error {
 	}
 	idx = refreshed(idx)
 	syncText(s, idx, 0, term.IsTerminal(os.Stderr.Fd()))
-	recs, res, err := grep(s, idx, kw, scope, true)
+	recs, found, err := grep(s, idx, kw, scope, true)
 	if err != nil {
 		return err
 	}
-	res = res[:limited(len(res), *limit)]
+	res := found.Results[:limited(len(found.Results), *limit)]
 
 	if *asJSON {
 		type row struct {
@@ -70,8 +70,8 @@ func cmdGrep(args []string) error {
 		}
 		return printJSON(rows)
 	}
-	if fixes := fulltext.Expand(fulltext.Dir(), fulltext.ParseQuery(kw)).Fixes(); len(fixes) > 0 {
-		fmt.Println(strings.TrimPrefix(i18n.F("msg.also", strings.Join(fixes, " ")), " · ") + "\n")
+	if len(found.Fixes) > 0 {
+		fmt.Println(strings.TrimPrefix(i18n.F("msg.also", strings.Join(found.Fixes, " ")), " · ") + "\n")
 	}
 	now := time.Now()
 	w := min(termWidth(), 120)
@@ -90,11 +90,11 @@ func cmdGrep(args []string) error {
 }
 
 // grep runs a message search over the sessions scope picks; results index into the returned records.
-func grep(s *tend.Store, idx *index.Index, kw, scope string, all bool) ([]*tend.Rec, []fulltext.Result, error) {
+func grep(s *tend.Store, idx *index.Index, kw, scope string, all bool) ([]*tend.Rec, fulltext.Found, error) {
 	q := tend.Parse(scope)
 	q.All = all
 	recs, err := localRecs(s, idx, nil, q, "")
-	return recs, fulltext.Search(context.Background(), fulltext.Dir(), fulltext.Cands(recs, idx.PathsBySession()), kw), err
+	return recs, fulltext.Find(context.Background(), fulltext.Dir(), recs, idx.PathsBySession(), kw), err
 }
 
 // syncText brings the full-text store up to date within budget (0 = no limit); false: the budget cut it short.

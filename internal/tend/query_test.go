@@ -227,3 +227,42 @@ func TestProjectMatchesWhereTheSessionBelongs(t *testing.T) {
 		t.Errorf("groups %q %q", in.Group(), out.Group())
 	}
 }
+
+// TestTokensAreWhatParseReads: every word of a query is one token, its kind what Parse makes of it.
+func TestTokensAreWhatParseReads(t *testing.T) {
+	s := "#Bug Project:P_web provider:codex status:completed after:2026-09-01 before:xx last:7d turns:1 file:Main.go host:mba branch:x Cursor # p:"
+	want := []Token{
+		{TokTag, "#Bug", "bug"}, {TokProject, "Project:P_web", "p_web"}, {TokProvider, "provider:codex", "codex"},
+		{TokStatus, "status:completed", StatusDone}, {TokAfter, "after:2026-09-01", "2026-09-01"},
+		{TokUnknown, "before:xx", "before:xx"}, {TokLast, "last:7d", "7d"}, {TokTurns, "turns:1", "1"},
+		{TokFile, "file:Main.go", "main.go"}, {TokHost, "host:mba", "mba"}, {TokUnknown, "branch:x", "branch:x"},
+		{TokWord, "Cursor", "cursor"}, {TokWord, "p:", "p:"},
+	}
+	got := Tokens(s)
+	if len(got) != len(want) {
+		t.Fatalf("tokens %+v", got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("token %d: %+v, want %+v", i, got[i], want[i])
+		}
+	}
+	q := Parse(s)
+	if q.Tags[0] != "bug" || q.Project != "p_web" || q.Provider != "codex" || q.Status != StatusDone || q.After.IsZero() ||
+		!q.Before.IsZero() || q.Active.IsZero() || q.Turns != 1 || q.File != "main.go" || q.Host != "mba" ||
+		len(q.Unknown) != 2 || len(q.Words) != 4 {
+		t.Errorf("Parse read %+v", q)
+	}
+}
+
+func TestProjectNoneIsTheRowsInNoProject(t *testing.T) {
+	in := &Rec{ID: "a", FavoritedAt: new(time.Now()), Project: "web", ProjectID: "p_web", ProjectName: "Web"}
+	out := &Rec{ID: "b", FavoritedAt: new(time.Now()), Project: "scratch"}
+	q := Parse("project:none")
+	if q.Match(in) || !q.Match(out) {
+		t.Error("project:none picks the rows of no project")
+	}
+	if tk := Tokens("project:None"); tk[0].Kind != TokProject || tk[0].Value != ProjectNone {
+		t.Errorf("%+v", tk)
+	}
+}

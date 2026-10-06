@@ -262,12 +262,16 @@ func TestServedRunThereIsQuotedForThatMachine(t *testing.T) {
 	s.start(t)
 	waitFor(t, m, func() bool { return len(m.hosts.Names()) == 2 })
 	r := cursorOnHost(t, m, "mba")
-	posix := m.resumeCommandFor(r)
-	for i := range m.tasks.machines {
-		if m.tasks.machines[i].Name == "mba" {
-			m.tasks.machines[i].OS = "windows"
+	setOS := func(goos string) {
+		for i := range m.tasks.machines {
+			if m.tasks.machines[i].Name == "mba" {
+				m.tasks.machines[i].OS = goos
+			}
 		}
 	}
+	setOS("linux")
+	posix := m.resumeCommandFor(r)
+	setOS("windows")
 	if win := m.resumeCommandFor(r); win == posix || !strings.HasPrefix(win, "Set-Location") && !strings.Contains(win, "; ") {
 		t.Fatalf("PowerShell on a Windows machine: %q (POSIX %q)", win, posix)
 	}
@@ -362,14 +366,14 @@ func TestServedSharedRowsSayWhoseTheyAre(t *testing.T) {
 	s := newServedRig(t, nil)
 	m := s.m
 	s.start(t)
-	waitFor(t, m, func() bool { return len(m.hosts.Names()) == 2 })
+	waitFor(t, m, func() bool { return len(m.hosts.Names()) == 2 && m.ownerName("bobs") == "Bob" })
 	own := cursorOnHost(t, m, "mba")
-	if strings.Contains(m.hostMark(own), i18n.F("remote.shared", "u_bob")) || strings.Contains(screenText(m), i18n.T("remote.read_title")) {
+	if strings.Contains(m.hostMark(own), i18n.F("remote.shared", "Bob")) || strings.Contains(screenText(m), i18n.T("remote.read_title")) {
 		t.Fatalf("the viewer's own machine is not marked: %q", m.hostMark(own))
 	}
 	cursorOnHost(t, m, "bobs")
 	screen := screenText(m)
-	for _, want := range []string{"@bobs  ·  " + i18n.F("remote.shared", "u_bob"), i18n.T("remote.read_title"), i18n.F("remote.shared_note", "u_bob")} {
+	for _, want := range []string{"@bobs  ·  " + i18n.F("remote.shared", "Bob"), i18n.T("remote.read_title"), i18n.F("remote.shared_note", "Bob")} {
 		if !strings.Contains(screen, want) {
 			t.Fatalf("missing %q:\n%s", want, screen)
 		}
@@ -382,7 +386,7 @@ func TestServedSharedRowsSayWhoseTheyAre(t *testing.T) {
 	}
 	m.pickHost()
 	i := slices.IndexFunc(m.ov.items, func(it item) bool { return it.name == "bobs" })
-	if i < 0 || m.ov.items[i].label != i18n.F("remote.shared_host", "bobs", "u_bob") {
+	if i < 0 || m.ov.items[i].label != i18n.F("remote.shared_host", "bobs", "Bob") {
 		t.Fatalf("the picker marks the shared machine: %+v", m.ov.items)
 	}
 	if !strings.Contains(screenText(m), i18n.T("remote.manage_web")) {
@@ -397,10 +401,10 @@ func TestServedSharedRowOffersNothingThatChangesIt(t *testing.T) {
 	s := newServedRig(t, nil)
 	m := s.m
 	s.start(t)
-	waitFor(t, m, func() bool { return len(m.hosts.Names()) == 2 })
+	waitFor(t, m, func() bool { return len(m.hosts.Names()) == 2 && m.ownerName("bobs") == "Bob" })
 	r := cursorOnHost(t, m, "bobs")
 	was := *r
-	readOnly, why := i18n.F("remote.shared_read_only", "u_bob"), i18n.F("remote.shared_note", "u_bob")
+	readOnly, why := i18n.F("remote.shared_read_only", "Bob"), i18n.F("remote.shared_note", "Bob")
 	for _, b := range bindings {
 		if b.in&inList == 0 || b.act == actQuit {
 			continue
@@ -439,11 +443,58 @@ func TestServedSharedRowOffersNothingThatChangesIt(t *testing.T) {
 	if m.ov.active() || m.notice != why {
 		t.Fatalf("「建成任务」 says why not: overlay %d, %q", m.ov.kind, m.notice)
 	}
+}
 
+// TestServedOwnMachineWritesThroughTheServer: the viewer's own machine takes favorite, done and edit through the
+// server's node.call put and writes its own records; a shared one is refused before anything is sent.
+func TestServedOwnMachineWritesThroughTheServer(t *testing.T) {
+	s := newServedRig(t, nil)
+	m := s.m
+	s.start(t)
+	m.search.SetValue("host:all status:all")
+	m.refresh()
+	waitFor(t, m, func() bool { m.refresh(); return len(rowsOn(m, "mba")) > 0 && len(rowsOn(m, "bobs")) > 0 })
+	r := cursorOnHost(t, m, "mba")
+	key(m, "x")
+	waitFor(t, m, func() bool { return r.Status == tend.StatusDone })
+	key(m, "e")
+	if m.ov.kind != ovEdit {
+		t.Fatal("e opens the edit dialog on the viewer's own machine")
+	}
+	m.ov.edit.SetValue("改在 mba 上")
+	key(m, "ctrl+s")
+	waitFor(t, m, func() bool { return r.Title == "改在 mba 上" })
+	if m.notice != i18n.F("edit.saved", "改在 mba 上") {
+		t.Fatalf("%q", m.notice)
+	}
+	st, err := tend.OpenAt(filepath.Join(s.d.Home, "records.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rec := st.BySession(r.Provider, r.SessionID); rec == nil || rec.Title != "改在 mba 上" || rec.Status != tend.StatusDone {
+		t.Fatalf("mba's node wrote its records: %+v", rec)
+	}
+	if len(m.store.All()) != len(fixture(t).All()) {
+		t.Fatal("nothing is written to this machine's records")
+	}
+
+	bob := cursorOnHost(t, m, "bobs")
+	was := bob.Favorite()
+	key(m, "f")
+	if m.notice != i18n.F("remote.shared_read_only", m.ownerName("bobs")) || bob.Favorite() != was {
+		t.Fatalf("a shared machine stays read only: %q", m.notice)
+	}
+
+	s.down = true
+	m = s.open(t, nil)
+	s.m = m
+	s.start(t)
+	m.search.SetValue("host:all status:all")
+	m.refresh()
 	cursorOnHost(t, m, "mba")
 	key(m, "f")
-	if m.notice != i18n.T("remote.read_only") {
-		t.Fatalf("the viewer's own machine keeps the read-only note: %q", m.notice)
+	if want := i18n.F("remote.put_server_down", remote.Reason(m.serverDown())); m.notice != want {
+		t.Fatalf("the server out of reach says why: %q, want %q", m.notice, want)
 	}
 }
 
@@ -475,5 +526,45 @@ func TestServedForgetsAMachineNoLongerTheViewers(t *testing.T) {
 	}
 	if again := s.open(t, nil); len(again.hosts.Names()) != 0 {
 		t.Fatalf("nothing of it starts the next TUI: %v", again.hosts.Names())
+	}
+}
+
+// TestNamesAreAskedOncePerConnection: the owners' names come in one batch and are kept; an id not known yet is asked
+// alone; a reset of the state stream forgets them, and a server without people.names leaves ids.
+func TestNamesAreAskedOncePerConnection(t *testing.T) {
+	s := newServedRig(t, nil)
+	m := s.m
+	s.start(t)
+	waitFor(t, m, func() bool { return m.ownerName("bobs") == "Bob" && m.nameOf("u_ann") == "Ann" })
+	if m.askNames() != nil {
+		t.Fatal("the names known are not asked again")
+	}
+	m.tasks.machines = append(m.tasks.machines, coord.Machine{Name: "carols", Owner: "u_carol"})
+	cmd := m.askNames()
+	if cmd == nil || len(m.people.asked) != 3 {
+		t.Fatalf("only the new id is asked: %v", m.people.asked)
+	}
+	if msg := cmd().(namesMsg); !slices.Equal(msg.ids, []string{"u_carol"}) || len(msg.got.Names) != 0 {
+		t.Fatalf("one id, which the server does not answer for: %+v", msg)
+	} else {
+		msg.apply(m)
+	}
+	if m.ownerName("carols") != "u_carol" || m.askNames() != nil {
+		t.Fatal("an id the server does not name stays an id, and is not asked again on this connection")
+	}
+
+	tasksPushMsg{cl: m.tasks.cl, gen: m.tasks.gen, pushes: []wire.Push{{Method: coord.PushReset}}}.apply(m)
+	if m.nameOf("u_ann") != "u_ann" {
+		t.Fatal("a reset forgets the names")
+	}
+	pump(m, m.askNames())
+	if m.ownerName("bobs") != "Bob" {
+		t.Fatal("and asks them again")
+	}
+
+	m.forgetNames()
+	m.proj.hello.Methods = slices.DeleteFunc(slices.Clone(m.proj.hello.Methods), func(x string) bool { return x == coord.MPeopleNames })
+	if m.askNames() != nil || m.ownerName("bobs") != "u_bob" {
+		t.Fatal("an old server's ids stay ids")
 	}
 }

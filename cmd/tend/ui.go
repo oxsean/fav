@@ -158,8 +158,8 @@ func cmdFzfList(args []string) error {
 		if !syncText(s, idx, 300*time.Millisecond, false) { // a first build: search what is there, finish it in the background
 			finishTextInBackground()
 		}
-		recs, res, err := grep(s, idx, kw, scope, tab == fzfui.TabSessions)
-		for _, x := range res {
+		recs, found, err := grep(s, idx, kw, scope, tab == fzfui.TabSessions)
+		for _, x := range found.Results {
 			fmt.Println(render.Line(recs[x.Cand], now))
 		}
 		return err
@@ -233,21 +233,12 @@ func cmdFzfPick(args []string) error {
 
 	switch kind {
 	case "togglefav", "togglearchive", "toggledone":
-		r, err := pickLocal(s, query)
+		r, err := remotePick(s, query)
 		if err != nil {
 			return err
 		}
-		now := time.Now()
-		_, err = s.Update(r, func(r *tend.Rec) {
-			switch kind {
-			case "togglefav":
-				r.ToggleFavorite(now)
-			case "togglearchive":
-				r.ToggleArchived(now)
-			default:
-				r.ToggleStatus(tend.StatusDone)
-			}
-		})
+		p := map[string]tend.Patch{"togglefav": r.ToggleFavorite(), "togglearchive": r.ToggleArchived(), "toggledone": r.ToggleStatus(tend.StatusDone)}[kind]
+		_, err = writeRec(s, r, p, nil)
 		return err
 	case "copy":
 		r, err := pick(s, query)
