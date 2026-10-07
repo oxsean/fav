@@ -428,8 +428,9 @@ func TestRefreshPathsReadsOnlyTheGivenFiles(t *testing.T) {
 	claude, codex := setup(t)
 	cache := filepath.Join(t.TempDir(), "sessions.jsonl")
 	proj := filepath.Join(claude, "projects", "-Users-me-work-webapp")
+	work := t.TempDir()
 	edit := func(name string) string {
-		return `{"type":"assistant","timestamp":"2026-09-10T01:00:05Z","message":{"content":[{"type":"tool_use","name":"Edit","input":{"file_path":"/Users/me/work/webapp/` + name + `"}}]}}` + "\n"
+		return `{"type":"assistant","timestamp":"2026-09-10T01:00:05Z","message":{"content":[{"type":"tool_use","name":"Edit","input":{"file_path":` + testkit.JSONString(filepath.Join(work, name)) + `}}]}}` + "\n"
 	}
 	a, b := filepath.Join(proj, "aaaa.jsonl"), filepath.Join(proj, "bbbb.jsonl")
 	write(t, a, claudeLines("帮我排查搜索分页为什么会重复返回", "继续", "再看看")+edit("a.go"))
@@ -463,10 +464,10 @@ func TestRefreshPathsReadsOnlyTheGivenFiles(t *testing.T) {
 	if want := []string{a, c, cx}; sprintf("%q", changed) != sprintf("%q", want) {
 		t.Fatalf("变了的路径各报一次：%q", changed)
 	}
-	if f := next.files[a]; f.Turns != 4 || f.Files["/Users/me/work/webapp/b.go"] != 1 {
+	if f := next.files[a]; f.Turns != 4 || f.Files[filepath.Join(work, "b.go")] != 1 {
 		t.Fatalf("变长的文件从偏移接着读：%+v", f)
 	}
-	if f := idx.files[a]; f.Turns != 3 || f.Files["/Users/me/work/webapp/b.go"] != 0 {
+	if f := idx.files[a]; f.Turns != 3 || f.Files[filepath.Join(work, "b.go")] != 0 {
 		t.Fatalf("旧快照不许被改：%+v", f)
 	}
 	if next.files[b].Turns != 3 {
