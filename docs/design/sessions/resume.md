@@ -15,6 +15,9 @@
    记录没有 workspace 时按目录找（`herdr.WorkspacesFor`）：有 pane 正好在记录目录里的 workspace 优先，没有再看同属一棵子树的；只有一个就用它，多个时恢复框弹选择（最后一项是「当前终端」），`tend resume` 报错列出候选、用 `--workspace <名字>` 指定。
    恢复发生在别的 tab 里，**TUI 不退出**：底部提示结果，用户接着找下一条。只有当前终端恢复才退出 TUI（要 `exec` 接管终端）。
 6. 路径或 workspace 不存在时不得静默猜测；显示问题并提供降级选择。
+7. 迁移过的会话（[migration.md](migration.md)「Claude 完整迁移」）：
+   - 迁来的会话第一次恢复时，`claude --resume <id>` 后面带一条首条消息「这个会话刚从 <机器> 迁过来，先读 <迁移说明的路径>」（`migrate.FirstResume`，`capture.Plan.FirstMessage`），恢复命令发出后记下已说明，之后不再带。聚焦已有 tab、`claude attach` 后台会话时不带。
+   - 最近一次迁移是从这台迁走的：`tend resume` 在 stderr 提醒「已迁往 <机器>（<时间>）」，两边都接着做会分叉；不拦。
 
 恢复框的按钮分组和键位见 [tui.md](tui.md)「键盘与鼠标」；在跑的会话上的「切过去」「接管」见 [tui.md](tui.md)「跑着的会话（Herdr）」；其它机器的会话怎么恢复见 [remote.md](remote.md)「恢复」。
 

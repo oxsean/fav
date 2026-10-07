@@ -10,6 +10,7 @@ import (
 	"github.com/oxsean/fav/internal/agent"
 	"github.com/oxsean/fav/internal/capture"
 	"github.com/oxsean/fav/internal/i18n"
+	"github.com/oxsean/fav/internal/migrate"
 	"github.com/oxsean/fav/internal/tend"
 )
 
@@ -87,11 +88,23 @@ func resumeRec(s *tend.Store, r *tend.Rec, dryRun, noHerdr bool, workspace strin
 	if err != nil {
 		return err
 	}
-	return runPlan(s, r, plan, dryRun, workspace, true)
+	if msg := migrate.Reminder(r.Provider, r.SessionID); msg != "" {
+		fmt.Fprintln(os.Stderr, "tend: "+msg)
+	}
+	prompt, noted := migrate.FirstResume(r.Provider, r.SessionID)
+	if !plan.FirstMessage(prompt) {
+		noted = nil
+	}
+	return runPlanThen(s, r, plan, dryRun, workspace, true, noted)
 }
 
 // runPlan carries out a plan; resume = it continues r itself (counted), not a fork or a new session.
 func runPlan(s *tend.Store, r *tend.Rec, plan capture.Plan, dryRun bool, workspace string, resume bool) error {
+	return runPlanThen(s, r, plan, dryRun, workspace, resume, nil)
+}
+
+// runPlanThen is runPlan telling started, when set, once the plan is on its way.
+func runPlanThen(s *tend.Store, r *tend.Rec, plan capture.Plan, dryRun bool, workspace string, resume bool, started func()) error {
 	if plan.Ws == nil && len(plan.WsChoices) > 1 {
 		var labels []string
 		for i, w := range plan.WsChoices {
@@ -117,6 +130,9 @@ func runPlan(s *tend.Store, r *tend.Rec, plan capture.Plan, dryRun bool, workspa
 		if err := capture.MarkResumed(s, r); err != nil {
 			fmt.Fprint(os.Stderr, i18n.F("cli.resume.count_not_saved", err))
 		}
+	}
+	if started != nil {
+		started()
 	}
 	if plan.Live.TabID != "" || plan.Ws != nil {
 		msg, warn, err := plan.RunInHerdr(r)

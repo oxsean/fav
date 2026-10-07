@@ -11,7 +11,7 @@ tend add [--supersede <id>] [--session-id <id>] [--provider <p>]
                                        从 stdin 读 /tend 的 JSON；会话目录属于某个项目时 project 写成项目名（「项目表」）
 tend list [表达式] [--json|--line] [--limit N]
 tend sessions [表达式] [--json] [--limit N]   本机全部会话，收藏的和没收藏的都在
-tend show <id> [--json]
+tend show <id> [--json]                Claude 会话迁移过时，卡片下列出每次迁移和两边现在的状态（两台都问 copies；同一对机器只判最近一条，更早的标成已被取代；migration.md「Claude 完整迁移」）
 tend preview <id> [--width N]
 tend grep <关键词 + 筛选> [--json] [--limit N]   搜消息（index-and-search.md「搜消息（> 前缀）」）；前面的 > 可省；先同步正文库，≥20 个文件时 stderr 报进度；
                                        不认识的 -x 当排除词不当参数（queryDashes，fzf-list 同样），只有 -h / --help 例外
@@ -46,6 +46,14 @@ tend handoff <id|机器:sid> --host <机器> [--dir <目录>] [--to claude|codex
                                        交接包带「环境差异」段，stderr 打汇总和阻断项，有阻断也照样交接
 tend handoff --open <id> [--dry-run] [--no-herdr] [--workspace 名字]
                                        在这台开交接包要的新会话
+tend migrate <id|机器:sid> --to <机器> [--dir <目录>] [--move] [--dry-run]
+                                       把 Claude 会话整个复制到另一台自己的机器（migration.md「Claude 完整迁移」）：stderr 打清单、留下的、
+                                       环境诊断汇总和进度，stdout 打那台的恢复命令 tend resume <机器>:<sid>；目录同 handoff --host 的找法；
+                                       有阻断项、在跑、不能确定在不在跑、两边一致或已分叉、那台已有同 id 的会话时拒绝；--move 在那台提交后
+                                       把原件放进源机器的回收站；有未完成的迁移就接着做，那台完成的是之前的旧快照时
+                                       不移原件、提示再跑一次；--dry-run 只做到环境诊断，有阻断时退出码非 0
+tend migrate <id|机器:sid> --abandon [--to <机器>]
+                                       放弃这个会话未完成的迁移：源机器记 aborted，连得上的目标机器删掉暂存
 tend memory [项目|目录] [host:<机器>] [--json]
                                        列出这个目录（默认当前目录；项目 = 它在那台机器上的各个仓库目录）的 Claude 项目记忆和 Codex
                                        全局记忆里适用于它的块（migration.md「记忆的管理与迁移」）；host: 经那台的 memory.ls
@@ -114,6 +122,8 @@ tend uninstall-skill                    只删 ~/.claude、~/.codex 下的 tend 
 - 单机：`config.hosts` 经 ssh。
 - server（`coordinator.url`）：第一次要读别的机器时拨 server 一次（5 秒为限，`hello` + `machine.list`），经 `node.call` 读它让看的人读的机器（去掉本机），`host:` 用 server 的机器名，不退回 ssh。拨不上时 stderr 一行「连不上 server：原因 · 别的机器显示缓存」，只列自己机器的缓存。fzf 守 30 秒规则、不列别人共享的机器，`tend resume` 的规则，都见 [remote.md](remote.md)「server 模式」「恢复」「fzf」。
 - 写记录：`favorite` / `unfavorite` / `archive` / `unarchive` / `status` / `done` / `edit` 和 fzf 的 `fzf-pick toggle*` 接受 `host:sid`，经那台机器的 `put` 写（`remotePick`、`writeRec`）；`edit` 先从那台重读这一行，再开编辑器，存时带它的 `updated_at`，那边改过就失败。server 模式下拨不上 server、或机器是别人共享的，就拒绝；那台的 tend 旧（没有 `put`）时提示先 `tend hosts install <机器>`。`rm` 和 `trash --restore` 也接受 `host:sid`，经那台的 `trash` / `restore`（`rmFar`、`restoreFar`，同一组 `Hosts` 方法），在跑的会话那台回 `busy`，同样拒绝。`pin`、`open`、`resume --fork`、不带 `--host` 的 `handoff` 等仍只对本机的记录；`handoff --host` 读 `host:sid` 那台的 `handoff.facts`。见 [remote.md](remote.md)「远端行的写入」。
+
+CLI 卡片的第二行在元信息后接迁移关系：`-> 机器`（迁往）、`<- 机器`（迁来），未完成的写 `-> 机器（迁移未完成 · 多久）`。
 
 fzf 的项目选择器先列项目（`<id>  # <名字>  (N)`，选了写 `project:<id>`），再列自动组；卡片和行里的项目写项目名（`Rec.Group()`）。`--json` 输出里的 `project` 仍是记录自己的字段。
 

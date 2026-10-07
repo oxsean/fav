@@ -350,6 +350,7 @@ tend grep '回调 host:all'                 # 搜消息也搜那几台；没搜�
 tend show mba:<id> · tend resume mba:<id> # 远端会话：预览和检查来自那台机器，恢复执行 `ssh -t mba tend resume …`
 tend env [--dir 目录] [--json]           # 本机给 agent 的环境：CLI 版本、git、指令文件、skill、MCP、项目配置、模型提供方；只有名字、版本和哈希
 tend env diff mba --session <id>         # AI 到那台会看到哪些不同，阻断在前；那边的目录和交接一样找，找不到用 --there；有阻断时退出码非 0
+tend migrate <id> --to mba [--dir 目录]  # 把 Claude 会话整个复制到 mba（改写 cwd），再 `tend resume mba:<id>`；在跑、有阻断、两边都接着做过时拒绝；--move 把原件放进回收站
 ```
 
 TUI 里用机器筹码（`m`）选本机、全部或某一台；远端行带 `@名字`，预览和 Agents 从那台机器读，恢复在新的 Herdr tab 或当前终端里开 `ssh -t`。远端行上的收藏、状态、归档、编辑（`f` `x` `a` `e`，`u` 撤销）经那台机器上的 tend 写到那边；`tend favorite`、`status`、`done`、`archive`、`edit` 和 fzf 的开关给 `host:id` 也一样。远端行上 `D` 把会话移进那台机器的回收站（在跑的拒绝），回收站筛选里列出各台机器的回收站，`D` 还原；`tend rm host:id` 和 `tend trash --restore host:id` 也一样。那台的 tend 太旧时提示先 `tend hosts install <名字>`。搬目录到会话自己的机器上做。搜消息（`>`）也经那边的 tend 搜筛选里看得到的机器：哪台答了，它的命中就和本机的一起排进列表（停顿一下或离开搜索框才发出去），`→` 列出远端会话的全部命中；没搜全的机器（离线、tend 旧、正文库还在建）在列表标题里写明。筛选里看得到的机器每 30 秒在后台取一次列表（失败后间隔翻倍，最长 5 分钟），缓存在 `~/.agent/tend/hosts/`；连不上时显示缓存的行和“离线 · 多久前”。

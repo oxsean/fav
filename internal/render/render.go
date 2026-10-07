@@ -1,6 +1,8 @@
 package render
 
 import (
+	"cmp"
+	"fmt"
 	"strconv"
 	"strings"
 	"unicode"
@@ -139,6 +141,29 @@ func Meta(r *tend.Rec) string {
 	return meta
 }
 
+// Copies is how a session's migrations read on its card: the latest with each other machine, "-> name" copied there,
+// "<- name" copied from there, one unfinished with how long ago it started; aborted ones not at all.
+func Copies(cs []tend.Copy, now time.Time) string {
+	var parts []string
+	seen := map[string]bool{}
+	for _, c := range cs {
+		key := cmp.Or(c.Endpoint, c.Peer)
+		if seen[key] || c.State == tend.CopyAborted {
+			continue
+		}
+		seen[key] = true
+		switch {
+		case c.State == tend.CopyPending:
+			parts = append(parts, i18n.F("card.copy_pending", c.Peer, ShortDur(now.Sub(c.At))))
+		case c.Role == tend.CopyTo:
+			parts = append(parts, "-> "+c.Peer)
+		default:
+			parts = append(parts, "<- "+c.Peer)
+		}
+	}
+	return strings.Join(parts, ", ")
+}
+
 // HostMark: @name for another machine's session, "" for this one.
 func HostMark(r *tend.Rec) string {
 	if r.Host == "" {
@@ -177,6 +202,20 @@ func LiveText(l capture.Live, now time.Time) string {
 	return text
 }
 
+// Bytes is a size as people read it: B, KiB, MiB, GiB.
+func Bytes(n int64) string {
+	const k = 1024
+	switch {
+	case n < k:
+		return fmt.Sprintf("%d B", n)
+	case n < k*k:
+		return fmt.Sprintf("%.1f KiB", float64(n)/k)
+	case n < k*k*k:
+		return fmt.Sprintf("%.1f MiB", float64(n)/(k*k))
+	}
+	return fmt.Sprintf("%.1f GiB", float64(n)/(k*k*k))
+}
+
 func ShortDur(d time.Duration) string {
 	switch {
 	case d < time.Minute:
@@ -194,7 +233,11 @@ func Card(r *tend.Rec, width int, now time.Time) []string {
 	head := RecGlyph(r) + " " + r.Title
 	gap := width - Width(when) - 1
 	line1 := Pad(head, gap) + " " + when
-	out := []string{line1, "  " + dim.p(Truncate(Meta(r), width-2))}
+	meta := Meta(r)
+	if c := Copies(r.Copies, now); c != "" {
+		meta += " · " + c
+	}
+	out := []string{line1, "  " + dim.p(Truncate(meta, width-2))}
 	if len(r.Tags) > 0 {
 		out = append(out, "  "+blue.p(Truncate(TagString(r.Tags), width-2)))
 	}

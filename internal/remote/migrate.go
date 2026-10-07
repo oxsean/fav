@@ -284,12 +284,13 @@ var liveWhyKeys = map[string]string{
 
 // Copy states CheckCopies concludes for a done migration.
 const (
-	CopySame      = "same"      // neither machine's copy moved on since
-	CopyHere      = "here"      // only the machine asked went on
-	CopyThere     = "there"     // only the other one did
-	CopyDiverged  = "diverged"  // both did: forked
-	CopyMoved     = "moved"     // the source's original went to its trash: one copy left
-	CopyUnchecked = "unchecked" // the other machine did not answer or has no record, or a side cannot tell
+	CopySame       = "same"       // neither machine's copy moved on since
+	CopyHere       = "here"       // only the machine asked went on
+	CopyThere      = "there"      // only the other one did
+	CopyDiverged   = "diverged"   // both did: forked
+	CopyMoved      = "moved"      // the source's original went to its trash: one copy left
+	CopySuperseded = "superseded" // a later done migration between the same two machines stands instead
+	CopyUnchecked  = "unchecked"  // the other machine did not answer or has no record, or a side cannot tell
 )
 
 // CopyState is one of a session's migrations as a machine recorded it and, for a done one, how both copies stand.
@@ -312,6 +313,8 @@ func (s CopyState) StatusText() string {
 		return i18n.T("remote.copies.diverged")
 	case CopyMoved:
 		return i18n.T("remote.copies.moved")
+	case CopySuperseded:
+		return i18n.T("remote.copies.superseded")
 	case CopyUnchecked:
 		return i18n.F("remote.copies.unchecked", s.Why)
 	}
@@ -319,17 +322,14 @@ func (s CopyState) StatusText() string {
 }
 
 // CheckCopies are ref's migrations recorded on at, newest first, each done one with how both copies stand: other finds
-// the machine at its other end (an error leaves it unchecked). Each other machine is asked once.
+// the machine at its other end (an error leaves it unchecked). Only the latest done one with each other machine is
+// judged (each other machine asked once), the earlier ones are superseded.
 func CheckCopies(ctx context.Context, at Peer, ref Ref, other func(PeerRef) (Peer, error)) ([]CopyState, error) {
 	var mine Copies
 	if err := call(ctx, at, migrateShort, MCopies, ref, &mine); err != nil {
 		return nil, failed(at, MCopies, err)
 	}
-	type answer struct {
-		copies Copies
-		err    error
-	}
-	asked := map[string]answer{}
+	asked := map[string]bool{}
 	out := make([]CopyState, len(mine.Copies))
 	for i, c := range mine.Copies {
 		out[i].Copy = c
@@ -337,16 +337,17 @@ func CheckCopies(ctx context.Context, at Peer, ref Ref, other func(PeerRef) (Pee
 			continue
 		}
 		key := cmp.Or(c.Peer.Endpoint, c.Peer.Name)
-		a, ok := asked[key]
-		if !ok {
-			p, err := other(c.Peer)
-			if err == nil {
-				err = call(ctx, p, migrateShort, MCopies, ref, &a.copies)
-			}
-			a.err = err
-			asked[key] = a
+		if asked[key] {
+			out[i].Status = CopySuperseded
+			continue
 		}
-		out[i].Status, out[i].Why = judge(c, a.copies.Copies, a.err)
+		asked[key] = true
+		var theirs Copies
+		p, err := other(c.Peer)
+		if err == nil {
+			err = call(ctx, p, migrateShort, MCopies, ref, &theirs)
+		}
+		out[i].Status, out[i].Why = judge(c, theirs.Copies, err)
 	}
 	return out, nil
 }

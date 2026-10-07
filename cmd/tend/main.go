@@ -18,6 +18,7 @@ import (
 	"github.com/oxsean/fav/internal/capture"
 	"github.com/oxsean/fav/internal/i18n"
 	"github.com/oxsean/fav/internal/index"
+	"github.com/oxsean/fav/internal/migrate"
 	"github.com/oxsean/fav/internal/node"
 	"github.com/oxsean/fav/internal/render"
 	"github.com/oxsean/fav/internal/tend"
@@ -467,6 +468,7 @@ func localRecs(s *tend.Store, idx *index.Index, live map[string]capture.Live, q 
 	}
 	unfav := idx.Attach(s, nil)
 	rows := belongRows()
+	rows.Copies = migrate.Marks()
 	recs, err := rows.List(s, idx, unfav, live, q)
 	isKept := func(r *tend.Rec) bool { return keep != "" && (r.ID == keep || r.SessionID == keep) }
 	if !slices.ContainsFunc(recs, isKept) {
@@ -507,6 +509,9 @@ func cmdShow(args []string) error {
 		return printJSON(r)
 	}
 	fmt.Print(render.Preview(r, remoteHosts().Source(r), min(termWidth(), 100), time.Now()))
+	if r.Provider == tend.ProviderClaude {
+		showCopies(r)
+	}
 	return nil
 }
 

@@ -44,6 +44,16 @@ func PlanResume(r *tend.Rec, live map[string]Live, noHerdr bool) (Plan, error) {
 	return p, nil
 }
 
+// FirstMessage makes prompt the first message of a resume that starts the CLI, not one that focuses its tab or attaches
+// its background session; false when it does not.
+func (p *Plan) FirstMessage(prompt string) bool {
+	if prompt == "" || p.Spec.Exec == "" || p.Live.TabID != "" || p.Live.BackgroundID != "" {
+		return false
+	}
+	p.Spec.Args = append(p.Spec.Args, prompt)
+	return true
+}
+
 // PlanFork: a new session carrying r's history, placed where a resume would go.
 func PlanFork(r *tend.Rec, noHerdr bool) (Plan, error) {
 	p := Plan{Checks: Checks(r)}

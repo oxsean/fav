@@ -52,7 +52,7 @@ tend 是 Claude Code、Codex CLI 与 Herdr 的统一 Session 收藏、检索与�
 
 - 托管或同步 Claude/Codex 的完整聊天内容（`tend pin` 只在本机硬链，不复制、不上传；搜消息用的正文副本只在本机 `text/`，工具输出只留开头几行，行数见设置 `tool_output_lines`）。
 - 替代 Claude Code 或 Codex CLI 的聊天界面。
-- 多用户协作、团队收藏、云同步。单用户多机在范围内：经自己的 SSH 只读聚合其它机器的会话已实现，见 [remote.md](remote.md)「聚合」；配了 server（模式二）时改经 server 读，见 [remote.md](remote.md)「server 模式」；会话与记忆的手动迁移、迁移前的环境诊断未实现，见 [migration.md](migration.md)「迁移」「迁移前的环境诊断」。
+- 多用户协作、团队收藏、云同步。单用户多机在范围内：经自己的 SSH 只读聚合其它机器的会话已实现，见 [remote.md](remote.md)「聚合」；配了 server（模式二）时改经 server 读，见 [remote.md](remote.md)「server 模式」；手动迁移已实现：交接到另一台机器、Claude 会话的完整迁移（`tend migrate`）、记忆的对比与复制、迁移前环境诊断的核心维度；TUI 和 Web 上的迁移、诊断的其余维度未实现，见 [migration.md](migration.md)「迁移」「迁移前的环境诊断」。
 - 自动收藏所有 Session。
 - 改写 Claude/Codex 的私有存储：只在移动项目目录、迁移会话时改写 `cwd` 字段和索引行，不改消息正文。
 - Herdr workspace 的自动创建；cwd 失效时用 git remote 反查候选 repo。

@@ -7,11 +7,13 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/oxsean/fav/internal/fixture"
 	"github.com/oxsean/fav/internal/i18n"
 	"github.com/oxsean/fav/internal/index"
 	"github.com/oxsean/fav/internal/migrate"
+	"github.com/oxsean/fav/internal/render"
 	"github.com/oxsean/fav/internal/tend"
 	"github.com/oxsean/fav/internal/testkit"
 	"github.com/oxsean/fav/internal/wire"
@@ -468,6 +470,15 @@ func TestMigrateBackAndForward(t *testing.T) {
 	src.on()
 	if entries, _ := tend.LoadTrash(); len(entries) != 1 || !strings.Contains(entries[0].Title, "ask one") {
 		t.Errorf("the replaced original waits in the trash, under its title: %+v", entries)
+	}
+	states, err := CheckCopies(context.Background(), src.peer(), mref, func(PeerRef) (Peer, error) { return dst.peer(), nil })
+	if err != nil || len(states) != 2 || states[0].Role != migrate.RoleFrom || states[0].Status != CopySame ||
+		states[1].Role != migrate.RoleTo || states[1].Status != CopySuperseded {
+		t.Fatalf("the migration back stands, the one before it is superseded: %+v %v", states, err)
+	}
+	src.on()
+	if mark := render.Copies(migrate.Marks()(&tend.Rec{Provider: tend.ProviderClaude, SessionID: msid}), time.Now()); mark != "<- dst" {
+		t.Errorf("the card marks the latest only: %q", mark)
 	}
 	src.goOn(msid, cwd, "and on here")
 	migrateOnce(t, src, dst, dir, false)

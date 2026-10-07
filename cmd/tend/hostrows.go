@@ -508,15 +508,19 @@ func remoteResume(r *tend.Rec) (spec agent.CommandSpec, there string, err error)
 	return agent.CommandSpec{Exec: cmd.Args[0], Args: cmd.Args[1:]}, "", nil
 }
 
-// thereLine is the command resuming r on its machine, quoted for that machine's shell.
+// thereLine is the command resuming r on its machine, quoted for that machine's shell: tend resume for a session
+// migrated there, which starts with its migration note.
 func (c *cliHosts) thereLine(r *tend.Rec) string {
-	spec, err := agent.ResumeOf(r, "")
-	if err != nil {
-		return ""
-	}
 	sh := shell.POSIX
 	if c.machine(r.Host).OS == "windows" {
 		sh = shell.PowerShell
+	}
+	if tend.MigratedHere(r.Copies) {
+		return sh.Line("", []string{"tend", "resume", r.SessionID})
+	}
+	spec, err := agent.ResumeOf(r, "")
+	if err != nil {
+		return ""
 	}
 	return sh.Line(spec.Cwd, spec.Argv())
 }
