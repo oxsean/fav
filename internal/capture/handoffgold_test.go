@@ -57,7 +57,7 @@ func TestLocalPackIsUnchanged(t *testing.T) {
 	for _, lang := range []string{i18n.EN, i18n.ZH} {
 		i18n.Set(lang)
 		got := localPack(r)
-		got = strings.ReplaceAll(got, filepath.Dir(r.Cwd), "<dir>")
+		got = strings.ReplaceAll(got, filepath.Dir(r.Cwd)+string(filepath.Separator), "<dir>/")
 		golden := filepath.Join("testdata", "handoff_local_"+lang+".golden")
 		if *updateGolden {
 			os.MkdirAll("testdata", 0o755)
