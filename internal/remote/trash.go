@@ -64,10 +64,13 @@ func (h *Hosts) callIf(ctx context.Context, name, method string, params, out any
 
 // TooOld says host's tend is too old for method.
 func TooOld(host, method string) string {
-	if method == MPut {
+	switch method {
+	case MPut:
 		return i18n.F("remote.put_old", host, host)
+	case MTrash, MRestore:
+		return i18n.F("remote.trash_old", host, host)
 	}
-	return i18n.F("remote.trash_old", host, host)
+	return i18n.F("remote.method_old", host, host)
 }
 
 // Refused says why method (put, trash or restore) on host did not land.

@@ -142,6 +142,15 @@ func ClaudeHome() string {
 	return filepath.Join(home, ".claude")
 }
 
+// ClaudeJSON is Claude's state file beside its home: in CLAUDE_CONFIG_DIR when that is set, else ~/.claude.json.
+func ClaudeJSON() string {
+	if h := os.Getenv("CLAUDE_CONFIG_DIR"); h != "" {
+		return filepath.Join(h, ".claude.json")
+	}
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".claude.json")
+}
+
 func CodexHome() string {
 	if h := os.Getenv("CODEX_HOME"); h != "" {
 		return h

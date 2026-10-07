@@ -86,6 +86,7 @@ type cliHosts struct {
 	down     error           // the server could not be reached
 	machines []coord.Machine // the server's list, once reached
 	own      map[string]bool // the machines in it the viewer owns
+	features []string        // the server's, once reached
 }
 
 func newCLIHosts(cfg tend.Config) *cliHosts {
@@ -149,7 +150,7 @@ func (c *cliHosts) dial() error {
 	}
 	os.Remove(path)
 	c.link.use(cl)
-	c.machines = ms.Machines
+	c.machines, c.features = ms.Machines, hello.Features
 	list := tuiui.ServerMachines(ms.Machines, hello.Caller, projects.NodeID(tend.Home()))
 	tuiui.ForgetOthers(c.Server, ms.Machines, hello.Caller, list)
 	c.own = map[string]bool{}

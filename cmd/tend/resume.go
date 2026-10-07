@@ -178,6 +178,13 @@ func cmdHandoff(args []string) error {
 	dryRun := fs.Bool("dry-run", false, i18n.T("cli.handoff.flag_dry_run"))
 	noHerdr := fs.Bool("no-herdr", false, i18n.T("cli.resume.flag_no_herdr"))
 	workspace := fs.String("workspace", "", i18n.T("cli.resume.flag_workspace"))
+	host := fs.String("host", "", i18n.T("cli.handoff.flag_host"))
+	dir := fs.String("dir", "", i18n.T("cli.handoff.flag_dir"))
+	asTask := fs.Bool("task", false, i18n.T("cli.handoff.flag_task"))
+	agentName := fs.String("agent", "", i18n.T("cli.handoff.flag_agent"))
+	project := fs.String("project", "", i18n.T("cli.handoff.flag_project"))
+	printOnly := fs.Bool("print", false, i18n.T("cli.handoff.flag_print"))
+	open := fs.String("open", "", i18n.T("cli.handoff.flag_open"))
 	rest, err := parseMixed(fs, args)
 	if err != nil {
 		return err
@@ -185,6 +192,23 @@ func cmdHandoff(args []string) error {
 	s, err := tend.Open()
 	if err != nil {
 		return err
+	}
+	ways := 0
+	for _, on := range []bool{*to != "", *asTask, *printOnly} {
+		if on {
+			ways++
+		}
+	}
+	switch {
+	case *open != "":
+		return handoffOpen(s, *open, *dryRun, *noHerdr, *workspace)
+	case *host == "" && (*dir != "" || *asTask || *printOnly || *agentName != "" || *project != ""):
+		return errors.New(i18n.T("cli.handoff.needs_host"))
+	case ways > 1:
+		return errors.New(i18n.T("cli.handoff.one_way"))
+	case *host != "":
+		return handoffHost(s, first(rest), handoffTo{host: *host, dir: *dir, provider: *to, task: *asTask, print: *printOnly, agent: *agentName,
+			project: *project, dryRun: *dryRun, noHerdr: *noHerdr, workspace: *workspace})
 	}
 	r, err := pickLocal(s, first(rest))
 	if err != nil {

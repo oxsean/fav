@@ -40,7 +40,7 @@ func TestHandoffPack(t *testing.T) {
 	if got := changedFiles(msgs, cwd, 30); !slices.Equal(got, []string{"/elsewhere/n.ipynb", "/elsewhere/b.md", "a.go"}) {
 		t.Errorf("changed files, newest first, relative under cwd: %q", got)
 	}
-	pack := handoff(r)
+	pack := RenderHandoff(HandoffFactsOf(r), HandoffTarget{})
 	for _, want := range []string{"分页游标漂移", "要求六", "改完了", "- a.go", "> 改完了\n> | a | b |\n", path} {
 		if !strings.Contains(pack, want) {
 			t.Errorf("pack lacks %q:\n%s", want, pack)

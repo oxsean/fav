@@ -59,8 +59,8 @@
 - **握手**：`hello` 先行，返回协议号、tend 版本、操作系统、架构、端点 id、主机名、WSL 发行版、home、路径分隔符、Claude / Codex 的配置目录、支持的方法列表（见 [wire.md](../runs/wire.md)「握手与版本」）。协议号不兼容时，本机提示「远端 tend 需要更新」，不强行读取。
 - **方法**：
   - 已有：`hello`、`list`（整份返回）、`query`（筛选、排序、分页后的一页，见「列表与写入」）、`put`（写一条记录，同上）、`trash` / `restore`（删除到那台机器的回收站、还原，同上）、`grep`（搜消息，`{q, all, limit, budget_ms, projects, also}` → `{hits, building, busy, too_long, fixes}`）、`hits`（一个会话里的命中，`{provider, session_id, q, limit}` → `{hits, total}`）、`messages`（带 `find` 时每条消息带高亮的 `spans`）、`text`（全文，按偏移读）、`steps`、`pulse`、`checks`、`live`、`echo`（中文往返自检）。搜消息这三处的做法见 [index-and-search.md](index-and-search.md)「搜消息」的「节点」。
-  - 交接、记忆、环境和迁移（做法见 [migration.md](migration.md)）：名字、参数和回答的类型在 `proto.go`，`local.go` 把它们分给 `handoff.go`、`memory.go`、`env.go`、`migrate.go`；这些处理函数现在都回 `unknown_method`，名字也还不在 `methods` 里，对端照「tend 旧」处理。
-    - 交接：`handoff.facts{provider, session_id}`（源机器：交接包的各段事实）、`handoff.put{ref, text, dir, provider, from}` → `{id, path}`（目标机器：写交接包，`provider` 是新会话用的 CLI，`ref` 是源机器上的会话）。
+  - 交接、记忆、环境和迁移（做法见 [migration.md](migration.md)）：名字、参数和回答的类型在 `proto.go`，`local.go` 把它们分给 `handoff.go`、`memory.go`、`env.go`、`migrate.go`；交接的两个已在 `methods` 里，其余处理函数现在都回 `unknown_method`，名字也还不在 `methods` 里，对端照「tend 旧」处理。
+    - 交接：`handoff.facts{provider, session_id}` → `capture.HandoffFacts`（源机器：交接包的各段事实，不是成稿：标题、目录、分支、最近活动、transcript 路径、摘要、最近 5 条要求、最后一条回复、改过的文件、`git{status, remote}`，各段上限同本机交接）、`handoff.put{ref, text, dir, provider, from}` → `{id, path}`（目标机器：把成稿写成那台的 `handoff/<id>.md`，同目录 `<id>.json` 记下目录、provider、来源；`provider` 是新会话用的 CLI，`ref` 是源机器上的会话；`text` 为空、`dir` 不是这台的绝对路径、`provider` 不是 claude / codex 回 `bad_request`）。做法见 [resume.md](resume.md)「交接到另一台机器」。
     - 记忆：`memory.ls{dirs, global}` → `{sets}`、`memory.read{file}` → `{text, at, sha}`、`memory.trash{file}` → `{entry}`、`memory.restore{entry}` → `{file}`、`memory.put{dir, kind, name, text, line, expect}` → `{file, incoming, lines, bytes, over}`。
     - 环境：`env{dir, ref?}` → 这台机器的指纹（`envcheck.Print`）、`env.file{kind, name, dir}` → `{text}`。
     - 迁移，源机器：`export.plan{provider, session_id, migration?, to?}` → `{manifest, live, why, cwd, repo, git}`、`export.read{…, migration, file, off, n, id}` → `{data, eof}`、`export.done{…, migration, state, move}` → `{trashed}`、`copies{provider, session_id}` → `{copies}`；目标机器：`import.begin{migration, from, provider, session_id, cwd, dir, pairs, manifest}` → `{staged, committed, clash}`、`import.chunk{migration, file, off, data}` → `{off}`、`import.commit{migration, note}` → `{row, files, unmapped}`、`import.abort{migration}` → `{}`。`data` 是 base64。
@@ -144,7 +144,7 @@
 | Agents | 各机器在跑的会话合在一起，标出机器。远端 Agents 卡片只显示远端自己的运行状态，不查本机按 session id 记的 pulse 和关注状态 |
 | 收藏 / 状态 / 编辑 / 删除 | 经节点的 `put`、`trash`、`restore`（见「列表与写入」）写到会话所在的那台机器；TUI 和 CLI 的远端行见「远端行的写入」。Windows 上的记录文件锁是进程间锁（`LockFileEx`） |
 | 恢复 | 见「恢复」 |
-| 项目对应关系 | 未实现。用户确认过一次的「这台机器的哪个目录对应那台机器的哪个目录」，记下来以后直接用。首次猜测时先读 `~/.claude.json` 的 `githubRepoPaths` 和 Codex 的 `git_origin_url`，读不到再扫描目录；同一个 remote 对应多个目录时让用户选 |
+| 项目对应关系 | 项目的目录（`task.Repo.Dirs`，机器 → 那台的检出目录）就是对应关系，两种模式都存在协调器里。会话要去的机器上没有项目目录时，问那台的 `node.repos{remote}`（见 [node.md](../runs/node.md)「找检出」）：只有一个就用它，几个让用户选，没有就手填 |
 
 ### 恢复
 
@@ -235,4 +235,4 @@ server 模式下同样守 30 秒：
 
 ## 未实现
 
-记忆、项目对应关系、迁移、环境诊断、增量列表、`grep` 以外读请求的时间预算与部分结果、`cache: meta | none`。迁移、记忆和环境诊断的设计见 [migration.md](migration.md)。
+记忆、迁移、环境诊断、增量列表、`grep` 以外读请求的时间预算与部分结果、`cache: meta | none`。迁移、记忆和环境诊断的设计见 [migration.md](migration.md)。

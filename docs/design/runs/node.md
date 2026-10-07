@@ -144,6 +144,16 @@ claude 的工具结果里带着整份文件，codex 反复推一轮的全部 dif
 
 `node.dirs` 这类节点方法不是会话，不经过这一层。
 
+## 找检出
+
+`node.repos{remote}` → `{dirs:[{path, branch, from}]}`：这台机器上这个 remote 的检出，交接和迁移定目标目录时用（[resume.md](../sessions/resume.md)「交接到另一台机器」）。同 `node.dirs`：协调器只给机器主人和管理员，不经 `share_sessions`；只找 `allow_dirs`（没有就 home）下的目录。按顺序收集候选：
+- `~/.claude.json`（设了 `CLAUDE_CONFIG_DIR` 就是那里的 `.claude.json`）的 `githubRepoPaths`，只在 remote 是 GitHub 时用；这个文件里有账号信息，流式解码只取这一个键，其余的值逐个 token 跳过；
+- 索引里记下同一个 remote 的 Codex 会话的主仓库（没有就是目录），`from` 是 `index-remote`；
+- 索引里其余会话的主仓库（没有就是目录），最近的在前，最多 100 个；
+- 在根下往下三层找 git 检出（不进隐藏目录，也不进检出里面），最多读 200 个目录。
+
+每个候选都用 `git remote get-url origin` 核一次，`task.RemoteKey` 相同才留下，按 `git rev-parse --show-toplevel` 去重，带当前分支（`symbolic-ref`）和 `from`（`claude` / `index-remote` / `index` / `scan`）。整个调用最多 3 秒，到时回已找到的。
+
 ## 会话绑定
 
 | provider | 方式 |

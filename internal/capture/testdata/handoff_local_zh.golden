@@ -1,0 +1,30 @@
+# 交接：Paging
+
+来自 Claude Code 会话 abc-123，目录 <dir>/proj，分支 feat/pages，最近活动 2026-09-22 10:03
+完整记录：<dir>/s.jsonl（可能很大，只读需要的部分）。
+这里不含工具输出；依赖这些结论前，先看看文件本身。
+
+## 目标和摘要
+
+the cursor drifts
+
+## 最近的要求（从旧到新）
+
+1. fix the cursor
+   it drifts
+2. now the tests
+
+## 停在哪里（最后一条回复）
+
+> done; next: run them
+
+## 改过的文件（最近的在前）
+
+- a.go
+
+## 未提交的改动（git status）
+
+```
+## No commits yet on feat/pages
+?? a.go
+```

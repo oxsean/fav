@@ -49,6 +49,22 @@
 - 建成任务（恢复框「另开会话」一行的「建成任务」，没有键）：不在终端里开新会话，而是经协调器建一个任务，后台运行接着原会话写（`run.continue{session}`，Claude `--resume`、Codex `exec resume`），不分叉：之后在终端里恢复这个会话，会看到 agent 的轮次。所以会话正在跑时不让建，不然两边同时写同一个记录。只对本机的会话，也只给这台机器的主人。表单、项目选项和不能建的几种原因见 [tui.md](tui.md)「建成任务」。
 - 交接弹窗（`ovHandoff`）：预览全文（↑↓ / PgUp PgDn / 滚轮），`e` 用 `$VISUAL`/`$EDITOR` 编辑（TUI 让出终端，回来重读），没设就用 VS Code 打开（不等）；`y` 复制全文；`1` Claude Code / `2` Codex CLI 开新会话（只列装了的，原会话的 provider 在前、Enter 就是它）。新会话在原目录，第一条消息是「先读 <路径>，说说理解和下一步」——包本身不进命令行，编辑过的内容就是新会话读到的内容。检查只看 CLI 装没装、目录在不在。
 - `tend handoff <id>` 不带 `--to` 时把包打到 stdout、路径打到 stderr；`--to` 同 resume 的去向规则（`--dry-run` 也会写包）。
+- 交接包分两步写：`capture.HandoffFactsOf(r)` 在会话所在的机器上取事实（`HandoffFacts`），`capture.RenderHandoff(facts, target)` 在看的人这台用自己的语言写成 Markdown。`target` 为零值时就是上面本机交接的成稿（金样测试守着逐字不变）。
+
+### 交接到另一台机器
+
+`tend handoff <id|机器:sid> --host <机器>`：会话在 A，新会话开在 B，两台都要是自己的机器（模式二由协调器只给机器主人，见 [team.md](../tasks/team.md) 第 6 条；CLI 先拦下别人共享来的机器）。驱动函数 `remote.Handoff` 只认 `remote.Peer`（`peer.go`）：本机是 `Here`（进程内，不经 `share_sessions`；CLI 另接上 `node.repos`），别的机器是 `(*Hosts).Peer`（模式一 ssh、模式二 `node.call`），协调器替网页时用 `PeerOf`。`Peer.Call` 只发 hello 里有的方法，没有就回 `unknown_method`，界面写「<机器> 的 tend 旧：先 `tend hosts install <机器>`」。模式二的 server 的 hello 没有 `migrate` 时写「server 旧」。
+
+1. A 回答 `handoff.facts`。A 或 B 的 `share_sessions` 不是 `all` 时那台回 `unauthorized`，CLI 写明是这个设置。A 和 B 是同一台（`endpoint` 相同）时，成稿和本机交接一样。
+2. 定 B 上的目录：`--dir` 给了就用它（要是 B 写法的绝对路径）；会话归某个项目、项目在 A 和 B 上都有目录时，用 `pathmap.Rebase` 把会话目录从 A 的项目目录接到 B 的；否则拿会话的 remote（facts 里 `git.remote`，没有就是记录的 `GitRemote`，再没有就是本机索引里 Codex 记下的 origin）问 B 的 `node.repos`：只有一个检出就用它，几个就列出来让用户用 `--dir` 选，没有就要 `--dir`。
+3. 成稿按 B 写（`HandoffTarget`）：不写 A 的 transcript 路径，改成「原会话在 <A> 上，这台机器读不到；要细节就问用户」；多一段「目录对应」：A 的目录 → B 的目录，两边的 home。
+4. 开法：
+   - 不带开法：`handoff.put` 写到 B 的 `~/.agent/tend/handoff/<id>.md`（0600，30 天后清掉），stdout 打 `tend handoff --open <id>`，在 B 上执行它。
+   - `--to claude|codex`：写到 B，再开终端：B 是本机就直接开；模式一 `ssh -t <别名> <tend argv> handoff --open <id> --no-herdr`，在 Herdr 里开新 tab，否则用当前终端（同远端恢复）；模式二只在有同名 ssh 项、`node_id` 对得上时这样做，否则打出那条命令。命令行上只有 `id`（`[A-Za-z0-9._-]`），目录和交接包都不进远端 shell。
+   - `--task [--agent <档案>] [--project <项目>]`：不写到 B，经协调器 `task.create` 建成 B 上的任务（标题「交接：<原标题>」，任务书是成稿加一句「先说说你的理解和下一步。」，目录是第 2 步的，agent 默认是会话自己的 CLI，项目默认是会话所在的项目），再 `run.dispatch`；协调器原有的规则照用。
+   - `--print`：只把成稿打到 stdout。
+5. `tend handoff --open <id>`（B 上）：读 `<id>.json`，目录不在就报错，再用 `HandoffPrompt(<id>.md)` 开新会话，检查和去向同 `PlanStart`（`--dry-run`、`--no-herdr`、`--workspace` 同上）。
+6. 源会话不动，也不记迁移关系：交接开的是新会话。
 
 ### 在这里开新会话
 

@@ -89,8 +89,8 @@ func repoName(rs []task.Repo, dir string) string {
 	return name
 }
 
-// projectAttach adds a directory on a machine to a project: to the repository of the same remote that has none there
-// yet, else as a repository of its own. A directory the project has there already changes nothing.
+// projectAttach adds a directory on a machine to a project: to the repository of the same remote (task.RemoteKey) that
+// has none there yet, else as a repository of its own. A directory the project has there already changes nothing.
 func (c *Coord) projectAttach(who Principal, r *wire.Request) (string, []journal.Event, error) {
 	var p ProjectAttach
 	if err := r.Decode(&p); err != nil {
@@ -116,7 +116,10 @@ func (c *Coord) projectAttach(who Principal, r *wire.Request) (string, []journal
 	repos := cloneRepos(pr.Repos)
 	at := -1
 	if p.Remote != "" {
-		at = slices.IndexFunc(repos, func(rp task.Repo) bool { return rp.Remote == p.Remote && rp.Dirs[p.Machine] == "" })
+		key := cmp.Or(task.RemoteKey(p.Remote), p.Remote)
+		at = slices.IndexFunc(repos, func(rp task.Repo) bool {
+			return cmp.Or(task.RemoteKey(rp.Remote), rp.Remote) == key && rp.Dirs[p.Machine] == ""
+		})
 	}
 	if at < 0 {
 		repos = append(repos, task.Repo{Name: repoName(repos, p.Dir), Remote: p.Remote})

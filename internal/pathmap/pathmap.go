@@ -49,6 +49,30 @@ func Map(p string, from, to End) (string, bool) {
 	return join(to.Home, segs[len(home):], to)
 }
 
+// Rebase is p (absolute, in from's form) moved from fromDir on from to toDir on to: the same names under toDir, in to's
+// form. False when p is not fromDir or inside it, when any of them is relative, UNC or holds "..", or when to cannot
+// hold a name.
+func Rebase(p, fromDir, toDir string, from, to End) (string, bool) {
+	drive, segs, ok := parse(p, from)
+	dDrive, dir, dOK := parse(fromDir, from)
+	if !ok || !dOK || len(segs) < len(dir) || !same(drive, dDrive, from) {
+		return "", false
+	}
+	for i, d := range dir {
+		if !same(segs[i], d, from) {
+			return "", false
+		}
+	}
+	root, base, ok := split(toDir, to.OS)
+	if !ok || strings.HasPrefix(root, `\\`) {
+		return "", false
+	}
+	if to.windows() {
+		root += `\`
+	}
+	return join(root, append(base, segs[len(dir):]...), to)
+}
+
 // parse splits an absolute path into its drive ("" off Windows) and names; a UNC path has no counterpart.
 func parse(p string, e End) (drive string, segs []string, ok bool) {
 	root, segs, ok := split(p, e.OS)

@@ -135,7 +135,7 @@ func TestWhoMayCreateAProjectAndChangeItsDirectories(t *testing.T) {
 }
 
 // TestAttachJoinsTheRepositoryOfTheSameRemoteAndDetachDropsAnEmptyOne, in both modes: attach joins the repository whose
-// remote is the directory's, else adds one named after the directory; the same directory twice changes nothing; detach
+// remote is the directory's (by task.RemoteKey), else adds one named after the directory; the same directory twice changes nothing; detach
 // takes the directory out and drops the repository it leaves empty.
 func TestAttachJoinsTheRepositoryOfTheSameRemoteAndDetachDropsAnEmptyOne(t *testing.T) {
 	for _, teamMode := range []bool{true, false} {
@@ -179,8 +179,9 @@ func TestAttachJoinsTheRepositoryOfTheSameRemoteAndDetachDropsAnEmptyOne(t *test
 		if again, err := attach("far", "/srv/app", remote); err != nil || e.projectOf("shop").Rev != rev || len(again.Repos) != 1 {
 			t.Fatalf("team %v: the same directory again changes nothing: %+v %v", teamMode, again.Repos, err)
 		}
-		if got, err = attach("bobs", "/home/bob/app", remote); err != nil || len(got.Repos) != 1 || got.Repos[0].Dirs["bobs"] != "/home/bob/app" {
-			t.Fatalf("team %v: a checkout of the same remote on another machine joins its repository: %+v %v", teamMode, got.Repos, err)
+		if got, err = attach("bobs", "/home/bob/app", "git@EXAMPLE.com:acme/app"); err != nil || len(got.Repos) != 1 ||
+			got.Repos[0].Dirs["bobs"] != "/home/bob/app" || got.Repos[0].Remote != remote {
+			t.Fatalf("team %v: a checkout of the same remote on another machine, its URL in another form, joins its repository: %+v %v", teamMode, got.Repos, err)
 		}
 		if got, err = attach("far", "/opt/app", ""); err != nil || len(got.Repos) != 2 || got.Repos[1].Name != "app-2" || got.Repos[1].Remote != "" {
 			t.Fatalf("team %v: a directory without a remote is a repository of its own, its name told apart: %+v %v", teamMode, got.Repos, err)

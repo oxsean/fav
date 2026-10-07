@@ -14,7 +14,16 @@ import (
 	"github.com/oxsean/fav/internal/testkit"
 )
 
-func TestMain(m *testing.M) { testkit.Main(m) }
+// asTend makes the test binary tend itself: the fixture launchers of a test that reaches another home run it.
+const asTend = "TEND_TEST_AS_TEND"
+
+func TestMain(m *testing.M) {
+	if os.Getenv(asTend) == "1" {
+		main()
+		os.Exit(0)
+	}
+	testkit.Main(m)
+}
 
 func stdoutOf(t *testing.T, f func()) string { return captured(t, &os.Stdout, f) }
 

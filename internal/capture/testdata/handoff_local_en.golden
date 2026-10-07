@@ -1,0 +1,30 @@
+# Handoff: Paging
+
+From the Claude Code session abc-123 in <dir>/proj, branch feat/pages, last active 2026-09-22 10:03
+Full transcript: <dir>/s.jsonl (read only the parts you need; it can be large).
+Tool output is left out; check the files themselves before relying on this summary.
+
+## Goal and summary
+
+the cursor drifts
+
+## Latest requests (oldest first)
+
+1. fix the cursor
+   it drifts
+2. now the tests
+
+## Where it stopped (the last reply)
+
+> done; next: run them
+
+## Files it changed (most recent first)
+
+- a.go
+
+## Uncommitted changes (git status)
+
+```
+## No commits yet on feat/pages
+?? a.go
+```

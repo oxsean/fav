@@ -42,7 +42,7 @@
 - 改项目设置的是项目负责人和管理员（`project.edit`，整份替换所写的字段）；别人的个人项目管理员看不到，也就改不了。
 - **一个个加、删目录**：`project.attach{project, machine, dir, remote?}`、`project.detach{project, machine, dir}`，回改完的项目。协调器在锁里从当前的 `repos` 算出新的一份，写成 `project_edited{id, repos}`，不另加事件类型；两个客户端同时加目录不会互相覆盖（`project.edit` 不带 `expected_rev`）。
   - 谁：负责人和管理员能动看得见的任何机器；参与者只能动自己名下的机器；只读成员不能。看不见项目回 `not_found`，看得见没权限回 `unauthorized`。`attach` 时看不见或没有这台机器回 `not_found`；`detach` 不要求机器还在。
-  - `attach` 的 `dir` 必须是这台机器写法的绝对路径（机器的系统未知时按路径本身的写法判断），`~/…`、相对路径、带 `..` 的回 `bad_request`。这台机器在项目里已有同一个目录（按它的系统比较）时什么都不改；否则并进 `remote` 相同、这台机器还没有目录的第一个仓库，没有就新建一个仓库，名字取目录名，重名依次加 `-2`、`-3`，`remote` 记下传来的值。
+  - `attach` 的 `dir` 必须是这台机器写法的绝对路径（机器的系统未知时按路径本身的写法判断），`~/…`、相对路径、带 `..` 的回 `bad_request`。这台机器在项目里已有同一个目录（按它的系统比较）时什么都不改；否则并进 `remote` 相同（按 `task.RemoteKey` 比：`git@host:a/b.git`、`ssh://git@host:22/a/b`、`https://host/a/b` 都读成 `host/a/b`，host 小写，去掉用户名、端口、末尾的 `/` 和 `.git`；读不出时按原样比）、这台机器还没有目录的第一个仓库，没有就新建一个仓库，名字取目录名，重名依次加 `-2`、`-3`，`remote` 记下传来的值。
   - `detach` 去掉那台机器上的这个目录（按它的系统比较，系统未知时按原文），仓库因此一个目录都不剩就整个去掉；项目里没有这个目录回 `not_found`。已有的 `~/…` 目录按原文去掉，再用绝对路径 `attach`。
   - `project.edit` 照旧能整份写 `repos`，不检查路径的写法（网页的项目设置会把已有的 `~` 目录原样带回去）。
 - 四个 hook（`setup`、`before_run`、`check`、`cleanup`）都会执行（见 [workflows.md](workflows.md)「hooks」和 [execution.md](execution.md)「实现」），网页的项目设置每个 hook 各有一个输入框；`fetch` 只保存和编辑，按它抓取需求未实现。

@@ -380,16 +380,8 @@ func replaceCwd(line []byte, old, new string) []byte {
 	return line
 }
 
-func claudeSettingsPath() string {
-	if h := os.Getenv("CLAUDE_CONFIG_DIR"); h != "" {
-		return filepath.Join(h, ".claude.json")
-	}
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".claude.json")
-}
-
 func claudeSettings() map[string]json.RawMessage {
-	b, err := os.ReadFile(claudeSettingsPath())
+	b, err := os.ReadFile(capture.ClaudeJSON())
 	if err != nil {
 		return nil
 	}
@@ -402,7 +394,7 @@ func claudeSettings() map[string]json.RawMessage {
 
 // moveClaudeSettings renames projects[old…] keys to new… in ~/.claude.json, every other byte untouched; writes a .bak first.
 func moveClaudeSettings(old, new string) error {
-	path := claudeSettingsPath()
+	path := capture.ClaudeJSON()
 	b, err := os.ReadFile(path)
 	if err != nil {
 		return err

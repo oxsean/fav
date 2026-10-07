@@ -153,3 +153,53 @@ func TestUnderAcrossMachines(t *testing.T) {
 		}
 	}
 }
+
+func TestRebaseEveryPair(t *testing.T) {
+	ends := map[string]End{"mac": mac, "linux": linux, "win": win, "wsl": wsl}
+	dirs := map[string]string{"mac": "/src/中文 项目", "linux": "/srv/app", "win": `D:\work\app`, "wsl": "/mnt/d/work/app"}
+	for fn, from := range ends {
+		for tn, to := range ends {
+			p := dirs[fn] + from.sep() + "pkg" + from.sep() + "a b.go"
+			want := dirs[tn] + to.sep() + "pkg" + to.sep() + "a b.go"
+			if got, ok := Rebase(p, dirs[fn], dirs[tn], from, to); !ok || got != want {
+				t.Errorf("%s → %s: %q %v, want %q", fn, tn, got, ok, want)
+			}
+			if got, ok := Rebase(dirs[fn], dirs[fn], dirs[tn], from, to); !ok || got != dirs[tn] {
+				t.Errorf("%s → %s, the directory itself: %q %v", fn, tn, got, ok)
+			}
+		}
+	}
+}
+
+func TestRebase(t *testing.T) {
+	for _, c := range []struct {
+		name              string
+		p, fromDir, toDir string
+		from, to          End
+		want              string
+		ok                bool
+	}{
+		{"Windows source ignores case", `c:\WORK\App\x`, `C:\work\app`, "/srv/app", win, linux, "/srv/app/x", true},
+		{"POSIX source keeps case", "/srv/App/x", "/srv/app", "/w", linux, mac, "", false},
+		{"forward slashes on Windows", "D:/work/app/x/y", `D:\work\app`, "/w", win, mac, "/w/x/y", true},
+		{"to Windows with forward slashes in its directory", "/srv/app/x", "/srv/app", "D:/work/app", linux, win, `D:\work\app\x`, true},
+		{"trailing separators", "/srv/app/x/", "/srv/app/", `D:\work\`, linux, win, `D:\work\x`, true},
+		{"not under", "/srv/other/x", "/srv/app", "/w", linux, mac, "", false},
+		{"a prefix is not a parent", "/srv/appx/a", "/srv/app", "/w", linux, mac, "", false},
+		{"dot dot in the path", "/srv/app/../etc", "/srv/app", "/w", linux, mac, "", false},
+		{"dot dot in the target", "/srv/app/x", "/srv/app", "/w/../etc", linux, mac, "", false},
+		{"relative path", "app/x", "/srv/app", "/w", linux, mac, "", false},
+		{"relative target", "/srv/app/x", "/srv/app", "w", linux, mac, "", false},
+		{"UNC source", `\\server\share\app\x`, `\\server\share\app`, "/w", win, mac, "", false},
+		{"UNC target", "/srv/app/x", "/srv/app", `\\server\share\app`, linux, win, "", false},
+		{"a POSIX target on Windows", "/srv/app/x", "/srv/app", "/w", linux, win, "", false},
+		{"a name Windows cannot hold", "/srv/app/a:b", "/srv/app", `D:\w`, linux, win, "", false},
+		{"a backslash in a POSIX name", `/srv/app/a\b`, "/srv/app", `D:\w`, linux, win, "", false},
+		{"WSL and Windows on one machine", `C:\Users\x\app\y`, `C:\Users\x\app`, "/mnt/c/Users/x/app", win, wsl, "/mnt/c/Users/x/app/y", true},
+	} {
+		got, ok := Rebase(c.p, c.fromDir, c.toDir, c.from, c.to)
+		if ok != c.ok || got != c.want {
+			t.Errorf("%s: %q %v, want %q %v", c.name, got, ok, c.want, c.ok)
+		}
+	}
+}
