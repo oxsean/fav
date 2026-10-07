@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"cmp"
 	"strings"
 
 	"github.com/oxsean/fav/internal/i18n"
@@ -9,26 +8,6 @@ import (
 	"github.com/oxsean/fav/internal/task"
 	"github.com/oxsean/fav/internal/tend"
 )
-
-// sessionTasks: by agent session id, the task of the newest run that used it; a run still queued to continue a session
-// counts for it.
-func sessionTasks(st *task.State) map[string]*task.Task {
-	newest := map[string]*task.Run{}
-	for _, r := range st.Runs {
-		s := cmp.Or(r.Session, r.Resume)
-		if s == "" || st.Tasks[r.Task] == nil {
-			continue
-		}
-		if o := newest[s]; o == nil || r.Seq > o.Seq || r.Seq == o.Seq && r.QueuedAt.After(o.QueuedAt) {
-			newest[s] = r
-		}
-	}
-	out := make(map[string]*task.Task, len(newest))
-	for s, r := range newest {
-		out[s] = st.Tasks[r.Task]
-	}
-	return out
-}
 
 // taskLabel: id, title and stage on one line; the title comes from agents and trackers.
 func taskLabel(x *task.Task) string {
@@ -53,7 +32,7 @@ func (m *Model) taskOf(r *tend.Rec) *task.Task {
 		return nil
 	}
 	if k := (linkKey{t.st, t.st.Seq, len(t.st.Runs)}); t.linkedAt != k {
-		t.links, t.linkedAt = sessionTasks(t.st), k
+		t.links, t.linkedAt = task.SessionTasks(t.st), k
 	}
 	return t.links[r.SessionID]
 }

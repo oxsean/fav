@@ -35,7 +35,7 @@ func linkedState(newTitle, newSession string) *task.State {
 }
 
 func TestASessionLinksToTheTaskOfItsNewestRun(t *testing.T) {
-	links := sessionTasks(linkedState("New attempt", "s-new"))
+	links := task.SessionTasks(linkedState("New attempt", "s-new"))
 	if x := links["s-new"]; x == nil || x.ID != "tk-new" {
 		t.Errorf("two tasks' runs on one session: the newest run's task, got %v", x)
 	}

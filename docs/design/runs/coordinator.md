@@ -106,7 +106,7 @@ run `state` 转移表（终态单调，重复事件无副作用）：
   - 旧节点（hello 里没有 `query`）：并行取整份 `list` 和 `live`，在协调器里用同一个 `index.Select` 筛选、排序、分页，项目和 `also` 照样算，`live` 失败当作没有在跑的。这台标 `old`，行不可写，也不能建成任务。
   - 每行是 `{machine, writable?, task?, make?}` 加节点的 `Row`：
     - `writable`：看的人是机器主人，节点有 `put`，`share_sessions` 不是 `none`（`runs` 的节点在 `query` 里只列放出的会话）。和 `node.call put` 的写闸同一个条件。
-    - `task`：这台机器上用过这个会话的 run（`Run.session`，排队续它的 `Run.resume` 也算）里，看的人读得了任务的、`seq` 最大的那个（同 `seq` 比排队时间），它的任务 `{id, title, stage}`。`also` 用的是同一张表。
+    - `task`：这台机器上用过这个会话的 run（`Run.session`，排队续它的 `Run.resume` 也算）里，看的人读得了任务的、`seq` 最大的那个（同 `seq` 比排队时间），它的任务 `{id, title, stage}`。`also` 用的是同一张表。「哪个 run 算最新」和 run 的会话（`Session`，没有取 `Resume`）的规则在 `internal/task`（`Newest`、`RunSession`），TUI 的会话 → 任务关联用同一份（`task.SessionTasks`）。
     - `make`（只给机器主人）`{why?, agents}`：`agents` 是能在这台机器续这个 provider 会话的档案（`agent.CanContinue`，和 `run.continue` 同一个判断），和会话 provider 同名的排第一。`why` 按顺序判：`old`（旧节点，或节点没有 `run.resume`）；`busy`（`live` 里有它，有未结束的 run 用着它，或 Codex 会话 15 秒内写过，`agent.CodexQuiet`）；`no_agent`（没有能续的档案）；空串是可以建。建成任务仍走 `run.continue{session}`。
 - `sessions.grep{q, all, limit}`：同样挑机器，并行问节点的 `grep`（`budget_ms` 3000，各限 5 秒），回 `{hits, machines, fixes?, too_long?}`。`hits` 每条是 `{machine}` 加节点的 `GrepHit`。合并先列「一条消息里全中」的，再列其余的；每一层里各台按自己的名次轮流取（各台的分数按各自的语料算，不互相比），取前 `limit` 条（默认 50，最多 500）。`fixes` 去重合并，`too_long` 取或；正文库还在建的那台在 `machines` 里带 `building{done, total}`；节点没有 `grep` 的标 `old`，不搜。
 - `node.call` 仍是纯转发，不加归属；放行哪些方法、给谁，见 [../tasks/team.md](../tasks/team.md) 第 6 条。

@@ -198,11 +198,11 @@ func (c *Coord) sessionTasks(p Principal, ms []*sessionsOf, words bool) {
 	for _, s := range ms {
 		by[s.name] = s
 	}
-	newest := map[*sessionsOf]map[string]*task.Run{}
+	newest := map[*sessionsOf]task.Newest[string]{}
 	reads := map[string]bool{}
 	for _, r := range c.st.Runs {
 		s := by[r.Machine]
-		session := cmp.Or(r.Session, r.Resume)
+		session := task.RunSession(r)
 		if s == nil || session == "" {
 			continue
 		}
@@ -218,11 +218,9 @@ func (c *Coord) sessionTasks(p Principal, ms []*sessionsOf, words bool) {
 			continue
 		}
 		if newest[s] == nil {
-			newest[s] = map[string]*task.Run{}
+			newest[s] = task.Newest[string]{}
 		}
-		if o := newest[s][session]; o == nil || r.Seq > o.Seq || r.Seq == o.Seq && r.QueuedAt.After(o.QueuedAt) {
-			newest[s][session] = r
-		}
+		newest[s].Add(session, r)
 	}
 	for s, runs := range newest {
 		for session, r := range runs {
