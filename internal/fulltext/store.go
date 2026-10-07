@@ -105,7 +105,9 @@ func Update(ctx context.Context, dir string, paths []string, opt Options, progre
 	}
 	defer unlock()
 
-	st, voc := loadState(dir), loadVocab(dir)
+	st := loadState(dir)
+	// the vocabulary is read only when there is text to count: parsing it costs more than the rest of an update with nothing new
+	var voc *vocab
 	if st.OutLines != opt.OutLines { // every text file was written with the other setting
 		st.Files, st.OutLines = map[string]*entry{}, opt.OutLines
 		voc = &vocab{Ver: storeVer, Words: map[string]int{}, dirty: true}
@@ -148,6 +150,9 @@ func Update(ctx context.Context, dir string, paths []string, opt Options, progre
 			jobs = append(jobs, job{p, fi.Size(), true})
 		}
 	}
+	if voc == nil && len(jobs) > 0 {
+		voc = editableVocab(dir)
+	}
 	prog := Progress{Total: len(jobs)}
 	lastSave := time.Now()
 	for _, j := range jobs {
@@ -174,7 +179,9 @@ func Update(ctx context.Context, dir string, paths []string, opt Options, progre
 			lastSave = time.Now()
 		}
 	}
-	voc.save(dir)
+	if voc != nil && voc.save(dir) == nil {
+		voc.remember(dir)
+	}
 	return prog, st.save(dir)
 }
 

@@ -428,3 +428,65 @@ func TestToolOutputIsSearchableWhenAsked(t *testing.T) {
 		t.Fatal("changing the line count rebuilds: the second line is gone")
 	}
 }
+
+func TestUpdateReadsTheVocabularyOnlyForNewText(t *testing.T) {
+	dir, src := t.TempDir(), t.TempDir()
+	a := filepath.Join(src, "a.jsonl")
+	var lines []string
+	for range 6 {
+		lines = append(lines, claudeLine("user", "flyway baseline"))
+	}
+	writeTranscript(t, a, lines...)
+	reads := 0
+	readVocab = func(p string) ([]byte, error) { reads++; return os.ReadFile(p) }
+	t.Cleanup(func() { readVocab = os.ReadFile })
+	ctx := context.Background()
+	if _, err := Update(ctx, dir, []string{a}, Options{}, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	reads = 0
+	if p, err := Update(ctx, dir, []string{a}, Options{}, nil); err != nil || p.Total != 0 {
+		t.Fatalf("nothing new: %+v %v", p, err)
+	}
+	if reads != 0 {
+		t.Fatalf("an update with nothing new read the vocabulary %d times", reads)
+	}
+
+	vocabCache.Lock()
+	vocabCache.dir, vocabCache.v = "", nil
+	vocabCache.Unlock()
+	if fixes := Expand(dir, ParseQuery("flyawy")).Fixes(); len(fixes) != 1 || fixes[0] != "flyway" {
+		t.Fatalf("flyawy is read as flyway: %v", fixes)
+	}
+	cached := cachedVocab(dir)
+	reads = 0
+	var more []string
+	for range 6 {
+		more = append(more, claudeLine("assistant", "kubernetes rollout"))
+	}
+	appendTranscript(t, a, more...)
+	if p, err := Update(ctx, dir, []string{a}, Options{}, nil); err != nil || p.Done != 1 {
+		t.Fatalf("new text: %+v %v", p, err)
+	}
+	if reads != 0 {
+		t.Fatalf("the vocabulary Expand already parsed was read again %d times", reads)
+	}
+	if cached.Words["kubernetes"] != 0 {
+		t.Fatal("the update counted into the vocabulary Expand is reading")
+	}
+	if fixes := Expand(dir, ParseQuery("kubernetse")).Fixes(); len(fixes) != 1 || fixes[0] != "kubernetes" {
+		t.Fatalf("the new words are counted: %v", fixes)
+	}
+	if reads != 0 {
+		t.Fatalf("Expand parsed the vocabulary the update just wrote %d times", reads)
+	}
+	saved := loadVocab(dir)
+	if saved.Words["flyway"] != 6 || saved.Words["kubernetes"] != 6 || saved.Words["rollout"] != 6 {
+		t.Fatalf("each word counted once per occurrence: %v", saved.Words)
+	}
+	res := Search(ctx, dir, []Cand{{Paths: []string{a}}}, "kubernetse")
+	if len(res) != 1 || !strings.Contains(res[0].Snippet, "kubernetes") {
+		t.Fatalf("the corrected word finds the new text: %+v", res)
+	}
+}

@@ -2,6 +2,7 @@ package fulltext
 
 import (
 	"encoding/json"
+	"maps"
 	"os"
 	"path/filepath"
 	"sort"
@@ -27,9 +28,11 @@ type vocab struct {
 	dirty bool
 }
 
+var readVocab = os.ReadFile
+
 func loadVocab(dir string) *vocab {
 	v := &vocab{Ver: storeVer, Words: map[string]int{}}
-	b, err := os.ReadFile(filepath.Join(dir, vocabFile))
+	b, err := readVocab(filepath.Join(dir, vocabFile))
 	if err != nil {
 		return v
 	}
@@ -83,21 +86,51 @@ var vocabCache struct {
 	sync.Mutex
 	dir   string
 	stamp int64
-	v     *vocab
+	v     *vocab // never changed once cached: Update adds to a copy
+}
+
+func vocabStamp(dir string) (int64, bool) {
+	fi, err := os.Stat(filepath.Join(dir, vocabFile))
+	if err != nil {
+		return 0, false
+	}
+	return fi.ModTime().UnixNano() ^ fi.Size(), true
 }
 
 // cachedVocab reloads the vocabulary only when its file changed.
 func cachedVocab(dir string) *vocab {
-	fi, err := os.Stat(filepath.Join(dir, vocabFile))
-	if err != nil {
+	stamp, ok := vocabStamp(dir)
+	if !ok {
 		return nil
 	}
 	vocabCache.Lock()
 	defer vocabCache.Unlock()
-	if stamp := fi.ModTime().UnixNano() ^ fi.Size(); vocabCache.dir != dir || vocabCache.stamp != stamp {
+	if vocabCache.dir != dir || vocabCache.stamp != stamp {
 		vocabCache.dir, vocabCache.stamp, vocabCache.v = dir, stamp, loadVocab(dir)
 	}
 	return vocabCache.v
+}
+
+// editableVocab is the vocabulary for Update to count into: a copy of the cached one while it matches the file.
+func editableVocab(dir string) *vocab {
+	stamp, ok := vocabStamp(dir)
+	vocabCache.Lock()
+	defer vocabCache.Unlock()
+	if ok && vocabCache.dir == dir && vocabCache.stamp == stamp {
+		return &vocab{Ver: storeVer, Words: maps.Clone(vocabCache.v.Words)}
+	}
+	return loadVocab(dir)
+}
+
+// remember caches v as the file it was just saved to; v is not changed afterwards.
+func (v *vocab) remember(dir string) {
+	stamp, ok := vocabStamp(dir)
+	if !ok {
+		return
+	}
+	vocabCache.Lock()
+	defer vocabCache.Unlock()
+	vocabCache.dir, vocabCache.stamp, vocabCache.v = dir, stamp, v
 }
 
 // Expand adds, to each plain keyword holding a Latin word the store barely knows, alternatives with that word corrected.
