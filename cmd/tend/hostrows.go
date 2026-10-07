@@ -257,8 +257,17 @@ func hostsOf(h *remote.Hosts, q tend.Query) []string {
 // hostRows are the rows q selects on other machines, fetched in parallel; a host that cannot answer gives its cached
 // rows and one line on stderr. live: who runs on each host, by host name (status:live only).
 func hostRows(q tend.Query) ([]*tend.Rec, map[string]map[string]capture.Live) {
-	if q.Status == tend.StatusTrash || q.Status == tend.StatusAgent {
+	switch {
+	case q.Status == tend.StatusAgent:
 		return nil, nil
+	case q.Status == tend.StatusTrash:
+		if cachedFor > 0 { // fzf lists per keystroke: a trash is read only on request
+			return nil, nil
+		}
+		hq := q
+		hq.Status, hq.Turns = "all", 0 // the trash's rows match as any row, as this machine's do
+		rows := belongRows()
+		return index.Select(&rows, hostTrash(q), hq, index.Page{}).Rows, nil
 	}
 	h, far := remoteHosts(), farHosts()
 	if far.Server != nil && cachedFor == 0 && selectsHosts(q) {
@@ -329,6 +338,49 @@ func hostRows(q tend.Query) ([]*tend.Rec, map[string]map[string]capture.Live) {
 		live[name] = a.live
 	}
 	return out, live
+}
+
+// hostTrash is the trash of each of the viewer's own machines q selects, read in parallel through their query; each
+// row's UpdatedAt is when it went there. A machine that cannot answer gives one line on stderr, a shared one is left
+// out (named alone, it says so).
+func hostTrash(q tend.Query) []*tend.Rec {
+	h, far := remoteHosts(), farHosts()
+	if far.Server != nil && selectsHosts(q) {
+		if err := far.reach(); err != nil {
+			fmt.Fprintln(os.Stderr, i18n.F("remote.server_down", remote.Reason(err)))
+			return nil
+		}
+	}
+	var names []string
+	for _, name := range hostsOf(h, q) {
+		if far.Server != nil && !far.mine(name) {
+			if q.Host != tend.HostAll {
+				fmt.Fprintln(os.Stderr, i18n.F("cli.remote.shared_write", name))
+			}
+			continue
+		}
+		names = append(names, name)
+	}
+	recs := make([][]*tend.Rec, len(names))
+	errs := make([]error, len(names))
+	ctx, cancel := context.WithTimeout(context.Background(), hostTimeout)
+	defer cancel()
+	var wg sync.WaitGroup
+	for i, name := range names {
+		wg.Go(func() { recs[i], _, errs[i] = h.Trashed(ctx, name) })
+	}
+	wg.Wait()
+	var out []*tend.Rec
+	for i, name := range names {
+		switch {
+		case wire.Code(errs[i]) == wire.CodeUnknownMethod:
+			fmt.Fprintln(os.Stderr, remote.TooOld(name, remote.MTrash))
+		case errs[i] != nil:
+			fmt.Fprintln(os.Stderr, i18n.F("remote.trash_unread", name, remote.Reason(errs[i])))
+		}
+		out = append(out, recs[i]...)
+	}
+	return out
 }
 
 // pickHost resolves host:ref (a configured host, then a record id or session id prefix there); ok is false when ref

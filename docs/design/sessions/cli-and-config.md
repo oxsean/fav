@@ -25,8 +25,11 @@ tend rm <id> [-y]                      挪进回收站；正在跑的拒绝（�
                                        所有 <id> 都先按 record id 找，找不到当 session id（前缀也行，多于一条命中报歧义）
                                        到收藏、索引、在跑的会话里找，最后按前缀认索引里 skip 的、没说过话的文件和续接链的旧 id；
                                        没收藏的会话第一次改状态 / 编辑时建记录（不算收藏）。
-tend trash [--json] [--restore <id|sid>] [--purge [--all] [-y]]
-                                       --restore host:sid 还原那台机器回收站里的；列表和 --purge 只管本机
+tend trash [host:<机器>|host:all] [--json] [--restore <id|sid>] [--purge [--all] [-y]]
+                                       不带 host: 列本机的回收站；host:<机器> 只列那台的，host:all 列本机和每台自己的机器
+                                       （经 Hosts.Trashed，和 TUI 回收站视图同一个读法；行写成 host:sid，--json 每条多一个 host，
+                                       files 为空）；tend sessions host:<机器> status:trash 列同样的行（fzf 不读远端回收站）。
+                                       --restore host:sid 还原那台机器回收站里的；--purge 只管本机，两者都不接 host:
                                        --purge 只清过期；--purge --all 清空是唯一不可逆的删除，先问 y/N
 tend mv <旧目录> <新目录> [-y]          移动项目（和 TUI 的 M 同一段代码）；有会话在跑就拒绝（别名 move）
 tend resume <id> [--dry-run] [--no-herdr] [--app|--terminal] [--workspace 名字] [--fork]

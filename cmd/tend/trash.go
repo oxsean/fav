@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -59,9 +60,15 @@ func cmdTrash(args []string) error {
 	all := fs.Bool("all", false, i18n.T("cli.trash.flag_all"))
 	yes := fs.Bool("y", false, i18n.T("cli.rm.flag_yes"))
 	asJSON := fs.Bool("json", false, i18n.T("cli.flag_json"))
-	if err := fs.Parse(args); err != nil {
+	pos, err := parseMixed(fs, args)
+	if err != nil {
 		return err
 	}
+	expr := strings.Join(pos, " ")
+	if len(pos) > 0 && (*restore != "" || *purge || slices.ContainsFunc(tend.Tokens(expr), func(t tend.Token) bool { return t.Kind != tend.TokHost })) {
+		return errors.New(i18n.T("cli.trash.usage"))
+	}
+	q := tend.Parse(expr)
 	switch {
 	case *restore != "":
 		if done, err := restoreFar(*restore); done {
@@ -113,22 +120,43 @@ func cmdTrash(args []string) error {
 		fmt.Print(i18n.F("cli.trash.purged", n))
 		return nil
 	}
-	entries, err := tend.LoadTrash()
-	if err != nil {
-		return err
+	var rows []trashRow
+	if q.Host == "" || q.Host == tend.HostLocal || q.Host == tend.HostAll {
+		entries, err := tend.LoadTrash()
+		if err != nil {
+			return err
+		}
+		for _, e := range entries {
+			rows = append(rows, trashRow{TrashEntry: e})
+		}
+	}
+	for _, r := range hostTrash(q) {
+		rows = append(rows, trashRow{TrashEntry: tend.TrashEntry{Provider: r.Provider, SessionID: r.SessionID, Title: r.Title,
+			Cwd: r.Cwd, Files: []tend.Moved{}, DeletedAt: r.UpdatedAt}, Host: r.Host})
 	}
 	if *asJSON {
-		return printJSON(entries)
+		return printJSON(rows)
 	}
-	if len(entries) == 0 {
+	if len(rows) == 0 {
 		fmt.Println(i18n.T("cli.trash.empty"))
 		return nil
 	}
 	now := time.Now()
-	for _, e := range entries {
-		fmt.Printf("%s  %-6s  %s  %s\n", e.SessionID, e.Provider, render.When(e.DeletedAt, now), e.Title)
+	for _, e := range rows {
+		id := e.SessionID
+		if e.Host != "" {
+			id = e.Host + ":" + id
+		}
+		fmt.Printf("%s  %-6s  %s  %s\n", id, e.Provider, render.When(e.DeletedAt, now), e.Title)
 	}
 	return nil
+}
+
+// trashRow is an entry of a trash: this machine's as its manifest keeps it, another machine's (Host) as its query
+// lists it, which says nothing of the files moved.
+type trashRow struct {
+	tend.TrashEntry
+	Host string `json:"host,omitempty"`
 }
 
 // rmFar moves another machine's session into that machine's trash through its trash method.

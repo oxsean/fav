@@ -288,6 +288,7 @@
   "cli.trash.purged": "已彻底删除 %d 个会话\n",
   "cli.trash.restored": "已还原  %s（%d 个文件）\n",
   "cli.trash.restored_far": "已在 %s 上还原  %s（%d 个文件）\n",
+  "cli.trash.usage": "用法：tend trash [host:<机器>|host:all] [--json]；--restore 和 --purge 不接 host:（还原别的机器的：--restore 主机:id）",
   "cli.unarchived": "已取消归档",
   "cli.unfavorited": "已取消收藏（记录留着，tend sessions 可查）",
   "cli.unknown_subcommand": "未知子命令 %q\n\n%s",

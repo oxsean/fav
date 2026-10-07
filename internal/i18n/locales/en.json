@@ -288,6 +288,7 @@
   "cli.trash.purged": "Purged %d {session|sessions}\n",
   "cli.trash.restored": "Restored  %s (%d {file|files})\n",
   "cli.trash.restored_far": "Restored on %s  %s (%d {file|files})\n",
+  "cli.trash.usage": "usage: tend trash [host:<name>|host:all] [--json]; --restore and --purge take no host: (another machine's: --restore host:id)",
   "cli.unarchived": "Unarchived",
   "cli.unfavorited": "Unfavorited (record kept; see tend sessions)",
   "cli.unknown_subcommand": "unknown subcommand %q\n\n%s",

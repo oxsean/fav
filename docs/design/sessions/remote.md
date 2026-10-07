@@ -161,7 +161,7 @@
   - server 模式下连不上 server：「连不上 server，改不了别的机器上的会话：<原因>」；
   - 那台的 tend 旧（上次 `hello` 的 `methods` 里没有 `put`，删除和还原看 `trash` / `restore`，每个方法分开记；没取到过 `hello` 的，`Hosts` 不发请求，回 `unknown_method`）：「<机器> 的 tend 旧：先 `tend hosts install <机器>`」；
   - 发出去失败：`stale` 说「这条记录刚被别处改过」，`busy` 说会话在那边运行，其余写「改不了 / 删不了 / 还原不了 <机器> 上的会话：<原因>」，行不变。
-- CLI：`favorite` / `unfavorite` / `archive` / `unarchive` / `status` / `done` / `edit` 和 fzf 的 `fzf-pick toggle*` 接受 `host:sid`（`remotePick`、`writeRec`）；`tend rm host:sid` 问过 y/N 后经 `Hosts.Trash`；`tend trash --restore host:sid` 在那台的 `Trashed` 里按 session id 前缀或记录 id 找，再经 `Hosts.Restore`。server 模式下先拨 server，拨不上、或机器是别人共享的就拒绝（`farWritable`）；`edit` 先从那台重读这一行，再开编辑器。`tend trash` 的列表和 `--purge` 只管本机。
+- CLI：`favorite` / `unfavorite` / `archive` / `unarchive` / `status` / `done` / `edit` 和 fzf 的 `fzf-pick toggle*` 接受 `host:sid`（`remotePick`、`writeRec`）；`tend rm host:sid` 问过 y/N 后经 `Hosts.Trash`；`tend trash --restore host:sid` 在那台的 `Trashed` 里按 session id 前缀或记录 id 找，再经 `Hosts.Restore`。server 模式下先拨 server，拨不上、或机器是别人共享的就拒绝（`farWritable`）；`edit` 先从那台重读这一行，再开编辑器。`tend trash host:<机器>` / `host:all` 和 `tend sessions host:<机器> status:trash` 经 `Hosts.Trashed` 列那些机器的回收站（`hostTrash`，别人共享的机器不列）；`--purge` 只管本机。
 - 搬目录、钉住、在本机打开、交接、分叉仍只在本机做：TUI 提示「其它机器上的会话在这里能收藏、改状态、归档、编辑和删除，其余到那台机器上做」，拦截不看焦点，搬目录的入口再拦一次；CLI 拒绝。`Store` 拒绝写入 `Rec.Host` 非空的记录。
 
 ### TUI
