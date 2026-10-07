@@ -332,6 +332,7 @@ func (b *builder) claudeSessions() {
 	cjk := b.claude("cjk-dir", b.dir("中文项目"), "main", 3*d)
 	cjk.user("把 README 里的安装步骤翻译成中文，保留命令原样")
 	cjk.reply("已翻译，命令和路径都没动。")
+	cjk.permission("bypassPermissions")
 	cjk.user("再加一节常见问题")
 	cjk.reply("加好了，放在最后。")
 	cjk.user("常见问题里补一条代理设置")

@@ -13,6 +13,7 @@ import (
 	"github.com/oxsean/fav/internal/i18n"
 	"github.com/oxsean/fav/internal/paths"
 	"github.com/oxsean/fav/internal/render"
+	"github.com/oxsean/fav/internal/shell"
 	"github.com/oxsean/fav/internal/skin"
 	"github.com/oxsean/fav/internal/tend"
 )
@@ -20,14 +21,14 @@ import (
 // Settings panel: , opens; ↑↓ picks, ←→/Enter/Space changes a value; applies immediately and writes config.json.
 
 type setting struct {
-	label string
-	opts  []string
-	get   func(m *Model) int
-	set   func(m *Model, i int) tea.Cmd
-	text  func(m *Model) *string // non-nil = free-text item: Enter edits, Enter saves, Esc discards
-	hint  string
-	ph    string       // a free-text item's placeholder
-	saved func(*Model) // runs after a free-text item is saved
+	label   string
+	opts    []string
+	get     func(m *Model) int
+	set     func(m *Model, i int) tea.Cmd
+	text    func(m *Model) string // non-nil = free-text item: Enter edits, Enter saves, Esc discards
+	hint    string
+	ph      string // a free-text item's placeholder
+	setText func(m *Model, v string)
 }
 
 var views = []string{"favorites", "sessions", "projects", "live", "tasks"}
@@ -131,7 +132,10 @@ func settingsTable() []setting {
 				}
 				return nil
 			}, nil, "", "", nil},
-		{label: "IDE", text: func(m *Model) *string { return &m.cfg.IDE }, hint: i18n.F("settings.ide_hint", capture.DefaultIDE()), ph: capture.DefaultIDE()},
+		{label: "IDE", text: func(m *Model) string { return m.cfg.IDE }, setText: func(m *Model, v string) { m.cfg.IDE = v },
+			hint: i18n.F("settings.ide_hint", capture.DefaultIDE()), ph: capture.DefaultIDE()},
+		sessionArgs(tend.ProviderClaude, "Claude"),
+		sessionArgs(tend.ProviderCodex, "Codex"),
 		{i18n.T("settings.skin"), func() []string {
 			out := []string{}
 			for _, n := range skinNames() {
@@ -145,12 +149,12 @@ func settingsTable() []setting {
 				useSkin(m.cfg)
 				return nil
 			}, nil, "", "", nil},
-		{label: i18n.T("settings.accent"), text: func(m *Model) *string { return &m.cfg.Accent }, hint: i18n.T("settings.accent_hint"), ph: "#rrggbb",
-			saved: func(m *Model) {
-				if !hexColor.MatchString(m.cfg.Accent) {
-					m.cfg.Accent = ""
+		{label: i18n.T("settings.accent"), text: func(m *Model) string { return m.cfg.Accent }, hint: i18n.T("settings.accent_hint"), ph: "#rrggbb",
+			setText: func(m *Model, v string) {
+				if !hexColor.MatchString(v) {
+					v = ""
 				}
-				m.cfg.Accent = strings.ToLower(m.cfg.Accent)
+				m.cfg.Accent = strings.ToLower(v)
 				useSkin(m.cfg)
 			}},
 		{i18n.T("settings.contrast"), []string{i18n.T("settings.contrast_standard"), i18n.T("settings.contrast_high")},
@@ -169,13 +173,40 @@ func settingsTable() []setting {
 	}
 }
 
+// sessionArgs edits config session_args for provider as one POSIX line.
+func sessionArgs(provider, name string) setting {
+	return setting{label: i18n.F("settings.session_args", name), hint: i18n.F("settings.session_args_hint", provider),
+		text: func(m *Model) string { return shell.POSIX.Join(m.cfg.SessionArgs[provider]) },
+		setText: func(m *Model, v string) {
+			var args []string
+			if v != "" {
+				words, ok := shell.POSIX.Split(provider + " " + v) // after a command name, a word with = is an argument
+				if !ok {
+					m.flash(i18n.T("settings.args_refused"))
+					return
+				}
+				args = words[1:]
+			}
+			if m.cfg.SessionArgs == nil {
+				m.cfg.SessionArgs = map[string][]string{}
+			}
+			m.cfg.SessionArgs[provider] = args
+			if len(args) == 0 {
+				delete(m.cfg.SessionArgs, provider)
+			}
+			if len(m.cfg.SessionArgs) == 0 {
+				m.cfg.SessionArgs = nil
+			}
+		}}
+}
+
 func (m *Model) openSettings() { m.ov = overlay{kind: ovSettings} }
 
 func (m *Model) cycleSetting(i, delta int) tea.Cmd {
 	s := settingsTable()[i]
 	if s.text != nil {
 		ti := newInput()
-		ti.SetValue(*s.text(m))
+		ti.SetValue(s.text(m))
 		ti.Placeholder = s.ph
 		ti.CharLimit = 200
 		ti.Focus()
@@ -197,10 +228,7 @@ func (m *Model) settingsKey(msg tea.KeyPressMsg) tea.Cmd {
 			return nil
 		case "enter":
 			s := settingsTable()[m.ov.cursor]
-			*s.text(m) = strings.TrimSpace(m.ov.edit.Value())
-			if s.saved != nil {
-				s.saved(m)
-			}
+			s.setText(m, strings.TrimSpace(m.ov.edit.Value()))
 			m.ov.editing = false
 			m.saveConfig()
 			return nil
@@ -243,10 +271,10 @@ func (m *Model) renderSettings() string {
 		switch {
 		case s.text != nil && i == m.ov.cursor && m.ov.editing:
 			val = inputView(m.ov.edit)
-		case s.text != nil && *s.text(m) == "":
+		case s.text != nil && s.text(m) == "":
 			val = s.hint
 		case s.text != nil:
-			val = *s.text(m)
+			val = s.text(m)
 		default:
 			val = s.opts[s.get(m)]
 		}

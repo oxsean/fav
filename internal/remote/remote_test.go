@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"slices"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -236,6 +237,22 @@ func TestSessionTimesReadInThisZone(t *testing.T) {
 	r := s.Rec("linux")
 	if r.LastAt.Location() != time.Local || !r.LastAt.Equal(at) || r.SessionStartedAt.Location() != time.Local {
 		t.Fatalf("a remote in another zone shows its times in ours: %v %v", r.LastAt, r.SessionStartedAt)
+	}
+}
+
+func TestSessionCarriesThePermissionModeAnOldNodeLeavesOut(t *testing.T) {
+	perm := tend.Permission{Mode: "bypassPermissions"}
+	b, _ := json.Marshal(SessionOf(&tend.Rec{Provider: tend.ProviderClaude, SessionID: "s1", Permission: perm}))
+	var s Session
+	if json.Unmarshal(b, &s) != nil || s.Rec("linux").Permission != perm {
+		t.Fatalf("the mode crosses the wire: %s", b)
+	}
+	var old Session
+	if json.Unmarshal([]byte(`{"provider":"claude","session_id":"s1"}`), &old) != nil || old.Rec("linux").Permission != (tend.Permission{}) {
+		t.Fatal("an older node sends none: the resume takes no mode")
+	}
+	if b, _ := json.Marshal(SessionOf(&tend.Rec{Provider: tend.ProviderClaude})); strings.Contains(string(b), "permission") {
+		t.Fatalf("no mode, no field: %s", b)
 	}
 }
 

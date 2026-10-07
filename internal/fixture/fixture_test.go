@@ -85,6 +85,15 @@ func TestIndexSeesEveryScenario(t *testing.T) {
 		}
 		return s
 	}
+	if p := get("cjk-dir").Rec().Permission; p.Mode != "bypassPermissions" {
+		t.Errorf("cjk-dir: the mode it switched to resumes with it: %+v", p)
+	}
+	if p := get("oauth").Rec().Permission; p.Mode != "default" {
+		t.Errorf("oauth: %+v", p)
+	}
+	if p := get("codex-cli").Rec().Permission; p.Approval != "on-request" || p.Sandbox != "workspace-write" {
+		t.Errorf("codex-cli: %+v", p)
+	}
 	oauth := get("oauth")
 	if oauth.Title != "登录页 OAuth 回调排障" || oauth.Turns != 4 || oauth.Branch != "feat/oauth-callback" || !strings.Contains(oauth.Recap, "OAuth") {
 		t.Errorf("oauth: %+v", oauth)

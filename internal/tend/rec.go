@@ -106,6 +106,8 @@ type Rec struct {
 	Repo string `json:"-"`
 	// Files: absolute path → times the AI wrote it in this session.
 	Files map[string]int `json:"-"`
+	// Permission: the permission mode the session last recorded; resuming and forking it carry the mode.
+	Permission Permission `json:"-"`
 	// ProjectID and ProjectName: the project its directory belongs to, filled while listing (index.Rows.Belong).
 	ProjectID   string `json:"-"`
 	ProjectName string `json:"-"`
@@ -259,4 +261,12 @@ func TopFiles(files map[string]int, n int) []FileCount {
 		return out[i].Path < out[j].Path
 	})
 	return out[:min(n, len(out))]
+}
+
+// Permission is a session's permission mode as its transcript last recorded it: Claude's permissionMode, Codex's
+// approval_policy and sandbox_policy.
+type Permission struct {
+	Mode     string `json:"mode,omitempty"`
+	Approval string `json:"approval,omitempty"`
+	Sandbox  string `json:"sandbox,omitempty"`
 }

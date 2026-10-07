@@ -34,6 +34,7 @@ func cmdResume(args []string) error {
 	if err != nil {
 		return err
 	}
+	withMode(r)
 	if r.Host != "" {
 		if *fork {
 			return readOnly(r)

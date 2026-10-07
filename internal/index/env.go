@@ -21,6 +21,7 @@ type Env struct {
 	Provider string    `json:"provider,omitempty"` // Codex model_provider
 	Approval string    `json:"approval,omitempty"` // Codex approval_policy
 	Sandbox  string    `json:"sandbox,omitempty"`  // Codex sandbox_policy
+	Mode     string    `json:"mode,omitempty"`     // Claude permissionMode: a permission-mode line's or a prompt's
 	Platform string    `json:"platform,omitempty"` // Claude's environment snapshot
 	Shell    string    `json:"shell,omitempty"`
 	Worktree bool      `json:"worktree,omitempty"`
@@ -275,6 +276,21 @@ func (f *File) takeUses(b []byte) {
 	if f.Env != nil && l.Version != "" {
 		f.Env.Version = l.Version
 	}
+}
+
+// takeMode keeps the permission mode a Claude permission-mode line or prompt carries.
+func (f *File) takeMode(l *line) {
+	if l.PermissionMode != "" && f.Provider == tend.ProviderClaude {
+		f.env(l.Timestamp).Mode = l.PermissionMode
+	}
+}
+
+// Permission is the mode the session last recorded.
+func (e *Env) Permission() tend.Permission {
+	if e == nil {
+		return tend.Permission{}
+	}
+	return tend.Permission{Mode: e.Mode, Approval: e.Approval, Sandbox: e.Sandbox}
 }
 
 // takeVersion keeps the CLI version a Claude line carries.

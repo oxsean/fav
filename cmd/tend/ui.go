@@ -252,6 +252,7 @@ func cmdFzfPick(args []string) error {
 			}
 			return clipboard.WriteAll(cmp.Or(there, spec.TerminalLine()))
 		}
+		withMode(r)
 		plan, err := capture.PlanResume(r, capture.LiveSessions(), true)
 		if err != nil {
 			return err

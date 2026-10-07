@@ -8,6 +8,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/oxsean/fav/internal/tend"
 )
 
 func claudeAttach(sec int, attachment string) string {
@@ -145,5 +147,54 @@ func TestEnvOfCodexAndTheNewestRollout(t *testing.T) {
 	}
 	if idx.Env("codex", "nope") != nil {
 		t.Fatal("an unknown session has no env")
+	}
+}
+
+func TestSessionsCarryTheLastPermissionMode(t *testing.T) {
+	claude, codex := setup(t)
+	p := filepath.Join(claude, "projects", "-Users-me-work-webapp", "perm.jsonl")
+	user := `{"type":"user","timestamp":"2026-09-10T01:00:%02dZ","cwd":"/Users/me/work/webapp","sessionId":"perm","permissionMode":%q,"message":{"content":%q}}` + "\n"
+	write(t, p, `{"type":"permission-mode","permissionMode":"default","sessionId":"perm"}`+"\n"+
+		sprintf(user, 1, "default", "first prompt of the session")+sprintf(user, 2, "acceptEdits", "second prompt")+
+		`{"type":"permission-mode","permissionMode":"plan","sessionId":"perm"}`+"\n")
+	write(t, filepath.Join(claude, "projects", "-Users-me-work-webapp", "none.jsonl"), claudeLines("a session without a mode", "two", "three"))
+	turn := `{"timestamp":"2026-09-11T02:00:01Z","type":"turn_context","payload":{"cwd":"/w","approval_policy":%q,"sandbox_policy":{"type":%q}}}` + "\n"
+	write(t, rolloutPath(codex, 11, "cxp"), codexLines("cxp", "/w", "codex_cli_rs", "fix the build please")+sprintf(turn, "never", "danger-full-access"))
+
+	cache := filepath.Join(t.TempDir(), "sessions.jsonl")
+	idx, _ := OpenAt(cache)
+	idx, _ = idx.Refresh()
+	perm := func(id string) tend.Permission {
+		for _, s := range idx.Sessions() {
+			if s.SessionID == id {
+				return s.Rec().Permission
+			}
+		}
+		t.Fatalf("no session %s", id)
+		return tend.Permission{}
+	}
+	if got := perm("perm"); got != (tend.Permission{Mode: "plan"}) {
+		t.Fatalf("the last mode a line recorded: %+v", got)
+	}
+	if got := perm("none"); got != (tend.Permission{}) {
+		t.Fatalf("no mode recorded, none carried: %+v", got)
+	}
+	if got := perm("cxp"); got != (tend.Permission{Approval: "never", Sandbox: "danger-full-access"}) {
+		t.Fatalf("codex's turn_context: %+v", got)
+	}
+
+	appendTo(t, p, sprintf(user, 3, "bypassPermissions", "third prompt"))
+	idx.Save()
+	idx, _ = OpenAt(cache)
+	idx, _ = idx.Refresh()
+	if got := perm("perm"); got.Mode != "bypassPermissions" {
+		t.Fatalf("read on from the offset: %+v", got)
+	}
+	store, _ := tend.OpenAt(filepath.Join(t.TempDir(), "records.jsonl"))
+	store.Put(&tend.Rec{Provider: tend.ProviderClaude, SessionID: "perm", Title: "favorited"})
+	for _, r := range idx.Attach(store, nil) {
+		if r.SessionID == "perm" && r.Permission.Mode != "bypassPermissions" {
+			t.Fatalf("a stored record gets it attached: %+v", r.Permission)
+		}
 	}
 }

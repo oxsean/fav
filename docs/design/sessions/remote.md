@@ -76,7 +76,7 @@
   - `restore{provider, session_id}` → `{title, files}`：和 TUI 的还原同一个函数 `index.RestoreSession`，之后刷新索引，下一次 `query` 就列出它。不在回收站回 `not_found`。
   - 回收站里的会话照样能读：`messages`、`text`、`steps`、`pulse`、`checks` 找不到记录时看回收站，读那里的那份；`put` 和 `hits` 不看，`put` 回 `not_found`。
   - 节点的 `share_sessions` 对这几个方法的约束见 [node.md](../runs/node.md)「会话的可见范围」。
-- **协议数据结构单独定义**：不直接把存储里的 `Rec` 拿来当协议。`Session` 是字段白名单（标题、摘要、标签、路径、时间、轮数等，不含消息）；存储里带 `json:"-"` 的字段（轮数、最后活动时间、改过的文件等）在 `Session` 里都有。列表或筛选要用的新字段加进 `SessionOf` 和 `Session.Rec`（时间转成本机时区）。`Session` 有 `copies`（这个会话和别的机器之间的迁移关系，列表只显示关系，不带 `changed`）：节点的 `list` / `query` / `grep` 由 `migrate.Marks` 从这台的 `migrations.jsonl` 填进 `Rec.Copies`，`SessionOf` 带出，`Session.Rec` 带回。
+- **协议数据结构单独定义**：不直接把存储里的 `Rec` 拿来当协议。`Session` 是字段白名单（标题、摘要、标签、路径、时间、轮数等，不含消息）；存储里带 `json:"-"` 的字段（轮数、最后活动时间、改过的文件等）在 `Session` 里都有。列表或筛选要用的新字段加进 `SessionOf` 和 `Session.Rec`（时间转成本机时区）。`permission` 是会话最后记下的权限模式，server 模式在本机拼「在那台机器上执行」的命令时用；旧节点不发，命令就不带模式。`Session` 有 `copies`（这个会话和别的机器之间的迁移关系，列表只显示关系，不带 `changed`）：节点的 `list` / `query` / `grep` 由 `migrate.Marks` 从这台的 `migrations.jsonl` 填进 `Rec.Copies`，`SessionOf` 带出，`Session.Rec` 带回。
 
 ## 标识
 

@@ -73,6 +73,8 @@ type Session struct {
 	Prompts   string
 	App       bool   // started in a desktop app (Codex: from the file; Claude: set by Attach)
 	Recap     string // the newest file's Recap
+	// Permission: the mode the newest file that recorded one last recorded
+	Permission tend.Permission
 	// Repo: the main checkout when the session ran in a linked git worktree (worktrees.go)
 	Repo   string
 	Files  map[string]int
@@ -117,12 +119,12 @@ func (s *Session) Rec() *tend.Rec {
 		r.Summary = s.Recap
 	}
 	r.Attach(s.Turns, s.Turns+s.Replies, s.LastAt, s.Prompts)
-	r.App, r.CodexArchived = s.App, s.CodexArchived()
+	r.App, r.CodexArchived, r.Permission = s.App, s.CodexArchived(), s.Permission
 	return r
 }
 
 const (
-	scanVer    = 9
+	scanVer    = 10
 	promptsCap = 8 * 1024 // max prompt bytes kept per file
 	promptCap  = 300      // max chars stored per prompt
 	titleMin   = 12       // prompts shorter than this are not titles
@@ -131,17 +133,18 @@ const (
 )
 
 type line struct {
-	Type        string    `json:"type"`
-	Timestamp   time.Time `json:"timestamp"`
-	Cwd         string    `json:"cwd"`
-	GitBranch   string    `json:"gitBranch"`
-	Entrypoint  string    `json:"entrypoint"`
-	Version     string    `json:"version"`
-	IsMeta      bool      `json:"isMeta"` // injected by Claude (skill expansion, caveats)
-	CustomTitle string    `json:"customTitle"`
-	AITitle     string    `json:"aiTitle"`
-	ContinuedIn string    `json:"continuedInSessionId"`
-	Worktree    *struct {
+	Type           string    `json:"type"`
+	Timestamp      time.Time `json:"timestamp"`
+	Cwd            string    `json:"cwd"`
+	GitBranch      string    `json:"gitBranch"`
+	Entrypoint     string    `json:"entrypoint"`
+	Version        string    `json:"version"`
+	IsMeta         bool      `json:"isMeta"` // injected by Claude (skill expansion, caveats)
+	PermissionMode string    `json:"permissionMode"`
+	CustomTitle    string    `json:"customTitle"`
+	AITitle        string    `json:"aiTitle"`
+	ContinuedIn    string    `json:"continuedInSessionId"`
+	Worktree       *struct {
 		OriginalCwd string `json:"originalCwd"`
 	} `json:"worktreeSession"`
 	Subtype string          `json:"subtype"`
@@ -185,7 +188,7 @@ func (l *line) userText() string {
 
 // interesting is a cheap pre-filter before JSON parsing.
 var wanted = [][]byte{[]byte(`"type":"user"`), []byte(`"role":"user"`), []byte(`-title"`), []byte(`"session_meta"`), []byte(`"continued-in"`),
-	[]byte(`"away_summary"`), []byte(`"task_complete"`), []byte(`"worktree-state"`), []byte(`"turn_context"`)}
+	[]byte(`"away_summary"`), []byte(`"task_complete"`), []byte(`"worktree-state"`), []byte(`"turn_context"`), []byte(`"permission-mode"`)}
 
 var replyClaude, replyText, replyCodex = []byte(`"type":"assistant"`), []byte(`"type":"text"`), []byte(`"type":"output_text"`)
 
@@ -264,6 +267,9 @@ func (f *File) take(l *line) {
 	case "continued-in":
 		f.ContinuedIn = l.ContinuedIn
 		return
+	case "permission-mode":
+		f.takeMode(l)
+		return
 	case "system":
 		if l.Subtype == "away_summary" {
 			var text string
@@ -282,6 +288,7 @@ func (f *File) take(l *line) {
 		f.Skip = true
 	}
 	f.takeVersion(l)
+	f.takeMode(l)
 	if f.Cwd == "" {
 		f.Cwd = l.Cwd
 	}
@@ -698,6 +705,9 @@ func (idx *Index) Sessions() []*Session {
 		if !f.ModTime.Before(s.LastAt) {
 			s.wtRepo = f.WtRepo
 		}
+		if p := f.Env.Permission(); p != (tend.Permission{}) && (s.Permission == (tend.Permission{}) || !f.ModTime.Before(s.LastAt)) {
+			s.Permission = p
+		}
 		if f.Remote != "" {
 			s.remote = f.Remote
 		}
@@ -824,7 +834,7 @@ func (idx *Index) Attach(store *tend.Store, prev []*tend.Rec) []*tend.Rec {
 				r.TranscriptPath = s.Path
 			}
 			r.Attach(s.Turns, s.Turns+s.Replies, s.LastAt, s.Prompts)
-			r.App, r.CodexArchived, r.Repo, r.Files = s.App, s.CodexArchived(), s.Repo, s.Files
+			r.App, r.CodexArchived, r.Repo, r.Files, r.Permission = s.App, s.CodexArchived(), s.Repo, s.Files, s.Permission
 			continue
 		}
 		r = s.Rec()

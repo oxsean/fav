@@ -22,8 +22,9 @@ tend 管的是本机**全部**会话，收藏只是其中打了 ★ 的一部分
   `~/.agent/tend/sessions.jsonl`（一行一个文件，后写覆盖；旧行的字节数超过现行各行时整个重写，否则在跑的会话反复追加大行会让它膨胀）。首次全量建索引读几个 GB 要几秒，在 TUI 后台跑；
   之后每 10 秒对照一次磁盘，稳态只是一千多次 stat；TUI 里在跑会话的 transcript 另外每秒 stat 一次，变了的只读这几个文件（`Index.RefreshPaths`，见 [tui.md](tui.md)「跑着的会话」）。文件被清理了条目就丢。
 - **会话当时看到的环境**（`File.Env`；`Index.Env` 取同一会话最新那份文件的）：给环境诊断用（[migration.md](migration.md)「迁移前的环境诊断」），增量扫描时顺带叠加，读到哪里叠到哪里。
-  - Claude：最后看到的 `version`；`attachment` 里 `model` 的 `identity.modelId`；`instructions` 的路径、类别和按原文算的 `NormSHA`（不带 `changed` 的一条整份替换，带的按路径增改、按 `removed` 删；`AutoMem` / `TeamMem` 是记忆，不算）；`skill_listing` 的名字；`deferred_tools_delta`、`mcp_instructions_delta`、`agent_listing_delta` 叠成最终集合（`skill_listing` 和 `agent_listing_delta` 带 `isInitial` 时从空重来）；`environment` 的系统、shell、是否 worktree；`Skill` 工具调用的 skill 名和 `mcp__<服务器>__…` 工具名里的服务器名（会话用过的）。`Known` 记这几类出现过哪些：没出现的是「未知」，不是「空」。
-  - Codex：`session_meta` 的 `cli_version`、`model_provider`；`turn_context` 的 `model`、`approval_policy` 和 `sandbox_policy` 的模式名。
+  - Claude：最后看到的 `version`；`attachment` 里 `model` 的 `identity.modelId`；`instructions` 的路径、类别和按原文算的 `NormSHA`（不带 `changed` 的一条整份替换，带的按路径增改、按 `removed` 删；`AutoMem` / `TeamMem` 是记忆，不算）；`skill_listing` 的名字；`deferred_tools_delta`、`mcp_instructions_delta`、`agent_listing_delta` 叠成最终集合（`skill_listing` 和 `agent_listing_delta` 带 `isInitial` 时从空重来）；`environment` 的系统、shell、是否 worktree；`Skill` 工具调用的 skill 名和 `mcp__<服务器>__…` 工具名里的服务器名（会话用过的）。`Known` 记这几类出现过哪些：没出现的是「未知」，不是「空」。最后记下的权限模式：`permission-mode` 行和用户提示行上的 `permissionMode`（Shift+Tab 切换后的提示带新模式），恢复和分叉照它开（[resume.md](resume.md)「Provider」）。
+  - Codex：`session_meta` 的 `cli_version`、`model_provider`；`turn_context` 的 `model`、`approval_policy` 和 `sandbox_policy` 的模式名（最后一条的，恢复和分叉照它开）。
+  - 权限模式随会话走（`index.Session.Permission`，取最新一份记了模式的文件）挂到 `Rec.Permission`（不落盘，`Attach` 每次刷新重挂），别的机器的会话经 `Session` 白名单的 `permission` 带过来。
   - 隐私：只解码上面这些附件类型的这些键，其余类型（`session_context`、`credential_org`、`command_permissions`、`queued_command`、`hook_*`、`file`、`edited_text_file`、`prompt_snapshot` 等）按字节预筛就跳过；指令文件只留路径和哈希，工具调用只留名字，参数和正文都不留。名字集合各封顶 300 个，文件 64 个。fixture 在这些附件和工具参数里埋假密钥，测试断言 `sessions.jsonl` 里搜不到。
 - **标题**：收藏的 title > Claude `/rename` 写的 `custom-title` > Claude 自动的 `ai-title` / Codex `session_index.jsonl` 的 `thread_name`
   > 第一条 ≥12 字的提示语（「继续」「ok」不配当标题）。

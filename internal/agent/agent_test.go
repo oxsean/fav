@@ -5,8 +5,12 @@ import (
 	"slices"
 	"testing"
 
+	"github.com/oxsean/fav/internal/shell"
 	"github.com/oxsean/fav/internal/tend"
+	"github.com/oxsean/fav/internal/testkit"
 )
+
+func TestMain(m *testing.M) { testkit.Main(m) }
 
 func TestLaunchLines(t *testing.T) {
 	sid := "fa000001-0c1a-4de0-8000-000000000001"
@@ -69,6 +73,122 @@ func TestResumeForkStart(t *testing.T) {
 	}
 	if SessionProvider(ProviderFake) != tend.ProviderClaude || SessionProvider(ProviderCommand) != "" || SessionProvider("codex") != "codex" {
 		t.Fatal("session providers")
+	}
+}
+
+func TestSessionArgsGoWhereAnAliasPutsThem(t *testing.T) {
+	t.Setenv("TEND_HOME", t.TempDir())
+	c := tend.DefaultConfig()
+	c.SessionArgs = map[string][]string{tend.ProviderClaude: {"--dangerously-skip-permissions"}, tend.ProviderCodex: {"-c", "model=a b"}}
+	if err := c.Save(); err != nil {
+		t.Fatal(err)
+	}
+	cl := &tend.Rec{Provider: tend.ProviderClaude, SessionID: "s1", Cwd: "/w"}
+	cx := &tend.Rec{Provider: tend.ProviderCodex, SessionID: "s1", Cwd: "/w"}
+	resume, _ := ResumeOf(cl, "n")
+	fork, _ := ForkOf(cl)
+	start, _ := StartOf(tend.ProviderClaude, "/w", "hi")
+	cxResume, _ := ResumeOf(cx, "")
+	cxFork, _ := ForkOf(cx)
+	cxStart, _ := StartOf(tend.ProviderCodex, "", "")
+	for got, want := range map[*CommandSpec][]string{
+		&resume:   {"claude", "--dangerously-skip-permissions", "--resume", "s1", "--name", "n"},
+		&fork:     {"claude", "--dangerously-skip-permissions", "--resume", "s1", "--fork-session"},
+		&start:    {"claude", "--dangerously-skip-permissions", "hi"},
+		&cxResume: {"codex", "-c", "model=a b", "resume", "s1"},
+		&cxFork:   {"codex", "-c", "model=a b", "fork", "s1"},
+		&cxStart:  {"codex", "-c", "model=a b"},
+	} {
+		if !slices.Equal(got.Argv(), want) {
+			t.Errorf("%q, want %q", got.Argv(), want)
+		}
+	}
+	if a := AttachOf(cl, "b1"); !slices.Equal(a.Argv(), []string{"claude", "attach", "b1"}) {
+		t.Errorf("attaching to a background session takes no flags: %q", a.Argv())
+	}
+	if l, _ := LaunchOf(LaunchSpec{Profile: Profile{Provider: tend.ProviderClaude}, Dir: "/w"}); slices.Contains(l.Argv(), "--dangerously-skip-permissions") {
+		t.Errorf("runs take their profile's args only: %q", l.Argv())
+	}
+	if words, ok := shell.POSIX.Split(cxStart.ShellLine()); !ok || !slices.Equal(words, cxStart.Argv()) {
+		t.Errorf("an argument with a space survives the Herdr pane's line: %q %v", cxStart.ShellLine(), ok)
+	}
+	if line := shell.PowerShell.Line("", cxResume.Argv()); line != "codex -c 'model=a b' resume s1" {
+		t.Errorf("and the line to run on a Windows machine: %s", line)
+	}
+
+	c.SessionArgs = map[string][]string{tend.ProviderClaude: {}}
+	c.Save()
+	if r, _ := ResumeOf(cl, ""); !slices.Equal(r.Argv(), []string{"claude", "--resume", "s1"}) {
+		t.Errorf("no args: the command as without the setting: %q", r.Argv())
+	}
+}
+
+func TestResumeFollowsTheSessionsPermissionMode(t *testing.T) {
+	t.Setenv("TEND_HOME", t.TempDir())
+	claudeRec := func(mode string) *tend.Rec {
+		return &tend.Rec{Provider: tend.ProviderClaude, SessionID: "s1", Permission: tend.Permission{Mode: mode}}
+	}
+	codexRec := func(approval, sandbox string) *tend.Rec {
+		return &tend.Rec{Provider: tend.ProviderCodex, SessionID: "s1", Permission: tend.Permission{Approval: approval, Sandbox: sandbox}}
+	}
+	for _, c := range []struct {
+		r            *tend.Rec
+		resume, fork []string
+	}{
+		{claudeRec("bypassPermissions"), []string{"claude", "--dangerously-skip-permissions", "--resume", "s1"}, []string{"claude", "--dangerously-skip-permissions", "--resume", "s1", "--fork-session"}},
+		{claudeRec("acceptEdits"), []string{"claude", "--permission-mode", "acceptEdits", "--resume", "s1"}, nil},
+		{claudeRec("plan"), []string{"claude", "--permission-mode", "plan", "--resume", "s1"}, nil},
+		{claudeRec("auto"), []string{"claude", "--permission-mode", "auto", "--resume", "s1"}, nil},
+		{claudeRec("dontAsk"), []string{"claude", "--permission-mode", "dontAsk", "--resume", "s1"}, nil},
+		{claudeRec("default"), []string{"claude", "--resume", "s1"}, nil},
+		{claudeRec("someFutureMode"), []string{"claude", "--resume", "s1"}, nil},
+		{claudeRec(""), []string{"claude", "--resume", "s1"}, nil},
+		{codexRec("never", "danger-full-access"), []string{"codex", "resume", "-a", "never", "-s", "danger-full-access", "s1"}, []string{"codex", "fork", "-a", "never", "-s", "danger-full-access", "s1"}},
+		{codexRec("on-request", "workspace-write"), []string{"codex", "resume", "-a", "on-request", "-s", "workspace-write", "s1"}, nil},
+		{codexRec("untrusted", "read-only"), []string{"codex", "resume", "-s", "read-only", "s1"}, nil},
+		{codexRec("", "external-sandbox"), []string{"codex", "resume", "s1"}, nil},
+		{codexRec("", ""), []string{"codex", "resume", "s1"}, nil},
+	} {
+		if got, _ := ResumeOf(c.r, ""); !slices.Equal(got.Argv(), c.resume) {
+			t.Errorf("resume %+v: %q, want %q", c.r.Permission, got.Argv(), c.resume)
+		}
+		if got, _ := ForkOf(c.r); c.fork != nil && !slices.Equal(got.Argv(), c.fork) {
+			t.Errorf("fork %+v: %q, want %q", c.r.Permission, got.Argv(), c.fork)
+		}
+	}
+	if a := AttachOf(claudeRec("bypassPermissions"), "b1"); !slices.Equal(a.Argv(), []string{"claude", "attach", "b1"}) {
+		t.Errorf("attach takes no mode: %q", a.Argv())
+	}
+
+	c := tend.DefaultConfig()
+	c.SessionArgs = map[string][]string{tend.ProviderClaude: {"--permission-mode", "acceptEdits"}, tend.ProviderCodex: {"--yolo"}}
+	c.Save()
+	if got, _ := ResumeOf(claudeRec("bypassPermissions"), ""); !slices.Equal(got.Argv(), []string{"claude", "--permission-mode", "acceptEdits", "--resume", "s1"}) {
+		t.Errorf("a permission flag in session_args wins over the session's mode: %q", got.Argv())
+	}
+	if got, _ := ForkOf(codexRec("on-request", "workspace-write")); !slices.Equal(got.Argv(), []string{"codex", "--yolo", "fork", "s1"}) {
+		t.Errorf("codex too: %q", got.Argv())
+	}
+	c.SessionArgs = map[string][]string{tend.ProviderClaude: {"--verbose"}}
+	c.Save()
+	if got, _ := ResumeOf(claudeRec("plan"), ""); !slices.Equal(got.Argv(), []string{"claude", "--verbose", "--permission-mode", "plan", "--resume", "s1"}) {
+		t.Errorf("other session_args leave the mode in: %q", got.Argv())
+	}
+}
+
+func TestSetsPermissionReadsTheSameFlagsAsBypass(t *testing.T) {
+	for _, argv := range [][]string{{"claude", "--dangerously-skip-permissions"}, {"claude", "--permission-mode", "plan"},
+		{"claude", "--permission-mode=acceptEdits"}, {"codex", "--yolo"}, {"codex", "-a", "never"}, {"codex", "--ask-for-approval=on-request"},
+		{"codex", "-s", "read-only"}, {"codex", "-sread-only"}, {"codex", "--full-auto"}, {"codex", "-c", "approval_policy=never"},
+		{"codex", "--config=sandbox_mode=workspace-write"}, {"codex", "--dangerously-bypass-approvals-and-sandbox"}} {
+		if !SetsPermission(argv) {
+			t.Errorf("%q", argv)
+		}
+	}
+	for _, argv := range [][]string{{"claude", "--verbose"}, {"claude", "--settings", "{}"}, {"codex", "-c", "model=x"}, {"codex", "-m", "gpt"}} {
+		if SetsPermission(argv) {
+			t.Errorf("%q", argv)
+		}
 	}
 }
 

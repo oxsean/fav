@@ -29,7 +29,10 @@ type Config struct {
 	TrashDays    int    `json:"trash_days"`          // days kept in trash; 0 = never auto-purge
 	ToolOutput   int    `json:"tool_output_lines"`   // lines of each tool output kept for message search; 0 = none
 	ResumeIn     string `json:"resume_in,omitempty"` // what Enter on resume opens: terminal (default) | app | origin (the app for sessions started there)
-	Hosts        []Host `json:"hosts,omitempty"`
+	// SessionArgs, by provider, go right after the CLI's name in the resume, fork and new-session commands tend builds,
+	// where an alias would put them ({"claude": ["--dangerously-skip-permissions"]}); not in attach or runs.
+	SessionArgs map[string][]string `json:"session_args,omitempty"`
+	Hosts       []Host              `json:"hosts,omitempty"`
 
 	Agents      []AgentProfile           `json:"agents,omitempty"`
 	Machines    map[string]MachineConfig `json:"machines,omitempty"`

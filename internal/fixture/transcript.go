@@ -2,6 +2,7 @@ package fixture
 
 import (
 	"bytes"
+	"cmp"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -55,6 +56,7 @@ type claudeSession struct {
 	id, cwd, branch, entry string
 	parent                 any
 	seq                    int
+	mode                   string // the permission mode its prompts carry; "" = default
 }
 
 func (s *claudeSession) uuid() string {
@@ -78,7 +80,7 @@ func (s *claudeSession) user(content any) {
 	o, u := s.head("user")
 	ts := s.tick(2 * time.Minute)
 	o = o.with("promptId", u).with("message", obj{{"role", "user"}, {"content", content}})
-	s.add(s.tail(o, u, ts).with("permissionMode", "default"))
+	s.add(s.tail(o, u, ts).with("permissionMode", cmp.Or(s.mode, "default")))
 }
 
 // meta is text Claude Code injects (skill bodies, caveats).
@@ -123,6 +125,12 @@ func (s *claudeSession) system(subtype, content string) {
 func (s *claudeSession) attach(a obj) {
 	o, u := s.head("attachment")
 	s.add(s.tail(o.with("attachment", a), u, stamp(s.t)))
+}
+
+// permission switches the mode as Shift+Tab does: a permission-mode line, and the prompts after it carry the mode.
+func (s *claudeSession) permission(mode string) {
+	s.mark("permission-mode", "permissionMode", mode)
+	s.mode = mode
 }
 
 func (s *claudeSession) mark(typ, key string, v any) {

@@ -34,7 +34,7 @@ func (claude) Installed() bool { return onPath("claude") }
 
 // Resume keeps the original session id (no --fork-session); --name makes the terminal title and /resume use it.
 func (claude) Resume(r *tend.Rec, name string) (CommandSpec, error) {
-	args := []string{"--resume", r.SessionID}
+	args := append(claudeMode(r.Permission.Mode), "--resume", r.SessionID)
 	if name != "" {
 		args = append(args, "--name", name)
 	}
@@ -42,7 +42,18 @@ func (claude) Resume(r *tend.Rec, name string) (CommandSpec, error) {
 }
 
 func (claude) Fork(r *tend.Rec) (CommandSpec, error) {
-	return CommandSpec{Exec: "claude", Args: []string{"--resume", r.SessionID, "--fork-session"}, Cwd: r.Cwd}, nil
+	return CommandSpec{Exec: "claude", Args: append(claudeMode(r.Permission.Mode), "--resume", r.SessionID, "--fork-session"), Cwd: r.Cwd}, nil
+}
+
+// claudeMode is the flag that starts claude in a permission mode it recorded; none for default or a mode it does not take.
+func claudeMode(mode string) []string {
+	switch mode {
+	case "bypassPermissions":
+		return []string{"--dangerously-skip-permissions"}
+	case "acceptEdits", "auto", "dontAsk", "manual", "plan":
+		return []string{"--permission-mode", mode}
+	}
+	return nil
 }
 
 func (claude) Start(cwd, prompt string) (CommandSpec, error) {
@@ -105,11 +116,26 @@ func (codex) Caps() Caps {
 func (codex) Installed() bool { return onPath("codex") }
 
 func (codex) Resume(r *tend.Rec, _ string) (CommandSpec, error) {
-	return CommandSpec{Exec: "codex", Args: []string{"resume", r.SessionID}, Cwd: r.Cwd}, nil
+	return CommandSpec{Exec: "codex", Args: append(append([]string{"resume"}, codexMode(r.Permission)...), r.SessionID), Cwd: r.Cwd}, nil
 }
 
 func (codex) Fork(r *tend.Rec) (CommandSpec, error) {
-	return CommandSpec{Exec: "codex", Args: []string{"fork", r.SessionID}, Cwd: r.Cwd}, nil
+	return CommandSpec{Exec: "codex", Args: append(append([]string{"fork"}, codexMode(r.Permission)...), r.SessionID), Cwd: r.Cwd}, nil
+}
+
+// codexMode are the flags that put codex back in the approval policy and sandbox it recorded, each only when codex
+// takes that value.
+func codexMode(p tend.Permission) []string {
+	var args []string
+	switch p.Approval {
+	case "on-request", "never":
+		args = append(args, "-a", p.Approval)
+	}
+	switch p.Sandbox {
+	case "read-only", "workspace-write", "danger-full-access":
+		args = append(args, "-s", p.Sandbox)
+	}
+	return args
 }
 
 func (codex) Start(cwd, prompt string) (CommandSpec, error) {

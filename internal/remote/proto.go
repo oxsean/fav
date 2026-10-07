@@ -111,36 +111,37 @@ type List struct {
 // Session is the list fields of a record: what a card, the filters and the detail header need, and all that the
 // local cache keeps. No conversation text beyond the title, summary and recap.
 type Session struct {
-	ID            string         `json:"id,omitempty"`
-	Provider      string         `json:"provider"`
-	SessionID     string         `json:"session_id"`
-	Title         string         `json:"title"`
-	Label         string         `json:"label,omitempty"`
-	Summary       string         `json:"summary,omitempty"`
-	Project       string         `json:"project,omitempty"`
-	WorkType      string         `json:"work_type,omitempty"`
-	Tags          []string       `json:"tags,omitempty"`
-	Status        string         `json:"status,omitempty"`
-	Cwd           string         `json:"cwd,omitempty"`
-	GitBranch     string         `json:"git_branch,omitempty"`
-	GitRemote     string         `json:"git_remote,omitempty"`
-	Repo          string         `json:"repo,omitempty"`
-	Transcript    string         `json:"transcript,omitempty"`
-	Pinned        string         `json:"pinned,omitempty"`
-	StartedAt     *time.Time     `json:"started_at,omitzero"`
-	FavoritedAt   *time.Time     `json:"favorited_at,omitzero"`
-	ArchivedAt    *time.Time     `json:"archived_at,omitzero"`
-	UpdatedAt     time.Time      `json:"updated_at"`
-	ResumedAt     *time.Time     `json:"resumed_at,omitzero"`
-	Resumes       int            `json:"resumes,omitempty"`
-	LastAt        time.Time      `json:"last_at"`
-	Turns         int            `json:"turns"`
-	Msgs          int            `json:"msgs"`
-	App           bool           `json:"app,omitempty"`
-	CodexArchived bool           `json:"codex_archived,omitempty"`
-	Recap         bool           `json:"recap,omitempty"`
-	Files         map[string]int `json:"files,omitempty"`
-	Copies        []Copy         `json:"copies,omitempty"` // its migrations to and from other machines, never Changed
+	ID            string          `json:"id,omitempty"`
+	Provider      string          `json:"provider"`
+	SessionID     string          `json:"session_id"`
+	Title         string          `json:"title"`
+	Label         string          `json:"label,omitempty"`
+	Summary       string          `json:"summary,omitempty"`
+	Project       string          `json:"project,omitempty"`
+	WorkType      string          `json:"work_type,omitempty"`
+	Tags          []string        `json:"tags,omitempty"`
+	Status        string          `json:"status,omitempty"`
+	Cwd           string          `json:"cwd,omitempty"`
+	GitBranch     string          `json:"git_branch,omitempty"`
+	GitRemote     string          `json:"git_remote,omitempty"`
+	Repo          string          `json:"repo,omitempty"`
+	Transcript    string          `json:"transcript,omitempty"`
+	Pinned        string          `json:"pinned,omitempty"`
+	StartedAt     *time.Time      `json:"started_at,omitzero"`
+	FavoritedAt   *time.Time      `json:"favorited_at,omitzero"`
+	ArchivedAt    *time.Time      `json:"archived_at,omitzero"`
+	UpdatedAt     time.Time       `json:"updated_at"`
+	ResumedAt     *time.Time      `json:"resumed_at,omitzero"`
+	Resumes       int             `json:"resumes,omitempty"`
+	LastAt        time.Time       `json:"last_at"`
+	Turns         int             `json:"turns"`
+	Msgs          int             `json:"msgs"`
+	App           bool            `json:"app,omitempty"`
+	CodexArchived bool            `json:"codex_archived,omitempty"`
+	Recap         bool            `json:"recap,omitempty"`
+	Files         map[string]int  `json:"files,omitempty"`
+	Permission    tend.Permission `json:"permission,omitzero"` // the mode a resume built here carries; an older node sends none
+	Copies        []Copy          `json:"copies,omitempty"`    // its migrations to and from other machines, never Changed
 }
 
 func SessionOf(r *tend.Rec) Session {
@@ -149,7 +150,8 @@ func SessionOf(r *tend.Rec) Session {
 		GitBranch: r.GitBranch, GitRemote: r.GitRemote, Repo: r.Repo, Transcript: r.TranscriptPath, Pinned: r.PinnedPath,
 		StartedAt: r.SessionStartedAt, FavoritedAt: r.FavoritedAt, ArchivedAt: r.ArchivedAt, UpdatedAt: r.UpdatedAt,
 		ResumedAt: r.LastResumedAt, Resumes: r.ResumeCount, LastAt: r.LastAt, Turns: r.Turns, Msgs: r.Msgs, App: r.App,
-		CodexArchived: r.CodexArchived, Recap: r.Recap, Files: r.Files, Copies: copiesOf(r.Copies)}
+		CodexArchived: r.CodexArchived, Recap: r.Recap, Files: r.Files, Copies: copiesOf(r.Copies),
+		Permission: r.Permission}
 }
 
 func copiesOf(cs []tend.Copy) []Copy {
@@ -170,7 +172,7 @@ func (s Session) Rec(host string) *tend.Rec {
 		GitBranch: s.GitBranch, GitRemote: s.GitRemote, Repo: s.Repo, TranscriptPath: s.Transcript, PinnedPath: s.Pinned,
 		SessionStartedAt: s.StartedAt, FavoritedAt: s.FavoritedAt, ArchivedAt: s.ArchivedAt, UpdatedAt: s.UpdatedAt,
 		LastResumedAt: s.ResumedAt, ResumeCount: s.Resumes, LastAt: s.LastAt, Turns: s.Turns, Msgs: s.Msgs, App: s.App,
-		CodexArchived: s.CodexArchived, Recap: s.Recap, Files: s.Files, Host: host}
+		CodexArchived: s.CodexArchived, Recap: s.Recap, Files: s.Files, Permission: s.Permission, Host: host}
 	for _, t := range []*time.Time{&r.UpdatedAt, &r.LastAt, r.SessionStartedAt, r.FavoritedAt, r.ArchivedAt, r.LastResumedAt} {
 		if t != nil {
 			*t = t.Local()
