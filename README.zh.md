@@ -317,7 +317,8 @@ tend trash --restore 01a07dcf
 tend mv <旧目录> <新目录>                 # 等于 TUI 的 M
 tend rm <id>                              # 单条进回收站；所有 <id> 也认会话 id 前缀，host:id 是那台机器的
 tend trash [host:mba|host:all] [--json]  # 看回收站（host: 看别的机器的或每台的）；--purge 清过期的，--purge --all 清空（会确认）
-tend doctor [--compact]                  # 体检：数据文件、失效会话、回收站过期、空闲几小时的 agent、没人留的大文件；--compact 压实
+tend doctor [--compact]                  # 体检：数据文件、失效会话、回收站过期、空闲几小时的 agent、没人留的大文件、孤儿记忆；--compact 压实
+tend memory [项目|目录] [host:mba]       # Claude 项目记忆和适用的 Codex 全局记忆；show <文件> 读一条，rm <文件|目录> 进回收站，merge <旧> <新> 并过去
 ```
 
 ### 其它机器：`hosts`

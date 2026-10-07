@@ -5,11 +5,13 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/oxsean/fav/internal/fixture"
 	"github.com/oxsean/fav/internal/index"
+	"github.com/oxsean/fav/internal/memory"
 	"github.com/oxsean/fav/internal/remote"
 	"github.com/oxsean/fav/internal/wire"
 )
@@ -95,5 +97,43 @@ func TestReposTakesTheCodexSessionsOfTheRemoteFirst(t *testing.T) {
 	got, err := n.Repos(context.Background(), remote.ReposParams{Remote: "git@example.com:acme/webapp"})
 	if err != nil || len(got.Dirs) == 0 || got.Dirs[0] != (remote.RepoDir{Path: filepath.Join(d.Work, "webapp"), Branch: "main", From: "index-remote"}) {
 		t.Fatalf("%+v %v", got.Dirs, err)
+	}
+}
+
+// A memory directory whose project directory is gone counts as moved when node.repos finds its repository's one checkout.
+func TestReposPlaceAMovedProjectsMemory(t *testing.T) {
+	needGit(t)
+	d, err := fixture.Build(filepath.Join(t.TempDir(), "machine"), time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, kv := range d.Env() {
+		k, v, _ := strings.Cut(kv, "=")
+		t.Setenv(k, v)
+	}
+	idx, err := index.Open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if idx, _ = idx.Refresh(); idx.Save() != nil {
+		t.Fatal("index not saved")
+	}
+	var origins []memory.Origin
+	for _, s := range append(idx.Sessions(), idx.AgentSessions()...) {
+		origins = append(origins, memory.Origin{Dir: s.Cwd, Remote: s.GitRemote()})
+	}
+	n := New(t.TempDir())
+	n.Limits.AllowDirs = []string{d.Root}
+	r := memory.Scan(origins, func(url string) []string {
+		res, _ := n.Repos(context.Background(), remote.ReposParams{Remote: url})
+		var dirs []string
+		for _, x := range res.Dirs {
+			dirs = append(dirs, x.Path)
+		}
+		return dirs
+	})
+	i := slices.IndexFunc(r.Orphans, func(o memory.Orphan) bool { return o.From == filepath.Join(d.Work, "legacy-app") })
+	if i < 0 || r.Orphans[i].Class != memory.OrphanMoved || r.Orphans[i].Target != filepath.Join(d.Root, "dev", "legacy-app") {
+		t.Fatalf("orphans: %+v", r.Orphans)
 	}
 }

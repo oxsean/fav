@@ -52,8 +52,8 @@ func isTemporary(dir string) bool {
 }
 
 // Scan goes through every projects/*/memory/ directory; their names encode a path one way, so origins whose encoding
-// matches are where they came from, and same says whether two git remotes are one repository.
-func Scan(origins []Origin, same func(a, b string) bool) Report {
+// matches are where they came from, and checkouts lists this machine's checkouts of a git remote.
+func Scan(origins []Origin, checkouts func(remote string) []string) Report {
 	var r Report
 	byName := map[string][]Origin{}
 	for _, o := range origins {
@@ -90,7 +90,7 @@ func Scan(origins []Origin, same func(a, b string) bool) Report {
 		case slices.ContainsFunc(from, func(o Origin) bool { return temporary(o.Dir) }):
 			o.Class = OrphanTemp
 		default:
-			if t := checkout(from, origins, same); t != "" {
+			if t := checkout(from, checkouts); t != "" {
 				o.Class, o.Target = OrphanMoved, t
 			}
 		}
@@ -133,19 +133,20 @@ func stillThere(name string) bool {
 	return rest == "" || walk(root, rest)
 }
 
-// checkout is the one existing directory here whose remote is the orphan's, "" when there are none or several.
-func checkout(from, origins []Origin, same func(a, b string) bool) string {
-	if same == nil {
+// checkout is the one existing checkout here of the orphan's remotes, "" when there are none or several.
+func checkout(from []Origin, checkouts func(remote string) []string) string {
+	if checkouts == nil {
 		return ""
 	}
-	var hits []string
+	var hits, asked []string
 	for _, f := range from {
-		if f.Remote == "" {
+		if f.Remote == "" || slices.Contains(asked, f.Remote) {
 			continue
 		}
-		for _, o := range origins {
-			if o.Remote != "" && same(f.Remote, o.Remote) && paths.IsDir(o.Dir) && !slices.Contains(hits, o.Dir) {
-				hits = append(hits, o.Dir)
+		asked = append(asked, f.Remote)
+		for _, d := range checkouts(f.Remote) {
+			if paths.IsDir(d) && !slices.ContainsFunc(hits, func(h string) bool { return paths.Same(h, d) }) {
+				hits = append(hits, d)
 			}
 		}
 	}

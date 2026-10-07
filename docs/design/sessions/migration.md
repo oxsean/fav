@@ -75,7 +75,7 @@
 2. **管**
    - `tend doctor` 扫描 `~/.claude/projects/*/memory/`（`memory.Scan`）：空目录只计数；有内容的，用索引里会话的 `Cwd`、`Repo` 和收藏记录的 `Cwd` 反查（目录名是单向编码，只能拿已知目录编码后比对）。有一个候选目录还在，或者按编码从根目录一层层能在盘上找到原目录（最多读 500 个目录），就不是孤儿。孤儿分三类：
      - 临时目录：候选是 agent 的 scratch 目录（`index.AgentScratch`），或在临时目录里（Claude home 本身也在临时目录里时不按这一条判，比如测试和 fixture）。建议 `tend memory rm <记忆目录>`。
-     - 已搬走：候选带 git remote（Codex 会话记的 `repository_url`、收藏记录的 `git_remote`），本机现存的会话目录里同一个 remote 的只有一个。建议 `tend memory merge <记忆目录> <那个目录>`。
+     - 已搬走：候选带 git remote（Codex 会话记的 `repository_url`、收藏记录的 `git_remote`），本机的 `node.repos` 按 `task.RemoteKey` 只找到这个仓库的一个检出（在 `allow_dirs` 下，没有就在 home 下）。建议 `tend memory merge <记忆目录> <那个检出>`。
      - 其余：「来源未知」，不猜。
    - 删一条记忆（`memory.Trash`，`tend memory rm`、`memory.trash`）：只删 Claude 记忆目录里的条目文件，不删 `MEMORY.md`，不碰 Codex 的记忆。文件进 tend 回收站（`TrashEntry` 的 `kind: "memory"`，`line` 是从 `MEMORY.md` 去掉的那一行原文），条目 id 是它在回收站里的目录名。还原（`memory.Restore`，`tend trash --restore <id>`、`memory.restore`）把文件放回，原处已有同名文件就拒绝，那一行加回 `MEMORY.md` 末尾（已有就不加）。`tend trash` 和会话一起列出记忆条目；TUI 的回收站视图仍只列会话。
    - 整个记忆目录也能进回收站（`tend memory rm <记忆目录>`），还原同上。
@@ -138,7 +138,6 @@
 | `tend doctor` 检测 Codex `history_mode` | 只看文件名和修改时间没有稳定的信号（见「Codex：不做完整迁移」的风险监控） |
 | 远端机器的孤儿扫描 | `tend doctor` 只扫本机；要看那台就在那台上跑 |
 | TUI 回收站视图里的记忆条目 | 回收站视图只列会话；记忆用 `tend trash --restore` 还原 |
-| 「已搬走」的候选来自 `node.repos` 的本机查找 | 现在只从会话目录里按 remote 找候选 |
 
 ## 决定
 

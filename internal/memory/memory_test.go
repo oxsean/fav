@@ -459,7 +459,8 @@ func TestScanSortsOrphans(t *testing.T) {
 	const remote, other = "https://example.com/acme/app.git", "git@example.com:acme/other.git"
 	origins := []Origin{{Dir: alive}, {Dir: scratch}, {Dir: gone, Remote: remote}, {Dir: movedTo, Remote: remote},
 		{Dir: lost}, {Dir: twice, Remote: other}, {Dir: dup1, Remote: other}, {Dir: dup2, Remote: other}}
-	r := Scan(origins, func(a, b string) bool { return a == b })
+	checkouts := map[string][]string{remote: {movedTo}, other: {dup1, dup2}}
+	r := Scan(origins, func(remote string) []string { return checkouts[remote] })
 
 	if r.Dirs != 6 || r.Empty != 1 {
 		t.Errorf("dirs %d empty %d", r.Dirs, r.Empty)

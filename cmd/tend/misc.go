@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -15,7 +16,9 @@ import (
 	"github.com/oxsean/fav/internal/memory"
 	"github.com/oxsean/fav/internal/node"
 	"github.com/oxsean/fav/internal/paths"
+	"github.com/oxsean/fav/internal/remote"
 	"github.com/oxsean/fav/internal/shell"
+	"github.com/oxsean/fav/internal/task"
 	"github.com/oxsean/fav/internal/tend"
 	"github.com/oxsean/fav/skills"
 )
@@ -130,7 +133,7 @@ func printMemoryScan(s *tend.Store, idx *index.Index) {
 	for _, r := range s.All() {
 		origins = append(origins, memory.Origin{Dir: r.Cwd, Remote: r.GitRemote})
 	}
-	rep := memory.Scan(origins, sameRemote)
+	rep := memory.Scan(origins, repoCheckouts())
 	fmt.Print(i18n.F("cli.doctor.memory", rep.Dirs, rep.Empty))
 	by := map[string][]memory.Orphan{}
 	for _, o := range rep.Orphans {
@@ -166,12 +169,27 @@ func printMemoryScan(s *tend.Store, idx *index.Index) {
 	}
 }
 
-// sameRemote: two git remotes name one repository.
-func sameRemote(a, b string) bool {
-	trim := func(u string) string {
-		return strings.TrimSuffix(strings.TrimSuffix(strings.TrimSpace(u), "/"), ".git")
+// repoCheckouts lists this machine's checkouts of a git remote as node.repos finds them, once per repository.
+func repoCheckouts() func(string) []string {
+	n := node.New(tend.Home())
+	n.Limits = loadConfig().Node
+	found := map[string][]string{}
+	return func(url string) []string {
+		key := task.RemoteKey(url)
+		if key == "" {
+			return nil
+		}
+		if dirs, ok := found[key]; ok {
+			return dirs
+		}
+		res, _ := n.Repos(context.Background(), remote.ReposParams{Remote: url})
+		var dirs []string
+		for _, d := range res.Dirs {
+			dirs = append(dirs, d.Path)
+		}
+		found[key] = dirs
+		return dirs
 	}
-	return strings.EqualFold(trim(a), trim(b))
 }
 
 // Claude and Codex both read skills/<name>/SKILL.md: one source symlinked to both.

@@ -320,7 +320,8 @@ Numbers follow the filter, so reuse the same directory / query. Without a TTY an
 tend mv <old dir> <new dir>              # same as the TUI's M
 tend rm <id>                             # one session to the trash; every <id> also accepts a session-id prefix, host:id another machine's
 tend trash [host:mba|host:all] [--json]  # list the trash (host: another machine's, or every one's); --purge removes expired entries, --purge --all empties it (asks)
-tend doctor [--compact]                  # check data files, dead sessions, trash expiry, agents idle for hours, big old transcripts nobody kept; --compact rewrites the store
+tend doctor [--compact]                  # check data files, dead sessions, trash expiry, agents idle for hours, big old transcripts nobody kept, orphaned memories; --compact rewrites the store
+tend memory [project|dir] [host:mba]     # Claude's project memory and the Codex global memories that apply; show <file>, rm <file|dir> (to the trash), merge <old> <new>
 ```
 
 ### Other machines: `hosts`

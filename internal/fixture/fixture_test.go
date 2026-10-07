@@ -463,7 +463,7 @@ func TestMemoryScenarios(t *testing.T) {
 	for _, s := range append(idx.Sessions(), idx.AgentSessions()...) {
 		origins = append(origins, memory.Origin{Dir: s.Cwd, Remote: s.GitRemote()})
 	}
-	r := memory.Scan(origins, func(a, b string) bool { return a == b })
+	r := memory.Scan(origins, nil)
 	if r.Dirs != 3 || r.Empty != 1 || len(r.Orphans) != 2 {
 		t.Fatalf("scan: %+v", r)
 	}
