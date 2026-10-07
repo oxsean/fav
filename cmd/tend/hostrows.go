@@ -376,22 +376,31 @@ func pickLocal(s *tend.Store, ref string) (*tend.Rec, error) {
 
 func readOnly(r *tend.Rec) error { return i18n.E("cli.remote.read_only", r.Host) }
 
-// remotePick is pick for commands that write a record: another machine's goes through its put (writeRec), refused
-// on a machine shared with the viewer and while the server cannot be reached.
+// remotePick is pick for commands that write a session: another machine's goes through its node methods (writeRec,
+// rm), refused where farWritable says so.
 func remotePick(s *tend.Store, ref string) (*tend.Rec, error) {
 	r, err := pick(s, ref)
 	if err != nil || r.Host == "" {
 		return r, err
 	}
-	if far := farHosts(); far.Server != nil {
-		if err := far.reach(); err != nil {
-			return nil, i18n.E("remote.put_server_down", remote.Reason(err))
-		}
-		if !far.mine(r.Host) {
-			return nil, i18n.E("cli.remote.shared_write", r.Host)
-		}
+	if err := farWritable(r.Host); err != nil {
+		return nil, err
 	}
 	return r, nil
+}
+
+// farWritable: machine name takes writes from here; not one shared with the viewer, nor while the server cannot be
+// reached.
+func farWritable(name string) error {
+	if far := farHosts(); far.Server != nil {
+		if err := far.reach(); err != nil {
+			return i18n.E("remote.put_server_down", remote.Reason(err))
+		}
+		if !far.mine(name) {
+			return i18n.E("cli.remote.shared_write", name)
+		}
+	}
+	return nil
 }
 
 // fresh is another machine's r as its machine lists it now, r itself when that cannot be read: an edit starts from
@@ -419,15 +428,10 @@ func writeRec(s *tend.Store, r *tend.Rec, p tend.Patch, expect *time.Time) (*ten
 	ctx, cancel := context.WithTimeout(context.Background(), hostTimeout)
 	defer cancel()
 	saved, err := remoteHosts().Put(ctx, r.Host, remote.Ref{Provider: r.Provider, SessionID: r.SessionID}, p, expect)
-	switch wire.Code(err) {
-	case "":
-		return saved, nil
-	case wire.CodeUnknownMethod:
-		return nil, i18n.E("remote.put_old", r.Host, r.Host)
-	case wire.CodeStale:
-		return nil, i18n.E("remote.put_stale", r.Host)
+	if err != nil {
+		return nil, errors.New(remote.Refused(r.Host, remote.MPut, err))
 	}
-	return nil, i18n.E("remote.put_failed", r.Host, remote.Reason(err))
+	return saved, nil
 }
 
 // remoteResume is `ssh -t <host> tend resume …` for r, as a command spec. Mode 2 resumes over ssh only the viewer's

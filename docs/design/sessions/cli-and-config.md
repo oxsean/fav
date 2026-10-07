@@ -21,11 +21,12 @@ tend status <id> todo|doing|done
 tend done|archive|unarchive <id>
 tend favorite|unfavorite <id>
 tend pin|unpin <id>
-tend rm <id> [-y]                      挪进回收站；正在跑的拒绝（别名 delete）
+tend rm <id> [-y]                      挪进回收站；正在跑的拒绝（别名 delete）；host:sid 挪进那台机器的回收站
                                        所有 <id> 都先按 record id 找，找不到当 session id（前缀也行，多于一条命中报歧义）
                                        到收藏、索引、在跑的会话里找，最后按前缀认索引里 skip 的、没说过话的文件和续接链的旧 id；
                                        没收藏的会话第一次改状态 / 编辑时建记录（不算收藏）。
 tend trash [--json] [--restore <id|sid>] [--purge [--all] [-y]]
+                                       --restore host:sid 还原那台机器回收站里的；列表和 --purge 只管本机
                                        --purge 只清过期；--purge --all 清空是唯一不可逆的删除，先问 y/N
 tend mv <旧目录> <新目录> [-y]          移动项目（和 TUI 的 M 同一段代码）；有会话在跑就拒绝（别名 move）
 tend resume <id> [--dry-run] [--no-herdr] [--app|--terminal] [--workspace 名字] [--fork]
@@ -82,7 +83,7 @@ tend uninstall-skill                    只删 ~/.claude、~/.codex 下的 tend 
 
 - 单机：`config.hosts` 经 ssh。
 - server（`coordinator.url`）：第一次要读别的机器时拨 server 一次（5 秒为限，`hello` + `machine.list`），经 `node.call` 读它让看的人读的机器（去掉本机），`host:` 用 server 的机器名，不退回 ssh。拨不上时 stderr 一行「连不上 server：原因 · 别的机器显示缓存」，只列自己机器的缓存。fzf 守 30 秒规则、不列别人共享的机器，`tend resume` 的规则，都见 [remote.md](remote.md)「server 模式」「恢复」「fzf」。
-- 写记录：`favorite` / `unfavorite` / `archive` / `unarchive` / `status` / `done` / `edit` 和 fzf 的 `fzf-pick toggle*` 接受 `host:sid`，经那台机器的 `put` 写（`remotePick`、`writeRec`）；`edit` 先从那台重读这一行，再开编辑器，存时带它的 `updated_at`，那边改过就失败。server 模式下拨不上 server、或机器是别人共享的，就拒绝；那台的 tend 旧（没有 `put`）时提示先 `tend hosts install <机器>`。`pin`、`rm`、`open`、`resume --fork`、`handoff` 等仍只对本机的记录。见 [remote.md](remote.md)「远端行的写入」。
+- 写记录：`favorite` / `unfavorite` / `archive` / `unarchive` / `status` / `done` / `edit` 和 fzf 的 `fzf-pick toggle*` 接受 `host:sid`，经那台机器的 `put` 写（`remotePick`、`writeRec`）；`edit` 先从那台重读这一行，再开编辑器，存时带它的 `updated_at`，那边改过就失败。server 模式下拨不上 server、或机器是别人共享的，就拒绝；那台的 tend 旧（没有 `put`）时提示先 `tend hosts install <机器>`。`rm` 和 `trash --restore` 也接受 `host:sid`，经那台的 `trash` / `restore`（`rmFar`、`restoreFar`，同一组 `Hosts` 方法），在跑的会话那台回 `busy`，同样拒绝。`pin`、`open`、`resume --fork`、`handoff` 等仍只对本机的记录。见 [remote.md](remote.md)「远端行的写入」。
 
 fzf 的项目选择器先列项目（`<id>  # <名字>  (N)`，选了写 `project:<id>`），再列自动组；卡片和行里的项目写项目名（`Rec.Group()`）。`--json` 输出里的 `project` 仍是记录自己的字段。
 

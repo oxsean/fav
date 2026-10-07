@@ -29,14 +29,17 @@ type fakeHost struct {
 	live     map[string]capture.Live
 	msgs     []capture.Message
 	calls    map[string]int
-	methods  []string    // what its hello lists
-	expects  []time.Time // the expect each put carried, zero for none
+	methods  []string         // what its hello lists
+	expects  []time.Time      // the expect each put carried, zero for none
+	trashed  []remote.Session // its trash, UpdatedAt when each went there
+	days     int              // its trash_days
 }
 
 func newFakeHost() *fakeHost {
 	now := time.Now()
 	f := &fakeHost{calls: map[string]int{}, live: map[string]capture.Live{"r-live": {Status: "working"}},
-		methods: []string{remote.MHello, remote.MList, remote.MLive, remote.MMessages, remote.MPut}}
+		methods: []string{remote.MHello, remote.MList, remote.MLive, remote.MMessages, remote.MPut, remote.MQuery, remote.MTrash, remote.MRestore},
+		days:    7}
 	for i, title := range []string{"远端分页排障", "remote websocket fix", "远端正在跑的"} {
 		id := []string{"r-a", "r-b", "r-live"}[i]
 		f.sessions = append(f.sessions, remote.Session{Provider: tend.ProviderClaude, SessionID: id, Title: title,
@@ -85,6 +88,38 @@ func (f *fakeHost) Handle(_ context.Context, method string, params json.RawMessa
 		return remote.Row{Session: f.sessions[i]}, nil
 	case remote.MList:
 		return remote.List{Sessions: slices.Clone(f.sessions)}, nil
+	case remote.MQuery:
+		var p remote.QueryParams
+		json.Unmarshal(params, &p)
+		if p.Q != "status:trash" || !slices.Contains(f.methods, remote.MQuery) {
+			break
+		}
+		res := remote.QueryResult{Rows: []remote.Row{}, TrashDays: f.days}
+		for _, s := range f.trashed {
+			res.Rows = append(res.Rows, remote.Row{Session: s, DeletedAt: new(s.UpdatedAt)})
+		}
+		return res, nil
+	case remote.MTrash, remote.MRestore:
+		if !slices.Contains(f.methods, method) {
+			break
+		}
+		var ref remote.Ref
+		json.Unmarshal(params, &ref)
+		from, to := &f.sessions, &f.trashed
+		if method == remote.MRestore {
+			from, to = to, from
+		} else if _, ok := f.live[ref.SessionID]; ok {
+			return nil, &wire.Error{Code: wire.CodeBusy}
+		}
+		i := slices.IndexFunc(*from, func(s remote.Session) bool { return s.Provider == ref.Provider && s.SessionID == ref.SessionID })
+		if i < 0 {
+			return nil, &wire.Error{Code: wire.CodeNotFound}
+		}
+		s := (*from)[i]
+		*from = slices.Delete(*from, i, i+1)
+		s.UpdatedAt = time.Now()
+		*to = append(*to, s)
+		return remote.TrashResult{Title: s.Title, Files: 1}, nil
 	case remote.MLive:
 		return remote.Live{Live: f.live}, nil
 	case remote.MMessages:
@@ -281,9 +316,9 @@ func TestRemoteResumeDialogOffersOnlyRemoteActions(t *testing.T) {
 	if !slices.Equal(labels, want) {
 		t.Fatalf("resume and copy only: %q", labels)
 	}
-	key(m, "D")
+	key(m, "M")
 	if m.ov.kind != ovResume || m.notice != i18n.T("remote.read_only") || len(m.store.All()) != 4 {
-		t.Fatalf("D in the dialog only flashes: notice=%q", m.notice)
+		t.Fatalf("M in the dialog only flashes: notice=%q", m.notice)
 	}
 	key(m, "f")
 	if m.ov.active() || !r.Favorite() || f.called(remote.MPut) != 1 || len(m.store.All()) != 4 {
@@ -297,14 +332,14 @@ func TestRemoteResumeDialogOffersOnlyRemoteActions(t *testing.T) {
 	}
 }
 
-// TestKeysPutCannotCarryOnARemoteRowOnlyFlash: moving, deleting and what opens local things stay this machine's.
+// TestKeysPutCannotCarryOnARemoteRowOnlyFlash: moving and what opens local things stay this machine's.
 func TestKeysPutCannotCarryOnARemoteRowOnlyFlash(t *testing.T) {
 	f := newFakeHost()
 	m := remoteModel(t, f, nil)
 	fetch(t, m)
 	showHosts(m, "host:mba")
 	r := cursorOn(t, m, "r-a")
-	for _, k := range []string{"M", "D", "w", "`", ".", "H", "X"} {
+	for _, k := range []string{"M", "w", "`", ".", "H", "X"} {
 		m.notice = ""
 		m.Update(press(k))
 		if m.ov.active() || m.notice != i18n.T("remote.read_only") {
@@ -427,7 +462,7 @@ func TestRemoteRowsStayReadOnlyWithAChipFocused(t *testing.T) {
 	fetch(t, m)
 	showHosts(m, "host:mba")
 	cursorOn(t, m, "r-a")
-	for _, k := range []string{"D", "M"} {
+	for _, k := range []string{"M", "w"} {
 		m.chipFocus, m.notice = 0, ""
 		m.Update(press(k))
 		if m.ov.active() || m.notice != i18n.T("remote.read_only") {

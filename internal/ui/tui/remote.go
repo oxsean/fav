@@ -40,8 +40,11 @@ type hostRows struct {
 	liveErr error     // who runs there is not known now: live is the last answer
 	fails   int       // fetches failed in a row
 	loading bool
-	idle    bool // not polled: the filter does not show the host
-	old     bool // its tend has no put, as its last hello said: its rows are read only
+	idle    bool            // not polled: the filter does not show the host
+	lacks   map[string]bool // the write methods its tend lacks, as its last hello or a call said
+	trash   []*tend.Rec     // its trash, as last read in the trash view
+	days    int             // its trash_days, as its trash answered (0: not known or never)
+	trashed bool            // its trash was read (or is being read) since the trash view opened
 }
 
 func (hr *hostRows) merge(fresh []*tend.Rec) {
@@ -82,8 +85,8 @@ type hostMsg struct {
 	live    map[string]capture.Live
 	liveErr error
 	os      string // its GOOS, as its hello said
-	hello   bool   // it said hello: old is known
-	old     bool   // its tend has no put
+	hello   bool   // it said hello: lacks is known
+	lacks   map[string]bool
 }
 
 type hostTickMsg string
@@ -113,7 +116,7 @@ func (m *Model) fetchHost(name string) tea.Cmd {
 		if msg.st.Err == nil {
 			msg.live, msg.liveErr = h.Live(ctx, name)
 			if hello, err := h.Hello(ctx, name); err == nil { // reached just now: no dial
-				msg.os, msg.hello, msg.old = hello.OS, true, !slices.Contains(hello.Methods, remote.MPut)
+				msg.os, msg.hello, msg.lacks = hello.OS, true, lacking(hello)
 			}
 		}
 		return msg
@@ -128,7 +131,7 @@ func (m *Model) applyHost(msg hostMsg) tea.Cmd {
 	hr.loading, hr.err = false, msg.st.Err
 	m.noteHostOS(msg.name, msg.os)
 	if msg.hello {
-		hr.old = msg.old
+		hr.lacks = msg.lacks
 	}
 	if hr.liveErr = msg.liveErr; msg.liveErr == nil { // unknown is not "nothing runs": keep the last answer
 		hr.live = msg.live
@@ -178,21 +181,35 @@ func (m *Model) wakeHosts() tea.Cmd {
 			cmds = append(cmds, m.fetchHost(name))
 		}
 	}
-	return tea.Batch(cmds...)
+	return tea.Batch(append(cmds, m.readTrash(q))...)
 }
 
-// remoteList: the rows of the hosts q.Host selects; status:live asks each host's own live map. Trash, one-shot agent
-// runs and message search are this machine's only.
+// remoteList: the rows of the hosts q.Host selects; status:live asks each host's own live map, status:trash lists each
+// host's trash as last read. One-shot agent runs and message search are this machine's only.
 func (m *Model) remoteList(q tend.Query) []*tend.Rec {
-	if len(m.remote) == 0 || q.Host == "" || q.Host == tend.HostLocal || q.Status == tend.StatusTrash || q.Status == tend.StatusAgent || m.msgMode() {
+	if len(m.remote) == 0 || q.Host == "" || q.Host == tend.HostLocal || q.Status == tend.StatusAgent || m.msgMode() {
 		return nil
 	}
 	var out []*tend.Rec
 	for _, name := range m.hosts.Names() {
 		hr := m.remote[name]
-		hq := q
+		hq, recs := q, hr.recs
 		hq.Live = func(id string) bool { _, ok := hr.live[id]; return ok }
-		out = append(out, index.Select(&m.lists, hr.recs, hq, index.Page{}).Rows...)
+		if q.Status == tend.StatusTrash { // the trash's rows match as any row, as this machine's do
+			hq.Status, hq.Turns, recs = "all", 0, hr.trash
+		}
+		out = append(out, index.Select(&m.lists, recs, hq, index.Page{}).Rows...)
+	}
+	return out
+}
+
+// lacking are the write methods hello does not list.
+func lacking(hello remote.Hello) map[string]bool {
+	out := map[string]bool{}
+	for _, method := range []string{remote.MPut, remote.MTrash, remote.MRestore} {
+		if !slices.Contains(hello.Methods, method) {
+			out[method] = true
+		}
 	}
 	return out
 }
@@ -316,8 +333,8 @@ func (m *Model) remoteRow() bool {
 	return false
 }
 
-// remoteBlocked: what writes tend's records or opens local things; on another machine's session only those put carries
-// (putAct) are offered, while its machine takes them.
+// remoteBlocked: what writes tend's records or opens local things; on another machine's session only those its node
+// methods carry (farMethod) are offered, while its machine takes them.
 func remoteBlocked(a act) bool {
 	switch a {
 	case actFavorite, actDone, actArchive, actEdit, actMove, actDelete, actNew, actPeek, actHandled, actSnooze, actCloseTab, actTitle:

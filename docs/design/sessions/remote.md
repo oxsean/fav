@@ -2,7 +2,7 @@
 
 在任何一台机器上看、读、恢复其它机器上的 Claude Code / Codex 会话：远端合同（协议、标识、路径映射、配置、连接与失败）和聚合（列表、筛选、右栏、恢复、缓存）。迁移、记忆和环境诊断见 [migration.md](migration.md)。
 
-实现：`internal/remote`（`proto.go` 方法与类型、`local.go` 应答端、`client.go` ssh 客户端、`transport.go` 两种传输、`hosts.go` 机器与缓存、`source.go` 记录来源），`internal/pathmap`，`internal/paths`（`SocketRoom`），`cmd/tend`（`hosts.go`、`rpc.go`）；帧与连接在 `internal/wire`。
+实现：`internal/remote`（`proto.go` 方法与类型、`local.go` 应答端、`client.go` ssh 客户端、`transport.go` 两种传输、`hosts.go` 机器与缓存、`trash.go` 远端删除与还原、`source.go` 记录来源），`internal/pathmap`，`internal/paths`（`SocketRoom`），`cmd/tend`（`hosts.go`、`rpc.go`）；帧与连接在 `internal/wire`。
 
 ## 范围
 
@@ -135,7 +135,7 @@
 | 右栏对话 | 经记录来源接口按页读取，每次取 40 句；按偏移读取的游标带上文件身份，文件变了就重新定位 |
 | 搜消息 | 节点回答 `grep`（本机排名、命中数、是否一条全中、片段和高亮、偏移，不回分数）、`hits` 和 `messages` 的 `find`（见「方法」）。Web 的会话页按 Enter 才搜，协调器 `sessions.grep` 并行问各台读得了会话的机器，按档位和名次交错合并（各机器的分数按各自语料算，不能直接比），没建完正文库的那台标进度。TUI 照旧只搜本机：远端行上 `\` 和 `→` 不查本机正文库，只在右栏已加载的消息里一处处跳 |
 | Agents | 各机器在跑的会话合在一起，标出机器。远端 Agents 卡片只显示远端自己的运行状态，不查本机按 session id 记的 pulse 和关注状态 |
-| 收藏 / 状态 / 编辑 / 删除 | 经节点的 `put`、`trash`、`restore`（见「列表与写入」）写到会话所在的那台机器；TUI 和 CLI 的远端行见「远端行的写入」（删除和还原还不经节点）。Windows 上的记录文件锁是进程间锁（`LockFileEx`） |
+| 收藏 / 状态 / 编辑 / 删除 | 经节点的 `put`、`trash`、`restore`（见「列表与写入」）写到会话所在的那台机器；TUI 和 CLI 的远端行见「远端行的写入」。Windows 上的记录文件锁是进程间锁（`LockFileEx`） |
 | 恢复 | 见「恢复」 |
 | 项目对应关系 | 未实现。用户确认过一次的「这台机器的哪个目录对应那台机器的哪个目录」，记下来以后直接用。首次猜测时先读 `~/.claude.json` 的 `githubRepoPaths` 和 Codex 的 `git_origin_url`，读不到再扫描目录；同一个 remote 对应多个目录时让用户选 |
 
@@ -151,15 +151,18 @@
 
 ### 远端行的写入
 
-- 自己的机器（单机模式下 `config.hosts` 的全部；server 模式下主人是看的人的）：收藏、状态（`x` 和 `tend status` / `done`）、归档、编辑（标题、标签、摘要）经那台机器的 `put` 写，补丁和本机行同一个 `tend.Patch`。`Hosts.Put(ctx, 机器, ref, patch, expect)` 经传输的 `Call` 发出，ssh 和 `node.call` 一样；回答的行换掉缓存里那一行（没有就补上），缓存照「两种传输」的写盘规则落盘。只有编辑框带 `expect`（打开时那条记录的 `updated_at`），对不上回 `stale`；开关和撤销不带。
-- TUI：按键时取补丁，后台发 `put`，后台只读值的拷贝；回答回来才把新值原地拷进同一行（指针不变），再闪一句、给撤销，和本机行同一段代码，所以撤销窗口从回答到达时算起，撤销也是一次 `put`。之前这一行仍是旧值。
-- 写不了时按键只闪一句，不开编辑框：
+- 自己的机器（单机模式下 `config.hosts` 的全部；server 模式下主人是看的人的）：收藏、状态（`x` 和 `tend status` / `done`）、归档、编辑（标题、标签、摘要，包括恢复框里改的标题）经那台机器的 `put` 写，删除和还原经它的 `trash` / `restore`，补丁和本机行同一个 `tend.Patch`。`Hosts.Put(ctx, 机器, ref, patch, expect)` 经传输的 `Call` 发出，ssh 和 `node.call` 一样；回答的行换掉缓存里那一行（没有就补上），缓存照「两种传输」的写盘规则落盘。只有编辑框带 `expect`（打开时那条记录的 `updated_at`），对不上回 `stale`；开关和撤销不带。
+- `Hosts.Trash` / `Restore` / `Trashed`（`internal/remote/trash.go`，TUI 和 CLI 共用）：那台上次 `hello` 的 `methods` 里没有 `trash`（或这个方法本身）时不发请求，回 `unknown_method`。`Trash` 成功后从缓存的列表里去掉这一行；`Restore` 不动缓存，下一次拉列表带回它；`Trashed` 是 `query{q: "status:trash", all}`（翻完所有页），行的 `updated_at` 换成 `deleted_at`，另回 `trash_days`。失败的说法（`remote.Refused`）三种写法共用。
+- TUI：远端写只有一条路（`farWrite`）：按键时取好参数，后台调一次 `Hosts` 的方法，后台只读值的拷贝；回答回来在主循环上应用。`put` 把新值原地拷进同一行（指针不变），再闪一句、给撤销，和本机行同一段代码，所以撤销窗口从回答到达时算起，撤销也是一次 `put`；之前这一行仍是旧值。恢复框里改了标题时先等 `put` 回答，回答到了、恢复框还开着才接着恢复；失败就留在恢复框，闪原因。
+- TUI 的删除：`D` 弹和本机一样的确认框，正文写「它在 <机器> 上的文件移入那台机器的回收站；在回收站筛选里按 `D` 可还原」（键取自 `bindings`）和那台的 `trash_days`（这次进过回收站视图才知道，不知道就不写）；文件数要那台机器才知道，确认框不写，成功后的闪句也只写标题。已知在跑（那台 `live` 里有它）就直接闪「这个会话正在 <机器> 上运行」，不开确认框；那边回 `busy` 时也闪这句。成功后这一行从列表里去掉。本机的删除不给撤销，远端也不给。
+- TUI 的回收站视图：`status:trash` 且 `host:` 选到的自己的机器，每次进视图后台读一次它的 `Trashed`（离开视图再进才重读，删除过的机器下次进也重读），行照本机回收站那样按 `status:all`、不嫌短筛选；读不到时闪「读不到 <机器> 的回收站：<原因>」。别人共享的、tend 旧的、连不上 server 时不读。`D` 经 `restore` 还原，成功后行从回收站里去掉，再拉一次那台的列表。
+- 写不了时按键只闪一句，不开编辑框或确认框：
   - 别人共享的机器：「<主人> 共享给你的会话在这里只读：只能看对话」；
   - server 模式下连不上 server：「连不上 server，改不了别的机器上的会话：<原因>」；
-  - 那台的 tend 旧（上次 `hello` 的 `methods` 里没有 `put`；没取到过 `hello` 的，`Hosts.Put` 不发请求，回 `unknown_method`）：「<机器> 的 tend 旧：先 `tend hosts install <机器>`」；
-  - 发出去失败：`stale` 说「这条记录刚被别处改过」，其余写「改不了 <机器> 上的会话：<原因>」，行不变。
-- CLI：`favorite` / `unfavorite` / `archive` / `unarchive` / `status` / `done` / `edit` 和 fzf 的 `fzf-pick toggle*` 接受 `host:sid`（`remotePick`、`writeRec`）。server 模式下先拨 server，拨不上、或机器是别人共享的就拒绝；`edit` 先从那台重读这一行，再开编辑器。
-- 删除、搬目录、钉住、在本机打开、交接、分叉仍只在本机做：TUI 提示「其它机器上的会话在这里能收藏、改状态、归档和编辑，其余到那台机器上做」，拦截不看焦点，删除和搬目录的入口再各拦一次；CLI 拒绝。节点虽然有 `trash` / `restore`（网页经 `node.call` 用），TUI 的 `D`、回收站里的还原和 `tend rm` / `tend trash --restore` 不对远端行发它们。`Store` 拒绝写入 `Rec.Host` 非空的记录。
+  - 那台的 tend 旧（上次 `hello` 的 `methods` 里没有 `put`，删除和还原看 `trash` / `restore`，每个方法分开记；没取到过 `hello` 的，`Hosts` 不发请求，回 `unknown_method`）：「<机器> 的 tend 旧：先 `tend hosts install <机器>`」；
+  - 发出去失败：`stale` 说「这条记录刚被别处改过」，`busy` 说会话在那边运行，其余写「改不了 / 删不了 / 还原不了 <机器> 上的会话：<原因>」，行不变。
+- CLI：`favorite` / `unfavorite` / `archive` / `unarchive` / `status` / `done` / `edit` 和 fzf 的 `fzf-pick toggle*` 接受 `host:sid`（`remotePick`、`writeRec`）；`tend rm host:sid` 问过 y/N 后经 `Hosts.Trash`；`tend trash --restore host:sid` 在那台的 `Trashed` 里按 session id 前缀或记录 id 找，再经 `Hosts.Restore`。server 模式下先拨 server，拨不上、或机器是别人共享的就拒绝（`farWritable`）；`edit` 先从那台重读这一行，再开编辑器。`tend trash` 的列表和 `--purge` 只管本机。
+- 搬目录、钉住、在本机打开、交接、分叉仍只在本机做：TUI 提示「其它机器上的会话在这里能收藏、改状态、归档、编辑和删除，其余到那台机器上做」，拦截不看焦点，搬目录的入口再拦一次；CLI 拒绝。`Store` 拒绝写入 `Rec.Host` 非空的记录。
 
 ### TUI
 

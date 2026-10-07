@@ -1291,17 +1291,20 @@ func (m *Model) editTitle() {
 // doResume persists an edited title before resuming.
 func (m *Model) doResume(noHerdr bool) {
 	r := m.ovRec()
+	if t := strings.TrimSpace(m.ov.edit.Value()); t != "" && t != r.Title {
+		if r.Host != "" { // the resume waits for the machine to take the title
+			m.editRec(r, tend.Patch{Title: &t}, nil, func(m *Model, saved *tend.Rec) {
+				if m.ov.kind == ovResume && m.ov.rec == saved {
+					m.remoteResume(noHerdr)
+				}
+			})
+			return
+		}
+		m.editRec(r, tend.Patch{Title: &t}, nil, func(_ *Model, saved *tend.Rec) { r = saved })
+	}
 	if r.Host != "" {
 		m.remoteResume(noHerdr)
 		return
-	}
-	if t := strings.TrimSpace(m.ov.edit.Value()); t != "" && t != r.Title {
-		r.Title = t
-		if r.ID != "" {
-			if err := m.store.Put(r); err != nil {
-				m.flash(i18n.F("resume.title_not_saved", err))
-			}
-		}
 	}
 	p := m.ov.plan
 	if noHerdr {

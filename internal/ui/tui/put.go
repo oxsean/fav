@@ -12,65 +12,84 @@ import (
 	"github.com/oxsean/fav/internal/wire"
 )
 
-// Another machine's row is written through that machine's put, in the background: the row keeps what it showed until
-// the answer, which is copied into it in place; then come the flash and the undo offer, as for this machine's rows.
+// Another machine's row is written through that machine's node methods, in the background: put for record edits,
+// trash and restore for delete. The row keeps what it showed until the answer, which is applied on the main loop; then
+// come the flash and the undo offer, as for this machine's rows.
 
-type putMsg struct {
-	row   *tend.Rec
-	host  string
-	saved *tend.Rec
-	err   error
-	done  func(*Model, *tend.Rec)
+// farCall runs a write against machine name off the main loop and returns how to apply its answer.
+type farCall func(ctx context.Context, h *remote.Hosts, name string, ref remote.Ref) (func(*Model) tea.Cmd, error)
+
+type farMsg struct {
+	host   string
+	method string
+	err    error
+	ok     func(*Model) tea.Cmd
 }
 
-// putActs are the record edits put carries; every other action stays this machine's.
-func putAct(a act) bool {
+// farMethod is the node method that carries a on another machine's row, "" when none does: record edits go through
+// put, delete through trash (restore in the trash view).
+func (m *Model) farMethod(a act) string {
 	switch a {
-	case actFavorite, actDone, actArchive, actEdit:
-		return true
+	case actFavorite, actDone, actArchive, actEdit, actTitle:
+		return remote.MPut
+	case actDelete:
+		if m.inTrash() {
+			return remote.MRestore
+		}
+		return remote.MTrash
 	}
-	return false
+	return ""
 }
 
-// putRec sends p for r off the main loop; the command reads copies, never the row.
-func (m *Model) putRec(r *tend.Rec, p tend.Patch, expect *time.Time, done func(*Model, *tend.Rec)) {
-	if why := m.unwritable(r.Host); why != "" {
+// farWrite sends call for r's machine; the command reads copies, never the row.
+func (m *Model) farWrite(r *tend.Rec, method string, call farCall) {
+	if why := m.unwritable(r.Host, method); why != "" {
 		m.flash(why)
 		return
-	}
-	if expect != nil {
-		e := *expect
-		expect = &e
 	}
 	h, name, ref := m.hosts, r.Host, remote.Ref{Provider: r.Provider, SessionID: r.SessionID}
 	m.pending = tea.Batch(m.pending, func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), hostTimeout)
 		defer cancel()
-		saved, err := h.Put(ctx, name, ref, p, expect)
-		return putMsg{row: r, host: name, saved: saved, err: err, done: done}
+		ok, err := call(ctx, h, name, ref)
+		return farMsg{host: name, method: method, err: err, ok: ok}
 	})
 }
 
-func (msg putMsg) apply(m *Model) tea.Cmd {
+func (msg farMsg) apply(m *Model) tea.Cmd {
 	if msg.err != nil {
 		if hr := m.remote[msg.host]; hr != nil && wire.Code(msg.err) == wire.CodeUnknownMethod {
-			hr.old = true
+			hr.lack(msg.method)
 		}
-		m.flash(putFailed(msg.host, msg.err))
+		m.flash(remote.Refused(msg.host, msg.method, msg.err))
 		return nil
 	}
-	r := msg.row
-	if hr := m.remote[msg.host]; hr != nil {
-		r = hr.put(msg.saved)
-	} else {
-		*r = *msg.saved
+	return msg.ok(m)
+}
+
+// putRec writes p to r through its machine's put; the answer is copied into the row in place.
+func (m *Model) putRec(r *tend.Rec, p tend.Patch, expect *time.Time, done func(*Model, *tend.Rec)) {
+	if expect != nil {
+		e := *expect
+		expect = &e
 	}
-	m.pin, m.pinKey = r, m.pinContext()
-	m.refresh()
-	if msg.done != nil {
-		msg.done(m, r)
-	}
-	return nil
+	m.farWrite(r, remote.MPut, func(ctx context.Context, h *remote.Hosts, name string, ref remote.Ref) (func(*Model) tea.Cmd, error) {
+		saved, err := h.Put(ctx, name, ref, p, expect)
+		return func(m *Model) tea.Cmd {
+			row := r
+			if hr := m.remote[name]; hr != nil {
+				row = hr.put(saved)
+			} else {
+				*row = *saved
+			}
+			m.pin, m.pinKey = row, m.pinContext()
+			m.refresh()
+			if done != nil {
+				done(m, row)
+			}
+			return nil
+		}, err
+	})
 }
 
 // put copies saved into the row of its session, kept by pointer, or adds it.
@@ -88,42 +107,40 @@ func (hr *hostRows) put(saved *tend.Rec) *tend.Rec {
 	return saved
 }
 
-// unwritable is why host's rows cannot be written now, "" when they can (or it is not known yet that they cannot).
-func (m *Model) unwritable(host string) string {
+// lack notes that the machine's tend has no method.
+func (hr *hostRows) lack(method string) {
+	if hr.lacks == nil {
+		hr.lacks = map[string]bool{}
+	}
+	hr.lacks[method] = true
+}
+
+// unwritable is why host's rows cannot take method now, "" when they can (or it is not known yet that they cannot).
+func (m *Model) unwritable(host, method string) string {
 	switch {
 	case m.shared(host):
 		return i18n.F("remote.shared_read_only", m.ownerName(host))
 	case m.serverDown() != nil:
 		return i18n.F("remote.put_server_down", remote.Reason(m.serverDown()))
-	case m.remote[host] != nil && m.remote[host].old:
-		return i18n.F("remote.put_old", host, host)
+	case m.remote[host] != nil && m.remote[host].lacks[method]:
+		return remote.TooOld(host, method)
 	}
 	return ""
 }
 
-// putFailed says why a put to host did not land.
-func putFailed(host string, err error) string {
-	switch wire.Code(err) {
-	case wire.CodeUnknownMethod:
-		return i18n.F("remote.put_old", host, host)
-	case wire.CodeStale:
-		return i18n.F("remote.put_stale", host)
-	}
-	return i18n.F("remote.put_failed", host, remote.Reason(err))
-}
-
-// refusal is what a key refused on another machine's row r says: why put cannot carry it now, or that only reading
-// and resuming are offered for it.
+// refusal is what a key refused on another machine's row r says: why its machine cannot take it now, or that only
+// reading and resuming are offered for it.
 func (m *Model) refusal(r *tend.Rec, a act) string {
-	if r != nil && putAct(a) {
-		if why := m.unwritable(r.Host); why != "" {
+	if method := m.farMethod(a); r != nil && method != "" {
+		if why := m.unwritable(r.Host, method); why != "" {
 			return why
 		}
 	}
 	return m.readOnlyNote(r)
 }
 
-// putsOn: a goes through put on r's machine, which takes it now.
-func (m *Model) putsOn(r *tend.Rec, a act) bool {
-	return r != nil && r.Host != "" && putAct(a) && m.unwritable(r.Host) == ""
+// writesOn: a goes to r's machine, which takes it now.
+func (m *Model) writesOn(r *tend.Rec, a act) bool {
+	method := m.farMethod(a)
+	return r != nil && r.Host != "" && method != "" && m.unwritable(r.Host, method) == ""
 }

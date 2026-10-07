@@ -358,7 +358,7 @@ func (m *Model) navKey(msg tea.KeyPressMsg) tea.Cmd {
 		m.flash(i18n.T("trash.in_trash_hint"))
 		return nil
 	}
-	if remoteBlocked(a) && m.remoteRow() && !(a == actEdit && m.onGroupHeader()) && !m.putsOn(m.current(), a) { // whatever has focus, these act on the current row
+	if remoteBlocked(a) && m.remoteRow() && !(a == actEdit && m.onGroupHeader()) && !m.writesOn(m.current(), a) { // whatever has focus, these act on the current row
 		m.flash(m.refusal(m.current(), a))
 		return nil
 	}
@@ -703,7 +703,7 @@ func (m *Model) overlayKey(msg tea.KeyPressMsg) tea.Cmd {
 			return cmd
 		}
 		a := keyAct(inResume, msg.String())
-		if m.ov.rec.Host != "" && remoteBlocked(a) && !m.putsOn(m.ov.rec, a) {
+		if m.ov.rec.Host != "" && remoteBlocked(a) && !m.writesOn(m.ov.rec, a) {
 			m.flash(m.refusal(m.ov.rec, a))
 			return nil
 		}

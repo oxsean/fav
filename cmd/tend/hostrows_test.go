@@ -30,7 +30,7 @@ func (f fakeHost) Handle(_ context.Context, method string, params json.RawMessag
 	case remote.MHello:
 		h := remote.Hello{Proto: wire.Proto, Version: "v0.0.9"}
 		if !f.old {
-			h.Methods = []string{remote.MHello, remote.MList, remote.MLive, remote.MPut}
+			h.Methods = []string{remote.MHello, remote.MList, remote.MLive, remote.MPut, remote.MTrash, remote.MRestore}
 		}
 		return h, nil
 	case remote.MPut:
@@ -51,6 +51,12 @@ func (f fakeHost) Handle(_ context.Context, method string, params json.RawMessag
 		r.UpdatedAt = time.Now()
 		f.sessions[i] = remote.SessionOf(r)
 		return remote.Row{Session: f.sessions[i]}, nil
+	case remote.MTrash:
+		var ref remote.Ref
+		json.Unmarshal(params, &ref)
+		if _, ok := f.live[ref.SessionID]; ok && !f.old {
+			return nil, &wire.Error{Code: wire.CodeBusy}
+		}
 	case remote.MList:
 		return remote.List{Sessions: f.sessions}, nil
 	case remote.MLive:
@@ -272,7 +278,6 @@ func TestHostRecordsAreReadOnly(t *testing.T) {
 	want := i18n.F("cli.remote.read_only", "mba")
 	for _, args := range [][]string{
 		{"pin", "mba:" + farFavorite},
-		{"rm", "-y", "mba:" + farFavorite},
 		{"handoff", "mba:" + farFavorite},
 		{"resume", "--fork", "mba:" + farFavorite},
 	} {

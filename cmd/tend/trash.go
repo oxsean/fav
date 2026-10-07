@@ -1,13 +1,16 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/oxsean/fav/internal/capture"
 	"github.com/oxsean/fav/internal/i18n"
 	"github.com/oxsean/fav/internal/index"
+	"github.com/oxsean/fav/internal/remote"
 	"github.com/oxsean/fav/internal/render"
 	"github.com/oxsean/fav/internal/tend"
 )
@@ -27,9 +30,12 @@ func cmdRm(args []string) error {
 	if err != nil {
 		return err
 	}
-	r, err := pickLocal(s, ref)
+	r, err := remotePick(s, ref)
 	if err != nil {
 		return err
+	}
+	if r.Host != "" {
+		return rmFar(r, *yes)
 	}
 	if _, ok := capture.LocalLive()[r.SessionID]; ok {
 		return errors.New(i18n.T("cli.rm.running"))
@@ -58,6 +64,9 @@ func cmdTrash(args []string) error {
 	}
 	switch {
 	case *restore != "":
+		if done, err := restoreFar(*restore); done {
+			return err
+		}
 		entries, err := tend.LoadTrash()
 		if err != nil {
 			return err
@@ -120,6 +129,62 @@ func cmdTrash(args []string) error {
 		fmt.Printf("%s  %-6s  %s  %s\n", e.SessionID, e.Provider, render.When(e.DeletedAt, now), e.Title)
 	}
 	return nil
+}
+
+// rmFar moves another machine's session into that machine's trash through its trash method.
+func rmFar(r *tend.Rec, yes bool) error {
+	if ok, err := confirmErr(i18n.F("cli.rm.confirm_far", r.Title, r.Host), yes); !ok {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), hostTimeout)
+	defer cancel()
+	res, err := remoteHosts().Trash(ctx, r.Host, remote.Ref{Provider: r.Provider, SessionID: r.SessionID})
+	if err != nil {
+		return errors.New(remote.Refused(r.Host, remote.MTrash, err))
+	}
+	fmt.Print(i18n.F("cli.rm.done_far", r.Host, res.Title, res.Files))
+	return nil
+}
+
+// restoreFar restores host:ref from that machine's trash through its restore; done is false when ref names no
+// configured host, for this machine's trash to take it.
+func restoreFar(ref string) (done bool, err error) {
+	name, sub, found := strings.Cut(ref, ":")
+	if !found {
+		return false, nil
+	}
+	h := remoteHosts()
+	if hostName(h, name) == "" {
+		farHosts().reach()
+	}
+	if name = hostName(h, name); name == "" {
+		return false, nil
+	}
+	if sub == "" {
+		return true, errors.New(i18n.T("cli.missing_id"))
+	}
+	if err := farWritable(name); err != nil {
+		return true, err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), hostTimeout)
+	defer cancel()
+	recs, _, err := h.Trashed(ctx, name)
+	if err != nil {
+		return true, errors.New(remote.Refused(name, remote.MRestore, err))
+	}
+	r, n := matchRef(recs, sub, recKeys)
+	switch {
+	case n == 0:
+		return true, i18n.E("cli.trash.not_found", ref)
+	case n > 1:
+		return true, refErr(ref, n)
+	}
+	res, err := h.Restore(ctx, name, remote.Ref{Provider: r.Provider, SessionID: r.SessionID})
+	if err != nil {
+		return true, errors.New(remote.Refused(name, remote.MRestore, err))
+	}
+	fmt.Print(i18n.F("cli.trash.restored_far", name, res.Title, res.Files))
+	return true, nil
 }
 
 // autoPurge runs at startup; failures never block the command.
