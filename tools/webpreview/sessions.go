@@ -421,7 +421,7 @@ func (f *fakeSessions) grep(who string, p coord.SessionsGrep) (coord.SessionsFou
 	words, fixes := f.words(keywords)
 	out := coord.SessionsFound{Hits: []coord.SessionHit{}, Machines: []coord.MachineAnswer{}, Fixes: fixes}
 	if fulltext.TooLong(keywords) {
-		out.TooLong = true
+		out.TooLong, out.Fixes = true, nil
 		words = nil
 	}
 	q := tend.Parse(scope)
