@@ -16,6 +16,7 @@ import (
 	"github.com/oxsean/fav/internal/fixture"
 	"github.com/oxsean/fav/internal/index"
 	"github.com/oxsean/fav/internal/journal"
+	"github.com/oxsean/fav/internal/migrate"
 	"github.com/oxsean/fav/internal/node"
 	"github.com/oxsean/fav/internal/remote"
 	"github.com/oxsean/fav/internal/task"
@@ -579,6 +580,39 @@ func TestARowSaysItsTaskAndWhetherItCanBecomeOne(t *testing.T) {
 	}
 	if page := query(t, e.as(bob), SessionsQuery{Q: "again", All: true}); len(page.Rows) != 0 {
 		t.Errorf("nor does a task bob does not read match his keywords: %v", keys(page.Rows))
+	}
+}
+
+// A session migrated to another machine is listed there and here, one row each: each row carries the relation its
+// own machine sent, its own task and whether its own machine runs it (machine plus session, never the id alone).
+func TestTheSameSessionOnTwoMachinesIsTwoRows(t *testing.T) {
+	e := team(t, tend.Config{})
+	e.owner = func(string) string { return ann.User }
+	e.served = true
+	e.start()
+	away, came := sess("dup", 1, "/w", 5), sess("dup", 2, "/w", 5)
+	away.Copies = []remote.Copy{{Migration: "m-1", Role: migrate.RoleTo, State: migrate.StateDone, Peer: remote.PeerRef{Name: "m2", Endpoint: "e2"}}}
+	came.Copies = []remote.Copy{{Migration: "m-1", Role: migrate.RoleFrom, State: migrate.StateDone, Peer: remote.PeerRef{Name: "m1", Endpoint: "e1"}}}
+	e.attach("m1", &fakeNode{resume: true, sessions: []remote.Session{away}})
+	e.attach("m2", &fakeNode{resume: true, sessions: []remote.Session{came}, live: map[string]capture.Live{"dup": {Agent: tend.ProviderClaude}}})
+	e.runOn("m1", "dup", "Before the move", ann.User, task.Exited)
+
+	rows := map[string]SessionRow{}
+	for _, r := range query(t, e.as(ann), SessionsQuery{All: true}).Rows {
+		rows[r.Machine] = r
+	}
+	m1, m2 := rows["m1"], rows["m2"]
+	if len(rows) != 2 || m1.SessionID != "dup" || m2.SessionID != "dup" {
+		t.Fatalf("one row per machine: %v", keys(query(t, e.as(ann), SessionsQuery{All: true}).Rows))
+	}
+	if len(m1.Copies) != 1 || m1.Copies[0].Role != migrate.RoleTo || len(m2.Copies) != 1 || m2.Copies[0].Peer.Name != "m1" {
+		t.Errorf("each row keeps its machine's relation: %+v | %+v", m1.Copies, m2.Copies)
+	}
+	if m1.Task == nil || m1.Task.Title != "Before the move" || m2.Task != nil {
+		t.Errorf("the task stays with the machine its run used: %+v %+v", m1.Task, m2.Task)
+	}
+	if m1.Live != nil || m2.Live == nil || m1.Make == nil || m1.Make.Why != "" || m2.Make == nil || m2.Make.Why != MakeBusy {
+		t.Errorf("running is per machine: %+v %+v | %+v %+v", m1.Live, m1.Make, m2.Live, m2.Make)
 	}
 }
 

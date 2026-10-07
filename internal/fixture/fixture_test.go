@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"runtime"
 	"slices"
@@ -17,6 +18,7 @@ import (
 	"github.com/oxsean/fav/internal/index"
 	"github.com/oxsean/fav/internal/journal"
 	"github.com/oxsean/fav/internal/memory"
+	"github.com/oxsean/fav/internal/migrate"
 	"github.com/oxsean/fav/internal/paths"
 	"github.com/oxsean/fav/internal/shell"
 	"github.com/oxsean/fav/internal/task"
@@ -564,5 +566,48 @@ func TestLaunchersPutTheStubsFirstOnPath(t *testing.T) {
 		if err == nil || !strings.Contains(string(out), fmt.Sprintf(stubNote, name)) {
 			t.Errorf("%s --version through the launcher: %q %v", name, out, err)
 		}
+	}
+}
+
+// The chain's newer session came from another machine: its row says so, unchanged since; migrating it on copies the
+// chain, the sub-agent transcript, file history and todo, and names session-env without copying it. pagination has
+// a migration away left unfinished.
+func TestMigrationScenario(t *testing.T) {
+	d, idx, store := load(t)
+	chain, pagination := d.Get("chain-new"), d.Get("pagination")
+	recs := map[string]*tend.Rec{}
+	for _, r := range append(store.All(), idx.Attach(store, nil)...) {
+		recs[r.SessionID] = r
+	}
+	rows := index.Rows{Copies: migrate.Marks()}
+	rows.Place(recs[chain.ID], recs[pagination.ID])
+	if c := recs[chain.ID].Copies; len(c) != 1 || c[0].Role != tend.CopyFrom || c[0].State != tend.CopyDone || c[0].Peer != "laptop" {
+		t.Errorf("came from laptop: %+v", c)
+	}
+	if c := recs[pagination.ID].Copies; len(c) != 1 || c[0].Role != tend.CopyTo || c[0].State != tend.CopyPending {
+		t.Errorf("unfinished: %+v", c)
+	}
+	if rels, err := migrate.Copies(tend.ProviderClaude, chain.ID); err != nil || len(rels) != 1 || rels[0].Changed == nil || *rels[0].Changed {
+		t.Errorf("unchanged since: %+v %v", rels, err)
+	}
+
+	man, err := migrate.Plan(idx, recs[chain.ID])
+	if err != nil {
+		t.Fatal(err)
+	}
+	kinds := map[string]string{}
+	for _, f := range man.Files {
+		kinds[strings.SplitN(f.Path, "/", 2)[0]+" "+f.Kind] += path.Base(f.Path) + " "
+	}
+	for want, file := range map[string]string{
+		"projects transcript": d.Get("chain-old").ID + ".jsonl", "projects side": "agent-fx1.jsonl",
+		"file-history copy": "5c1e0a@v1", "todos copy": chain.ID + "-agent-",
+	} {
+		if !strings.Contains(kinds[want], file) {
+			t.Errorf("%s lacks %s: %v", want, file, kinds)
+		}
+	}
+	if !slices.Equal(man.Left, []string{"session-env/" + chain.ID}) {
+		t.Errorf("session-env is named, not copied: %v", man.Left)
 	}
 }

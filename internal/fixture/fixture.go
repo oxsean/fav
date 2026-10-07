@@ -3,6 +3,8 @@
 package fixture
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -96,6 +98,9 @@ func Build(root string, now time.Time) (*Dataset, error) {
 		}
 	}
 	if err := b.sidecars(); err != nil {
+		return nil, err
+	}
+	if err := b.migrations(); err != nil {
 		return nil, err
 	}
 	if err := b.memories(); err != nil {
@@ -621,6 +626,49 @@ func (b *builder) sidecars() error {
 		return err
 	}
 	return os.WriteFile(filepath.Join(b.Claude, "sessions", "999999.json"), stale, 0o644)
+}
+
+// migrations gives the chain's newer session what a migration copies besides its transcript (a sub-agent transcript,
+// file history, a todo) and a session-env directory it leaves behind, and records it migrated here, unchanged since,
+// from another machine; pagination has a migration to that machine left unfinished.
+func (b *builder) migrations() error {
+	chain := b.Get("chain-new")
+	side, _ := json.Marshal(map[string]any{"type": "user", "cwd": chain.Cwd, "sessionId": chain.ID, "isSidechain": true,
+		"message": map[string]string{"role": "user", "content": "look up the limiter"}})
+	files := map[string]string{
+		filepath.Join(filepath.Dir(chain.Path), chain.ID, "subagents", "agent-fx1.jsonl"): string(side) + "\n",
+		filepath.Join(b.Claude, "file-history", chain.ID, "5c1e0a@v1"):                    "rate_limit:\n  rps: 10\n",
+		filepath.Join(b.Claude, "todos", chain.ID+"-agent-"+chain.ID+".json"):             `[{"content":"429 with Retry-After","status":"completed"}]`,
+		filepath.Join(b.Claude, "session-env", chain.ID, "sessionstart-hook-0.sh"):        "export FIXTURE_ONLY=1\n",
+	}
+	for p, body := range files {
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			return err
+		}
+		if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
+			return err
+		}
+	}
+	main, err := os.ReadFile(chain.Path)
+	if err != nil {
+		return err
+	}
+	sum := sha256.Sum256(main)
+	laptop := map[string]any{"name": "laptop", "endpoint": "fx-laptop", "end": map[string]any{"os": "linux", "home": "/home/dev", "host": "laptop"}}
+	var lines []byte
+	for _, r := range []map[string]any{
+		{"migration": "20260101T090000-fx000001", "role": "from", "provider": tend.ProviderClaude, "session_id": chain.ID, "peer": laptop,
+			"state": "done", "at": stamp(b.now.Add(-time.Hour)), "files": 6, "size": len(main), "sha": hex.EncodeToString(sum[:]), "dir": chain.Cwd},
+		{"migration": "20260101T100000-fx000002", "role": "to", "provider": tend.ProviderClaude, "session_id": b.Get("pagination").ID,
+			"peer": laptop, "state": "pending", "at": stamp(b.now.Add(-8 * 24 * time.Hour)), "files": 1},
+	} {
+		l, err := json.Marshal(r)
+		if err != nil {
+			return err
+		}
+		lines = append(append(lines, l...), '\n')
+	}
+	return os.WriteFile(filepath.Join(b.Home, "migrations.jsonl"), lines, 0o600)
 }
 
 // memories writes Claude's project memory of webapp (an index, one entry with front matter, one without), an empty
