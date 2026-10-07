@@ -181,6 +181,15 @@ test('core/sessions: marks cut text at the byte spans Go gives, CJK too', () => 
   eq([ss.marks('abc'), ss.marks('', [[0, 1]])], [[['abc', false]], []], 'no spans, no text');
 });
 
+test('core/sessions: how many messages come after a hit, by the newest page', () => {
+  const page = (offs, from, done, file = 'f') => ({Msgs: offs.map(Off => ({Off})), From: from, Done: done, file});
+  eq(ss.later(page([2400, 2000, 1600, 1200], 0, true), 1200, 'f'), {n: 3, more: false}, 'the whole session read: exact');
+  eq(ss.later(page([2400, 2000, 1600, 1200], 1200, false), 1200, 'f'), {n: 3, more: false}, 'a page reaching back to it: exact');
+  eq(ss.later(page([2400, 2000], 2000, false), 1200, 'f'), {n: 2, more: true}, 'a page that does not: at least that many');
+  eq(ss.later(page([1200], 0, true), 1200, 'f'), {n: 0, more: false}, 'the hit is the newest');
+  eq(ss.later(page([60, 0], 0, true, 'g'), 1200, 'f'), {n: 2, more: false}, 'another file: what it holds');
+});
+
 test('core/sessions: what it asks the coordinator and the nodes', async () => {
   const sent = [];
   const wire = {call: (m, p) => { sent.push([m, p]); return Promise.resolve({text: 'whole'}); }};
@@ -498,7 +507,7 @@ for (const f of ['desktop', 'phone']) {
           eq(root.find('.sv-hit').map(h => h.one('.sess-titled').find('.ell')[0].textContent), ['Fix the checkout total', 'Port the importer'], 'the best first');
           eq(root.find('.sv-snip').map(markedOf), [['total', 'checkout'], ['checkout']], 'snippets marked at Go\'s spans');
           eq(linesOf(root), [desk ? words.f('sess.m.oldNoSearch', 'linux', linux, 'linux') : words.f('sess.m.oldShort', 'linux'),
-            words.f('sess.m.building', 'mba', 120, 400), words.f('sess.fixes', 'checkout')], 'not searched, still building, and a spelling also searched');
+            words.f('sess.m.building', 'mba', 120, 400), words.f('sess.fixes', 'checkout', 'chekout total')], 'not searched, still building, and a spelling also searched beside what she typed');
           styled(root, `${f} hits`);
         },
         async open() { await click(rowsOf(root)[0]); },
@@ -507,12 +516,14 @@ for (const f of ['desktop', 'phone']) {
           eq(root.one('.sv-at').getAttribute('data-off'), '1200', 'open at the best hit');
           eq(root.find('.sess-msg').map(markedOf), [['checkout', 'total'], ['Checkout', 'total']], 'its words marked');
           eq(nav().find('span')[0].textContent, words.f('sess.hitNav', 2, 3), 'which of its hits');
+          eq(root.one('.sv-later').one('.t-muted').textContent, words.f('sess.later', 3), 'how many messages come after it, counted on the newest page');
           await click(nav().find('button')[1]);
         },
         async next() {
           await act(() => settle());
           eq([root.one('.sv-at').getAttribute('data-off'), nav().find('span')[0].textContent], ['2000', words.f('sess.hitNav', 3, 3)], 'the next, read from a page ending on it');
           eq(nav().find('button')[1].disabled, true, 'the last');
+          eq(root.one('.sv-later').one('.t-muted').textContent, words.f('sess.later', 1), 'one message after it');
           await click(nav().find('button')[0]);
         },
         async back() {
@@ -534,6 +545,16 @@ for (const f of ['desktop', 'phone']) {
         async again() {
           await act(() => settle());
           eq(linesOf(root).length, 2, 'built: no line for it');
+        },
+        async long() {
+          if (desk) await act(() => a.router.go({page: 'sessions', q: '> chekout total'}, {replace: true}));
+          const input = root.one('.sv-q').one('input');
+          await type(input, '> a b c');
+          await act(() => input.dispatch('keydown', {key: 'Enter'}));
+        },
+        async tooLong() {
+          await act(() => settle());
+          ok(linesOf(root).includes(words.f('sess.tooLong', ss.WORDS)), 'too many words: how many it takes');
         },
       });
       eq(r.errors, [], 'errors');

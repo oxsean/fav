@@ -39,6 +39,9 @@ export function refOf(key) {
 }
 const refIn = r => ({provider: r.provider, session_id: r.session_id});
 
+// ⚠️ The most keywords one message search takes (fulltext's tooLong): more answer too_long.
+export const WORDS = 64;
+
 // ⚠️ What starts message search in the query box (fulltext.Prefixed): > or the 》 a CJK input method types.
 export const searching = q => /^\s*[>》]/.test(q || '');
 export const searchText = q => String(q || '').replace(/^\s*[>》]\s*/, '');
@@ -221,6 +224,14 @@ export const readText = (wire, machine, ref, off, file = '') => call(wire, machi
 
 // older adds page (newest first, as the node gives it) before the messages held (oldest first).
 export const older = (held, page) => [...[...(page?.Msgs || [])].reverse(), ...held];
+
+// later is how many messages come after the one at off (in file) by the newest page: {n, more}, more when the page does
+// not reach back to it and there are at least n.
+export function later(newest, off, file = '') {
+  const msgs = newest?.Msgs || [];
+  if ((newest?.file || '') !== (file || '')) return {n: msgs.length, more: !newest?.Done};
+  return {n: msgs.filter(m => m.Off > off).length, more: !newest?.Done && (newest?.From ?? 0) > off};
+}
 
 // cut says a message's text was shortened by the node: it holds fewer characters than it had.
 export const cut = m => (m.Chars || 0) > [...(m.Text || '')].length;

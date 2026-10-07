@@ -64,7 +64,8 @@ register('sessions', {
   'sess.m.searchAgain': ['再搜一次', 'Search again'],
   'sess.m.oldNoSearch': ['%s 的 tend 是旧版（%s）：没搜它。在那台机器上更新：tend hosts install %s', '%s runs an older tend (%s): not searched. Update it: tend hosts install %s'],
   'sess.msgHead': ['消息 · %d 个会话 · %d 处', 'Messages · %d {session|sessions} · %d {hit|hits}'], 'sess.hitsAt': ['%d 处 · %s', '%d {hit|hits} · %s'],
-  'sess.fixes': ['也搜了 %s', 'Also searched %s'], 'sess.tooLong': ['关键词太多：删掉几个再搜', 'Too many words: remove some and search again'],
+  'sess.fixes': ['也搜了 %s（你写的是 %s）', 'Also searched %s (you typed %s)'],
+  'sess.tooLong': ['关键词太多：最多 %d 个，删掉几个再搜', 'Too many words: at most %d, remove some'],
   'sess.noHits': ['没搜到', 'Nothing found'], 'sess.noHitsSub': ['这些机器的消息里都没有「%s」。少写一个词再试', 'No message on these machines has “%s”. Try fewer words'],
   'sess.msgIdle': ['输入关键词，按 Enter 搜所有机器上的消息', 'Type words and press Enter to search messages on every machine'],
   'sess.sharedBy': ['%s 共享', 'Shared by %s'], 'sess.sharedRO': ['%s 共享，只读', 'Shared by %s, read only'],
@@ -485,8 +486,8 @@ export function Sessions({store, wire, router, toasts, commands, session = null,
       if (a.share_sessions === 'none') line('', html`<${Icon} name="eye" size=${14} />`, owner ? f('sess.m.sharedNone', a.name) : f('sess.shareNone', a.name));
     }
   }
-  if (search && found?.fixes?.length) lines.push({key: 'fixes', tone: '', icon: html`<${Icon} name="search" size=${14} />`, text: f('sess.fixes', found.fixes.join(' '))});
-  if (search && found?.too_long) lines.push({key: 'long', tone: 'warn', icon: html`<${Status} state="waiting" />`, text: t('sess.tooLong')});
+  if (search && found?.fixes?.length) lines.push({key: 'fixes', tone: '', icon: html`<${Icon} name="search" size=${14} />`, text: f('sess.fixes', found.fixes.join(' '), ss.searchText(q).trim())});
+  if (search && found?.too_long) lines.push({key: 'long', tone: 'warn', icon: html`<${Status} state="waiting" />`, text: f('sess.tooLong', ss.WORDS)});
 
   const machineCol = r => {
     const owner = ownerOf(session, answerOf(r.machine));

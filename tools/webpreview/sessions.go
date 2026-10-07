@@ -420,7 +420,7 @@ func (f *fakeSessions) grep(who string, p coord.SessionsGrep) (coord.SessionsFou
 	keywords, scope := fulltext.Split(p.Q)
 	words, fixes := f.words(keywords)
 	out := coord.SessionsFound{Hits: []coord.SessionHit{}, Machines: []coord.MachineAnswer{}, Fixes: fixes}
-	if len(words) > 8 {
+	if fulltext.TooLong(keywords) {
 		out.TooLong = true
 		words = nil
 	}

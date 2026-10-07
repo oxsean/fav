@@ -37,7 +37,8 @@ register('sessionview', {
   'sess.oldRO': ['%s 的 tend 是旧版：能看，不能改，也不能建成任务、删除。更新后就能改：tend hosts install %s',
     '%s runs an older tend: read only, no tasks or deleting. Update it to change: tend hosts install %s'],
   'sess.hitNav': ['命中 %d / %d', 'Hit %d / %d'], 'sess.hitPrev': ['上一处', 'Previous hit'], 'sess.hitNext': ['下一处', 'Next hit'], 'sess.hitWords': ['关键词：%s', 'Words: %s'],
-  'sess.later': ['后面还有对话', 'The conversation goes on'], 'sess.toLatest': ['回到最新', 'Back to the latest'],
+  'sess.later': ['后面还有 %d 条消息', '%d more {message|messages} after this'],
+  'sess.laterMany': ['后面还有 %d 条以上的消息', 'More than %d {message|messages} after this'], 'sess.toLatest': ['回到最新', 'Back to the latest'],
   'sess.unseen': ['这一处在续接前的旧文件里，这里看不到：下面是最新的对话', 'This hit is in the file before the session went on and is not shown here: the newest part follows'],
   'sess.edit.title': ['编辑会话', 'Edit session'], 'sess.edit.name': ['标题', 'Title'], 'sess.edit.tags': ['标签', 'Tags'], 'sess.edit.summary': ['摘要', 'Summary'],
   'sess.edit.tagHint': ['空格或逗号成一个', 'Space or comma ends a tag'], 'sess.edit.common': ['这台机器上常用的：', 'Common on this machine:'],
@@ -162,7 +163,7 @@ export function Conversation({wire, row, os, copy, toasts, now, onTask, project,
   const [at, setAt] = useState(best);
   const [hits, setHits] = useState(null);
   const ref = {provider: row.provider, session_id: row.session_id};
-  const empty = {msgs: [], from: -1, done: false, file: '', loading: true, error: null, latest: true, unseen: false, at: null};
+  const empty = {msgs: [], from: -1, done: false, file: '', loading: true, error: null, latest: true, unseen: false, at: null, later: null};
   const [s, setS] = useState(empty);
   const [from, setFrom] = useState(best);
   const [rev, setRev] = useState(0);
@@ -190,7 +191,10 @@ export function Conversation({wire, row, os, copy, toasts, now, onTask, project,
       ss.readPage(wire, row.machine, ref, {before: from.off + 1, file: from.file || '', find}).then(p => {
         if (gone) return;
         keep.current = 'at';
-        setS({...empty, msgs: ss.older([], p), from: p.From, done: !!p.Done, file: p.file || '', loading: false, latest: false, at: from.off});
+        const msgs = ss.older([], p), file = p.file || '';
+        setS({...empty, msgs, from: p.From, done: !!p.Done, file, loading: false, latest: false, at: from.off});
+        const last = msgs.at(-1)?.Off ?? from.off;
+        ss.readPage(wire, row.machine, ref).then(n => !gone && setS(o => ({...o, later: ss.later(n, last, file)})), () => {});
       }, e => (e?.code === code.stale ? newest(true) : Promise.reject(e))).catch(fail);
     }
     return () => { gone = true; };
@@ -263,7 +267,8 @@ export function Conversation({wire, row, os, copy, toasts, now, onTask, project,
       ${s.loading && !s.msgs.length && html`<p class="empty">${t('sess.loading')}</p>`}
       ${!s.loading && !s.error && !s.msgs.length && html`<p class="empty">${t('sess.empty')}</p>`}
       <ol class="sess-msgs">${s.msgs.map(m => html`<${Message} key=${m.Off} m=${m} agent=${agent} onFull=${full} at=${m.Off === s.at} />`)}</ol>
-      ${!s.latest && !s.loading && html`<p class="sv-later"><span class="t-muted">${t('sess.later')}</span>
+      ${!s.latest && !s.loading && !(s.later && !s.later.n && !s.later.more) && html`<p class="sv-later">
+        ${s.later && html`<span class="t-muted">${f(s.later.more ? 'sess.laterMany' : 'sess.later', s.later.n)}</span>`}
         <${Button} kind="quiet" onClick=${() => { setFrom(null); setRev(n => n + 1); }}>${t('sess.toLatest')}<//></p>`}
     </div>
   </article>`;
