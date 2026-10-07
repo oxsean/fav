@@ -12,7 +12,8 @@ import (
 	"github.com/oxsean/fav/internal/i18n"
 )
 
-// keepStdio puts back what --log replaces for the whole process.
+// keepStdio puts back what --log replaces for the whole process, closing the log. Call it after the test's t.TempDir
+// calls: cleanups run last registered first, and Windows cannot remove a log file still open.
 func keepStdio(t *testing.T) {
 	t.Helper()
 	out, errOut, logOut := os.Stdout, os.Stderr, log.Writer()
@@ -70,7 +71,6 @@ func TestNodeEnvFileUnreadable(t *testing.T) {
 }
 
 func TestNodeLogAppendsEverything(t *testing.T) {
-	keepStdio(t)
 	logFile := filepath.Join(t.TempDir(), "node dir", "service.log")
 	if err := os.MkdirAll(filepath.Dir(logFile), 0o700); err != nil {
 		t.Fatal(err)
@@ -79,6 +79,7 @@ func TestNodeLogAppendsEverything(t *testing.T) {
 		t.Fatal(err)
 	}
 	envFile := serviceEnv(t, [][2]string{{"TEND_HOME", t.TempDir()}})
+	keepStdio(t)
 	err := cmdNode([]string{"--connect", "ws://127.0.0.1:1", "--token-file", "absent", "--env", envFile, "--log", logFile})
 	if err == nil {
 		t.Fatal("a node without node.allow_dirs ran")
@@ -97,8 +98,8 @@ func TestNodeLogAppendsEverything(t *testing.T) {
 }
 
 func TestNodeLogNeedsConnect(t *testing.T) {
-	keepStdio(t)
 	logFile := filepath.Join(t.TempDir(), "service.log")
+	keepStdio(t)
 	if err := cmdNode([]string{"--log", logFile}); err == nil || err.Error() != i18n.T("cli.node.log_needs_connect") {
 		t.Errorf("err = %v", err)
 	}
