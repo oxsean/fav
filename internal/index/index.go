@@ -52,6 +52,7 @@ type File struct {
 	Remote string `json:"remote,omitempty"` // Codex: session_meta git.repository_url
 	// Files: absolute path → times the AI wrote it (Claude Edit / Write / MultiEdit / NotebookEdit, Codex apply_patch); filesCap paths
 	Files map[string]int `json:"files,omitempty"`
+	Env   *Env           `json:"env,omitempty"` // what the session saw of its environment
 
 	line int // bytes of its line in the cache
 }
@@ -121,7 +122,7 @@ func (s *Session) Rec() *tend.Rec {
 }
 
 const (
-	scanVer    = 8
+	scanVer    = 9
 	promptsCap = 8 * 1024 // max prompt bytes kept per file
 	promptCap  = 300      // max chars stored per prompt
 	titleMin   = 12       // prompts shorter than this are not titles
@@ -135,6 +136,7 @@ type line struct {
 	Cwd         string    `json:"cwd"`
 	GitBranch   string    `json:"gitBranch"`
 	Entrypoint  string    `json:"entrypoint"`
+	Version     string    `json:"version"`
 	IsMeta      bool      `json:"isMeta"` // injected by Claude (skill expansion, caveats)
 	CustomTitle string    `json:"customTitle"`
 	AITitle     string    `json:"aiTitle"`
@@ -158,7 +160,12 @@ type line struct {
 		Git            struct {
 			RepositoryURL string `json:"repository_url"`
 		} `json:"git"`
-		Content json.RawMessage `json:"content"`
+		Content        json.RawMessage `json:"content"`
+		CLIVersion     string          `json:"cli_version"`
+		ModelProvider  string          `json:"model_provider"`
+		Model          string          `json:"model"`
+		ApprovalPolicy string          `json:"approval_policy"`
+		SandboxPolicy  json.RawMessage `json:"sandbox_policy"`
 	} `json:"payload"`
 }
 
@@ -178,7 +185,7 @@ func (l *line) userText() string {
 
 // interesting is a cheap pre-filter before JSON parsing.
 var wanted = [][]byte{[]byte(`"type":"user"`), []byte(`"role":"user"`), []byte(`-title"`), []byte(`"session_meta"`), []byte(`"continued-in"`),
-	[]byte(`"away_summary"`), []byte(`"task_complete"`), []byte(`"worktree-state"`)}
+	[]byte(`"away_summary"`), []byte(`"task_complete"`), []byte(`"worktree-state"`), []byte(`"turn_context"`)}
 
 var replyClaude, replyText, replyCodex = []byte(`"type":"assistant"`), []byte(`"type":"text"`), []byte(`"type":"output_text"`)
 
@@ -198,8 +205,15 @@ func interesting(b []byte) bool {
 // scan reads from f.Size to EOF; a trailing partial line is not counted, lines longer than scanBuf are skipped.
 func (f *File) scan() {
 	f.Size, _ = fileio.Lines(context.Background(), f.Path, f.Size, scanBuf, func(_ int64, b []byte) bool {
-		if isEdit(b) {
+		tool := bytes.Contains(b, toolUse)
+		if isEdit(b, tool) {
 			f.takeEdits(b)
+		}
+		if tool && isUse(b) {
+			f.takeUses(b)
+		}
+		if isEnv(b) {
+			f.takeEnv(b)
 		}
 		if isReply(b) {
 			f.Replies++
@@ -228,6 +242,10 @@ func (f *File) take(l *line) {
 		}
 		f.App = capture.CodexFromApp(l.Payload.Originator)
 		f.Remote = l.Payload.Git.RepositoryURL
+		f.takeCodex(l)
+		return
+	case "turn_context":
+		f.takeCodex(l)
 		return
 	case "worktree-state":
 		f.WtRepo = ""
@@ -263,6 +281,7 @@ func (f *File) take(l *line) {
 	if l.Entrypoint != "" && l.Entrypoint != "cli" {
 		f.Skip = true
 	}
+	f.takeVersion(l)
 	if f.Cwd == "" {
 		f.Cwd = l.Cwd
 	}
@@ -520,7 +539,7 @@ func rescanFile(c candidate, st os.FileInfo, old *File, threads func() map[strin
 	f := &File{Path: c.path, Provider: c.provider, SessionID: c.sessionID, Ver: scanVer}
 	if old != nil && old.Ver == scanVer && st.Size() >= old.Size {
 		cp := *old
-		cp.Files = maps.Clone(old.Files) // ⚠️ old belongs to a snapshot others are reading
+		cp.Files, cp.Env = maps.Clone(old.Files), old.Env.clone() // ⚠️ old belongs to a snapshot others are reading
 		f = &cp
 	}
 	f.ModTime = st.ModTime()

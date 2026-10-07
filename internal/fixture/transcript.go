@@ -119,6 +119,12 @@ func (s *claudeSession) system(subtype, content string) {
 	s.add(s.tail(o.with("subtype", subtype).with("content", content).with("isMeta", false), u, ts))
 }
 
+// attach is an attachment line, written at the current time as Claude Code does at the start of a turn.
+func (s *claudeSession) attach(a obj) {
+	o, u := s.head("attachment")
+	s.add(s.tail(o.with("attachment", a), u, stamp(s.t)))
+}
+
 func (s *claudeSession) mark(typ, key string, v any) {
 	s.add(obj{{"type", typ}, {key, v}, {"sessionId", s.id}})
 }

@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -98,6 +99,9 @@ func Build(root string, now time.Time) (*Dataset, error) {
 		return nil, err
 	}
 	if err := b.memories(); err != nil {
+		return nil, err
+	}
+	if err := b.configs(); err != nil {
 		return nil, err
 	}
 	if err := b.tasks(); err != nil {
@@ -277,6 +281,7 @@ func (b *builder) claudeSessions() {
 
 	s := b.claude("oauth", b.dir("webapp"), "feat/oauth-callback", 2*h)
 	s.mark("permission-mode", "permissionMode", "default")
+	b.attachments(s)
 	s.user("ok")
 	s.user("登录页 OAuth 回调偶发 400，帮我排查一下 state 参数是不是被截断了")
 	s.reply("我先看回调处理的代码，再复现一次。")
@@ -293,6 +298,8 @@ func (b *builder) claudeSessions() {
 		"File created successfully.")
 	s.tool("NotebookEdit", obj{{"notebook_path", b.dir("webapp", "docs", "state.ipynb")}, {"new_source", "decode(state)"}},
 		"Updated cell.")
+	s.tool("Skill", obj{{"skill", "review"}}, "Launching skill: review")
+	s.tool("mcp__gitea__list_issues", obj{{"repo", "acme/webapp"}, {"token", Secret + "-mcpinput"}}, "[]")
 	s.tool("Write", obj{{"file_path", filepath.Join(b.Tmp, "claude-501", "scratchpad", "notes.md")}, {"content", "draft"}},
 		"File created successfully.")
 	s.user("好，顺便把文档补一下，然后跑一遍测试")
@@ -482,6 +489,107 @@ func (b *builder) codexSessions() {
 	b.recs[len(b.recs)-1].GitRemote = strings.TrimSuffix(fmt.Sprintf(remote, "legacy-app"), ".git")
 }
 
+// attachments are what Claude Code records at a session's start: the environment it saw (index.Env), and attachments
+// carrying personal or secret values that nothing may read.
+func (b *builder) attachments(s *claudeSession) {
+	s.attach(obj{{"type", "model"}, {"identity", obj{{"modelId", "claude-opus-5-5"}, {"marketingName", "Opus 5.5"},
+		{"knowledgeCutoff", "2026-06"}}}, {"text", "You are powered by Opus 5.5."}})
+	s.attach(obj{{"type", "instructions"}, {"files", []obj{
+		{{"path", filepath.Join(b.Claude, "CLAUDE.md")}, {"type", "User"}, {"content", strings.TrimSpace(globalRules)}},
+		{{"path", b.dir("webapp", "CLAUDE.md")}, {"type", "Project"}, {"content", strings.TrimSpace(projectRules)}},
+		{{"path", b.dir("webapp", "docs", "oauth.md")}, {"type", "Project"}, {"content", "# OAuth"}},
+		{{"path", filepath.Join(b.Claude, "projects", index.ClaudeProjectName(b.dir("webapp")), "memory", "MEMORY.md")},
+			{"type", "AutoMem"}, {"content", "- a memory line"}}}}})
+	s.attach(obj{{"type", "skill_listing"}, {"content", "- review: Review a change\n- tend: Save the session"}, {"skillCount", 4},
+		{"isInitial", true}, {"names", []string{"review", "tend", "codex:rescue", "simplify"}}})
+	s.attach(obj{{"type", "deferred_tools_delta"}, {"addedNames", []string{"WebFetch", "WebSearch"}},
+		{"addedLines", []string{"WebFetch", "WebSearch"}}, {"removedNames", []string{}}})
+	s.attach(obj{{"type", "mcp_instructions_delta"}, {"addedNames", []string{"gitea"}}, {"addedBlocks", []string{"## gitea\nUse the gitea tools."}},
+		{"removedNames", []string{}}})
+	s.attach(obj{{"type", "agent_listing_delta"}, {"addedTypes", []string{"Explore", "general-purpose"}}, {"addedLines", []string{"- Explore"}},
+		{"builtInTypes", []string{"Explore", "general-purpose"}}, {"removedTypes", []string{}}, {"isInitial", true}, {"showConcurrencyNote", false}})
+	s.attach(obj{{"type", "environment"}, {"snapshot", obj{{"workingDirectory", s.cwd}, {"isWorktree", false}, {"isGitRepo", true},
+		{"additionalWorkingDirectories", []string{}}, {"platform", runtime.GOOS}, {"shell", "zsh"}, {"osVersion", "Darwin 24.6.0"},
+		{"scratchpadDirectory", filepath.Join(b.Tmp, "claude-501", "scratchpad")}}}})
+	s.attach(obj{{"type", "session_context"}, {"context", obj{{"userEmail", SecretEmail}, {"gitStatus", Secret + "-gitstatus"}}}})
+	s.attach(obj{{"type", "credential_org"}, {"organizationUuid", Secret + "-org"}})
+	s.attach(obj{{"type", "command_permissions"}, {"allowedTools", []string{"Bash(curl -H 'Authorization: " + Secret + "-perm')"}}})
+	s.attach(obj{{"type", "queued_command"}, {"prompt", Secret + "-queued"}})
+	s.attach(obj{{"type", "hook_success"}, {"hookName", "SessionStart"}, {"content", Secret + "-hook"}, {"stdout", Secret + "-stdout"},
+		{"stderr", Secret + "-stderr"}})
+	s.attach(obj{{"type", "file"}, {"filename", b.dir("webapp", ".env")}, {"content", obj{{"type", "text"},
+		{"file", obj{{"filePath", b.dir("webapp", ".env")}, {"content", "API_KEY=" + Secret + "-file"}}}}}})
+	s.attach(obj{{"type", "edited_text_file"}, {"filename", b.dir("webapp", "src", "auth", "callback.ts")}, {"snippet", Secret + "-edit"}})
+	s.attach(obj{{"type", "prompt_snapshot"}, {"text", Secret + "-prompt"}})
+}
+
+// Secret and SecretEmail are planted in the dataset's configuration, credential files and attachments: no answer,
+// index line or output may carry them.
+const (
+	Secret      = "FAKESECRET"
+	SecretEmail = "fake-user@example.invalid"
+)
+
+const (
+	globalRules  = "# Global rules\n\nAnswer in the language of the question.\n"
+	projectRules = "# Webapp\n\nRun npm test before a commit.\n\n@docs/oauth.md\n"
+)
+
+// configs writes what the CLIs keep beside the transcripts — instruction files, settings, skills, a plugin, MCP
+// servers, provider settings — each holding planted secrets where real ones sit.
+func (b *builder) configs() error {
+	plugin := filepath.Join(b.Claude, "plugins", "cache", "openai-codex", "codex", "1.0.0")
+	webapp := b.dir("webapp")
+	installed, _ := json.Marshal(map[string]any{"version": 2, "plugins": map[string]any{
+		"codex@openai-codex": []map[string]any{{"scope": "user", "installPath": plugin, "version": "1.0.0", "installedAt": stamp(b.now)}}}})
+	settings, _ := json.Marshal(map[string]any{
+		"env": map[string]string{"ANTHROPIC_BASE_URL": "https://" + Secret + "-user:" + Secret + "-pass@gateway.example.com/v1",
+			"ANTHROPIC_AUTH_TOKEN": Secret + "-token", "DISABLE_TELEMETRY": "1"},
+		"permissions": map[string]any{"allow": []string{"Bash(curl " + Secret + "-allow)"}}, "apiKeyHelper": Secret + "-helper",
+		"enabledPlugins": map[string]bool{"codex@openai-codex": true}})
+	local, _ := json.Marshal(map[string]any{"env": map[string]string{"LOCAL_TOKEN": Secret + "-local"}})
+	mcp, _ := json.Marshal(map[string]any{"mcpServers": map[string]any{"local-db": map[string]any{"command": "pg-mcp",
+		"args": []string{"--password", Secret + "-pgarg"}, "env": map[string]string{"PGPASSWORD": Secret + "-pg"},
+		"headers": map[string]string{"X-Key": Secret + "-pghdr"}, "url": "https://" + Secret + "-pgurl.example.com"}}})
+	toml := "model = \"gpt-6\"\nmodel_provider = \"azure\"\n\n[model_providers.azure]\nname = \"Azure\"\n" +
+		"base_url = \"https://" + Secret + "-u@ai.example.net/openai\"\nenv_key = \"" + Secret + "_ENV_KEY\"\napi_key = \"" + Secret + "-codexkey\"\n\n" +
+		"[mcp_servers.gitea]\ncommand = \"gitea-mcp\"\nargs = [\"--token\", \"" + Secret + "-codexarg\"]\nenv = { GITEA_TOKEN = \"" + Secret + "-codexenv\" }\n\n" +
+		"[projects." + tomlString(webapp) + "]\ntrust_level = \"trusted\"\n"
+	files := map[string]string{
+		filepath.Join(b.Claude, "CLAUDE.md"):                             globalRules,
+		filepath.Join(b.Claude, "settings.json"):                         string(settings),
+		filepath.Join(b.Claude, ".credentials.json"):                     `{"claudeAiOauth":{"accessToken":"` + Secret + `-access","refreshToken":"` + Secret + `-refresh"}}`,
+		filepath.Join(b.Claude, "skills", "review", "SKILL.md"):          "---\nname: review\n---\nReview a change.\n",
+		filepath.Join(b.Claude, "skills", "tend", "SKILL.md"):            "---\nname: tend\n---\nSave the session.\n",
+		filepath.Join(b.Claude, "plugins", "installed_plugins.json"):     string(installed),
+		filepath.Join(plugin, "skills", "rescue", "SKILL.md"):            "---\nname: rescue\n---\nHand the task to Codex.\n",
+		filepath.Join(b.Codex, "AGENTS.md"):                              "# Codex rules\n\nKeep diffs small.\n",
+		filepath.Join(b.Codex, "auth.json"):                              `{"OPENAI_API_KEY":"` + Secret + `-openai","tokens":{"access_token":"` + Secret + `-codexaccess"}}`,
+		filepath.Join(b.Codex, "config.toml"):                            toml,
+		filepath.Join(webapp, "CLAUDE.md"):                               projectRules,
+		filepath.Join(webapp, "CLAUDE.local.md"):                         "Use the staging API locally.\n",
+		filepath.Join(webapp, "AGENTS.md"):                               "# Webapp for Codex\n\nRun npm test.\n",
+		filepath.Join(webapp, ".mcp.json"):                               string(mcp),
+		filepath.Join(webapp, ".env"):                                    "API_KEY=" + Secret + "-dotenv\n",
+		filepath.Join(webapp, ".claude", "settings.local.json"):          string(local),
+		filepath.Join(webapp, ".claude", "skills", "deploy", "SKILL.md"): "---\nname: deploy\n---\nDeploy the webapp.\n",
+	}
+	for p, body := range files {
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			return err
+		}
+		if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// tomlString is s as a TOML basic string.
+func tomlString(s string) string {
+	return `"` + strings.ReplaceAll(strings.ReplaceAll(s, `\`, `\\`), `"`, `\"`) + `"`
+}
+
 func (b *builder) sidecars() error {
 	index := map[string]string{b.Get("codex-cli").ID: "修 webapp CI", b.Get("codex-desktop").ID: "Request logging with trace ids"}
 	var lines []string
@@ -492,8 +600,18 @@ func (b *builder) sidecars() error {
 	if err := os.WriteFile(filepath.Join(b.Codex, "session_index.jsonl"), []byte(strings.Join(lines, "\n")+"\n"), 0o644); err != nil {
 		return err
 	}
-	settings, _ := json.MarshalIndent(map[string]any{"numStartups": 3, "projects": map[string]any{
-		b.dir("webapp"): map[string]any{"allowedTools": []string{}}, b.dir("legacy-app"): map[string]any{"allowedTools": []string{}}}}, "", "  ")
+	settings, _ := json.MarshalIndent(map[string]any{"numStartups": 3, "userID": Secret + "-uid", "primaryApiKey": Secret + "-apikey",
+		"oauthAccount": map[string]string{"emailAddress": SecretEmail, "accountUuid": Secret + "-account", "organizationName": Secret + "-orgname"},
+		"mcpServers": map[string]any{
+			"gitea": map[string]any{"type": "stdio", "command": "gitea-mcp", "args": []string{"--token", Secret + "-arg"},
+				"env": map[string]string{"GITEA_TOKEN": Secret + "-env"}},
+			"docs": map[string]any{"type": "http", "url": "https://" + Secret + "-url.example.com/mcp",
+				"headers": map[string]string{"Authorization": "Bearer " + Secret + "-header"}}},
+		"projects": map[string]any{
+			b.dir("webapp"): map[string]any{"allowedTools": []string{"Bash(npm test:*)", "Bash(curl -H 'X-Key: " + Secret + "-allowed')", "WebFetch"},
+				"enabledMcpjsonServers": []string{"local-db"}, "hasTrustDialogAccepted": true, "lastCost": 0.42,
+				"mcpServers": map[string]any{"proj-only": map[string]any{"command": "x", "env": map[string]string{"K": Secret + "-projenv"}}}},
+			b.dir("legacy-app"): map[string]any{"allowedTools": []string{}}}}, "", "  ")
 	if err := os.WriteFile(filepath.Join(b.Claude, ".claude.json"), settings, 0o644); err != nil {
 		return err
 	}

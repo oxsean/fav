@@ -10,12 +10,14 @@ import (
 
 var editNames = [][]byte{[]byte(`"name":"Edit"`), []byte(`"name":"Write"`), []byte(`"name":"MultiEdit"`), []byte(`"name":"NotebookEdit"`)}
 
-// isEdit is a cheap pre-filter for lines where the AI wrote a file.
-func isEdit(b []byte) bool {
+var toolUse = []byte(`"tool_use"`)
+
+// isEdit is a cheap pre-filter for lines where the AI wrote a file; tool: the line has a Claude tool call (toolUse).
+func isEdit(b []byte, tool bool) bool {
 	if bytes.Contains(b, []byte(`"custom_tool_call"`)) {
 		return bytes.Contains(b, []byte(`"apply_patch"`))
 	}
-	if !bytes.Contains(b, []byte(`"tool_use"`)) {
+	if !tool {
 		return false
 	}
 	for _, n := range editNames {

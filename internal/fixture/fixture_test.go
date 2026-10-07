@@ -119,6 +119,42 @@ func TestIndexSeesEveryScenario(t *testing.T) {
 	}
 }
 
+func TestTheIndexKeepsWhatASessionSawAndNoSecret(t *testing.T) {
+	d, idx, _ := load(t)
+	oauth := idx.Env(tend.ProviderClaude, d.Get("oauth").ID)
+	if oauth == nil || oauth.Model != "claude-opus-5-5" || oauth.Version == "" || oauth.Shell != "zsh" {
+		t.Fatalf("oauth: %+v", oauth)
+	}
+	var loaded []string
+	for _, f := range oauth.Files {
+		loaded = append(loaded, f.Path)
+	}
+	if want := []string{filepath.Join(d.Claude, "CLAUDE.md"), filepath.Join(d.Work, "webapp", "CLAUDE.md"),
+		filepath.Join(d.Work, "webapp", "docs", "oauth.md")}; !slices.Equal(loaded, want) {
+		t.Errorf("oauth: instruction files %v, want %v (a memory file is not one)", loaded, want)
+	}
+	if !slices.Contains(oauth.Skills, "codex:rescue") || !slices.Equal(oauth.Used, []string{"review"}) ||
+		!slices.Equal(oauth.UsedMCP, []string{"gitea"}) || !slices.Equal(oauth.MCP, []string{"gitea"}) {
+		t.Errorf("oauth: skills and MCP: %+v", oauth)
+	}
+	if cx := idx.Env(tend.ProviderCodex, d.Get("codex-cli").ID); cx == nil || cx.Version != "0.156.1" || cx.Provider != "openai" ||
+		cx.Model != "gpt-6" || cx.Approval != "on-request" || cx.Sandbox != "workspace-write" {
+		t.Errorf("codex-cli: %+v", cx)
+	}
+	if err := idx.Save(); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(filepath.Join(d.Home, "sessions.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, secret := range []string{Secret, SecretEmail} {
+		if strings.Contains(string(b), secret) {
+			t.Errorf("the index cache holds %s", secret)
+		}
+	}
+}
+
 func TestRowsListEveryKind(t *testing.T) {
 	d, idx, store := load(t)
 	unfav := idx.Attach(store, nil)
