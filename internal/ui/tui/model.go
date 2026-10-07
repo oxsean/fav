@@ -156,6 +156,7 @@ type Model struct {
 	projCur int                    // highlighted session in the project info; active when the right pane has focus on a group header
 
 	hosts  *remote.Hosts        // other machines; nil = none configured, nothing is contacted
+	here   func() remote.Peer   // this machine as a handoff reaches it; nil: remote.Here
 	remote map[string]*hostRows // by host name
 	far    servedHosts          // mode 2: how the other machines are read through the server
 	people people               // users' names, as the coordinator gives them

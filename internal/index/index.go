@@ -360,6 +360,19 @@ func (idx *Index) Transcript(sessionID string) string {
 	return ""
 }
 
+// GitRemote is the origin recorded for r (Codex records it) when r is a session of this machine, else "".
+func (idx *Index) GitRemote(r *tend.Rec) string {
+	if idx == nil || r.Host != "" {
+		return ""
+	}
+	for _, s := range idx.Sessions() {
+		if s.Provider == r.Provider && s.SessionID == r.SessionID {
+			return s.GitRemote()
+		}
+	}
+	return ""
+}
+
 // FileByPrefix: the newest file whose session id starts with ref, Skip and silent files included, and how many
 // sessions match.
 func (idx *Index) FileByPrefix(ref string) (*File, int) {

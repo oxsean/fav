@@ -11,8 +11,8 @@ import (
 
 // What a node answers of this machine's sessions (node.share_sessions).
 const (
-	ShareAll  = "all"  // every session: ssh and mode 1
-	ShareRuns = "runs" // only its runs' sessions: the default of a node that dialed a server
+	ShareAll  = remote.ShareAll // every session: ssh and mode 1
+	ShareRuns = "runs"          // only its runs' sessions: the default of a node that dialed a server
 	ShareNone = "none"
 )
 

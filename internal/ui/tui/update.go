@@ -746,7 +746,7 @@ func (m *Model) overlayKey(msg tea.KeyPressMsg) tea.Cmd {
 	// letters type into the picker; navigate with arrows and ctrl+n/p
 	switch msg.String() {
 	case "esc":
-		m.closeOverlay()
+		m.closeThen(m.ov.back)
 		return nil
 	case "enter":
 		if m.pressFocused() {

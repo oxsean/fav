@@ -4,11 +4,14 @@ import (
 	"cmp"
 	"context"
 	"encoding/json"
+	"errors"
 	"path/filepath"
 	"slices"
 	"strings"
 
+	"github.com/oxsean/fav/internal/agent"
 	"github.com/oxsean/fav/internal/capture"
+	"github.com/oxsean/fav/internal/i18n"
 	"github.com/oxsean/fav/internal/pathmap"
 	"github.com/oxsean/fav/internal/task"
 	"github.com/oxsean/fav/internal/tend"
@@ -30,7 +33,7 @@ type Repos struct {
 type RepoDir struct {
 	Path   string `json:"path"`
 	Branch string `json:"branch,omitempty"`
-	From   string `json:"from"` // where it was found: claude (~/.claude.json) | index | scan
+	From   string `json:"from"` // where it was found: claude (~/.claude.json) | index | scan; Dirs adds same | project
 }
 
 // handoff answers handoff.facts and handoff.put.
@@ -111,10 +114,13 @@ func (x *Handover) FromName() string {
 // Text is the pack for a new session in dir on To.
 func (x *Handover) Text(dir string) string { return capture.RenderHandoff(x.Facts, x.Target(dir)) }
 
-// Dirs are where the session can go on To, in order: the session's directory moved into each pair's (a project's
-// directory on both machines), else the checkouts To finds of the session's remote (the facts' origin, then
-// remotes). Nothing found is no error: the caller asks for a directory.
+// Dirs are where the session can go on To, in order: its own directory when To is its own machine, the session's
+// directory moved into each pair's (a project's directory on both machines), else the checkouts To finds of the
+// session's remote (the facts' origin, then remotes). Nothing found is no error: the caller asks for a directory.
 func (x *Handover) Dirs(ctx context.Context, pairs []DirPair, remotes ...string) ([]RepoDir, error) {
+	if x.From.Same(x.To) {
+		return []RepoDir{{Path: x.Facts.Cwd, From: "same"}}, nil
+	}
 	for _, p := range pairs {
 		if d, ok := pathmap.Rebase(x.Facts.Cwd, p.From, p.To, x.From.End(), x.To.End()); ok {
 			return []RepoDir{{Path: d, From: "project"}}, nil
@@ -142,4 +148,63 @@ func (x *Handover) Put(ctx context.Context, text, dir, provider string) (Handoff
 	var res HandoffPut
 	err := x.To.Call(ctx, MHandoffPut, HandoffPutParams{Ref: x.Ref, Text: text, Dir: dir, Provider: provider, From: x.From.Ref()}, &res)
 	return res, err
+}
+
+// ShareAll is the node.share_sessions value under which a node answers every session (node.ShareAll).
+const ShareAll = "all"
+
+// HandoffRefusal says why p, called host, did not answer method: its tend is too old, or its node shares only what
+// its runs left (a handoff reads and writes beyond those).
+func HandoffRefusal(p Peer, host, method string, err error) string {
+	if wire.Code(err) == wire.CodeUnknownMethod {
+		return TooOld(host, method)
+	}
+	if share := ShareLimit(p, err); share != "" {
+		return i18n.F("cli.handoff.share", host, share)
+	}
+	return i18n.F("cli.handoff.refused", host, Reason(err))
+}
+
+// ShareLimit is p's node.share_sessions when err is p refusing what that setting keeps from the caller, else "".
+func ShareLimit(p Peer, err error) string {
+	if share := p.Hello.Share; wire.Code(err) == wire.CodeUnauthorized && share != "" && share != ShareAll {
+		return share
+	}
+	return ""
+}
+
+// ServerRefusal is why a server (mode 2) does not carry work between the viewer's own machines to machine name, ""
+// when it does: down is why it cannot be reached (nil when it can), mine whether name is the viewer's, features what
+// it understands; notMine and serverOld are the keys of what is said for another person's machine and for a server
+// too old for the work.
+func ServerRefusal(name string, down error, mine bool, features []string, notMine, serverOld string) string {
+	switch {
+	case down != nil:
+		return i18n.F("remote.put_server_down", Reason(down))
+	case !mine:
+		return i18n.F(notMine, name)
+	case !slices.Contains(features, FeatureMigrate):
+		return i18n.T(serverOld)
+	}
+	return ""
+}
+
+func handoffOpenArgs(id string) []string { return []string{"handoff", "--open", id} }
+
+// HandoffOpenLine is the command that opens the pack put as id, run on the machine it was put on.
+func HandoffOpenLine(id string) string { return "tend " + strings.Join(handoffOpenArgs(id), " ") }
+
+// HandoffThere opens the pack put as id on h over ssh, in this terminal.
+func HandoffThere(h tend.Host, id string) agent.CommandSpec {
+	cmd := Command(h, true, append(handoffOpenArgs(id), "--no-herdr")...)
+	return agent.CommandSpec{Exec: cmd.Args[0], Args: cmd.Args[1:]}
+}
+
+// Reach is machine name as a Peer, its failure said for the UI.
+func (h *Hosts) Reach(ctx context.Context, name string) (Peer, error) {
+	p, err := h.Peer(ctx, name)
+	if err != nil {
+		return Peer{}, errors.New(i18n.F("remote.unreachable", name, Reason(err)))
+	}
+	return p, nil
 }

@@ -312,9 +312,10 @@ func TestRemoteResumeDialogOffersOnlyRemoteActions(t *testing.T) {
 	for _, b := range m.ov.btns {
 		labels = append(labels, ansi.Strip(b.label))
 	}
-	want := []string{keyed(enterKey, i18n.T("resume.btn_resume")), keyed(keyOf(inResume, actCopy), i18n.T("resume.btn_copy")), cancelBtn().label}
+	want := []string{keyed(enterKey, i18n.T("resume.btn_resume")), keyed(keyOf(inResume, actCopy), i18n.T("resume.btn_copy")), cancelBtn().label,
+		keyed(keyOf(inResume, actHandoff), i18n.T("resume.btn_handoff"))}
 	if !slices.Equal(labels, want) {
-		t.Fatalf("resume and copy only: %q", labels)
+		t.Fatalf("resume, copy and handoff only: %q", labels)
 	}
 	key(m, "M")
 	if m.ov.kind != ovResume || m.notice != i18n.T("remote.read_only") || len(m.store.All()) != 4 {

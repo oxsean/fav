@@ -13,8 +13,8 @@ import (
 
 	"github.com/oxsean/fav/internal/i18n"
 	"github.com/oxsean/fav/internal/memory"
-	"github.com/oxsean/fav/internal/node"
 	"github.com/oxsean/fav/internal/pathmap"
+	"github.com/oxsean/fav/internal/projects"
 	"github.com/oxsean/fav/internal/remote"
 	"github.com/oxsean/fav/internal/render"
 	"github.com/oxsean/fav/internal/shell"
@@ -317,12 +317,7 @@ func memoryEndsOf(ctx context.Context, target, machine, from, there string) (mem
 	s := sessionProjects()
 	fromKey, toKey := cmp.Or(e.from.Name, s.Here), cmp.Or(e.to.Name, s.Here)
 	if p := projectNamed(target); p != nil && there == "" {
-		for _, r := range p.Repos {
-			if a, b := r.Dirs[fromKey], r.Dirs[toKey]; a != "" && b != "" {
-				e.pairs = append(e.pairs, remote.DirPair{From: a, To: b})
-			}
-		}
-		if len(e.pairs) == 0 {
+		if e.pairs = projects.Pairs(p, fromKey, toKey); len(e.pairs) == 0 {
 			return e, i18n.E("cli.memory.no_pair", p.Name, e.name(e.from), e.name(e.to))
 		}
 		return e, nil
@@ -361,7 +356,7 @@ func (e memoryEnds) refused(err error) error {
 		p = pe.Peer
 	}
 	host := e.name(p)
-	if share := p.Hello.Share; wire.Code(err) == wire.CodeUnauthorized && share != "" && share != node.ShareAll {
+	if share := remote.ShareLimit(p, err); share != "" {
 		return i18n.E("cli.memory.share", host, share)
 	}
 	return errors.New(remote.MemoryRefused(host, err))

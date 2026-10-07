@@ -19,6 +19,7 @@ import (
 
 // Others are the other machines whose sessions the TUI shows; the zero value shows none and contacts nothing.
 type Others struct {
+	Here   func() remote.Peer // this machine as a handoff reaches it: its session methods and node.repos
 	Hosts  *remote.Hosts
 	Server *remote.NodeCall // mode 2: the transport under Hosts, told which machines the server lets the viewer read
 	SSH    *remote.Hosts    // mode 2: config.hosts, reached only to resume the viewer's own machines
@@ -70,6 +71,7 @@ func ForgetOthers(nc *remote.NodeCall, ms []coord.Machine, caller *remote.Caller
 
 // useOthers shows o's machines; mode 2 starts from the viewer's own kept on disk, until the server lists its machines.
 func (m *Model) useOthers(o Others) {
+	m.here = o.Here
 	if o.Server == nil {
 		m.useHosts(o.Hosts)
 		return
@@ -234,18 +236,23 @@ type sshSameMsg struct {
 
 // askSSH asks the host of r's machine name here who it is; the resume opens when it answers.
 func (m *Model) askSSH(r *tend.Rec) {
-	name := r.Host
-	if !m.far.asking[name] {
-		m.far.asking[name] = true
-		h, want := m.far.ssh, m.nodeIDOf(name)
-		m.pending = tea.Batch(m.pending, func() tea.Msg {
-			ctx, cancel := context.WithTimeout(context.Background(), sshSameWait)
-			defer cancel()
-			hello, err := h.Hello(ctx, name)
-			return sshSameMsg{rec: r, name: name, same: err == nil && want != "" && hello.NodeID == want, err: err}
-		})
+	m.pending = tea.Batch(m.pending, m.checkSSH(r, r.Host))
+	m.flash(i18n.F("remote.ssh_checking", r.Host))
+}
+
+// checkSSH asks the host of machine name here who it is, unless that is being asked; r's resume opens on the answer.
+func (m *Model) checkSSH(r *tend.Rec, name string) tea.Cmd {
+	if m.far.asking[name] {
+		return nil
 	}
-	m.flash(i18n.F("remote.ssh_checking", name))
+	m.far.asking[name] = true
+	h, want := m.far.ssh, m.nodeIDOf(name)
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), sshSameWait)
+		defer cancel()
+		hello, err := h.Hello(ctx, name)
+		return sshSameMsg{rec: r, name: name, same: err == nil && want != "" && hello.NodeID == want, err: err}
+	}
 }
 
 func (msg sshSameMsg) apply(m *Model) tea.Cmd {
@@ -253,7 +260,7 @@ func (msg sshSameMsg) apply(m *Model) tea.Cmd {
 	if msg.err == nil { // unreachable now says nothing about who it is
 		m.far.same[msg.name] = msg.same
 	}
-	if m.ov.active() || m.current() != msg.rec {
+	if msg.rec == nil || m.ov.active() || m.current() != msg.rec {
 		return nil
 	}
 	if msg.same {

@@ -10,7 +10,6 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/oxsean/fav/internal/agent"
 	"github.com/oxsean/fav/internal/capture"
 	"github.com/oxsean/fav/internal/coord"
 	"github.com/oxsean/fav/internal/envcheck"
@@ -54,7 +53,7 @@ func handoffHost(s *tend.Store, ref string, o handoffTo) error {
 	}
 	x, err := remote.Handoff(ctx, from, to, remote.Ref{Provider: r.Provider, SessionID: r.SessionID})
 	if err != nil {
-		return handoffRefused(from, cmp.Or(r.Host, tend.HostLocal), remote.MHandoffFacts, err)
+		return errors.New(remote.HandoffRefusal(from, cmp.Or(r.Host, tend.HostLocal), remote.MHandoffFacts, err))
 	}
 	dir := o.dir
 	if dir == "" {
@@ -79,11 +78,11 @@ func handoffHost(s *tend.Store, ref string, o handoffTo) error {
 	provider := cmp.Or(o.provider, r.Provider)
 	put, err := x.Put(ctx, text, dir, provider)
 	if err != nil {
-		return handoffRefused(x.To, o.host, remote.MHandoffPut, err)
+		return errors.New(remote.HandoffRefusal(x.To, o.host, remote.MHandoffPut, err))
 	}
 	fmt.Fprint(os.Stderr, i18n.F("cli.handoff.put", o.host, put.Path))
 	if o.provider == "" {
-		fmt.Println(handoffOpenLine(put.ID))
+		fmt.Println(remote.HandoffOpenLine(put.ID))
 		return nil
 	}
 	if to.Name == "" {
@@ -91,8 +90,6 @@ func handoffHost(s *tend.Store, ref string, o handoffTo) error {
 	}
 	return handoffThere(o.host, put.ID, r.Title, o)
 }
-
-func handoffOpenLine(id string) string { return "tend handoff --open " + id }
 
 // handoffPeer is the machine name: this one for "" or local, else a configured host (mode 1) or one of the viewer's
 // own machines the server knows (mode 2), whose server forwards the handoff methods.
@@ -115,21 +112,12 @@ func ownPeer(ctx context.Context, name, notMine, serverOld string) (remote.Peer,
 		return remote.Peer{}, i18n.E("cli.host.unknown", name)
 	}
 	if far.Server != nil {
-		if err := far.reach(); err != nil {
-			return remote.Peer{}, i18n.E("remote.put_server_down", remote.Reason(err))
-		}
-		if !far.mine(n) {
-			return remote.Peer{}, i18n.E(notMine, n)
-		}
-		if !slices.Contains(far.features, remote.FeatureMigrate) {
-			return remote.Peer{}, errors.New(i18n.T(serverOld))
+		down := far.reach()
+		if why := remote.ServerRefusal(n, down, down == nil && far.mine(n), far.features, notMine, serverOld); why != "" {
+			return remote.Peer{}, errors.New(why)
 		}
 	}
-	p, err := h.Peer(ctx, n)
-	if err != nil {
-		return remote.Peer{}, errors.New(i18n.F("remote.unreachable", n, remote.Reason(err)))
-	}
-	return p, nil
+	return h.Reach(ctx, n)
 }
 
 // herePeer is this machine in this process: the session methods as `tend node` answers them past its share gate, and
@@ -158,20 +146,6 @@ func (h hereHandler) Handle(ctx context.Context, method string, params json.RawM
 	return h.n.Repos(ctx, p)
 }
 
-// handoffRefused says why p, called host, did not answer method: its tend is too old, or its node shares only what
-// its runs left (a handoff reads and writes beyond those).
-func handoffRefused(p remote.Peer, host, method string, err error) error {
-	switch wire.Code(err) {
-	case wire.CodeUnknownMethod:
-		return errors.New(remote.TooOld(host, method))
-	case wire.CodeUnauthorized:
-		if share := p.Hello.Share; share != "" && share != node.ShareAll {
-			return i18n.E("cli.handoff.share", host, share)
-		}
-	}
-	return i18n.E("cli.handoff.refused", host, remote.Reason(err))
-}
-
 // dirTexts are what handoffDir says: nothing found, the one taken, several to choose from.
 type dirTexts struct{ none, one, several string }
 
@@ -181,30 +155,20 @@ var handoffDirTexts = dirTexts{"cli.handoff.no_dir", "cli.handoff.dir", "cli.han
 // project's directory there, else the one checkout host finds of the session's remote (git's origin where it ran, else
 // the one its record or Codex recorded).
 func handoffDir(ctx context.Context, x *remote.Handover, r *tend.Rec, host string, say dirTexts) (string, error) {
-	if x.From.Same(x.To) {
-		return x.Facts.Cwd, nil
-	}
-	snap := sessionProjects()
 	there := host
 	if x.To.Name == "" {
-		there = snap.Here
+		there = ""
 	}
-	var pairs []remote.DirPair
-	if p := snap.Of(r); p != nil {
-		for _, rp := range p.Repos {
-			if a, b := rp.Dirs[snap.Machine(r)], rp.Dirs[there]; a != "" && b != "" {
-				pairs = append(pairs, remote.DirPair{From: a, To: b})
-			}
-		}
-	}
-	dirs, err := x.Dirs(ctx, pairs, r.GitRemote, indexedRemote(r))
+	dirs, err := x.Dirs(ctx, sessionProjects().DirPairs(r, there), r.GitRemote, indexedRemote(r))
 	if err != nil {
-		fmt.Fprintln(os.Stderr, handoffRefused(x.To, host, remote.MRepos, err))
+		fmt.Fprintln(os.Stderr, remote.HandoffRefusal(x.To, host, remote.MRepos, err))
 	}
-	switch len(dirs) {
-	case 0:
+	switch {
+	case len(dirs) == 0:
 		return "", i18n.E(say.none, host)
-	case 1:
+	case dirs[0].From == "same":
+		return dirs[0].Path, nil
+	case len(dirs) == 1:
 		fmt.Fprint(os.Stderr, i18n.F(say.one, host, dirs[0].Path))
 		return dirs[0].Path, nil
 	}
@@ -218,13 +182,9 @@ func handoffDir(ctx context.Context, x *remote.Handover, r *tend.Rec, host strin
 // handoffEnv compares the session's environment with dir's on host for the pack, and says on stderr how they differ
 // and what blocks; a block stops nothing, the new session reads it in the pack.
 func handoffEnv(ctx context.Context, x *remote.Handover, dir, host string) {
-	rep, err := x.Diagnose(ctx, dir)
-	if err != nil {
-		who := host
-		if !x.From.Has(remote.MEnv) {
-			who = x.FromName()
-		}
-		fmt.Fprint(os.Stderr, i18n.F("cli.handoff.env_unread", envErr(who, err)))
+	rep, why := x.CompareEnv(ctx, dir, host)
+	if why != "" {
+		fmt.Fprint(os.Stderr, i18n.F("cli.handoff.env_unread", why))
 		return
 	}
 	fmt.Fprint(os.Stderr, i18n.F("cli.handoff.env", host, rep.Summary()))
@@ -244,12 +204,7 @@ func indexedRemote(r *tend.Rec) string {
 	if err != nil {
 		return ""
 	}
-	for _, s := range idx.Sessions() {
-		if s.Provider == r.Provider && s.SessionID == r.SessionID {
-			return s.GitRemote()
-		}
-	}
-	return ""
+	return idx.GitRemote(r)
 }
 
 // handoffTask makes the pack a task on host and dispatches it: the coordinator's rules for the machine, the agent and
@@ -264,7 +219,7 @@ func handoffTask(r *tend.Rec, x *remote.Handover, text, dir string, o handoffTo)
 		project = p.ID
 	}
 	return withCoord(wire.Options{}, func(cl *coord.Client) error {
-		c := coord.TaskCreate{Title: i18n.F("handoff.title", r.Title), Brief: text + "\n" + i18n.T("handoff.task_ask") + "\n", Dir: dir,
+		c := coord.TaskCreate{Title: i18n.F("handoff.title", r.Title), Brief: capture.HandoffBrief(text), Dir: dir,
 			Machine: machine, Agent: cmp.Or(o.agent, r.Provider), Project: project}
 		var t task.Task
 		if err := write(cl, coord.MTaskCreate, c, &t); err != nil {
@@ -290,7 +245,7 @@ func handoffThere(name, id, title string, o handoffTo) error {
 	h, far := remoteHosts(), farHosts()
 	if far.Server != nil {
 		if !far.sshSame(name) {
-			fmt.Println(handoffOpenLine(id))
+			fmt.Println(remote.HandoffOpenLine(id))
 			return i18n.E("cli.handoff.no_ssh", name)
 		}
 		h = far.SSH
@@ -299,8 +254,7 @@ func handoffThere(name, id, title string, o handoffTo) error {
 	if !ok {
 		return i18n.E("cli.host.unknown", name)
 	}
-	cmd := remote.Command(host, true, "handoff", "--open", id, "--no-herdr")
-	plan := capture.Plan{Spec: agent.CommandSpec{Exec: cmd.Args[0], Args: cmd.Args[1:]}}
+	plan := capture.Plan{Spec: remote.HandoffThere(host, id)}
 	if !o.noHerdr && herdr.Active() {
 		plan.Ws = herdrWorkspace(o.workspace)
 	}

@@ -9,6 +9,7 @@ import (
 
 	"github.com/oxsean/fav/internal/capture"
 	"github.com/oxsean/fav/internal/envcheck"
+	"github.com/oxsean/fav/internal/i18n"
 	"github.com/oxsean/fav/internal/index"
 	"github.com/oxsean/fav/internal/wire"
 )
@@ -73,21 +74,52 @@ func (h *localHandler) env(ctx context.Context, method string, params json.RawMe
 // Diagnose compares the session's environment where it ran with dir's on To, and keeps for the pack the summary and
 // what blocks or changes what the AI finds there; when either end does not answer, the pack says why.
 func (x *Handover) Diagnose(ctx context.Context, dir string) (envcheck.Report, error) {
-	var src, dst envcheck.Print
-	err := x.From.Call(ctx, MEnv, EnvParams{Ref: &x.Ref}, &src)
+	rep, _, err := x.diagnose(ctx, dir)
+	return rep, err
+}
+
+// CompareEnv is Diagnose for a person: the report, or why the environments were not compared, naming the machine that
+// did not answer; to is To as the caller names it.
+func (x *Handover) CompareEnv(ctx context.Context, dir, to string) (envcheck.Report, string) {
+	rep, atFrom, err := x.diagnose(ctx, dir)
 	if err == nil {
+		return rep, ""
+	}
+	if atFrom {
+		to = x.FromName()
+	}
+	return rep, EnvRefusal(to, err)
+}
+
+// diagnose is Diagnose; atFrom: the session's machine is the one that did not answer.
+func (x *Handover) diagnose(ctx context.Context, dir string) (rep envcheck.Report, atFrom bool, err error) {
+	var src, dst envcheck.Print
+	if err = x.From.Call(ctx, MEnv, EnvParams{Ref: &x.Ref}, &src); err == nil {
 		err = x.To.Call(ctx, MEnv, EnvParams{Dir: dir}, &dst)
+	} else {
+		atFrom = true
 	}
 	if err != nil {
 		x.Env = &capture.HandoffEnv{Unread: Reason(err)}
-		return envcheck.Report{}, err
+		return envcheck.Report{}, atFrom, err
 	}
-	rep := envcheck.Compare(src, dst, x.From.End(), x.To.End())
+	rep = envcheck.Compare(src, dst, x.From.End(), x.To.End())
 	x.Env = &capture.HandoffEnv{Summary: rep.Summary()}
 	for _, it := range rep.Items {
 		if it.Level != envcheck.LevelHint {
 			x.Env.Items = append(x.Env.Items, envcheck.LevelText(it.Level)+": "+it.What)
 		}
 	}
-	return rep, nil
+	return rep, false, nil
+}
+
+// EnvRefusal says why machine name did not answer env.
+func EnvRefusal(name string, err error) string {
+	switch wire.Code(err) {
+	case wire.CodeUnknownMethod:
+		return i18n.F("cli.env.too_old", name, name)
+	case wire.CodeNotFound:
+		return i18n.F("cli.env.not_found", name)
+	}
+	return i18n.F("cli.env.failed", name, Reason(err))
 }

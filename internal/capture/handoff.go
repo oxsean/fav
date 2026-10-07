@@ -11,6 +11,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/oxsean/fav/internal/fileio"
 	"github.com/oxsean/fav/internal/i18n"
@@ -31,21 +33,34 @@ const (
 // HandoffPrompt is the new session's first message; the pack itself stays in the file so it never reaches argv or ps.
 func HandoffPrompt(path string) string { return i18n.F("handoff.prompt", path) }
 
+// HandoffBrief is a task's brief made of the pack text: the pack, then what the task asks of its agent.
+func HandoffBrief(text string) string { return text + "\n" + i18n.T("handoff.task_ask") + "\n" }
+
 func handoffDir() string { return filepath.Join(tend.Home(), "handoff") }
 
 // WriteHandoff writes r's handoff pack under the tend home and returns its path; packs older than handoffKeep are removed.
 func WriteHandoff(r *tend.Rec) (string, error) {
+	return WriteHandoffText(r.SessionID, RenderHandoff(HandoffFactsOf(r), HandoffTarget{}))
+}
+
+// WriteHandoffText writes text as a handoff pack of session sid under the tend home and returns its path.
+func WriteHandoffText(sid, text string) (string, error) {
 	dir := handoffDir()
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", err
 	}
 	pruneHandoffs(dir, time.Now())
-	sid := r.SessionID
-	if len(sid) > 8 {
-		sid = sid[:8]
+	name := strings.Map(func(r rune) rune {
+		if r < utf8.RuneSelf && (unicode.IsLetter(r) || unicode.IsDigit(r) || r == '-' || r == '_') {
+			return r
+		}
+		return -1
+	}, sid)
+	if len(name) > 8 {
+		name = name[:8]
 	}
-	path := filepath.Join(dir, fmt.Sprintf("%s-%s.md", sid, time.Now().Format("20060102-150405")))
-	return path, os.WriteFile(path, []byte(RenderHandoff(HandoffFactsOf(r), HandoffTarget{})), 0o600)
+	path := filepath.Join(dir, fmt.Sprintf("%s-%s.md", cmp.Or(name, "handoff"), time.Now().Format("20060102-150405")))
+	return path, os.WriteFile(path, []byte(text), 0o600)
 }
 
 func pruneHandoffs(dir string, now time.Time) {

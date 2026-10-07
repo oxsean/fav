@@ -110,3 +110,30 @@ func TestAHandoverComparesBothEnvironmentsForThePack(t *testing.T) {
 		t.Errorf("the pack says it was not compared:\n%s", text)
 	}
 }
+
+// CompareEnv says why the environments were not compared, naming the machine that did not answer: the session's when
+// its tend has no env, else the target as the caller names it; compared, the pack keeps the summary.
+func TestCompareEnvNamesTheMachineThatDidNotAnswer(t *testing.T) {
+	ctx, sent := context.Background(), map[string]json.RawMessage{}
+	peer := func(name, endpoint string, env bool) Peer {
+		answers := map[string]any{MHandoffPut: HandoffPut{}}
+		if env {
+			answers[MEnv] = envcheck.Print{Dir: "/home/dev/shop"}
+		}
+		return fakePeer(name, endpoint, "linux", "/home/dev", answers, sent)
+	}
+	old := &wire.Error{Code: wire.CodeUnknownMethod}
+	for _, c := range []struct {
+		fromEnv, toEnv bool
+		who            string
+	}{{false, true, "studio"}, {true, false, "the pc"}} {
+		x := &Handover{From: peer("studio", "e1", c.fromEnv), To: peer("pc", "e2", c.toEnv), Ref: Ref{tend.ProviderClaude, "s1"}}
+		if _, why := x.CompareEnv(ctx, "/srv/shop", "the pc"); why != EnvRefusal(c.who, old) {
+			t.Errorf("from env %v, to env %v: %q", c.fromEnv, c.toEnv, why)
+		}
+	}
+	x := &Handover{From: peer("studio", "e1", true), To: peer("pc", "e2", true), Ref: Ref{tend.ProviderClaude, "s1"}}
+	if rep, why := x.CompareEnv(ctx, "/srv/shop", "pc"); why != "" || x.Env == nil || x.Env.Summary != rep.Summary() {
+		t.Fatalf("compared: %q %+v", why, x.Env)
+	}
+}

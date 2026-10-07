@@ -15,6 +15,7 @@ import (
 
 	"github.com/oxsean/fav/internal/capture"
 	"github.com/oxsean/fav/internal/coord"
+	"github.com/oxsean/fav/internal/envcheck"
 	"github.com/oxsean/fav/internal/i18n"
 	"github.com/oxsean/fav/internal/index"
 	"github.com/oxsean/fav/internal/projects"
@@ -31,7 +32,8 @@ func TestFrameLinesFillWidth(t *testing.T) {
 	states := []string{"", "detail", "projects", "syntax", "picker", "help", "help-input", "resume", "resume-edit", "edit",
 		"edit-summary", "settings", "settings-ide", "palette", "status", "delete", "start", "message", "handoff", "peek", "remote", "remote-resume",
 		"projects-grouped", "project-file", "project-edit", "server", "server-down", "server-down-projects", "server-picker",
-		"server-shared", "server-shared-refused", "server-old", "remote-put", "remote-old", "run-there", "make-task", "make-task-project", "make-task-busy"}
+		"server-shared", "server-shared-refused", "server-old", "remote-put", "remote-old", "run-there", "make-task", "make-task-project", "make-task-busy",
+		"handoff-host", "handoff-dirs", "handoff-pick-dir", "handoff-no-ssh", "handoff-old", "handoff-env"}
 	for _, size := range []struct{ w, h int }{{140, 40}, {120, 34}, {80, 24}, {80, 18}, {56, 20}, {50, 16}} {
 		for _, state := range states {
 			m := newModel(t, st, size.w, size.h)
@@ -116,6 +118,8 @@ func openOverlay(m *Model, kind string) {
 		m.setView(viewProjects)
 		m.foldAll(nil)
 		m.flash(i18n.T("remote.old_server"))
+	case "handoff-host", "handoff-dirs", "handoff-pick-dir", "handoff-no-ssh", "handoff-old", "handoff-env":
+		openHandoffTo(m, kind)
 	case "run-there":
 		withServer(m)
 		m.openRunThere(m.current())
@@ -260,6 +264,57 @@ func findText(s, want string) (int, int) {
 		}
 	}
 	return -1, -1
+}
+
+// openHandoffTo opens the handoff dialog on this machine's first session in mode 2 (mba, win offline, nuc's tend too
+// old, bobs shared), mba's answer applied as readHandoff returns it.
+func openHandoffTo(m *Model, kind string) {
+	withServer(m)
+	m.setMachines([]remote.Machine{{Name: "mba", Mine: true}, {Name: "win", Mine: true}, {Name: "nuc", Mine: true}, {Name: "bobs"}})
+	m.remote["win"].err = &wire.Error{Code: wire.CodeOffline}
+	m.remote["nuc"].lacks = map[string]bool{remote.MHandoffPut: true}
+	m.SetCoordinator(func(wire.Options) (*coord.Client, error) { return nil, &wire.Error{Code: wire.CodeOffline} })
+	m.tasks.cl = &coord.Client{}
+	m.proj.hello = &remote.Hello{Features: []string{remote.FeatureMigrate}}
+	m.search.SetValue("")
+	m.refresh()
+	m.cursor = slices.IndexFunc(m.rows, func(r row) bool { return r.rec != nil && r.rec.Host == "" })
+	r := m.current()
+	here := remote.PeerOf("", remote.Hello{Hostname: "ann-mac", Endpoint: "ann-mac", OS: "darwin", Home: "/Users/ann"}, nil)
+	mba := remote.PeerOf("mba", remote.Hello{Hostname: "mba", Endpoint: "mba", OS: "linux", Home: "/home/u"}, nil)
+	x := &remote.Handover{From: here, To: mba, Facts: capture.HandoffFacts{Provider: r.Provider, SessionID: r.SessionID, Title: r.Title,
+		Cwd: "/Users/ann/dev/notes-api", Summary: r.Summary, Requests: []string{"弱网下重连要有退避上限", "先补测试再改计时器"},
+		Reply: "已定位：close 事件重置了 backoff 计时器。", Files: []string{"ws/reconnect.go", "ws/reconnect_test.go"},
+		Git: capture.HandoffGit{Remote: "git@example.com:team/notes-api.git"}}}
+	dirs := []remote.RepoDir{{Path: "/home/u/dev/notes-api", Branch: "main", From: "index"}}
+	if kind == "handoff-dirs" || kind == "handoff-pick-dir" {
+		dirs = append(dirs, remote.RepoDir{Path: "/home/u/work/notes-api", Branch: "fix/ws-reconnect", From: "claude"},
+			remote.RepoDir{Path: "/srv/build/notes-api", From: "scan"})
+	}
+	m.ov = overlay{kind: ovHandoff, rec: r, focus: -1, handoff: &handoffTo{}}
+	if kind == "handoff-host" || kind == "handoff-old" {
+		path := filepath.Join(tend.Home(), "handoff-frame.md")
+		os.WriteFile(path, []byte("# 交接："+r.Title+"\n\n"+r.Summary+"\n"), 0o600)
+		m.Update(handoffReadMsg{path: path})
+		m.ov.handoff.dir, m.ov.handoff.how = r.Cwd, "handoff.dir.same"
+	} else {
+		m.Update(handoffReadMsg{host: "mba", x: x, dirs: dirs})
+	}
+	m.screen()
+	switch kind {
+	case "handoff-host":
+		m.pickHandoffHost()
+	case "handoff-pick-dir":
+		m.pickHandoffDir()
+	case "handoff-old":
+		m.flash(m.handoffWhy("nuc", remote.MHandoffPut))
+	case "handoff-env":
+		d := m.ov.handoff
+		rep := envcheck.Report{Block: 1, Unequal: 2, Hint: 3}
+		m.Update(handoffEnvMsg{seq: d.seq, dir: d.dir, rep: rep, env: &capture.HandoffEnv{Summary: rep.Summary(),
+			Items: []string{envcheck.LevelText(envcheck.LevelBlock) + ": " + i18n.F("envcheck.cli_missing", "codex")}}})
+		m.screen()
+	}
 }
 
 // TEND_DUMP=120x34 go test ./internal/ui/tui -run TestDumpFrame -v prints a real frame.

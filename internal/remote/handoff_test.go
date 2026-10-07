@@ -153,3 +153,22 @@ func TestHereAnswersInThisProcess(t *testing.T) {
 		t.Errorf("node methods are the node's: %v", err)
 	}
 }
+
+// A node that shares only its runs' sessions, or none, is named as the reason a handoff is refused there; any other
+// refusal keeps the generic text.
+func TestHandoffRefusedByAShareNamesTheSetting(t *testing.T) {
+	denied := &wire.Error{Code: wire.CodeUnauthorized}
+	for share, want := range map[string]string{
+		"runs":   i18n.F("cli.handoff.share", "n2", "runs"),
+		"none":   i18n.F("cli.handoff.share", "n2", "none"),
+		ShareAll: i18n.F("cli.handoff.refused", "n2", Reason(denied)),
+		"":       i18n.F("cli.handoff.refused", "n2", Reason(denied)),
+	} {
+		if got := HandoffRefusal(PeerOf("n2", Hello{Share: share}, nil), "n2", MHandoffPut, denied); got != want {
+			t.Errorf("share %q: %q, want %q", share, got, want)
+		}
+	}
+	if got := HandoffRefusal(Peer{}, "n2", MRepos, &wire.Error{Code: wire.CodeUnknownMethod}); got != TooOld("n2", MRepos) {
+		t.Errorf("unknown method: %q", got)
+	}
+}

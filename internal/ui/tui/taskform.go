@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"cmp"
+	"context"
 	"slices"
 	"strings"
 
@@ -201,6 +203,26 @@ func (m *Model) placeAreaCursor(row, lead int) {
 	a.SetCursorColumn(col)
 }
 
+// createAndRun makes the task and runs it on its machine with its agent, as `tend handoff --task` does.
+func (m *Model) createAndRun(c coord.TaskCreate) tea.Cmd {
+	cl := m.tasks.cl
+	if cl == nil {
+		m.flash(i18n.T("tasks.unavailable"))
+		return nil
+	}
+	note := i18n.F("tasks.queued", cmp.Or(c.Machine, coord.Local), c.Agent)
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), tasksWait)
+		defer cancel()
+		var t task.Task
+		if err := cl.CallCommand(ctx, coord.MTaskCreate, commandID(), c, &t); err != nil {
+			return taskDoneMsg{err: err}
+		}
+		err := cl.CallCommand(ctx, coord.MRunDispatch, commandID(), coord.Dispatch{Task: t.ID}, nil)
+		return taskDoneMsg{note: note, err: err}
+	}
+}
+
 func (m *Model) saveTaskForm() tea.Cmd {
 	title := strings.TrimSpace(m.ov.edit.Value())
 	if title == "" {
@@ -210,10 +232,13 @@ func (m *Model) saveTaskForm() tea.Cmd {
 	dir := strings.TrimSpace(m.ov.edit2.Value())
 	machine, agentName := m.picked(0), m.picked(1)
 	brief := strings.TrimSpace(m.ov.area.Value())
-	id, was := m.ov.taskID, m.ov.taskWas
+	id, was, project, dispatch := m.ov.taskID, m.ov.taskWas, m.ov.project, m.ov.dispatch
 	m.closeOverlay()
 	if machine == coord.Local {
 		machine = ""
+	}
+	if id == "" && dispatch {
+		return m.createAndRun(coord.TaskCreate{Title: title, Brief: brief, Dir: dir, Machine: machine, Agent: agentName, Project: project})
 	}
 	if id == "" {
 		return m.write(coord.MTaskCreate, coord.TaskCreate{Title: title, Brief: brief, Dir: dir, Machine: machine, Agent: agentName},
@@ -302,6 +327,9 @@ func (m *Model) renderTaskForm() string {
 	field(i18n.T("tasks.field_dir"), inputView(m.ov.edit2), formDir, &m.ov.edit2)
 	m.selector(&body, i18n.T("tasks.field_machine"), formMachine, 0, inner, m.ov.field == formMachine)
 	m.selector(&body, i18n.T("tasks.field_agent"), formAgent, 1, inner, m.ov.field == formAgent)
+	if id := m.ov.project; id != "" {
+		body = append(body, dimmed.Render(i18n.T("tasks.field_project")), render.Truncate(m.projectName(id), inner), "")
+	}
 	field(i18n.T("tasks.field_brief"), m.ov.area.View(), formBrief, nil)
 	body = append(body, m.buttons(len(body)+1, []btn{
 		{keyed(keyOf(inTaskForm, actSave), i18n.T("edit.btn_save")), true, func(mm *Model) { mm.pending = mm.saveTaskForm() }},

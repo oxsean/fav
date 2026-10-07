@@ -93,6 +93,9 @@ type overlay struct {
 	send       bool           // reply dialog: a message for the running run, not a continuation
 	previewErr error
 	proj       *projDialog // the 「项目」 dialog
+	handoff    *handoffTo  // handoff dialog: the machine and directory the new session starts in
+	project    string      // task form: the project a new task goes into
+	dispatch   bool        // task form: the new task is run at once (a handoff)
 
 	msg   capture.Message
 	steps []string // the full text of msg's steps
@@ -227,7 +230,7 @@ func (o *overlay) cancelLabel() string {
 }
 
 func cancelBtn() btn {
-	return btn{keyed(keyName("esc"), i18n.T("btn.cancel")), false, (*Model).closeOverlay}
+	return btn{keyed(keyName("esc"), i18n.T("btn.cancel")), false, func(mm *Model) { mm.closeThen(mm.ov.back) }}
 }
 
 func (m *Model) focusOrPress(i int) {

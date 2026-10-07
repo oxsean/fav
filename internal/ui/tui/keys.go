@@ -121,6 +121,7 @@ const (
 	actExtendUp
 	actTask
 	actTick
+	actDir
 	// actViaDialog is not a key: an ime route meaning "a button in the resume dialog".
 	actViaDialog
 )
@@ -223,6 +224,8 @@ var bindings = []binding{
 	{act: actBottom, in: inHandoff | inReader, keys: []string{"G", "end"}},
 	{act: actEdit, in: inHandoff, keys: []string{"e", "ctrl+e"}},
 	{act: actCopy, in: inHandoff | inReader, keys: []string{"y", "ctrl+y"}},
+	{act: actHost, in: inHandoff, keys: []string{"m"}}, // the machine the new session starts on, as m picks machines in the list
+	{act: actDir, in: inHandoff, keys: []string{"d"}},  // its directory there
 
 	{act: actAnswer, in: inPeek, tier: tierStart, keys: []string{"1", "2", "3"}},
 	{act: actReply, in: inPeek, keys: []string{":", "："}},
@@ -256,7 +259,7 @@ var bindings = []binding{
 	{act: actUp, in: inProject, keys: []string{"up", "ctrl+p"}},
 	{act: actLeft, in: inProject, keys: []string{"left"}},
 	{act: actRight, in: inProject, keys: []string{"right"}},
-	{act: actTick, in: inProject, tier: tierRecord, keys: []string{"x", "ctrl+x"}}, // ticks a directory; Ctrl+X while the name box types
+	{act: actTick, in: inProject | inHandoff, tier: tierRecord, keys: []string{"x", "ctrl+x"}}, // ticks a directory; Ctrl+X while the name box types
 }
 
 var keyIndex = func() map[scope]map[string]*binding {

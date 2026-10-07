@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -17,7 +18,6 @@ import (
 	"github.com/oxsean/fav/internal/remote"
 	"github.com/oxsean/fav/internal/render"
 	"github.com/oxsean/fav/internal/tend"
-	"github.com/oxsean/fav/internal/wire"
 )
 
 // cmdEnv: tend env [--dir d] [--json] prints this machine's environment, the answer of env; tend env diff compares.
@@ -143,15 +143,7 @@ func localEnv(ctx context.Context, p remote.EnvParams) (envcheck.Print, error) {
 	return v.(envcheck.Print), nil
 }
 
-func envErr(name string, err error) error {
-	switch wire.Code(err) {
-	case wire.CodeUnknownMethod:
-		return i18n.E("cli.env.too_old", name, name)
-	case wire.CodeNotFound:
-		return i18n.E("cli.env.not_found", name)
-	}
-	return i18n.E("cli.env.failed", name, remote.Reason(err))
-}
+func envErr(name string, err error) error { return errors.New(remote.EnvRefusal(name, err)) }
 
 // envRows are a Print as label and value lines: names, versions and short hashes.
 func envRows(p envcheck.Print) [][2]string {

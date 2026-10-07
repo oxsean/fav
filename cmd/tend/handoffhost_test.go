@@ -13,10 +13,7 @@ import (
 	"github.com/oxsean/fav/internal/capture"
 	"github.com/oxsean/fav/internal/fixture"
 	"github.com/oxsean/fav/internal/i18n"
-	"github.com/oxsean/fav/internal/node"
-	"github.com/oxsean/fav/internal/remote"
 	"github.com/oxsean/fav/internal/tend"
-	"github.com/oxsean/fav/internal/wire"
 )
 
 // twoHomes are two fixture machines with launchers that run this test binary as tend in each: this process is self,
@@ -123,22 +120,5 @@ func TestHandoffBetweenTwoHomes(t *testing.T) {
 	}
 	if _, err := tendOut(t, "handoff", s.ID, "--print"); err == nil {
 		t.Error("--print goes with --host")
-	}
-}
-
-// A node that shares only its runs' sessions, or none, is named as the reason a handoff is refused there; any other
-// refusal keeps the generic text.
-func TestHandoffRefusedByAShareNamesTheSetting(t *testing.T) {
-	denied := &wire.Error{Code: wire.CodeUnauthorized}
-	for share, want := range map[string]string{
-		node.ShareRuns: i18n.F("cli.handoff.share", "n2", node.ShareRuns),
-		node.ShareNone: i18n.F("cli.handoff.share", "n2", node.ShareNone),
-		node.ShareAll:  i18n.F("cli.handoff.refused", "n2", remote.Reason(denied)),
-		"":             i18n.F("cli.handoff.refused", "n2", remote.Reason(denied)),
-	} {
-		p := remote.PeerOf("n2", remote.Hello{Share: share}, nil)
-		if got := handoffRefused(p, "n2", remote.MHandoffPut, denied).Error(); got != want {
-			t.Errorf("share %q: %q, want %q", share, got, want)
-		}
 	}
 }

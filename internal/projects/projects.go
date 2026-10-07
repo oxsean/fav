@@ -105,6 +105,26 @@ func (s *Snapshot) Of(r *tend.Rec) *task.Project {
 	return s.Holding(s.Machine(r), Dir(r))
 }
 
+// DirPairs are r's project's directories on r's machine and on machine to ("" this one), the pairs a session's
+// directory is moved between when it is handed from one to the other.
+func (s *Snapshot) DirPairs(r *tend.Rec, to string) []remote.DirPair {
+	return Pairs(s.Of(r), s.Machine(r), cmp.Or(to, s.Here))
+}
+
+// Pairs are p's repositories' directories on machines from and to, those found on both.
+func Pairs(p *task.Project, from, to string) []remote.DirPair {
+	if p == nil {
+		return nil
+	}
+	var out []remote.DirPair
+	for _, rp := range p.Repos {
+		if a, b := rp.Dirs[from], rp.Dirs[to]; a != "" && b != "" {
+			out = append(out, remote.DirPair{From: a, To: b})
+		}
+	}
+	return out
+}
+
 // Holding is the project holding dir on machine, nil for none.
 func (s *Snapshot) Holding(machine, dir string) *task.Project {
 	if !s.Ready() || machine == "" || dir == "" || len(s.Projects) == 0 {

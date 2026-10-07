@@ -48,11 +48,11 @@ func newHosts(cfg tend.Config, link *serverLink) tuiui.Others {
 	}
 	c := cfg.Coordinator
 	if c == nil || c.URL == "" {
-		return tuiui.Others{Hosts: ssh, SSH: ssh}
+		return tuiui.Others{Here: herePeer, Hosts: ssh, SSH: ssh}
 	}
 	nc := remote.NewNodeCall(c.URL, link.call)
 	nc.SetMachines(nc.Kept())
-	return tuiui.Others{Hosts: remote.NewHostsOver(nc), Server: nc, SSH: ssh}
+	return tuiui.Others{Here: herePeer, Hosts: remote.NewHostsOver(nc), Server: nc, SSH: ssh}
 }
 
 // serverLink is the server connection node.call goes through: the TUI's current one, or the one a command dialed.

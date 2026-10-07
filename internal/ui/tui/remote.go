@@ -206,7 +206,7 @@ func (m *Model) remoteList(q tend.Query) []*tend.Rec {
 // lacking are the write methods hello does not list.
 func lacking(hello remote.Hello) map[string]bool {
 	out := map[string]bool{}
-	for _, method := range []string{remote.MPut, remote.MTrash, remote.MRestore} {
+	for _, method := range []string{remote.MPut, remote.MTrash, remote.MRestore, remote.MHandoffPut} {
 		if !slices.Contains(hello.Methods, method) {
 			out[method] = true
 		}
@@ -424,16 +424,17 @@ func herdrHere() *herdr.Workspace {
 
 func (m *Model) remoteGroups() []btnGroup {
 	k := func(a act, text string) string { return keyed(keyOf(inResume, a), i18n.T(text)) }
+	handoff := btnGroup{label: i18n.T("resume.group.new"), bs: []btn{{k(actHandoff, "resume.btn_handoff"), false, func(mm *Model) { mm.askHandoff(mm.ov.rec) }}}}
 	if m.ov.there != "" {
 		copyThere := btn{keyed(keyOf(inResume, actEnter), i18n.T("remote.btn_copy_there")), true, (*Model).copyResume}
-		return append([]btnGroup{{label: i18n.T("resume.group.resume"), bs: []btn{copyThere}, end: []btn{cancelBtn()}}}, m.taskGroup(m.ov.rec)...)
+		return append([]btnGroup{{label: i18n.T("resume.group.resume"), bs: []btn{copyThere}, end: []btn{cancelBtn()}}, handoff}, m.taskGroup(m.ov.rec)...)
 	}
 	bs := []btn{{keyed(keyOf(inResume, actEnter), i18n.T("resume.btn_resume")), true, func(mm *Model) { mm.remoteResume(false) }}}
 	if m.ov.plan.Ws != nil {
 		bs = append(bs, btn{k(actTerminal, "resume.btn_terminal"), false, func(mm *Model) { mm.remoteResume(true) }})
 	}
 	bs = append(bs, btn{k(actCopy, "resume.btn_copy"), false, (*Model).copyResume})
-	return append([]btnGroup{{label: i18n.T("resume.group.resume"), bs: bs, end: []btn{cancelBtn()}}}, m.taskGroup(m.ov.rec)...)
+	return append([]btnGroup{{label: i18n.T("resume.group.resume"), bs: bs, end: []btn{cancelBtn()}}, handoff}, m.taskGroup(m.ov.rec)...)
 }
 
 // remoteResume runs the ssh resume in a new tab of this Herdr workspace, or quits and runs it in this terminal.

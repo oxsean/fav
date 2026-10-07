@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/oxsean/fav/internal/agent"
 	"github.com/oxsean/fav/internal/tend"
@@ -79,5 +80,23 @@ func TestForkAndStartCommands(t *testing.T) {
 	c, _ = agent.StartOf(tend.ProviderCodex, "/p", "read /x.md")
 	if !slices.Equal(c.Argv(), []string{"codex", "read /x.md"}) || c.Cwd != "/p" {
 		t.Errorf("codex start: %q", c.Argv())
+	}
+}
+
+// TestWriteHandoffTextNamesAnyID: the file is named after the session id's first characters that are safe in a file
+// name, so an id in another script never splits a character.
+func TestWriteHandoffTextNamesAnyID(t *testing.T) {
+	t.Setenv("TEND_HOME", t.TempDir())
+	for _, sid := range []string{"标签合并规则重写", "fa000001-0c1a-4de0-8000", "../x/y", ""} {
+		path, err := WriteHandoffText(sid, "# 交接\n")
+		if err != nil {
+			t.Fatalf("%q: %v", sid, err)
+		}
+		if b, err := os.ReadFile(path); err != nil || string(b) != "# 交接\n" {
+			t.Fatalf("%q: the pack reads back from %s: %v", sid, path, err)
+		}
+		if filepath.Dir(path) != handoffDir() || !utf8.ValidString(filepath.Base(path)) {
+			t.Errorf("%q: %s", sid, path)
+		}
 	}
 }
