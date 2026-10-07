@@ -160,6 +160,7 @@ type Model struct {
 	remote map[string]*hostRows // by host name
 	far    servedHosts          // mode 2: how the other machines are read through the server
 	people people               // users' names, as the coordinator gives them
+	mems   map[string]*memView  // the agents' memories, by project group or session directory
 
 	tasks tasksState
 	proj  projectsState

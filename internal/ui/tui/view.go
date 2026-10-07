@@ -1075,7 +1075,7 @@ func (m *Model) footer() string {
 		if m.cursor < len(m.rows) && m.rows[m.cursor].folded {
 			expand = "footer.enter_expand"
 		}
-		left = []footGroup{{fk(enterKey, expand, 0), fk(footKeyOf(inList, actFoldAll), "footer.fold_all", 4)}, {fk(footKeyOf(inList, actEdit), "footer.project", 2), fk(footKeyOf(inList, actNew), "footer.new_session", 3), fk(keyOf(inList, actMove), "footer.move_project", 4)}, {fk(keyOf(inList, actSearch), "footer.search", 0)}}
+		left = []footGroup{{fk(enterKey, expand, 0), fk(footKeyOf(inList, actFoldAll), "footer.fold_all", 4)}, {fk(footKeyOf(inList, actEdit), "footer.project", 2), fk(footKeyOf(inList, actMemory), "footer.memory", 3), fk(footKeyOf(inList, actNew), "footer.new_session", 3), fk(keyOf(inList, actMove), "footer.move_project", 4)}, {fk(keyOf(inList, actSearch), "footer.search", 0)}}
 	case m.current() == nil:
 		left = []footGroup{m.searchKeys()}
 		if m.w < compactCols {

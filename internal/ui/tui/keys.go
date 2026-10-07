@@ -24,9 +24,10 @@ const (
 	inTaskForm                   // the task form (its text fields take every other key)
 	inTaskRun                    // the run dialog: machine, agent, buttons
 	inProject                    // the 「项目」 dialog (its name box takes every letter)
+	inMemory                     // the memory overlay's list (reading one is inReader)
 )
 
-var scopes = []scope{inList, inResume, inConfirm, inStart, inHandoff, inPeek, inReader, inTaskForm, inTaskRun, inProject}
+var scopes = []scope{inList, inResume, inConfirm, inStart, inHandoff, inPeek, inReader, inTaskForm, inTaskRun, inProject, inMemory}
 
 // tier is how much an action changes. ⚠️ Rules for new keys:
 // tierStart never gets a list key (only a dialog's Enter or the same key pressed twice runs it);
@@ -122,6 +123,7 @@ const (
 	actTask
 	actTick
 	actDir
+	actMemory
 	// actViaDialog is not a key: an ime route meaning "a button in the resume dialog".
 	actViaDialog
 )
@@ -176,8 +178,9 @@ var bindings = []binding{
 	{act: actDone, in: inList | inResume, tier: tierRecord, keys: []string{"x", "ctrl+x"}},
 	{act: actArchive, in: inList | inResume, tier: tierRecord, keys: []string{"a"}, ime: actViaDialog}, // ⚠️ never Ctrl+A: Herdr's prefix
 	{act: actEdit, in: inList | inResume, tier: tierRecord, keys: []string{"e", "ctrl+e"}},
+	{act: actMemory, in: inList, keys: []string{"i"}, ime: actPalette}, // the agents' memories of the project or the session's directory
 	{act: actMove, in: inList | inResume, tier: tierHeavy, keys: []string{"M"}},
-	{act: actDelete, in: inList | inResume, tier: tierHeavy, keys: []string{"D"}},
+	{act: actDelete, in: inList | inResume | inMemory, tier: tierHeavy, keys: []string{"D"}},
 	{act: actCopy, in: inList | inResume, keys: []string{"y", "ctrl+y"}},
 	{act: actPeek, in: inList | inResume, keys: []string{"`", "·", "｀"}}, // an IME types ` as ·
 	{act: actHandled, in: inList | inResume, tier: tierRecord, keys: []string{".", "。"}},
@@ -187,14 +190,14 @@ var bindings = []binding{
 	{act: actHelp, in: inList, keys: []string{"?", "？"}},
 	{act: actSettings, in: inList, keys: []string{",", "，"}},
 	{act: actPalette, in: inList, keys: []string{":", "："}},
-	{act: actUndo, in: inList, keys: []string{"u", "ctrl+z"}},
+	{act: actUndo, in: inList | inMemory, keys: []string{"u", "ctrl+z"}},
 	{act: actPause, in: inList, tier: tierRecord, keys: []string{"b"}, ime: actEnter}, // Enter opens the task dialog, whose button pauses
 	{act: actExtendDown, in: inList, keys: []string{"shift+down"}},
 	{act: actExtendUp, in: inList, keys: []string{"shift+up"}},
 	{act: actBack, in: inList, keys: []string{"esc"}},
 	{act: actQuit, in: inList, keys: []string{"q", "ctrl+c"}},
 
-	{act: actEnter, in: inResume | inConfirm | inStart | inHandoff | inPeek, keys: []string{"enter"}},
+	{act: actEnter, in: inResume | inConfirm | inStart | inHandoff | inPeek | inMemory, keys: []string{"enter"}},
 	{act: actResume, in: inResume, tier: tierStart, keys: []string{"r"}}, // the dialog is the confirmation: r = Enter
 	{act: actTerminal, in: inResume, tier: tierStart, keys: []string{"t", "ctrl+t"}},
 	{act: actApp, in: inResume, tier: tierStart, keys: []string{"p"}},
@@ -205,23 +208,23 @@ var bindings = []binding{
 	{act: actFiles, in: inResume, tier: tierStart, keys: []string{"o"}},
 	{act: actTitle, in: inResume, keys: []string{"n"}},
 	{act: actTask, in: inResume, keys: []string{"g"}}, // the task the session's run worked for
-	{act: actFocusPrev, in: inResume | inConfirm | inStart | inHandoff, keys: []string{"shift+tab", "left", "h"}},
-	{act: actFocusNext, in: inResume | inConfirm | inStart | inHandoff, keys: []string{"tab", "right", "l"}},
-	{act: actClose, in: inResume | inStart | inHandoff | inPeek, keys: []string{"esc", "q"}},
+	{act: actFocusPrev, in: inResume | inConfirm | inStart | inHandoff | inMemory, keys: []string{"shift+tab", "left", "h"}},
+	{act: actFocusNext, in: inResume | inConfirm | inStart | inHandoff | inMemory, keys: []string{"tab", "right", "l"}},
+	{act: actClose, in: inResume | inStart | inHandoff | inPeek | inMemory, keys: []string{"esc", "q"}},
 
 	{act: actConfirm, in: inConfirm, tier: tierHeavy, keys: []string{"y"}},
 	{act: actClose, in: inConfirm, keys: []string{"esc", "q", "n"}},
 
 	{act: actClaude, in: inStart | inHandoff, tier: tierStart, keys: []string{"1"}},
 	{act: actCodex, in: inStart | inHandoff, tier: tierStart, keys: []string{"2"}},
-	{act: actDown, in: inStart | inHandoff | inReader, keys: []string{"j", "down", "ctrl+n"}},
-	{act: actUp, in: inStart | inHandoff | inReader, keys: []string{"k", "up", "ctrl+p"}},
-	{act: actPageDown, in: inHandoff | inReader, keys: []string{"space", "pgdown", "ctrl+f"}},
-	{act: actPageUp, in: inHandoff | inReader, keys: []string{"pgup", "ctrl+b", "b"}},
-	{act: actHalfDown, in: inHandoff | inReader, keys: []string{"ctrl+d"}},
-	{act: actHalfUp, in: inHandoff | inReader, keys: []string{"ctrl+u"}},
-	{act: actTop, in: inHandoff | inReader, keys: []string{"g", "home"}},
-	{act: actBottom, in: inHandoff | inReader, keys: []string{"G", "end"}},
+	{act: actDown, in: inStart | inHandoff | inReader | inMemory, keys: []string{"j", "down", "ctrl+n"}},
+	{act: actUp, in: inStart | inHandoff | inReader | inMemory, keys: []string{"k", "up", "ctrl+p"}},
+	{act: actPageDown, in: inHandoff | inReader | inMemory, keys: []string{"space", "pgdown", "ctrl+f"}},
+	{act: actPageUp, in: inHandoff | inReader | inMemory, keys: []string{"pgup", "ctrl+b", "b"}},
+	{act: actHalfDown, in: inHandoff | inReader | inMemory, keys: []string{"ctrl+d"}},
+	{act: actHalfUp, in: inHandoff | inReader | inMemory, keys: []string{"ctrl+u"}},
+	{act: actTop, in: inHandoff | inReader | inMemory, keys: []string{"g", "home"}},
+	{act: actBottom, in: inHandoff | inReader | inMemory, keys: []string{"G", "end"}},
 	{act: actEdit, in: inHandoff, keys: []string{"e", "ctrl+e"}},
 	{act: actCopy, in: inHandoff | inReader, keys: []string{"y", "ctrl+y"}},
 	{act: actHost, in: inHandoff, keys: []string{"m"}}, // the machine the new session starts on, as m picks machines in the list
@@ -435,6 +438,7 @@ func helpLayout() []helpSection {
 			{"help.host", inList, false, []act{actHost}},
 			{"help.enter_group", inList, false, []act{actEnter}},
 			{"help.group_project", inList, false, []act{actEdit}},
+			{"help.memory", inList, false, []act{actMemory}},
 			{"help.project_tick", inProject, false, []act{actTick}},
 			{"help.fold_all", inList, false, []act{actFoldAll, actFold, actUnfold}},
 		}},
@@ -614,7 +618,7 @@ func actName(a act) string {
 		actSort: "key.sort", actDown: "key.down", actUp: "key.up", actCopy: "key.copy", actTags: "key.tags",
 		actProjects: "key.projects", actProvider: "key.provider", actDate: "key.date", actStatus: "key.status", actHost: "key.host",
 		actNew: "key.new", actFavorite: "key.favorite", actDone: "key.done", actArchive: "key.archive",
-		actEdit: "key.edit", actQuit: "key.quit",
+		actEdit: "key.edit", actMemory: "key.memory", actQuit: "key.quit",
 	}[a]
 }
 

@@ -96,9 +96,15 @@ func (m *Model) peerFn() func(ctx context.Context, name string) (remote.Peer, er
 	}
 }
 
-// handoffWhy is why the session cannot be handed to or from machine name now ("" this machine, or it can): another
-// person's machine, a server that does not forward handoffs, a machine offline or whose tend is too old for method.
+// handoffWhy is why the session cannot be handed to or from machine name now ("" this machine, or it can).
 func (m *Model) handoffWhy(name, method string) string {
+	return m.ownWhy(name, method, "cli.handoff.not_mine", "cli.handoff.server_old")
+}
+
+// ownWhy is why work only machine name's owner may do cannot go there now through method ("" this machine, or it
+// can): another person's machine (notMine), a server that does not forward that work (serverOld), a machine offline or
+// whose tend is too old for method.
+func (m *Model) ownWhy(name, method, notMine, serverOld string) string {
 	if name == "" {
 		return ""
 	}
@@ -111,7 +117,7 @@ func (m *Model) handoffWhy(name, method string) string {
 		default:
 			features = m.proj.hello.Features
 		}
-		if why := remote.ServerRefusal(name, down, !m.shared(name), features, "cli.handoff.not_mine", "cli.handoff.server_old"); why != "" {
+		if why := remote.ServerRefusal(name, down, !m.shared(name), features, notMine, serverOld); why != "" {
 			return why
 		}
 	}

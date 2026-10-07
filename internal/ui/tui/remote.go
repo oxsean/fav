@@ -41,7 +41,7 @@ type hostRows struct {
 	fails   int       // fetches failed in a row
 	loading bool
 	idle    bool            // not polled: the filter does not show the host
-	lacks   map[string]bool // the write methods its tend lacks, as its last hello or a call said
+	lacks   map[string]bool // the methods its tend lacks that it is asked for on demand, as its last hello or a call said
 	trash   []*tend.Rec     // its trash, as last read in the trash view
 	days    int             // its trash_days, as its trash answered (0: not known or never)
 	trashed bool            // its trash was read (or is being read) since the trash view opened
@@ -203,10 +203,10 @@ func (m *Model) remoteList(q tend.Query) []*tend.Rec {
 	return out
 }
 
-// lacking are the write methods hello does not list.
+// lacking are the methods asked for on demand that hello does not list.
 func lacking(hello remote.Hello) map[string]bool {
 	out := map[string]bool{}
-	for _, method := range []string{remote.MPut, remote.MTrash, remote.MRestore, remote.MHandoffPut} {
+	for _, method := range []string{remote.MPut, remote.MTrash, remote.MRestore, remote.MHandoffPut, remote.MMemoryList, remote.MMemoryTrash} {
 		if !slices.Contains(hello.Methods, method) {
 			out[method] = true
 		}

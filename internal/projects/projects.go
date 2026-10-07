@@ -125,6 +125,17 @@ func Pairs(p *task.Project, from, to string) []remote.DirPair {
 	return out
 }
 
+// DirsOn are p's repositories' directories on machine.
+func DirsOn(p *task.Project, machine string) []string {
+	var out []string
+	for _, r := range p.Repos {
+		if d := r.Dirs[machine]; d != "" {
+			out = append(out, d)
+		}
+	}
+	return out
+}
+
 // Holding is the project holding dir on machine, nil for none.
 func (s *Snapshot) Holding(machine, dir string) *task.Project {
 	if !s.Ready() || machine == "" || dir == "" || len(s.Projects) == 0 {

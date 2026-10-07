@@ -43,6 +43,7 @@ const (
 	ovTaskDraft
 	ovProject
 	ovMakeTask
+	ovMemory
 )
 
 // ovPad: border + padding columns left of the overlay box; box-local zones add it.
@@ -94,6 +95,7 @@ type overlay struct {
 	previewErr error
 	proj       *projDialog // the 「项目」 dialog
 	handoff    *handoffTo  // handoff dialog: the machine and directory the new session starts in
+	mem        *memOverlay // the memory overlay
 	project    string      // task form: the project a new task goes into
 	dispatch   bool        // task form: the new task is run at once (a handoff)
 
@@ -368,6 +370,8 @@ func (m *Model) renderOverlay() string {
 		return m.renderProject()
 	case ovMakeTask:
 		return m.renderMakeTask()
+	case ovMemory:
+		return m.renderMemory()
 	}
 	return ""
 }
@@ -477,6 +481,8 @@ func (m *Model) ovWidth() int {
 		w = min(m.w-8, 100)
 	case ovProject:
 		w = min(max(w, 66), m.w-4)
+	case ovMemory:
+		w = min(m.w-8, 110)
 	}
 	return w
 }

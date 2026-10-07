@@ -7,6 +7,8 @@ import (
 	"strings"
 	"time"
 
+	tea "charm.land/bubbletea/v2"
+
 	"github.com/oxsean/fav/internal/i18n"
 	"github.com/oxsean/fav/internal/paths"
 	"github.com/oxsean/fav/internal/render"
@@ -65,6 +67,12 @@ func (m *Model) projectBlock(name string, y0, x0, w, h int) []string {
 		if r.GitRemote != "" {
 			add(render.GlyphBranch+i18n.T("project.remote"), r.GitRemote)
 			break
+		}
+	}
+	if v := m.mems[name]; v != nil && len(v.machines) > 0 {
+		for i, l := range m.memoryBlock(v, inner, labelW) {
+			m.mark(y0+1+len(body)+i, x0+2, inner, func(mm *Model) { mm.pending = tea.Batch(mm.pending, mm.openMemory()) })
+			body = append(body, l)
 		}
 	}
 	if bs := topN(recs, func(r *tend.Rec) string { return r.GitBranch }, 4); len(bs) > 0 {

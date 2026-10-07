@@ -78,12 +78,7 @@ func memoryDirs(target, machine string) ([]string, error) {
 		s := sessionProjects()
 		on := cmp.Or(machine, s.Here)
 		if p := projectNamed(target); p != nil {
-			var dirs []string
-			for _, r := range p.Repos {
-				if d := r.Dirs[on]; d != "" {
-					dirs = append(dirs, d)
-				}
-			}
+			dirs := projects.DirsOn(p, on)
 			if len(dirs) == 0 {
 				return nil, i18n.E("cli.memory.no_project_dir", p.Name, on)
 			}
@@ -355,11 +350,7 @@ func (e memoryEnds) refused(err error) error {
 	if errors.As(err, &pe) {
 		p = pe.Peer
 	}
-	host := e.name(p)
-	if share := remote.ShareLimit(p, err); share != "" {
-		return i18n.E("cli.memory.share", host, share)
-	}
-	return errors.New(remote.MemoryRefused(host, err))
+	return errors.New(remote.MemoryRefusal(p, e.name(p), err))
 }
 
 func memorySyncFlags(name string) (*flag.FlagSet, *string, *string) {

@@ -168,11 +168,18 @@ func memoryTexts(ctx context.Context, from, to Peer) memory.Texts {
 			}
 			text, cache[k] = t.Text, t.Text
 		}
-		if it.Line > 0 {
-			return memory.Block(text, it.Line), nil
-		}
-		return text, nil
+		return it.In(text), nil
 	}
+}
+
+// ReadMemory is it on p as text: its file, or the Codex block cut out of it.
+func ReadMemory(ctx context.Context, p Peer, it memory.Item) (MemoryText, error) {
+	var t MemoryText
+	if err := p.Call(ctx, MMemoryRead, MemoryFile{File: it.File}, &t); err != nil {
+		return MemoryText{}, err
+	}
+	t.Text = it.In(t.Text)
+	return t, nil
 }
 
 // CopyMemory copies e, a Claude memory of mp's directory on from, to the directory on to with its MEMORY.md line,
@@ -219,7 +226,15 @@ func (e *PeerError) Unwrap() error { return e.Err }
 // MemoryRefused says why name did not answer a memory method.
 func MemoryRefused(host string, err error) string {
 	if wire.Code(err) == wire.CodeUnknownMethod {
-		return i18n.F("remote.memory_old", host, host)
+		return TooOld(host, MMemoryList)
 	}
 	return i18n.F("remote.memory_failed", host, Reason(err))
+}
+
+// MemoryRefusal is MemoryRefused for p, called host: a node sharing less than all its sessions keeps its memories.
+func MemoryRefusal(p Peer, host string, err error) string {
+	if share := ShareLimit(p, err); share != "" {
+		return i18n.F("cli.memory.share", host, share)
+	}
+	return MemoryRefused(host, err)
 }

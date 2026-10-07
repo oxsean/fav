@@ -118,6 +118,8 @@ func openOverlay(m *Model, kind string) {
 		m.setView(viewProjects)
 		m.foldAll(nil)
 		m.flash(i18n.T("remote.old_server"))
+	case "memory-block", "memory", "memory-read", "memory-trashed":
+		dumpMemory(m, kind)
 	case "handoff-host", "handoff-dirs", "handoff-pick-dir", "handoff-no-ssh", "handoff-old", "handoff-env":
 		openHandoffTo(m, kind)
 	case "run-there":
@@ -328,6 +330,7 @@ func TestDumpFrame(t *testing.T) {
 		t.Fatalf("TEND_DUMP 应形如 120x34：%v", err)
 	}
 	m := newModel(t, demoStore(t), w, h)
+	dumpT = t
 	if os.Getenv("TEND_DUMP_VIEW") == "real" {
 		idx, _ := index.Open()
 		m.Update(m.pollLive()())

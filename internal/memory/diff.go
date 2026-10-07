@@ -186,6 +186,14 @@ func Block(text string, line int) string {
 	return strings.Join(lines[line-1:end], "\n") + "\n"
 }
 
+// In is it's text within text, its file's: a Codex block is cut out of the file.
+func (it Item) In(text string) string {
+	if it.Line > 0 {
+		return Block(text, it.Line)
+	}
+	return text
+}
+
 // blockEnd is where the group starting at line ends in lines (exclusive), 0 when line is not in them.
 func blockEnd(lines []string, line int) int {
 	if line < 1 || line > len(lines) {

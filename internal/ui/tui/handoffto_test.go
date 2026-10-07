@@ -36,6 +36,7 @@ type handoffNode struct {
 	dirs     map[string]node.Dirs
 	env      envcheck.Print
 	puts     []remote.HandoffPutParams
+	mem      *memNode
 }
 
 const shopRemote = "git@example.com:team/shop.git"
@@ -57,6 +58,9 @@ func (h *handoffNode) Handle(_ context.Context, method string, params json.RawMe
 	defer h.mu.Unlock()
 	if !slices.Contains(h.hello.Methods, method) {
 		return nil, &wire.Error{Code: wire.CodeUnknownMethod}
+	}
+	if h.mem != nil && strings.HasPrefix(method, "memory.") {
+		return h.mem.handle(method, params)
 	}
 	switch method {
 	case remote.MHello:

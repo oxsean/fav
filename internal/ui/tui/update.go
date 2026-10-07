@@ -21,6 +21,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if m.hosts != nil {
 		cmd = tea.Batch(cmd, m.wakeHosts())
 	}
+	cmd = tea.Batch(cmd, m.memoryHere())
 	if m.noticeNew {
 		m.noticeNew = false
 		seq := m.noticeSeq
@@ -626,6 +627,8 @@ func (m *Model) navKey(msg tea.KeyPressMsg) tea.Cmd {
 		m.openPalette()
 	case actUndo:
 		return m.doUndo()
+	case actMemory:
+		return m.openMemory()
 	}
 	return nil
 }
@@ -680,6 +683,8 @@ func (m *Model) overlayKey(msg tea.KeyPressMsg) tea.Cmd {
 		return m.projectKey(msg)
 	case ovMakeTask:
 		return m.makeTaskKey(msg)
+	case ovMemory:
+		return m.memoryKey(msg)
 	case ovMessage:
 		switch a := keyAct(inReader, msg.String()); a {
 		case actClose:
@@ -912,7 +917,13 @@ func (m *Model) wheel(dir, x int) bool {
 		}
 		return false
 	}
-	if m.ov.kind == ovMessage || m.ov.kind == ovHelp || m.ov.kind == ovHandoff {
+	if m.ov.kind == ovMemory && m.ov.mem.read == nil {
+		before := m.ov.mem.cursor
+		m.ov.mem.cursor += dir
+		m.ov.mem.clamp()
+		return m.ov.mem.cursor != before
+	}
+	if m.ov.kind == ovMessage || m.ov.kind == ovHelp || m.ov.kind == ovHandoff || m.ov.kind == ovMemory {
 		n := min(max(m.ov.cursor+dir*m.wheelStep, 0), m.ov.scrollMax)
 		if n == m.ov.cursor {
 			return false

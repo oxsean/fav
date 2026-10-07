@@ -69,6 +69,8 @@ func TooOld(host, method string) string {
 		return i18n.F("remote.put_old", host, host)
 	case MTrash, MRestore:
 		return i18n.F("remote.trash_old", host, host)
+	case MMemoryList, MMemoryRead, MMemoryTrash, MMemoryRestore, MMemoryPut:
+		return i18n.F("remote.memory_old", host, host)
 	}
 	return i18n.F("remote.method_old", host, host)
 }
