@@ -1,4 +1,5 @@
-// Command fixture writes the synthetic test dataset (internal/fixture) and launchers that run tend against it.
+// Command fixture writes the synthetic test dataset (internal/fixture) and launchers that run tend against it, with
+// herdr, claude and codex stubbed out.
 package main
 
 import (

@@ -2,6 +2,7 @@ package fixture
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -17,6 +18,7 @@ import (
 	"github.com/oxsean/fav/internal/journal"
 	"github.com/oxsean/fav/internal/memory"
 	"github.com/oxsean/fav/internal/paths"
+	"github.com/oxsean/fav/internal/shell"
 	"github.com/oxsean/fav/internal/task"
 	"github.com/oxsean/fav/internal/tend"
 	"github.com/oxsean/fav/internal/testkit"
@@ -509,5 +511,58 @@ func TestMemoryScenarios(t *testing.T) {
 	}
 	if classes[d.Get("scratch").Cwd] != memory.OrphanTemp || classes[filepath.Join(d.Work, "legacy-app")] != memory.OrphanUnknown {
 		t.Errorf("orphans: %+v", r.Orphans)
+	}
+}
+
+func TestLaunchersPutTheStubsFirstOnPath(t *testing.T) {
+	d, err := Build(filepath.Join(t.TempDir(), "machine"), time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	stubs := filepath.Join(d.Root, "stubs")
+	for goos, want := range map[string][]string{
+		"linux":   {"export PATH=" + shell.POSIX.Quote(stubs) + `:"$PATH"`, "exec"},
+		"windows": {`set "PATH=` + stubs + `;%PATH%"`, "if exist"},
+	} {
+		dir := t.TempDir()
+		if err := writeStubs(dir, goos); err != nil {
+			t.Fatal(err)
+		}
+		for _, name := range []string{"herdr", "claude", "codex"} {
+			files := []string{name}
+			if goos == "windows" {
+				files = append(files, name+".cmd")
+			}
+			for _, f := range files {
+				b, err := os.ReadFile(filepath.Join(dir, f))
+				if err != nil || !strings.Contains(string(b), fmt.Sprintf(stubNote, name)) {
+					t.Errorf("%s stub %s: %q %v", goos, f, b, err)
+				}
+			}
+		}
+		_, text := launcher(d.Env(), stubs, "", goos)
+		path, run := strings.Index(text, want[0]), strings.Index(text, want[1])
+		if path < 0 || run < 0 || path > run {
+			t.Errorf("%s launcher sets PATH at %d, runs tend at %d:\n%s", goos, path, run, text)
+		}
+	}
+
+	bin := filepath.Join(t.TempDir(), "tend")
+	script, launch := "#!/bin/sh\nexec \"$@\"\n", filepath.Join(d.Root, "tend.sh")
+	if runtime.GOOS == "windows" {
+		bin += ".cmd"
+		script, launch = "@%*\r\n", filepath.Join(d.Root, "tend.cmd")
+	}
+	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.WriteLaunchers(bin); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"herdr", "claude", "codex"} {
+		out, err := exec.Command(launch, name, "--version").CombinedOutput()
+		if err == nil || !strings.Contains(string(out), fmt.Sprintf(stubNote, name)) {
+			t.Errorf("%s --version through the launcher: %q %v", name, out, err)
+		}
 	}
 }

@@ -35,6 +35,41 @@ QUERIES = [(re.compile(rb"\x1b\]11;\?(\x07|\x1b\\)"), b"\x1b]11;rgb:0000/0000/00
 REPO = Path(__file__).resolve().parent.parent
 
 
+class Screen(pyte.Screen):
+    """pyte.Screen with CSI n S / CSI n T (scroll the scroll region, the cursor staying where it is) and a CSI n M
+    that clears a line whose replacement is blank, which pyte's leaves stale."""
+
+    def scroll_up(self, count=None, *_, **__) -> None:
+        self.shift(self.region()[0], count or 1)
+
+    def scroll_down(self, count=None, *_, **__) -> None:
+        self.shift(self.region()[0], -(count or 1))
+
+    def delete_lines(self, count=None) -> None:
+        top, bottom = self.region()
+        if top <= self.cursor.y <= bottom:
+            self.shift(self.cursor.y, count or 1)
+            self.carriage_return()
+
+    def region(self):
+        return self.margins or pyte.screens.Margins(0, self.lines - 1)
+
+    def shift(self, top: int, n: int) -> None:
+        """Moves the lines from top to the region's bottom up by n (down when negative), blank lines filling in."""
+        bottom = self.region()[1]
+        rows = [self.buffer.pop(y, None) for y in range(top, bottom + 1)]
+        n = max(-len(rows), min(n, len(rows)))
+        rows = rows[n:] + [None] * n if n >= 0 else [None] * -n + rows[:n]
+        for y, row in zip(range(top, bottom + 1), rows):
+            if row is not None:
+                self.buffer[y] = row
+        self.dirty.update(range(top, bottom + 1))
+
+
+class Stream(pyte.ByteStream):
+    csi = {**pyte.ByteStream.csi, "S": "scroll_up", "T": "scroll_down"}
+
+
 def key(step: str) -> str:
     if step in KEYS:
         return KEYS[step]
@@ -45,26 +80,22 @@ def key(step: str) -> str:
 
 def dataset(args) -> Path:
     if args.dir and (Path(args.dir) / "tend.sh").exists():
-        return Path(args.dir)
+        root = Path(args.dir)
+        if not (root / "stubs").is_dir():
+            sys.exit(f"{root}: no stubs/, made by an older tools/fixture; remove it and run again")
+        return root
     # ⚠️ not under an agent scratch dir (claude-… in temp): the scanner hides every session there
     base = Path.home() / ".cache" / "tend-tui-drive"
     base.mkdir(parents=True, exist_ok=True)
     root = Path(args.dir) if args.dir else Path(tempfile.mkdtemp(dir=base)) / "data"
     subprocess.run(["go", "run", "./tools/fixture", "-o", str(root), "-tend", args.tend],
                    cwd=REPO, check=True, stdout=subprocess.DEVNULL)
-    stubs = root / "stubs"
-    stubs.mkdir(exist_ok=True)
-    for name in ("herdr", "claude", "codex"):
-        stub = stubs / name
-        stub.write_text("#!/bin/sh\necho \"$(basename \"$0\"): disabled by tui-drive\" >&2\nexit 1\n")
-        stub.chmod(0o755)
     return root
 
 
-def environment(root: Path) -> dict:
+def environment() -> dict:
     env = {k: v for k, v in os.environ.items()
            if not k.startswith(("HERDR_", "CLAUDE_CODE_", "CODEX_", "TEND_"))}
-    env["PATH"] = f"{root / 'stubs'}{os.pathsep}{env.get('PATH', '')}"
     env["TERM"] = "xterm-256color"
     return env
 
@@ -81,13 +112,13 @@ def main() -> int:
     root = dataset(args)
     print(f"dataset: {root}", file=sys.stderr)
 
-    screen = pyte.Screen(cols, rows)
-    stream = pyte.ByteStream(screen)
+    screen = Screen(cols, rows)
+    stream = Stream(screen)
     pid, fd = pty.fork()
     if pid == 0:
         import fcntl, struct, termios
         fcntl.ioctl(0, termios.TIOCSWINSZ, struct.pack("HHHH", rows, cols, 0, 0))
-        os.execve(str(root / "tend.sh"), [str(root / "tend.sh"), args.cmd], environment(root))
+        os.execve(str(root / "tend.sh"), [str(root / "tend.sh"), args.cmd], environment())
 
     def pump(seconds: float) -> None:
         end = time.time() + seconds
