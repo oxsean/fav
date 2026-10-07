@@ -7,7 +7,10 @@ import (
 	"time"
 
 	"github.com/oxsean/fav/internal/capture"
+	"github.com/oxsean/fav/internal/envcheck"
 	"github.com/oxsean/fav/internal/index"
+	"github.com/oxsean/fav/internal/memory"
+	"github.com/oxsean/fav/internal/migrate"
 	"github.com/oxsean/fav/internal/tend"
 )
 
@@ -28,6 +31,31 @@ const (
 	MTrash    = "trash"
 	MRestore  = "restore"
 )
+
+// What a handoff or a migration asks of the machines at its two ends, for each machine's owner alone (the coordinator's
+// ownerReads and writeMethods).
+const (
+	MHandoffFacts  = "handoff.facts"
+	MHandoffPut    = "handoff.put"
+	MMemoryList    = "memory.ls"
+	MMemoryRead    = "memory.read"
+	MMemoryTrash   = "memory.trash"
+	MMemoryRestore = "memory.restore"
+	MMemoryPut     = "memory.put"
+	MEnv           = "env"
+	MEnvFile       = "env.file"
+	MExportPlan    = "export.plan"
+	MExportRead    = "export.read"
+	MExportDone    = "export.done"
+	MCopies        = "copies"
+	MImportBegin   = "import.begin"
+	MImportChunk   = "import.chunk"
+	MImportCommit  = "import.commit"
+	MImportAbort   = "import.abort"
+)
+
+// FeatureMigrate is in a coordinator's hello when its node.call forwards those methods.
+const FeatureMigrate = "migrate"
 
 type HelloParams struct {
 	Proto int    `json:"proto"`
@@ -112,6 +140,7 @@ type Session struct {
 	CodexArchived bool           `json:"codex_archived,omitempty"`
 	Recap         bool           `json:"recap,omitempty"`
 	Files         map[string]int `json:"files,omitempty"`
+	Copies        []Copy         `json:"copies,omitempty"` // its migrations to and from other machines, never Changed
 }
 
 func SessionOf(r *tend.Rec) Session {
@@ -308,4 +337,192 @@ type Hit struct {
 type HitsResult struct {
 	Hits  []Hit `json:"hits"`
 	Total int   `json:"total"`
+}
+
+// End is one machine as a path mapping needs it, from its hello (pathmap.End on the wire).
+type End struct {
+	OS   string `json:"os"`
+	Home string `json:"home"`
+	Host string `json:"host,omitempty"`
+	WSL  bool   `json:"wsl,omitempty"`
+}
+
+// PeerRef names the other machine of a handoff or migration as the initiator saw it.
+type PeerRef struct {
+	Name     string `json:"name"`     // display only: names differ per viewer and mode
+	Endpoint string `json:"endpoint"` // hello.endpoint: what a record matches on
+	NodeID   string `json:"node_id,omitempty"`
+	End      End    `json:"end"`
+}
+
+// DirPair is a source directory and its counterpart on the target, given explicitly.
+type DirPair struct {
+	From string `json:"from"`
+	To   string `json:"to"`
+}
+
+// HandoffPutParams writes a handoff pack on the target for `tend handoff --open`.
+type HandoffPutParams struct {
+	Ref      Ref     `json:"ref"` // the session handed off, on From
+	Text     string  `json:"text"`
+	Dir      string  `json:"dir"`
+	Provider string  `json:"provider"` // the CLI the new session starts with
+	From     PeerRef `json:"from"`
+}
+
+type HandoffPut struct {
+	ID   string `json:"id"` // [A-Za-z0-9._-], the only value `tend handoff --open` takes
+	Path string `json:"path"`
+}
+
+type MemoryListParams struct {
+	Dirs   []string `json:"dirs,omitempty"`
+	Global bool     `json:"global,omitempty"` // Codex's global memories too
+}
+
+type MemoryList struct {
+	Sets []memory.Set `json:"sets"`
+}
+
+// MemoryFile names a file under a memory root: memory.read and memory.trash take it, memory.restore answers it.
+type MemoryFile struct {
+	File string `json:"file"`
+}
+
+type MemoryText struct {
+	Text string    `json:"text"`
+	At   time.Time `json:"at"`
+	SHA  string    `json:"sha"`
+}
+
+// MemoryEntry is a memory's trash entry: memory.trash answers it, memory.restore takes it.
+type MemoryEntry struct {
+	Entry string `json:"entry"`
+}
+
+// MemoryPutParams writes one memory and its MEMORY.md line, never over another: Expect "" when the file should not exist.
+type MemoryPutParams struct {
+	Dir    string `json:"dir"`
+	Kind   string `json:"kind"`
+	Name   string `json:"name"`
+	Text   string `json:"text"`
+	Line   string `json:"line,omitempty"`
+	Expect string `json:"expect,omitempty"`
+}
+
+type MemoryPut struct {
+	File     string `json:"file"`
+	Incoming bool   `json:"incoming,omitempty"` // a different one was there: written under .incoming/, not indexed
+	Lines    int    `json:"lines,omitzero"`     // of MEMORY.md after
+	Bytes    int64  `json:"bytes,omitzero"`
+	Over     bool   `json:"over,omitempty"`
+}
+
+// EnvParams asks for envcheck.Print of dir; with Ref, on the source, the answer also has what the session saw.
+type EnvParams struct {
+	Dir string `json:"dir"`
+	Ref *Ref   `json:"ref,omitempty"`
+}
+
+// EnvFileParams asks for one file of a Print, answered as Text.
+type EnvFileParams struct {
+	Kind string `json:"kind"`
+	Name string `json:"name"`
+	Dir  string `json:"dir"`
+}
+
+type ExportPlanParams struct {
+	Ref
+	Migration string   `json:"migration,omitempty"` // set: record the intent (pending) for To
+	To        *PeerRef `json:"to,omitempty"`
+}
+
+type ExportPlan struct {
+	Manifest migrate.Manifest `json:"manifest"`
+	Live     string           `json:"live"`          // yes | no | unknown
+	Why      string           `json:"why,omitempty"` // why unknown, a stable code
+	Cwd      string           `json:"cwd"`
+	Repo     string           `json:"repo,omitempty"`
+	Git      envcheck.Git     `json:"git"`
+}
+
+type ExportReadParams struct {
+	Ref
+	Migration string `json:"migration"`
+	File      string `json:"file"` // a manifest path
+	Off       int64  `json:"off"`
+	N         int    `json:"n"`  // ≤ 4 MiB
+	ID        string `json:"id"` // fileio.ID of the file as planned: another one answers stale
+}
+
+type ExportChunk struct {
+	Data []byte `json:"data"`
+	EOF  bool   `json:"eof,omitempty"`
+}
+
+type ExportDoneParams struct {
+	Ref
+	Migration string `json:"migration"`
+	State     string `json:"state"`          // done | aborted
+	Move      bool   `json:"move,omitempty"` // done and move: the original goes to this machine's trash (index.TrashSession)
+}
+
+type ExportDone struct {
+	Trashed int `json:"trashed,omitzero"` // files moved into this machine's trash
+}
+
+type ImportBeginParams struct {
+	Migration string  `json:"migration"`
+	From      PeerRef `json:"from"`
+	Ref
+	Cwd      string           `json:"cwd"`             // the session's cwd on the source
+	Dir      string           `json:"dir"`             // the directory it gets here
+	Pairs    []DirPair        `json:"pairs,omitempty"` // explicit mappings the rewrite may use, Cwd → Dir first
+	Manifest migrate.Manifest `json:"manifest"`
+}
+
+type ImportBegin struct {
+	Staged    map[string]int64 `json:"staged,omitempty"`    // file → bytes held, matching the manifest's sha so far
+	Committed *Row             `json:"committed,omitempty"` // already committed: the row, nothing more to do
+	Clash     string           `json:"clash,omitempty"`     // "" | forward (an unchanged copy, replaced on commit) | diverged | exists
+}
+
+type ImportChunkParams struct {
+	Migration string `json:"migration"`
+	File      string `json:"file"`
+	Off       int64  `json:"off"` // the bytes staged so far: another offset is refused
+	Data      []byte `json:"data"`
+}
+
+type ImportChunk struct {
+	Off int64 `json:"off"`
+}
+
+type ImportCommitParams struct {
+	Migration string `json:"migration"`
+	Note      string `json:"note,omitempty"` // the migration note the first resume here starts with
+}
+
+type ImportCommit struct {
+	Row      Row      `json:"row"`
+	Files    int      `json:"files"`
+	Unmapped []string `json:"unmapped,omitempty"` // cwd values no pair or home mapped, left as they were
+}
+
+type ImportAbortParams struct {
+	Migration string `json:"migration"`
+}
+
+// Copies are a session's migrations this machine recorded.
+type Copies struct {
+	Copies []Copy `json:"copies"`
+}
+
+type Copy struct {
+	Migration string    `json:"migration"`
+	Role      string    `json:"role"`  // to: this machine is the source; from: the target
+	State     string    `json:"state"` // pending | done | aborted
+	Peer      PeerRef   `json:"peer"`
+	At        time.Time `json:"at"`
+	Changed   *bool     `json:"changed,omitempty"` // copies only: this side's transcript moved on since; nil unknown
 }

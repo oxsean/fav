@@ -251,3 +251,79 @@ func TestWatchPushesARecordsChange(t *testing.T) {
 	case <-time.After(5 * watchEvery):
 	}
 }
+
+// wholeMachine are the methods that read or write this machine's files beyond any one session's record and transcript.
+var wholeMachine = []string{remote.MHandoffPut, remote.MMemoryList, remote.MMemoryRead, remote.MMemoryTrash, remote.MMemoryRestore,
+	remote.MMemoryPut, remote.MEnv, remote.MEnvFile, remote.MImportBegin, remote.MImportChunk, remote.MImportCommit, remote.MImportAbort}
+
+// oneSession are the methods that name one session for its whole files or its copies elsewhere.
+var oneSession = []string{remote.MHandoffFacts, remote.MExportPlan, remote.MExportRead, remote.MExportDone, remote.MCopies}
+
+// Every method this machine answers has a share class, the ones it does not list yet too: a method left out would be
+// refused under runs and none.
+func TestEveryMethodHasAShareClass(t *testing.T) {
+	for _, m := range append(append(remote.LocalHello("test").Methods, wholeMachine...), oneSession...) {
+		if _, ok := shareClass[m]; !ok {
+			t.Errorf("%s has no share class", m)
+		}
+	}
+}
+
+// Under runs and none a method on the machine's files is refused; under all it is answered.
+func TestWholeMachineMethodsAreAnsweredOnlyUnderAll(t *testing.T) {
+	ctx := context.Background()
+	for _, m := range wholeMachine {
+		for _, share := range []string{ShareRuns, ShareNone} {
+			if _, err := shareSessions(ctx, share, twoSessions{}, m, nil); wire.Code(err) != wire.CodeUnauthorized {
+				t.Errorf("%s under %s: %v", m, share, err)
+			}
+		}
+		if res, err := shareSessions(ctx, ShareAll, twoSessions{}, m, nil); err != nil || res != (remote.Text{Text: "hi"}) {
+			t.Errorf("%s under all: %v %v", m, res, err)
+		}
+	}
+}
+
+// The methods that name a session for a handoff or migration reach under runs a run's session only, under none none.
+func TestOneSessionMethodsUnderRunsReachOnlyARunsSession(t *testing.T) {
+	dir := filepath.Join(tend.Home(), "node")
+	os.MkdirAll(dir, 0o700)
+	if err := capture.KeepRunSession(dir, "s-run", capture.RunSession{Run: "r_1"}); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	ref := func(sid string) json.RawMessage {
+		b, _ := json.Marshal(remote.ExportReadParams{Ref: remote.Ref{Provider: tend.ProviderClaude, SessionID: sid}, Migration: "m1", File: "projects/p/s.jsonl"})
+		return b
+	}
+	for _, m := range oneSession {
+		for _, c := range []struct {
+			share, sid string
+			want       string
+		}{{ShareRuns, "s-mine", wire.CodeUnauthorized}, {ShareRuns, "s-run", ""}, {ShareNone, "s-run", wire.CodeUnauthorized},
+			{ShareAll, "s-mine", ""}} {
+			if _, err := shareSessions(ctx, c.share, twoSessions{}, m, ref(c.sid)); wire.Code(err) != c.want {
+				t.Errorf("%s of %s under %s: %v, want %q", m, c.sid, c.share, err, c.want)
+			}
+		}
+	}
+}
+
+// A method without a share class is refused under runs and none, whatever it is; hello and echo are answered under
+// every share.
+func TestAnUnclassifiedMethodIsRefusedUnlessAll(t *testing.T) {
+	ctx := context.Background()
+	for _, share := range []string{ShareRuns, ShareNone} {
+		if _, err := shareSessions(ctx, share, twoSessions{}, "made.up", nil); wire.Code(err) != wire.CodeUnauthorized {
+			t.Errorf("made.up under %s: %v", share, err)
+		}
+		for _, m := range []string{remote.MHello, remote.MEcho} {
+			if _, err := shareSessions(ctx, share, twoSessions{}, m, nil); err != nil {
+				t.Errorf("%s under %s: %v", m, share, err)
+			}
+		}
+	}
+	if _, err := shareSessions(ctx, ShareAll, twoSessions{}, "made.up", nil); err != nil {
+		t.Errorf("made.up under all reaches the handler: %v", err)
+	}
+}

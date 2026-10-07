@@ -16,16 +16,34 @@ const (
 	ShareNone = "none"
 )
 
-// sessionRefs are the session reads and writes that name one session.
-var sessionRefs = map[string]bool{remote.MMessages: true, remote.MText: true, remote.MSteps: true, remote.MPulse: true, remote.MChecks: true,
-	remote.MPut: true, remote.MHits: true, remote.MTrash: true, remote.MRestore: true}
+// How share_sessions below all applies to a method.
+const (
+	shareOpen    = "open"    // nothing of a session: answered under every share
+	shareListed  = "listed"  // lists sessions: only the runs' are kept, none under none
+	shareScoped  = "scoped"  // counts, ranks or pages sessions: the handler leaves the others out before it does (remote.Scoped)
+	shareNamed   = "named"   // names one session: a run's only, refused under none
+	shareMachine = "machine" // this machine's files beyond any session's: refused
+)
 
-// scopedMethods count, rank or page sessions: the handler leaves the others out before it does (remote.Scoped).
-var scopedMethods = map[string]bool{remote.MQuery: true, remote.MGrep: true}
+// shareClass is every session method's class; one without a class is refused below all.
+var shareClass = map[string]string{
+	remote.MHello: shareOpen, remote.MEcho: shareOpen,
+	remote.MList: shareListed, remote.MLive: shareListed,
+	remote.MQuery: shareScoped, remote.MGrep: shareScoped,
+	remote.MMessages: shareNamed, remote.MText: shareNamed, remote.MSteps: shareNamed, remote.MPulse: shareNamed,
+	remote.MChecks: shareNamed, remote.MPut: shareNamed, remote.MHits: shareNamed, remote.MTrash: shareNamed,
+	remote.MRestore: shareNamed, remote.MHandoffFacts: shareNamed, remote.MExportPlan: shareNamed, remote.MExportRead: shareNamed,
+	remote.MExportDone: shareNamed, remote.MCopies: shareNamed,
+	remote.MHandoffPut: shareMachine, remote.MMemoryList: shareMachine, remote.MMemoryRead: shareMachine,
+	remote.MMemoryTrash: shareMachine, remote.MMemoryRestore: shareMachine, remote.MMemoryPut: shareMachine,
+	remote.MEnv: shareMachine, remote.MEnvFile: shareMachine, remote.MImportBegin: shareMachine,
+	remote.MImportChunk: shareMachine, remote.MImportCommit: shareMachine, remote.MImportAbort: shareMachine,
+}
 
 // shareSessions answers a session read or write under share: a list and who is running keep its runs' sessions, a
 // query or message search sees only them, a call naming another session is refused, and none refuses a query or search
-// outright. Even a server that forwards every call can then reach only the runs' sessions.
+// outright; a method on the machine's files, or one without a class, is refused. Even a server that forwards every call
+// can then reach only the runs' sessions.
 func shareSessions(ctx context.Context, share string, sessions remote.Handler, method string, params json.RawMessage) (any, error) {
 	if share == "" || share == ShareAll {
 		return sessions.Handle(ctx, method, params)
@@ -34,22 +52,27 @@ func shareSessions(ctx context.Context, share string, sessions remote.Handler, m
 	if share == ShareRuns {
 		runs = capture.RunSessions()
 	}
-	switch {
-	case scopedMethods[method]:
+	switch shareClass[method] {
+	case shareOpen:
+	case shareScoped:
 		sc, ok := sessions.(remote.Scoped)
 		if share == ShareNone || !ok {
 			return nil, &wire.Error{Code: wire.CodeUnauthorized, Detail: "sessions"}
 		}
 		return sc.HandleIn(ctx, method, params, func(id string) bool { _, ok := runs[id]; return ok })
-	case sessionRefs[method]:
+	case shareNamed:
 		var ref remote.Ref
 		json.Unmarshal(params, &ref)
 		if _, ok := runs[ref.SessionID]; !ok {
 			return nil, &wire.Error{Code: wire.CodeUnauthorized, Detail: "session " + ref.SessionID}
 		}
-	case method == remote.MList:
+	case shareListed:
 		res, err := sessions.Handle(ctx, method, params)
-		if l, ok := res.(remote.List); ok && err == nil {
+		if err != nil {
+			return res, err
+		}
+		switch l := res.(type) {
+		case remote.List:
 			kept := l.Sessions[:0:0]
 			for _, s := range l.Sessions {
 				if _, ok := runs[s.SessionID]; ok {
@@ -58,11 +81,7 @@ func shareSessions(ctx context.Context, share string, sessions remote.Handler, m
 			}
 			l.Sessions = kept
 			return l, nil
-		}
-		return res, err
-	case method == remote.MLive:
-		res, err := sessions.Handle(ctx, method, params)
-		if l, ok := res.(remote.Live); ok && err == nil {
+		case remote.Live:
 			kept := map[string]capture.Live{}
 			for id, x := range l.Live {
 				if _, ok := runs[id]; ok {
@@ -72,7 +91,9 @@ func shareSessions(ctx context.Context, share string, sessions remote.Handler, m
 			l.Live = kept
 			return l, nil
 		}
-		return res, err
+		return res, nil
+	default:
+		return nil, &wire.Error{Code: wire.CodeUnauthorized, Detail: method}
 	}
 	return sessions.Handle(ctx, method, params)
 }

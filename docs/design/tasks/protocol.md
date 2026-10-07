@@ -45,7 +45,8 @@ Web 在客户端折叠信封（`web/core/fold.js`），规则逐条照搬 `task.
   - feature 名字是稳定的字符串，节点现有八个：`dispatcher` `agentdef` `verdict` `check` `worktree` `files` `plan` `before_run`；
   - 节点在 hello 里报告 `node.Features`；一个 run 需要哪些由协调器的 `runFeatures(run)` 按 run 的发起人、档案、阶段和工作区推算。每加一种执行语义就各加一个名字。
 - 协调器只在节点的 hello 报了 `query`、`grep` 时才调它们：`sessions.query` 遇到没有 `query` 的旧节点，取整份 `list` 和 `live` 在协调器里筛，那台标 `old`、不可写；`sessions.grep` 跳过没有 `grep` 的节点，同样标 `old`。没有 `put` 的节点，行不可写；没有 `trash` 的节点不能删除、还原，`status:trash` 下那台标 `old`、不问。
-- `node.call` 转发两张表里的方法：读会话的 `readMethods`（含 `query`、`grep`、`hits`）和写记录的 `writeMethods`（`put`、`trash`、`restore`）。写的只给机器主人（见 [team.md](team.md) 第 6 条），往后的写方法加进同一张表。
+- `node.call` 转发三张表里的方法：读会话的 `readMethods`（含 `query`、`grep`、`hits`，以及给主人和管理员的 `node.dirs`、`node.repos`），只给机器主人的读 `ownerReads`（`memory.ls`、`memory.read`、`env`、`env.file`、`handoff.facts`、`export.plan`、`export.read`、`copies`），和写的 `writeMethods`（`put`、`trash`、`restore`、`handoff.put`、`memory.trash`、`memory.restore`、`memory.put`、`export.done`、`import.*`）。后两张只给机器主人（见 [team.md](team.md) 第 6 条），往后的方法按同样的分法加进其中一张；不在表里的回 `unauthorized`。
+- 协调器回给客户端的 hello 带 `features: ["migrate"]`：它转发交接、记忆、环境和迁移的方法。旧 server 不转发，回 `unauthorized`（`detail` 是方法名），所以模式二的客户端没看到 `migrate` 时说「server 旧：先更新 tend-server」，不说没权限。
 - 协调器不读客户端的 `hello.features`，不按它剥掉事件：推送对所有客户端一样，只按人过滤。
 - 协调器回给客户端的 hello 带 `caller{user, admin}`：它把这条连接当成谁（`HandlerFor` 的那个人），节点的 hello 不带。TUI 靠它判断自己能往哪些项目加目录；server 模式下 hello 里没有 `caller` 或 `methods` 里没有 `project.attach`，TUI 就当它是旧 server，项目对话框不画按钮（见 [sessions/tui.md](../sessions/tui.md)「项目对话框」）。
 - 客户端折叠时跳过未知的事件类型，只推进 `seq`。协调器自己的折叠仍然遇到未知类型就报错。

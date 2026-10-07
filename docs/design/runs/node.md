@@ -132,12 +132,17 @@ claude 的工具结果里带着整份文件，codex 反复推一轮的全部 dif
 
 ## 会话的可见范围
 
-节点配置 `share_sessions: runs | all | none`（模式二默认 `runs`，见 [team.md](../tasks/team.md) 第 7 条），节点自己再筛一遍会话方法（`share.go`），即使 server 把调用转过来：
+节点配置 `share_sessions: runs | all | none`（模式二默认 `runs`，见 [team.md](../tasks/team.md) 第 7 条），节点自己再筛一遍会话方法（`share.go`），即使 server 把调用转过来。`remote` 的每个方法在 `shareClass` 里都有一类，测试守着：
 
+- 不涉及会话的（`hello`、`echo`）：照常回答。
 - 列表（`list`）和谁在跑（`live`）只留 run 登记过的会话（`capture.RunSessions()`）；`none` 一条不留。
-- 指名一个会话的方法（`messages`、`text`、`steps`、`pulse`、`checks`、`hits`、写记录的 `put`、删除和还原的 `trash` / `restore`）对别的会话回 `unauthorized`，`none` 对每个会话都这样：`runs` 只能删、还原 run 留下的会话。
+- 指名一个会话的方法（`messages`、`text`、`steps`、`pulse`、`checks`、`hits`、写记录的 `put`、删除和还原的 `trash` / `restore`，交接和迁移读整个会话的 `handoff.facts`、`export.plan` / `export.read` / `export.done`、`copies`）对别的会话回 `unauthorized`，`none` 对每个会话都这样：`runs` 只能删、还原、交出 run 留下的会话。
 - 要计数、排序、分页的方法（`query`，`status:trash` 的回收站也在内；搜消息的 `grep`）在分页和排序之前筛：处理器实现 `remote.Scoped`，`HandleIn(…, keep)` 先按 `keep`（会话 id 在不在 run 登记里）去掉别的会话，再算 `total`、`matched`、`facets`、分页或排名，所以页、计数和命中只算放出的会话；`none` 直接回 `unauthorized`。
+- 整台机器的方法（记忆 `memory.*`、环境 `env` / `env.file`、写交接包的 `handoff.put`、迁入的 `import.*`）只在 `all` 时回答，`runs` 和 `none` 回 `unauthorized`。
+- 没有归类的方法，`runs` 和 `none` 一律回 `unauthorized`。
 - `all`（ssh 和模式一的默认）不筛。
+
+`node.dirs` 这类节点方法不是会话，不经过这一层。
 
 ## 会话绑定
 

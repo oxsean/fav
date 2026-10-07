@@ -137,11 +137,18 @@ const (
 
 // readMethods are the session reads node.call forwards.
 var readMethods = []string{remote.MHello, remote.MList, remote.MMessages, remote.MText, remote.MSteps, remote.MPulse,
-	remote.MChecks, remote.MLive, remote.MEcho, remote.MQuery, remote.MGrep, remote.MHits, node.MDirs}
+	remote.MChecks, remote.MLive, remote.MEcho, remote.MQuery, remote.MGrep, remote.MHits, node.MDirs, node.MRepos}
 
-// writeMethods are the session writes node.call forwards: the machine's owner's alone, admins and whom its sessions
-// are shared with included.
-var writeMethods = []string{remote.MPut, remote.MTrash, remote.MRestore}
+// ownerReads are the reads node.call forwards beyond a session's list and conversation (memories, the environment,
+// whole sessions for a handoff or migration): the machine's owner's alone, as writeMethods.
+var ownerReads = []string{remote.MMemoryList, remote.MMemoryRead, remote.MEnv, remote.MEnvFile, remote.MHandoffFacts,
+	remote.MExportPlan, remote.MExportRead, remote.MCopies}
+
+// writeMethods are the writes node.call forwards: the machine's owner's alone, admins and whom its sessions are shared
+// with included.
+var writeMethods = []string{remote.MPut, remote.MTrash, remote.MRestore, remote.MHandoffPut, remote.MMemoryTrash,
+	remote.MMemoryRestore, remote.MMemoryPut, remote.MExportDone, remote.MImportBegin, remote.MImportChunk,
+	remote.MImportCommit, remote.MImportAbort}
 
 // Methods are the client methods.
 var Methods = []string{MStateGet, MTaskGet, MTaskCreate, MTaskEdit, MTaskStatus, MTaskUndo, MRunDispatch, MRunStop, MRunAbandon, MRunTail, MRunOutputPage, MRunOutputWatch,
@@ -174,7 +181,7 @@ func (c *Coord) HandlerFor(p Principal) wire.Handler {
 			return nil, nil
 		case remote.MHello:
 			return remote.Hello{Proto: wire.Proto, Version: c.opt.Version, Build: c.opt.Build, Role: "coordinator", Methods: Methods,
-				Caller: &remote.Caller{User: p.User, Admin: p.Admin}}, nil
+				Features: []string{remote.FeatureMigrate}, Caller: &remote.Caller{User: p.User, Admin: p.Admin}}, nil
 		case MStateGet:
 			var sp StateParams
 			if err := r.Decode(&sp); err != nil {
@@ -277,16 +284,16 @@ func (c *Coord) HandlerFor(p Principal) wire.Handler {
 			if err := r.Decode(&np); err != nil {
 				return nil, err
 			}
-			write := slices.Contains(writeMethods, np.Method)
-			if !write && !slices.Contains(readMethods, np.Method) {
+			owners := slices.Contains(writeMethods, np.Method) || slices.Contains(ownerReads, np.Method)
+			if !owners && !slices.Contains(readMethods, np.Method) {
 				return nil, forbidden(np.Method)
 			}
 			c.mu.Lock()
 			may := c.readsSessions(p, np.Machine)
 			switch {
-			case write:
+			case owners:
 				may = c.ownerOf(np.Machine) == p.User
-			case np.Method == node.MDirs:
+			case np.Method == node.MDirs, np.Method == node.MRepos:
 				may = p.Admin || c.ownerOf(np.Machine) == p.User
 			}
 			c.mu.Unlock()

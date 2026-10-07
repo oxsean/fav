@@ -102,6 +102,12 @@ func run(args []string) error {
 		return cmdResume(args)
 	case "handoff":
 		return cmdHandoff(args)
+	case "migrate":
+		return cmdMigrate(args)
+	case "memory":
+		return cmdMemory(args)
+	case "env":
+		return cmdEnv(args)
 	case "today", "week":
 		return cmdReport(cmd, args)
 	case "fzf-pick":

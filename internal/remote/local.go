@@ -163,6 +163,14 @@ func (h *localHandler) HandleIn(ctx context.Context, method string, params json.
 			return nil, err
 		}
 		return Checks{Checks: src.Checks()}, nil
+	case MHandoffFacts, MHandoffPut:
+		return h.handoff(ctx, method, params)
+	case MMemoryList, MMemoryRead, MMemoryTrash, MMemoryRestore, MMemoryPut:
+		return h.memories(ctx, method, params)
+	case MEnv, MEnvFile:
+		return h.env(ctx, method, params)
+	case MExportPlan, MExportRead, MExportDone, MCopies, MImportBegin, MImportChunk, MImportCommit, MImportAbort:
+		return h.migration(ctx, method, params)
 	}
 	return nil, &wire.Error{Code: wire.CodeUnknownMethod, Detail: method}
 }
