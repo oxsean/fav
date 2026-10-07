@@ -12,8 +12,10 @@ import (
 	"github.com/oxsean/fav/internal/capture"
 	"github.com/oxsean/fav/internal/i18n"
 	"github.com/oxsean/fav/internal/index"
+	"github.com/oxsean/fav/internal/memory"
 	"github.com/oxsean/fav/internal/node"
 	"github.com/oxsean/fav/internal/paths"
+	"github.com/oxsean/fav/internal/shell"
 	"github.com/oxsean/fav/internal/tend"
 	"github.com/oxsean/fav/skills"
 )
@@ -86,6 +88,7 @@ func cmdDoctor(args []string) error {
 		}
 		printIdleAgents(s, idx, live)
 		printBigStale(s, idx, live)
+		printMemoryScan(s, idx)
 	}
 
 	doctorCoordinator()
@@ -112,6 +115,63 @@ func cmdDoctor(args []string) error {
 		fmt.Println(i18n.T("cli.doctor.suggest_compact"))
 	}
 	return nil
+}
+
+// printMemoryScan reports this machine's Claude memory directories: how many, the orphans with what to do about them,
+// and the MEMORY.md files Claude does not load whole.
+func printMemoryScan(s *tend.Store, idx *index.Index) {
+	var origins []memory.Origin
+	for _, x := range append(idx.Sessions(), idx.AgentSessions()...) {
+		origins = append(origins, memory.Origin{Dir: x.Cwd, Remote: x.GitRemote()})
+		if x.Repo != "" {
+			origins = append(origins, memory.Origin{Dir: x.Repo, Remote: x.GitRemote()})
+		}
+	}
+	for _, r := range s.All() {
+		origins = append(origins, memory.Origin{Dir: r.Cwd, Remote: r.GitRemote})
+	}
+	rep := memory.Scan(origins, sameRemote)
+	fmt.Print(i18n.F("cli.doctor.memory", rep.Dirs, rep.Empty))
+	by := map[string][]memory.Orphan{}
+	for _, o := range rep.Orphans {
+		by[o.Class] = append(by[o.Class], o)
+	}
+	if len(rep.Orphans) > 0 {
+		fmt.Print(i18n.F("cli.doctor.memory_orphans", len(by[memory.OrphanTemp]), len(by[memory.OrphanMoved]), len(by[memory.OrphanUnknown])))
+	}
+	sh := shell.User()
+	for _, class := range []string{memory.OrphanTemp, memory.OrphanMoved, memory.OrphanUnknown} {
+		for i, o := range by[class] {
+			if i == 5 {
+				fmt.Print(i18n.F("cli.doctor.memory_more", len(by[class])-5))
+				break
+			}
+			switch {
+			case class == memory.OrphanTemp:
+				fmt.Print(i18n.F("cli.doctor.memory_temp", o.From, o.Items))
+				fmt.Printf("      %s\n", sh.Join([]string{"tend", "memory", "rm", o.Dir}))
+			case class == memory.OrphanMoved:
+				fmt.Print(i18n.F("cli.doctor.memory_moved", o.From, o.Target, o.Items))
+				fmt.Printf("      %s\n", sh.Join([]string{"tend", "memory", "merge", o.Dir, o.Target}))
+			case o.From != "":
+				fmt.Print(i18n.F("cli.doctor.memory_unknown", o.From, o.Items))
+				fmt.Printf("      %s\n", o.Dir)
+			default:
+				fmt.Print(i18n.F("cli.doctor.memory_unknown_bare", o.Dir, o.Items))
+			}
+		}
+	}
+	for _, p := range rep.Over {
+		fmt.Print(i18n.F("cli.doctor.memory_over", p))
+	}
+}
+
+// sameRemote: two git remotes name one repository.
+func sameRemote(a, b string) bool {
+	trim := func(u string) string {
+		return strings.TrimSuffix(strings.TrimSuffix(strings.TrimSpace(u), "/"), ".git")
+	}
+	return strings.EqualFold(trim(a), trim(b))
 }
 
 // Claude and Codex both read skills/<name>/SKILL.md: one source symlinked to both.

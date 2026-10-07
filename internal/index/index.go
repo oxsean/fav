@@ -87,6 +87,9 @@ func (s *Session) CodexArchived() bool {
 
 func (s *Session) Key() string { return tend.SessionKey(s.Provider, s.SessionID) }
 
+// GitRemote is the origin Codex recorded for the session, "" for Claude.
+func (s *Session) GitRemote() string { return s.remote }
+
 func (s *Session) DisplayTitle() string {
 	if s.Title != "" {
 		return s.Title

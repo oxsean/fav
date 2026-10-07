@@ -11,6 +11,7 @@ import (
 	"github.com/oxsean/fav/internal/capture"
 	"github.com/oxsean/fav/internal/i18n"
 	"github.com/oxsean/fav/internal/index"
+	"github.com/oxsean/fav/internal/memory"
 	"github.com/oxsean/fav/internal/remote"
 	"github.com/oxsean/fav/internal/render"
 	"github.com/oxsean/fav/internal/tend"
@@ -74,6 +75,13 @@ func cmdTrash(args []string) error {
 		if done, err := restoreFar(*restore); done {
 			return err
 		}
+		if mem, _ := tend.MemoryTrash(); slices.ContainsFunc(mem, func(e tend.TrashEntry) bool { return e.MemoryID() == *restore }) {
+			file, err := memory.Restore(*restore)
+			if err == nil {
+				fmt.Print(i18n.F("cli.memory.restored", file))
+			}
+			return err
+		}
 		entries, err := tend.LoadTrash()
 		if err != nil {
 			return err
@@ -129,6 +137,13 @@ func cmdTrash(args []string) error {
 		for _, e := range entries {
 			rows = append(rows, trashRow{TrashEntry: e})
 		}
+		mem, err := tend.MemoryTrash()
+		if err != nil {
+			return err
+		}
+		for _, e := range mem {
+			rows = append(rows, trashRow{TrashEntry: e})
+		}
 	}
 	for _, r := range hostTrash(q) {
 		rows = append(rows, trashRow{TrashEntry: tend.TrashEntry{Provider: r.Provider, SessionID: r.SessionID, Title: r.Title,
@@ -143,11 +158,14 @@ func cmdTrash(args []string) error {
 	}
 	now := time.Now()
 	for _, e := range rows {
-		id := e.SessionID
+		id, kind := e.SessionID, e.Provider
+		if e.Kind == tend.KindMemory {
+			id, kind = e.MemoryID(), e.Kind
+		}
 		if e.Host != "" {
 			id = e.Host + ":" + id
 		}
-		fmt.Printf("%s  %-6s  %s  %s\n", id, e.Provider, render.When(e.DeletedAt, now), e.Title)
+		fmt.Printf("%s  %-6s  %s  %s\n", id, kind, render.When(e.DeletedAt, now), e.Title)
 	}
 	return nil
 }

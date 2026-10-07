@@ -31,6 +31,7 @@ tend trash [host:<机器>|host:all] [--json] [--restore <id|sid>] [--purge [--al
                                        files 为空）；tend sessions host:<机器> status:trash 列同样的行（fzf 不读远端回收站）。
                                        --restore host:sid 还原那台机器回收站里的；--purge 只管本机，两者都不接 host:
                                        --purge 只清过期；--purge --all 清空是唯一不可逆的删除，先问 y/N
+                                       本机的记忆条目也列在这里（第二列写 memory，id 是它在回收站里的目录名），--restore <id> 还原
 tend mv <旧目录> <新目录> [-y]          移动项目（和 TUI 的 M 同一段代码）；有会话在跑就拒绝（别名 move）
 tend resume <id> [--dry-run] [--no-herdr] [--app|--terminal] [--workspace 名字] [--fork]
 tend rpc [--stdio]                     远端应答（remote.md「远端协议」），给 ssh 调用
@@ -40,6 +41,13 @@ tend hosts rm <名字…> · tend hosts clear [名字…]
 tend hosts install <机器> [--os --arch] [--src 目录] [--dry-run] [--server] [--build-there]
 tend handoff <id> [--to claude|codex] [--dry-run] [--no-herdr] [--workspace 名字]
                                        写交接包（resume.md「分叉与交接」）；没有 --to 时把包打到 stdout
+tend memory [项目|目录] [host:<机器>] [--json]
+                                       列出这个目录（默认当前目录；项目 = 它在那台机器上的各个仓库目录）的 Claude 项目记忆和 Codex
+                                       全局记忆里适用于它的块（migration.md「记忆的管理与迁移」）；host: 经那台的 memory.ls
+tend memory show <文件> [host:<机器>]    读一条：只认记忆根下的文件（memory.read）
+tend memory rm <文件|记忆目录> [host:<机器>] [-y]
+                                       一条进回收站并从 MEMORY.md 去掉它那一行；给记忆目录时整个目录进回收站（doctor 建议的临时目录孤儿）
+tend memory merge <旧> <新>             只对本机：两个参数各是记忆目录或项目目录；逐条复制、不覆盖，冲突的放进 .incoming/，全部复制完旧目录进回收站
 tend today | tend week [查询] [--json]  日报：today 从今天 0 点、week 从本周一 0 点起动过的会话（last:，默认 status:all turns:1，查询可再收窄），
                                        按项目分组（组多的在前）：每条会话的来源、总轮数（索引没有按天的轮数）、最近活动；组里 AI 改得最多的 5 个
                                        文件；项目目录（主仓库优先）里这段时间的提交（git log --since --no-merges，显示 3 条标题）；
@@ -59,6 +67,7 @@ tend clean [目录] [查询…] [编号|会话id…|all] [-y]
 tend doctor [--compact]                 顺手清掉回收站里过期的；列出同一张表并指向 fix / clean；
                                        空闲的 agent：在跑但记录文件 4 小时没写的，写出在哪（Herdr tab / 后台 / 终端），指向 Agents 页 Z；
                                        大文件：会话文件合计 ≥100 MB、30 天没动、没收藏、没 pin、不在跑的，按大小排前 10 个，写 tend rm 命令和总大小
+                                       记忆：有内容和空的记忆目录数；孤儿按三类计数，各列前 5 个和建议的 tend memory rm / merge；超过加载上限的 MEMORY.md
 tend shell-init [zsh|bash] [--key K] [--ui fzf|tui]
                                        输出把 K（默认 ctrl-g；ctrl-x / alt-x 自动翻成各 shell 记法，别的原样透传）绑到 tend fzf（默认）或 tend tui 的 shell 代码（zle widget / bind -x），eval 进 rc 文件
 tend install-hook | tend uninstall-hook  可选的 Claude hook（tui.md「跑着的会话（Herdr）」里的「需要你」）；幂等，改前留 .bak-<时间>
@@ -69,7 +78,7 @@ tend uninstall-skill                    只删 ~/.claude、~/.codex 下的 tend 
 
 `tend hosts` 各子命令与 `tend rpc` 的细节见 [remote.md](remote.md)「CLI：`tend hosts`」「远端协议」；`tend mv` / TUI `M` 的搬迁步骤和回收站见 [tui.md](tui.md)「键盘与鼠标」（「移动项目目录」「删除会话」两行）。
 
-所有面向 UI 的子命令支持稳定 JSON 输出（list / sessions / show / trash / clean / fix 的列表都有 `--json`），ANSI 展示输出与业务数据分离。
+所有面向 UI 的子命令支持稳定 JSON 输出（list / sessions / show / trash / clean / fix / memory 的列表都有 `--json`），ANSI 展示输出与业务数据分离。
 所有 `[y/N]` 确认在 stdin 不是终端时直接报错退出，要脚本化就加 `-y`；clean / fix 有失败项时非零退出。
 子命令一律用 `newFlags(name)` 建参数解析器：`-h` / `--help` 只打印全局用法里属于这个子命令的行和它的参数，退出码 0；`tend help` 打完整用法。
 

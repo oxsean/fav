@@ -1,5 +1,5 @@
-// Package memory reads and writes the agents' memories on this machine: Claude's project memory, Codex's project and
-// global memories.
+// Package memory reads and writes the agents' memories on this machine: Claude's project memory and Codex's global
+// memories.
 package memory
 
 import "time"
@@ -7,11 +7,11 @@ import "time"
 // Kinds of a Set.
 const (
 	KindClaude      = "claude"
-	KindCodex       = "codex"
 	KindCodexGlobal = "codex_global"
 )
 
-// Set is one memory directory's entries and its MEMORY.md.
+// Set is one memory directory's entries and its MEMORY.md; Codex's global memories are the blocks of one MEMORY.md
+// that apply to Dir, or to no directory when Dir is "".
 type Set struct {
 	Kind  string `json:"kind"`
 	Dir   string `json:"dir"`
@@ -31,4 +31,5 @@ type Item struct {
 	SHA         string    `json:"sha"`  // of its bytes
 	Norm        string    `json:"norm"` // of its text with LF line ends
 	InIndex     bool      `json:"in_index,omitempty"`
+	Line        int       `json:"line,omitzero"` // a Codex block: the line of File it starts on
 }

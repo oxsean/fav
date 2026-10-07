@@ -16,8 +16,12 @@ import (
 	"github.com/oxsean/fav/internal/filelock"
 )
 
-// TrashEntry is a trashed session: where the files went, plus the record as it was.
+// KindMemory is a trashed memory file or directory; a session's entry has no kind.
+const KindMemory = "memory"
+
+// TrashEntry is a trashed session or memory: where the files went, plus the record as it was.
 type TrashEntry struct {
+	Kind      string    `json:"kind,omitempty"`
 	Provider  string    `json:"provider"`
 	SessionID string    `json:"session_id"`
 	Title     string    `json:"title"`
@@ -25,7 +29,8 @@ type TrashEntry struct {
 	Record    *Rec      `json:"record,omitempty"`
 	Files     []Moved   `json:"files"`
 	DeletedAt time.Time `json:"deleted_at"`
-	Dir       string    `json:"dir,omitempty"` // a fresh directory every time, so re-trashing the same session never overwrites the last one
+	Dir       string    `json:"dir,omitempty"`  // a fresh directory every time, so re-trashing the same session never overwrites the last one
+	Line      string    `json:"line,omitempty"` // a memory's MEMORY.md line, taken out with it and put back on restore
 }
 
 type Moved struct {
@@ -63,7 +68,20 @@ func (e TrashEntry) dir() string {
 	return filepath.Join(TrashDir(), e.Provider, e.SessionID)
 }
 
+// LoadTrash lists the trashed sessions.
 func LoadTrash() ([]TrashEntry, error) {
+	return loadTrash(func(e TrashEntry) bool { return e.Kind == "" })
+}
+
+// MemoryTrash lists the trashed memories.
+func MemoryTrash() ([]TrashEntry, error) {
+	return loadTrash(func(e TrashEntry) bool { return e.Kind == KindMemory })
+}
+
+// MemoryID names a trashed memory: its directory in the trash.
+func (e TrashEntry) MemoryID() string { return filepath.Base(e.Dir) }
+
+func loadTrash(keep func(TrashEntry) bool) ([]TrashEntry, error) {
 	f, err := os.Open(trashManifest())
 	if os.IsNotExist(err) {
 		return nil, nil
@@ -77,7 +95,7 @@ func LoadTrash() ([]TrashEntry, error) {
 	sc.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
 	for sc.Scan() {
 		var e TrashEntry
-		if json.Unmarshal(sc.Bytes(), &e) == nil && e.SessionID != "" {
+		if json.Unmarshal(sc.Bytes(), &e) == nil && (e.SessionID != "" || e.Kind == KindMemory && e.Dir != "") && keep(e) {
 			out = append(out, e)
 		}
 	}
@@ -110,7 +128,7 @@ func editTrash(change func([]TrashEntry) ([]TrashEntry, error), after ...func())
 		return err
 	}
 	defer unlock()
-	entries, err := LoadTrash()
+	entries, err := loadTrash(func(TrashEntry) bool { return true })
 	if err != nil {
 		return err
 	}
@@ -135,7 +153,7 @@ func MoveToTrash(e TrashEntry, paths []string) (TrashEntry, error) {
 	var earlier, dir string
 	var moved []Moved
 	err := editTrash(func(entries []TrashEntry) ([]TrashEntry, error) {
-		same := slices.IndexFunc(entries, func(x TrashEntry) bool { return x.Provider == e.Provider && x.SessionID == e.SessionID })
+		same := slices.IndexFunc(entries, func(x TrashEntry) bool { return x.sameSession(e) })
 		if same >= 0 && !slices.ContainsFunc(paths, present) {
 			if e.Record != nil {
 				entries[same].Record = e.Record
@@ -186,7 +204,7 @@ func present(p string) bool { _, err := os.Lstat(p); return err == nil }
 func SaveTrashEntry(e TrashEntry) error {
 	return editTrash(func(entries []TrashEntry) ([]TrashEntry, error) {
 		for i := range entries {
-			if entries[i].Provider == e.Provider && entries[i].SessionID == e.SessionID {
+			if entries[i].sameSession(e) {
 				entries[i] = e
 				return entries, nil
 			}
@@ -195,11 +213,63 @@ func SaveTrashEntry(e TrashEntry) error {
 	})
 }
 
+func (e TrashEntry) sameSession(x TrashEntry) bool {
+	return e.Kind == "" && x.Kind == "" && e.Provider == x.Provider && e.SessionID == x.SessionID
+}
+
+// TrashMemory moves a memory file or directory into the trash under an entry of its own.
+func TrashMemory(e TrashEntry, path string) (TrashEntry, error) {
+	e.Kind = KindMemory
+	err := editTrash(func(entries []TrashEntry) ([]TrashEntry, error) {
+		e.DeletedAt = time.Now()
+		e.Dir = filepath.Join(TrashDir(), KindMemory, filepath.Base(path)+"-"+strconv.FormatInt(e.DeletedAt.UnixNano(), 36))
+		if err := os.MkdirAll(e.Dir, 0o700); err != nil {
+			return nil, err
+		}
+		to := filepath.Join(e.Dir, filepath.Base(path))
+		if err := moveAny(path, to); err != nil {
+			os.Remove(e.Dir)
+			return nil, err
+		}
+		e.Files = []Moved{{From: path, To: to}}
+		return append([]TrashEntry{e}, entries...), nil
+	})
+	return e, err
+}
+
+// RestoreMemory puts a trashed memory back, never over a file that took its place, and drops its entry.
+func RestoreMemory(id string) (TrashEntry, error) {
+	var e TrashEntry
+	err := editTrash(func(entries []TrashEntry) ([]TrashEntry, error) {
+		i := slices.IndexFunc(entries, func(x TrashEntry) bool { return x.Kind == KindMemory && x.MemoryID() == id })
+		if i < 0 {
+			return nil, errors.New("not in trash")
+		}
+		e = entries[i]
+		for _, f := range e.Files {
+			if present(f.From) {
+				return nil, errors.New(f.From + " exists")
+			}
+		}
+		for _, f := range e.Files {
+			if err := os.MkdirAll(filepath.Dir(f.From), 0o700); err != nil {
+				return nil, err
+			}
+			if err := moveAny(f.To, f.From); err != nil {
+				return nil, err
+			}
+		}
+		os.Remove(e.Dir)
+		return slices.Delete(entries, i, i+1), nil
+	})
+	return e, err
+}
+
 // RestoreTrash puts the session back (recreating the original directory if needed), drops the entry and deletes files a project move rewrote.
 func RestoreTrash(provider, sessionID string) (TrashEntry, error) {
 	var e TrashEntry
 	err := editTrash(func(entries []TrashEntry) ([]TrashEntry, error) {
-		i := slices.IndexFunc(entries, func(x TrashEntry) bool { return x.Provider == provider && x.SessionID == sessionID })
+		i := slices.IndexFunc(entries, func(x TrashEntry) bool { return x.sameSession(TrashEntry{Provider: provider, SessionID: sessionID}) })
 		if i < 0 {
 			return nil, errors.New("not in trash")
 		}
@@ -254,17 +324,17 @@ func PurgeTrash(days int) (int, error) {
 	n := 0
 	err := editTrash(func(entries []TrashEntry) ([]TrashEntry, error) {
 		var kept []TrashEntry
-		owned := map[string]bool{} // by provider/name: the manifest's absolute paths go stale when TEND_HOME moves
+		owned := map[string]bool{} // by group/name: the manifest's absolute paths go stale when TEND_HOME moves
 		for _, e := range entries {
 			if !due(e.DeletedAt) {
 				kept = append(kept, e)
-				owned[filepath.Join(e.Provider, filepath.Base(e.dir()))] = true
+				owned[filepath.Join(filepath.Base(filepath.Dir(e.dir())), filepath.Base(e.dir()))] = true
 				continue
 			}
 			os.RemoveAll(e.dir()) // Relocated.To lives outside the trash and is in use
 			n++
 		}
-		for _, p := range []string{ProviderClaude, ProviderCodex} {
+		for _, p := range []string{ProviderClaude, ProviderCodex, KindMemory} {
 			ds, _ := os.ReadDir(filepath.Join(TrashDir(), p))
 			for _, d := range ds {
 				if info, err := d.Info(); err == nil && !owned[filepath.Join(p, d.Name())] && due(info.ModTime()) {

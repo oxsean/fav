@@ -97,6 +97,9 @@ func Build(root string, now time.Time) (*Dataset, error) {
 	if err := b.sidecars(); err != nil {
 		return nil, err
 	}
+	if err := b.memories(); err != nil {
+		return nil, err
+	}
 	if err := b.tasks(); err != nil {
 		return nil, err
 	}
@@ -500,6 +503,37 @@ func (b *builder) sidecars() error {
 		return err
 	}
 	return os.WriteFile(filepath.Join(b.Claude, "sessions", "999999.json"), stale, 0o644)
+}
+
+// memories writes Claude's project memory of webapp (an index, one entry with front matter, one without), an empty
+// memory directory for notes-api, orphans left by the scratch session and by the removed legacy-app checkout, and
+// Codex's global memories: a block applying inside webapp and one naming no directory.
+func (b *builder) memories() error {
+	mem := func(dir string) string {
+		return filepath.Join(b.Claude, "projects", index.ClaudeProjectName(dir), "memory")
+	}
+	files := map[string]string{
+		filepath.Join(mem(b.dir("webapp")), "MEMORY.md"): "- [Deploy steps](deploy.md) — how staging is deployed\n" +
+			"- [OAuth state](oauth-state.md) — state is decoded once, in the callback\n",
+		filepath.Join(mem(b.dir("webapp")), "deploy.md"): "---\nname: deploy-steps\ndescription: Staging deploys from main through the release script\n" +
+			"metadata:\n  type: project\n---\n\nRun scripts/release.sh staging; never deploy from a branch.\n",
+		filepath.Join(mem(b.dir("webapp")), "oauth-state.md"):                        "The callback decodes state once; a second decode broke logins.\n",
+		filepath.Join(mem(filepath.Join(b.Tmp, "claude-501", "scratchpad")), "a.md"): "Dry-run notes.\n",
+		filepath.Join(mem(b.dir("legacy-app")), "MEMORY.md"):                         "- [Docker build](docker.md) — multi-stage\n",
+		filepath.Join(mem(b.dir("legacy-app")), "docker.md"):                         "The image builds in two stages.\n",
+		filepath.Join(b.Codex, "memories", "MEMORY.md"): "# Task Group: webapp OAuth callback\nscope: state handling in the login callback\n" +
+			"applies_to: cwd=" + b.dir("webapp", "src", "auth") + "; reuse_rule=while the callback is unchanged\n\n## Task 1: state decoded twice, fixed\n\n" +
+			"# Task Group: release workflow\nscope: how releases are cut\napplies_to: cwd=any checkout using the release script; reuse_rule=general\n",
+	}
+	for p, body := range files {
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			return err
+		}
+		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+			return err
+		}
+	}
+	return os.MkdirAll(mem(b.dir("notes-api")), 0o755)
 }
 
 // bulk is n bytes of tool output: big enough that transcript paging crosses its 1 MB chunks.

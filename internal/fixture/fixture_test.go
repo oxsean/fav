@@ -15,6 +15,7 @@ import (
 	"github.com/oxsean/fav/internal/fulltext"
 	"github.com/oxsean/fav/internal/index"
 	"github.com/oxsean/fav/internal/journal"
+	"github.com/oxsean/fav/internal/memory"
 	"github.com/oxsean/fav/internal/paths"
 	"github.com/oxsean/fav/internal/task"
 	"github.com/oxsean/fav/internal/tend"
@@ -424,5 +425,53 @@ func TestSessionsBelongToTheProjectOfTheirDirectory(t *testing.T) {
 	}
 	if task.ProjectOf(st.Projects, "local", runtime.GOOS, r.Cwd) != nil {
 		t.Errorf("linked-worktree: its own directory %s is outside the checkout", r.Cwd)
+	}
+}
+
+func TestMemoryScenarios(t *testing.T) {
+	d, idx, _ := load(t)
+	for _, kv := range d.Env() {
+		k, v, _ := strings.Cut(kv, "=")
+		t.Setenv(k, v)
+	}
+	webapp := filepath.Join(d.Work, "webapp")
+	sets := memory.List([]string{webapp}, true)
+	var claude, codex, loose *memory.Set
+	for i, s := range sets {
+		switch {
+		case s.Kind == memory.KindClaude:
+			claude = &sets[i]
+		case s.Kind == memory.KindCodexGlobal && s.Dir == webapp:
+			codex = &sets[i]
+		case s.Kind == memory.KindCodexGlobal:
+			loose = &sets[i]
+		}
+	}
+	if claude == nil || len(claude.Items) != 2 || claude.Lines != 2 || claude.Over {
+		t.Fatalf("Claude memory of webapp: %+v", claude)
+	}
+	titles := []string{claude.Items[0].Title, claude.Items[1].Title}
+	slices.Sort(titles)
+	if !slices.Equal(titles, []string{"OAuth state", "deploy-steps"}) {
+		t.Errorf("titles: %v", titles)
+	}
+	if codex == nil || len(codex.Items) != 1 || loose == nil || len(loose.Items) != 1 {
+		t.Errorf("Codex global: %+v / %+v", codex, loose)
+	}
+
+	var origins []memory.Origin
+	for _, s := range append(idx.Sessions(), idx.AgentSessions()...) {
+		origins = append(origins, memory.Origin{Dir: s.Cwd, Remote: s.GitRemote()})
+	}
+	r := memory.Scan(origins, func(a, b string) bool { return a == b })
+	if r.Dirs != 3 || r.Empty != 1 || len(r.Orphans) != 2 {
+		t.Fatalf("scan: %+v", r)
+	}
+	classes := map[string]string{}
+	for _, o := range r.Orphans {
+		classes[o.From] = o.Class
+	}
+	if classes[d.Get("scratch").Cwd] != memory.OrphanTemp || classes[filepath.Join(d.Work, "legacy-app")] != memory.OrphanUnknown {
+		t.Errorf("orphans: %+v", r.Orphans)
 	}
 }

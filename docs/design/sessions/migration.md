@@ -2,7 +2,7 @@
 
 把会话或记忆从一台机器搬到另一台：交接式迁移、Claude 完整迁移、记忆的管理与迁移、迁移前的环境诊断，以及这部分的已定决策和待核实项。远端合同和只读聚合见 [remote.md](remote.md)。
 
-实现：本机交接包在 `internal/capture`（`handoff.go`）和 `cmd/tend`（`tend handoff`）；路径映射在 `internal/pathmap`；搬项目目录的文件枚举和改写在 `internal/index`（`move.go`）。本文其余部分**未实现**：跨机器交接、完整迁移（`import.*`）、记忆的查看 / 管理 / 对比 / 同步（`memory.ls`、`memory diff`）、环境诊断（`env`、`env diff`）、`tend doctor` 的记忆扫描和 `history_mode` 检测，代码里都还没有。
+实现：本机交接包在 `internal/capture`（`handoff.go`）和 `cmd/tend`（`tend handoff`）；路径映射在 `internal/pathmap`；搬项目目录的文件枚举和改写在 `internal/index`（`move.go`）；记忆的查看、删除和孤儿扫描在 `internal/memory`，节点方法 `memory.ls` / `memory.read` / `memory.trash` / `memory.restore` 在 `internal/remote`（`memory.go`），命令是 `tend memory` 和 `tend doctor` 的记忆一节。本文其余部分**未实现**：跨机器交接、完整迁移（`import.*`）、记忆的对比和同步（`memory.put`、`memory diff`）、环境诊断（`env`、`env diff`），代码里都还没有。
 
 ## 迁移
 
@@ -48,7 +48,7 @@
   - **旧格式**：把 rollout 复制到空的目标目录后，`migrate-rollouts --thread <id> --apply` 能迁进去（状态 `migrated`，新建 `thread_history_1.sqlite`，rollout 被改写成 paginated，线程登记进 `state_5.sqlite`）。原生 `codex resume` 能否接着做没有验证，因为那需要登录并实际调用模型。
   - **新格式**：rollout 仍然带着消息（抽查一个会话：rollout 有 139 条 response_item、10 个 turn_context，历史库里是 114 条、10 个 turn），但复制到目标机器后，`migrate-rollouts` 直接判为 `already_paginated` 并跳过，目标机器的历史库里没有这个会话的历史。要搬新格式会话，只能导出 Codex 私有的历史库，所以维持「不做」。
 - 剩下的验证项：旧格式会话复制并 `--apply` 之后，原生 `codex resume` 能否接着做。这要在一台已登录 Codex 的测试机上跑；它只覆盖越来越少的旧会话，优先级低。
-- 风险监控（未实现）：tend 读取 Codex 会话依赖 rollout 文件继续被写入。`tend doctor` 检测 `history_mode` 的变化，发现变化就提示。
+- 风险监控：tend 读取 Codex 会话依赖 rollout 文件继续被写入。`tend doctor` **不检测** `history_mode`：只看文件名和修改时间找不到稳定的信号。核实的事实（Codex 0.155.1，只看了文件名和二进制里的字符串）：`history_mode`（`legacy` / `paginated`）写在 rollout 首行 `session_meta` 里，是内容不是文件名；paginated 会话的 rollout 仍然带消息，所以这个值本身不说明 rollout 停写；「`thread-writer-locks/` 有新锁而 rollout 不变大」也不可靠，开着而空闲的线程本来就不写。tend 不带 SQLite，宁可不报。
 
 ## 记忆的管理与迁移
 
@@ -57,27 +57,29 @@
 | 记忆 | 位置与结构 | 特点 |
 |---|---|---|
 | Claude 项目记忆 | `~/.claude/projects/<编码后的项目路径>/memory/`：`MEMORY.md` 索引（一行一条）+ 每条一个带 frontmatter 的 `.md`。按官方文档，项目路径取自 **git 仓库**，同一仓库的 worktree 和子目录共用一份，不在 git 里时才按项目根目录；`settings.json` 的 `autoMemoryDirectory` 可以把它挪到别处；启动时只加载 `MEMORY.md` 的前 200 行或前 25KB（先到者为准），条目文件按需读取；官方明确写着「只存在本机」 | 实测大部分目录是空的；cwd 已不存在的几乎全是临时目录（scratchpad、claude-review、workdir）；少数反查不到来源 |
-| Codex 项目记忆 | `~/.codex/memories/projects/<编码后的 cwd>/`：`MEMORY.md` + 条目文件，结构和 Claude 相同 | 数量少 |
-| Codex 全局记忆 | `~/.codex/memories/` 下的 `MEMORY.md`（可达数百 KB）、`memory_summary.md`、`raw_memories.md`、`rollout_summaries/`、`skills/`、`extensions/`；条目用 `applies_to: cwd=…` 写绝对路径；目录是 Codex 自己建的 git 仓库（没有 remote），另有 `memories_1.sqlite` 记录整理任务的进度 | 由 Codex 自己在后台整理、改写 |
+| Codex 按项目的记忆 | 旧布局 `~/.codex/memories/projects/<编码后的 cwd>/`：Codex 0.155.1 已不维护（二进制里没有这个路径），现存的只是早先导入留下的；现在外部 agent 的记忆导入到 `~/.codex/memories/extensions/external_agent_import/resources/<project-key>/`，旁边一个 `scope.json`（只核过文件名，没读内容） | tend 两处都不读（推后，见「推后」） |
+| Codex 全局记忆 | `~/.codex/memories/` 下的 `MEMORY.md`（可达数百 KB）、`memory_summary.md`、`raw_memories.md`、`rollout_summaries/`、`skills/`、`extensions/`；`MEMORY.md` 一块一个 `# Task Group: <标题>`，下面是 `scope: <说明>` 和 `applies_to: cwd=<路径或一类目录>; reuse_rule=…`；目录是 Codex 自己建的 git 仓库（没有 remote），另有 `memories_1.sqlite` 记录整理任务的进度 | 由 Codex 自己在后台整理、改写 |
 | Claude 全局配置 | `~/.claude/CLAUDE.md`、skills、settings | 用户自己用 git 管，不归 tend 管 |
 
 难点：项目记忆按路径存放，四类机器上同一个仓库的路径各不相同，所以记忆天然是每台机器各一份；记忆正文里也有绝对路径；Codex 的记忆由它自己维护。
 
-已有的只有一处：`tend mv` 搬项目目录时，旧项目目录里 transcript 以外剩下的东西（`memory/` 等）一起搬到新目录（`internal/index/move.go` 的 `sweepProjectDir`）。下面各项都未实现。
+`tend mv` 搬项目目录时，旧项目目录里 transcript 以外剩下的东西（`memory/` 等）一起搬到新目录（`internal/index/move.go` 的 `sweepProjectDir`）。下面 1、2 已实现，3–5 未实现。
 
 ### 做法
 
-1. **看**（未实现）
-   - 定位 Claude 记忆目录时和 Claude 用同样的规则：先取 git 仓库根（worktree 归到主仓库，tend 的索引里已有 `Repo`），再看有没有设置 `autoMemoryDirectory`。
-   - 项目信息里列出这个项目的 Claude 和 Codex 项目记忆：每条的标题、一句话描述、更新时间；Enter 打开原文。
-   - Codex 全局记忆按 `applies_to` 挑出和这个项目有关的条目，只读列出；挑不出归属的条目也保留，不按 cwd 过滤掉。解析器按 Codex 版本适配。
-   - 远端用协议的 `memory.ls` 读取。
-2. **管**（未实现）
-   - `tend doctor` 单独扫描记忆目录，按路径特征给孤儿分类：
-     - 临时目录：建议直接进回收站。
-     - 能反查到 git remote、而且候选目录唯一的：提示「并到新目录」。
-     - 反查不到来源的：标「来源未知」，不去猜。
-   - 删一条记忆：进 tend 回收站，同时从 `MEMORY.md` 里去掉那一行。
+1. **看**
+   - 找 Claude 记忆目录和 Claude 同样的规则（`memory.ClaudeDir`）：`~/.claude/settings.json` 有 `autoMemoryDirectory` 就用它；没有就取 git 仓库根（`git rev-parse --git-common-dir` 的上一级，worktree 和子目录都归到主仓库，不在 git 里用目录本身），记忆在 `ClaudeProjectDir(根)/memory`。
+   - 一组（`memory.Set`）就是一个记忆目录：`MEMORY.md` 的行数、字节数，超过 200 行或 25 KB 记 `over`（只对 Claude）；每条（`.md` 文件，不含 `MEMORY.md` 和以 `.` 开头的，所以 `.incoming/` 不算）的标题取 frontmatter 的 `name`，没有就取 `MEMORY.md` 那一行的链接文字，再没有就取文件名；描述取 `description`，没有就取那一行破折号后面的部分；另有修改时间、大小、原文的 `sha`、换行统一成 LF 后的 `norm`，`in_index` 说明 `MEMORY.md` 里有没有指向它的行。
+   - Codex 全局记忆按块读：`applies_to` 的 `cwd=` 是绝对路径、并且落在要看的目录下的，归这个目录（一组，`dir` 是这个目录）；`cwd=` 不是绝对路径的（「一类目录」之类的说明）单列一组「没写适用目录」（`dir` 为空），不按 cwd 过滤掉。每块的 `file` 是 `MEMORY.md`，`line` 是块开头的行号。只读。
+   - 节点方法：`memory.ls{dirs, global}` 回每个目录的 Claude 组（同一个记忆目录只回一次）和（`global` 时）Codex 全局的各组；`memory.read{file}` 只读记忆根下的普通文件：Claude 的 `projects/<名字>/memory/`、`autoMemoryDirectory`、Codex 的 `memories/`，按解开链接后的真实路径判；其余路径一律回 `unauthorized`，不说存不存在。`tend memory`、`tend memory show` 在本机直接读，`host:` 经这两个方法。
+2. **管**
+   - `tend doctor` 扫描 `~/.claude/projects/*/memory/`（`memory.Scan`）：空目录只计数；有内容的，用索引里会话的 `Cwd`、`Repo` 和收藏记录的 `Cwd` 反查（目录名是单向编码，只能拿已知目录编码后比对）。有一个候选目录还在，或者按编码从根目录一层层能在盘上找到原目录（最多读 500 个目录），就不是孤儿。孤儿分三类：
+     - 临时目录：候选是 agent 的 scratch 目录（`index.AgentScratch`），或在临时目录里（Claude home 本身也在临时目录里时不按这一条判，比如测试和 fixture）。建议 `tend memory rm <记忆目录>`。
+     - 已搬走：候选带 git remote（Codex 会话记的 `repository_url`、收藏记录的 `git_remote`），本机现存的会话目录里同一个 remote 的只有一个。建议 `tend memory merge <记忆目录> <那个目录>`。
+     - 其余：「来源未知」，不猜。
+   - 删一条记忆（`memory.Trash`，`tend memory rm`、`memory.trash`）：只删 Claude 记忆目录里的条目文件，不删 `MEMORY.md`，不碰 Codex 的记忆。文件进 tend 回收站（`TrashEntry` 的 `kind: "memory"`，`line` 是从 `MEMORY.md` 去掉的那一行原文），条目 id 是它在回收站里的目录名。还原（`memory.Restore`，`tend trash --restore <id>`、`memory.restore`）把文件放回，原处已有同名文件就拒绝，那一行加回 `MEMORY.md` 末尾（已有就不加）。`tend trash` 和会话一起列出记忆条目；TUI 的回收站视图仍只列会话。
+   - 整个记忆目录也能进回收站（`tend memory rm <记忆目录>`），还原同上。
+   - 「并到新目录」（`memory.Merge`，`tend memory merge`，只对本机）：逐条用 `memory.Write` 写过去，不覆盖：目标没有就写入并把旧 `MEMORY.md` 里指向它的那一行加进目标的 `MEMORY.md`（目标已有这一行就不加）；内容相同的不动；同名而内容不同的写进目标的 `.incoming/`，不进 `MEMORY.md`。旧目录里只有记忆条目时，全部写完整个进回收站；有别的文件就保留旧目录，列出这些文件。
 3. **按条复制**（未实现，随完整迁移）：列出两边的差异，用户确认后按条复制，不覆盖目标机器已有的记忆。
 4. **对比与同步界面**（未实现）
    - 两台机器上的同一个项目按项目对应关系配对。
@@ -127,6 +129,16 @@
 - 想看某个 CLAUDE.md 或某条记忆具体差在哪，点开时才去取那一个文件做文本对比，不预先传正文。
 - 迁移确认框里一行汇总「阻断 0 · 不对等 3 · 提示 5」，展开看明细。有阻断项时不能迁移；只有不对等项时照样可以迁，确认框里写明「到那边 AI 会缺什么」。
 - 命令行：`env diff <机器> --session <id>`（针对一个会话）、`env diff <机器>`（两台机器整体比较）；有阻断项时退出码非 0。
+
+## 推后
+
+| 什么 | 为什么 |
+|---|---|
+| Codex 按项目的记忆（旧布局 `memories/projects/<编码后的 cwd>/` 和 `extensions/external_agent_import/resources/<project-key>/`） | Codex 0.155.1 不再维护旧布局，只对旧数据有效；导入布局的归属写在 `scope.json` 里，要读内容才知道，等需要时再核 |
+| `tend doctor` 检测 Codex `history_mode` | 只看文件名和修改时间没有稳定的信号（见「Codex：不做完整迁移」的风险监控） |
+| 远端机器的孤儿扫描 | `tend doctor` 只扫本机；要看那台就在那台上跑 |
+| TUI 回收站视图里的记忆条目 | 回收站视图只列会话；记忆用 `tend trash --restore` 还原 |
+| 「已搬走」的候选来自 `node.repos` 的本机查找 | 现在只从会话目录里按 remote 找候选 |
 
 ## 决定
 

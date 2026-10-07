@@ -39,7 +39,8 @@ type localHandler struct {
 	text    fulltext.Builder // the message-search store, one update at a time in this process
 }
 
-var methods = []string{MHello, MList, MMessages, MText, MSteps, MPulse, MChecks, MLive, MEcho, MQuery, MPut, MGrep, MHits, MTrash, MRestore}
+var methods = []string{MHello, MList, MMessages, MText, MSteps, MPulse, MChecks, MLive, MEcho, MQuery, MPut, MGrep, MHits, MTrash, MRestore,
+	MMemoryList, MMemoryRead, MMemoryTrash, MMemoryRestore}
 
 // Scoped is a Handler that answers a method over some of this machine's sessions only: keep names them by session id.
 type Scoped interface {
