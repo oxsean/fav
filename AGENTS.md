@@ -79,6 +79,7 @@ A hung TUI: on macOS `sample <pid>` prints its stacks; SIGQUIT prints them to th
 | `internal/capture` | current-session detection, resume commands (`CommandSpec`), paged transcript reading (`Messages`), who is running (`live.go`) |
 | `internal/wire` | the protocol: JSON frames over any two-way stream, either end may call, answers out of order, cancel, keepalive |
 | `internal/remote` | other machines' sessions over `wire`: methods and types (`proto.go`), answering side (`local.go`), ssh `Client`, `Hosts` cache, `Source` |
+| `internal/envcheck` | a machine's environment for agents and how two compare: `Collect` (CLIs, git, instruction files, skills, MCP, project settings, provider: names, versions and hashes from a fixed list of files and keys, never contents or values), `SeenOf` (what a session saw, from the index's `Env`), `Compare` (block, unequal, hint, each with its evidence); `FileText` serves only the instruction files `Collect` lists |
 | `internal/agent` | provider adapters (claude, codex, fake, command): launch, resume, fork, capabilities |
 | `internal/output` | a run's `output.log` read into events: the one reader of claude, codex and plain text, tool families and titles, turns, the timeline's grouping; `agent.OwnReport` tells the run's own reports |
 | `internal/tracker` | issue trackers behind one `Tracker` interface: Gitea and GitHub (`gitea.go`), GitLab, a shared REST layer; issues, comments, close, label, when an issue closed and opened (`StateEvents`); webhook checks per kind (`hook.go`); `trackertest` is a fake speaking all three with faults for tests; tend-server only |
@@ -110,7 +111,7 @@ A hung TUI: on macOS `sample <pid>` prints its stacks; SIGQUIT prints them to th
 | `internal/capture`, `internal/herdr` | `docs/design/sessions/resume.md`, `docs/design/sessions/external-behaviour.md` |
 | `cmd/tend` | `docs/design/sessions/cli-and-config.md`; task and run commands `docs/design/runs/clients.md` |
 | `internal/memory` | `docs/design/sessions/migration.md` |
-| `internal/remote`, `tend hosts` | `docs/design/sessions/remote.md`, `docs/design/sessions/migration.md` |
+| `internal/remote`, `internal/envcheck`, `tend hosts` | `docs/design/sessions/remote.md`, `docs/design/sessions/migration.md` |
 | `internal/wire`, `internal/dial` | `docs/design/runs/wire.md` |
 | `internal/journal`, `internal/task`, `internal/coord` | `docs/design/runs/coordinator.md`; the task features they carry in `docs/design/tasks/` |
 | `internal/node`, `internal/proc` | `docs/design/runs/node.md`, `docs/design/tasks/execution.md` |

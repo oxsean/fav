@@ -2,7 +2,7 @@
 
 把会话或记忆从一台机器搬到另一台：交接式迁移、Claude 完整迁移、记忆的管理与迁移、迁移前的环境诊断，以及这部分的已定决策和待核实项。远端合同和只读聚合见 [remote.md](remote.md)。
 
-实现：本机交接包在 `internal/capture`（`handoff.go`）和 `cmd/tend`（`tend handoff`）；路径映射在 `internal/pathmap`；搬项目目录的文件枚举和改写在 `internal/index`（`move.go`）；记忆的查看、删除、孤儿扫描、对比和按条写入在 `internal/memory`，节点方法 `memory.ls` / `memory.read` / `memory.trash` / `memory.restore` / `memory.put` 和两台机器之间的对比、复制（`CompareMemories`、`CopyMemory`）在 `internal/remote`（`memory.go`），命令是 `tend memory`（含 `diff`、`cp`）和 `tend doctor` 的记忆一节。本文其余部分**未实现**：跨机器交接、完整迁移（`import.*`）、环境诊断（`env`、`env diff`），代码里都还没有。
+实现：本机交接包在 `internal/capture`（`handoff.go`）和 `cmd/tend`（`tend handoff`）；交接到另一台机器在 `internal/remote`（`handoff.go`、`peer.go`）和 `cmd/tend`（`handoffhost.go`）；路径映射在 `internal/pathmap`；搬项目目录的文件枚举和改写在 `internal/index`（`move.go`）；记忆的查看、删除、孤儿扫描、对比和按条写入在 `internal/memory`，节点方法 `memory.ls` / `memory.read` / `memory.trash` / `memory.restore` / `memory.put` 和两台机器之间的对比、复制（`CompareMemories`、`CopyMemory`）在 `internal/remote`（`memory.go`），命令是 `tend memory`（含 `diff`、`cp`）和 `tend doctor` 的记忆一节；环境诊断的核心维度见「迁移前的环境诊断」。本文其余部分**未实现**：完整迁移（`import.*`）、交接包里的记忆条目和环境差异段、环境诊断的其余维度和界面，代码里都还没有。
 
 ## 迁移
 
@@ -18,7 +18,7 @@
 ### 交接式迁移
 
 - 已有：本机交接 `tend handoff <id> [--to claude|codex]`，交接包的内容、弹窗和去向见 [resume.md](resume.md)「分叉与交接」。
-- 未实现：`tend handoff <id> --host <机器>`：写交接包 → 传到目标机器 → 在目标机器对应的目录（按项目对应关系找，见 [remote.md](remote.md)「功能」）开新会话。
+- 已有：交接到另一台机器 `tend handoff <id> --host <机器>`，定目录、成稿和开法见 [resume.md](resume.md)「交接到另一台机器」。
 - 未实现：交接包里再加两样：和这个项目有关的记忆条目（见「记忆的管理与迁移」）、迁移前的环境差异摘要（见「迁移前的环境诊断」，诊断做好之后加上）。
 
 ### Claude 完整迁移
@@ -94,46 +94,75 @@
 
 ## 迁移前的环境诊断
 
-未实现。只诊断，不对齐。目的：迁移之前知道「这个会话到了那台机器，AI 看到的上下文和原来差多少」。只报告差异；每项差异附一句手动处理的提示（纯文字，tend 不执行）。
+只诊断，不对齐。目的：迁移之前知道「这个会话到了那台机器，AI 看到的上下文和原来差多少」。只报告差异；每项差异附一句手动处理的提示（纯文字，tend 不执行）。
+
+实现：`internal/envcheck`（`Collect` 采集、`SeenOf` 会话所见、`Compare` 比较、`GitOf`、`FileText`）、`internal/index`（`env.go`，会话当时看到的环境）、`internal/remote`（`env.go`，`env` 和 `env.file`）、`cmd/tend`（`env.go`，`tend env`、`tend env diff`）。做了的是核心维度：CLI、代码、指令文件、会话用过的 skill 和 MCP、按路径存放的项目配置、模型提供方。未实现：「对比什么」表里其余各行、目标机器同一项目最近一个会话的记录、TUI 的报告面板、交接包和迁移对话框里的诊断。
 
 ### 数据来源
 
-- **源端**：会话自己记录了它看到的环境。
-  - Claude：每行的 `version`、`gitBranch`；`attachment` 里的 `instructions`（加载了哪些指令文件，含原文，可以直接算出当时的哈希）、`skill_listing`、`invoked_skills`、`deferred_tools_delta`、`mcp_instructions_delta`、`agent_listing_delta`、`model`、`environment`（系统、shell、是否 worktree）。
+- **源端**：会话自己记录了它看到的环境。索引在增量扫描时把它叠加成 `File.Env`（字段和隐私边界见 [index-and-search.md](index-and-search.md)「全部会话与索引」），`envcheck.SeenOf` 把它转成 `Seen`，文件按 `Print` 的叫法命名。
+  - Claude：每行的 `version`；`attachment` 里的 `instructions`（加载了哪些指令文件）、`skill_listing`、`invoked_skills`、`deferred_tools_delta`、`mcp_instructions_delta`、`agent_listing_delta`、`model`、`environment`（系统、shell、是否 worktree）；`Skill` 和 `mcp__…` 工具调用（用过哪些 skill 和 MCP 服务器）。
   - Codex：`session_meta` 的 `cli_version`、`model_provider`，`turn_context` 的模型和审批 / 沙箱策略。
-  - 工具、子代理、skill 这几类记录的是增删事件，要先叠加成会话结束时的最终状态再比较。
+  - 工具、子代理、skill 这几类记录的是增删事件，叠加成会话结束时的最终状态再比较。
   - 这些附件大约从 Claude Code 2.1.259 起才有，实测只有一半左右的会话带。老会话大多只能标「未知」，这是常态，不是例外。
-- **目标端**：目标机器当前的配置扫描，加上目标机器上同一个项目最近一个会话的记录，两者并列。
-  - 最近那个会话的 CLI 版本和目标当前的不一致，或者超过 N 天，就只作参考。
-- **每一项都注明证据的来源和时间**：「会话当时看到的」「目标机器当前的配置」「未知」。读不到的维度标「未知」，不能判为一致。私有格式变化时，也便于查是哪一项读失败了。
+  - Claude 记下的指令文件正文是处理过的（去掉了 frontmatter 和 HTML 注释），哈希和磁盘上的原文对不上。所以会话记下的文件只证明「当时加载了哪些」，用来标证据来源；内容比较用两边机器当前的文件。
+- **目标端**：目标机器当前的配置（`env`）。目标机器上同一个项目最近一个会话的记录未实现。
+- **每一项都注明证据的来源和时间**：`session`（会话当时看到的）、`config`（机器当前的配置）、`unknown`（未知）。读不到的维度标「未知」，不能判为一致。私有格式变化时，也便于查是哪一项读失败了。
+
+### 采集：`env`
+
+`envcheck.Collect(dir)` 在回答的那台机器上跑，只取名字、版本和哈希；`dir` 为空时只看机器本身（不比代码和项目配置）。
+
+| 维度 | 取什么 | 不取什么 |
+|---|---|---|
+| CLI | `claude --version`、`codex --version`（各 5 秒超时，进程内缓存 1 分钟）；PATH 上有没有 | |
+| 代码 | `git status --porcelain=v2 --branch`：分支、HEAD、未提交的文件数和前 30 个文件名；没推送的提交数（有上游比上游，没有上游数不在任何远端分支上的）；origin 的 URL，去掉用户名和密码，和它的 `RemoteKey`（`task.RemoteKey`，同一个仓库的 ssh、https 写法得到同一个） | 文件内容 |
+| 指令文件 | `<claude>/CLAUDE.md`、`<dir>/CLAUDE.md`、`<dir>/.claude/CLAUDE.md`、`<dir>/CLAUDE.local.md`，以及它们 `@` 引用的文件（只跟一层，只认 `.md` / `.txt`，跳过代码块和行内代码）；`<codex>/AGENTS.md`、`<dir>/AGENTS.md`。每个文件：类别（`claude` / `codex` / `home` / `dir`，都不在下面的是 `path`）、相对名、`sha`（原始字节）、`norm`（`index.NormSHA`：换行统一成 LF、去掉首尾空白）；最多读 1 MiB | 正文（点开一项时才用 `env.file` 取那一个） |
+| skill 和 MCP | skill：`<claude>/skills/*`、`<dir>/.claude/skills/*`、`plugins/installed_plugins.json` 里用户级或这个目录装的插件带的，记成 `插件:skill`；MCP 服务器名：`.claude.json` 的 `mcpServers` 和 `projects[dir].mcpServers` 的键、`<dir>/.mcp.json` 的键、Codex `config.toml` 的 `[mcp_servers.*]` 名 | 每个 MCP 的 `env`、`headers`、`args`、`url` |
+| 按路径存放的项目配置 | 按目录找，经过软链也算（CLI 按解析后的路径记，macOS 的 `/var` 是 `/private/var`）。`.claude.json` 的 `projects[dir]`：`allowedTools` 括号前的工具名、`enabledMcpjsonServers`、`hasTrustDialogAccepted`；Codex 的 `projects."<dir>".trust_level` | `allowedTools` 的参数 |
+| 模型提供方 | Claude 的 `<claude>/settings.json`、`<dir>/.claude/settings.json` 和 `settings.local.json` 里 `env` 的键名，`ANTHROPIC_BASE_URL` 只取主机名；Codex 的 `model_provider` 和 `model_providers.<名字>.base_url` 的主机名 | 任何值、密钥、token |
+
+- JSON 按白名单流式解码，只走上表那些键，其余整段跳过；`config.toml` 按行读表头和这几个键。不打开 `.credentials.json`、Codex 的 `auth.json`、`.env`，不打日志。
+- 文件在但读不了、解析不了的记进 `unknown`（`claude_json`、`mcp_json`、`claude_settings`、`plugins`、`codex_config`、`git`、`file:<类别>:<名字>`；CLI 在 PATH 上但读不到版本是 `cli:<名字>`）；文件不在不算未知。
+- 协议：`env {dir, ref}`，`dir` 是绝对路径；带 `ref`（这台机器上的会话）时没给 `dir` 就用它的 cwd，回答多一个 `seen`。`env.file {kind, name, dir}` 只给 `Collect` 会列出的那些指令文件的正文，别的一律 `not_found`。
+- 测试在 fixture 的 `.claude.json`、settings、`.mcp.json`、`config.toml`、凭据文件、`.env`、MCP 工具参数和 transcript 附件里埋假密钥和假邮箱，断言 `env` 的回答、`tend env` / `tend env diff` 的输出和索引缓存里都搜不到。
+
+### 比较：`envcheck.Compare`
+
+`Compare(src, dst Print, from, to pathmap.End) Report` 是纯函数，CLI 用它，TUI、交接包和协调器以后也用它。
+
+- 每一项是 `{dim, level: block | unequal | hint, name, here, there, evidence, at, what, fix}`，`fix` 是一句手动处理的提示（i18n 文本）。按级别、再按维度排，严重的在前；`Report` 带三个计数，第一行汇总「阻断 0 · 不对等 3 · 提示 5」。
+- 证据：「会话当时看到的」优先，会话没记的用源机器当前的配置。
+- 会话是 Claude 的只比 Claude 那一侧（skill、Claude 的 MCP、项目配置和提供方），Codex 的只比 Codex 那一侧；不针对会话时两侧都比。CLI 只比会话那个，不针对会话时比源机器上装了的。
+- 指令文件按「类别 + 相对名」配对（`path` 类的先按路径映射），比 `norm`，所以 CRLF 和 home 不同不算差异；只差 `sha` 的报一条「只差换行」提示。
+- 同一台机器上的 Windows 和 WSL 是近邻，同一台机器上的同一个目录就是它自己：都不比代码（[remote.md](remote.md)「路径映射」）。
+- 目标机器上没有这个目录时只报那一条，目录下的指令文件和项目配置不再逐个报缺。
+- 会话调用过、源机器配置里却找不到的 MCP 服务器（claude.ai 连接器或插件带的）报一条「未知」提示，不判缺失。
 
 ### 对比什么
 
 | 维度 | 内容 | 级别 |
 |---|---|---|
-| CLI | Claude / Codex 的 CLI 版本 | 没装：**阻断**；更旧：**不对等**，附升级命令；只有已知不兼容才阻断 |
-| 代码 | 仓库在不在、分支、HEAD、未提交改动、没推送的提交；AI **写过**的文件逐个比哈希（设上限） | 仓库不在：**阻断**；其余：**不对等** |
-| git 带不走的东西 | `.claude/settings.local.json`、`CLAUDE.local.md`、`.env`、worktree | **不对等** |
-| 指令文件 | 全局 / 项目 / local 的 CLAUDE.md 及其 `@` 引用；`~/.codex/AGENTS.md`、仓库里的 AGENTS.md | **不对等** |
-| 记忆 | 项目记忆逐条比较；Codex 全局记忆里和本项目有关的条目；两边的 `autoMemoryDirectory` 设置 | **不对等** |
-| skill、插件、子代理、MCP | 会话结束时的最终状态 vs 目标机器的；会话用过的排在前面；插件带来的 skill、子代理、MCP 归到插件名下；claude.ai 连接器跟着账号走，账号无法安全确认时标「未知」，不去读凭据推断 | 用过的缺了：**不对等**；没用过的缺了：**提示** |
+| CLI | Claude / Codex 的 CLI 版本 | 没装：**阻断**；更旧：**不对等**，附升级命令；读不到版本：**提示**（未知）；只有已知不兼容才阻断 |
+| 代码 | 仓库在不在、origin 是不是同一个仓库（比 `RemoteKey`，没带它的旧 tend 由 URL 现算；源目录没有 origin 不比）、分支、HEAD、未提交改动、没推送的提交；未实现：AI **写过**的文件逐个比哈希（设上限） | 源目录是仓库而目标没有这个目录或不是仓库：**阻断**；源目录不是仓库而目标没有：**不对等**；其余：**不对等** |
+| git 带不走的东西 | `CLAUDE.local.md` 随指令文件比，`.claude/settings.local.json` 的 `env` 键名随模型提供方比；未实现：它的其余设置、`.env`、worktree | **不对等** |
+| 指令文件 | 全局 / 项目 / local 的 CLAUDE.md 及其 `@` 引用；`~/.codex/AGENTS.md`、仓库里的 AGENTS.md | 缺了、内容不同、目标多出来的：**不对等**；只差换行：**提示** |
+| 记忆（未实现） | 项目记忆逐条比较；Codex 全局记忆里和本项目有关的条目；两边的 `autoMemoryDirectory` 设置 | **不对等** |
+| skill、MCP；插件、子代理（未实现） | 会话结束时的最终状态 vs 目标机器的；会话用过的排在前面；插件带来的 skill 归到插件名下；claude.ai 连接器跟着账号走，账号无法安全确认时标「未知」，不去读凭据推断 | 用过的缺了：**不对等**；没用过的缺了：**提示** |
 | 模型提供方 | 提供方名称、base_url 的主机名（不取密钥）；Claude 的 `env` 只看键名 | **不对等** |
-| 按绝对路径存放的项目配置 | `~/.claude.json` 的 `projects[cwd]`（allowedTools、enabledMcpjsonServers）；Codex 的 `projects."<路径>".trust_level` | **不对等** |
-| 权限与沙箱 | `permissions`、Codex 的审批 / 沙箱策略 | 目标机器放得更宽：**突出显示**；其余：**提示** |
-| hook | 配置的命令路径在目标机器上是否存在 | **提示** |
-| 模型与推理强度 | model、effort | **提示** |
-| 命令行工具 | 会话在 Bash 里用过的程序在目标机器上有没有、版本多少 | **提示**（排在最后做） |
-| 系统 | 系统、shell、home | **提示** |
+| 按绝对路径存放的项目配置 | `~/.claude.json` 的 `projects[cwd]`（allowedTools、enabledMcpjsonServers、是否信任过）；Codex 的 `projects."<路径>".trust_level` | **不对等** |
+| 权限与沙箱（未实现） | `permissions`、Codex 的审批 / 沙箱策略 | 目标机器放得更宽：**突出显示**；其余：**提示** |
+| hook（未实现） | 配置的命令路径在目标机器上是否存在 | **提示** |
+| 模型与推理强度（未实现） | model、effort | **提示** |
+| 命令行工具（未实现） | 会话在 Bash 里用过的程序在目标机器上有没有、版本多少 | **提示**（排在最后做） |
+| 系统（未实现） | 系统、shell、home | **提示** |
+| 读不到的 | 两边各自的 `unknown` | **提示**（未知） |
 
-计划先做核心维度：CLI、代码状态、指令文件、会话用过的 skill 和 MCP、按路径存放的项目配置、模型提供方；其余维度以后补上。
+### 展示
 
-### 采集与展示
-
-- 每台机器通过协议的 `env` 方法（命令行对应 `env --json`）输出指纹：**只有名字、版本和内容哈希**，不含文件正文、环境变量的值、MCP 的 env / headers，也不含令牌。
-- 同时保留原始哈希和规范化之后的比较结果（换行统一成 LF，路径按映射转换），避免把 CRLF 或 home 不同误报成差异，也不会掩盖真实的差异。
-- 想看某个 CLAUDE.md 或某条记忆具体差在哪，点开时才去取那一个文件做文本对比，不预先传正文。
-- 迁移确认框里一行汇总「阻断 0 · 不对等 3 · 提示 5」，展开看明细。有阻断项时不能迁移；只有不对等项时照样可以迁，确认框里写明「到那边 AI 会缺什么」。
-- 命令行：`env diff <机器> --session <id>`（针对一个会话）、`env diff <机器>`（两台机器整体比较）；有阻断项时退出码非 0。
+- 命令行：`tend env [--dir 目录] [--json]` 输出本机指纹，`--json` 就是 `env` 的回答；`tend env diff <机器> --session <id>`（针对一个会话）、`--dir 目录`（一个目录）、都不给（两台机器整体比较）；目标机器上的目录和交接到另一台机器一样找（`handoffDir`，见 [resume.md](resume.md)「交接到另一台机器」第 2 步，remote 先取源目录的 origin），找不到或找到几个时要 `--there` 给出；有阻断项时退出码非 0（[cli-and-config.md](cli-and-config.md)）。
+- 想看某个 CLAUDE.md 具体差在哪，点开时才去两边各取那一个文件（`env.file`）做文本对比，不预先传正文。
+- 未实现：迁移确认框和 TUI 报告面板里一行汇总、展开看明细；有阻断项时不能迁移；只有不对等项时照样可以迁，确认框里写明「到那边 AI 会缺什么」。交接包里的「环境差异」段由发起端用同一份 `Report` 写。
 
 ## 推后
 

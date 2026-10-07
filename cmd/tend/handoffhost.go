@@ -57,7 +57,7 @@ func handoffHost(s *tend.Store, ref string, o handoffTo) error {
 	}
 	dir := o.dir
 	if dir == "" {
-		if dir, err = handoffDir(ctx, x, r, o.host); err != nil {
+		if dir, err = handoffDir(ctx, x, r, o.host, handoffDirTexts); err != nil {
 			return err
 		}
 	}
@@ -168,10 +168,15 @@ func handoffRefused(p remote.Peer, host, method string, err error) error {
 	return i18n.E("cli.handoff.refused", host, remote.Reason(err))
 }
 
+// dirTexts are what handoffDir says: nothing found, the one taken, several to choose from.
+type dirTexts struct{ none, one, several string }
+
+var handoffDirTexts = dirTexts{"cli.handoff.no_dir", "cli.handoff.dir", "cli.handoff.dirs"}
+
 // handoffDir is where the new session starts on host (3.1): the session's own directory on its own machine, the
 // project's directory there, else the one checkout host finds of the session's remote (git's origin where it ran, else
 // the one its record or Codex recorded).
-func handoffDir(ctx context.Context, x *remote.Handover, r *tend.Rec, host string) (string, error) {
+func handoffDir(ctx context.Context, x *remote.Handover, r *tend.Rec, host string, say dirTexts) (string, error) {
 	if x.From.Same(x.To) {
 		return x.Facts.Cwd, nil
 	}
@@ -194,16 +199,16 @@ func handoffDir(ctx context.Context, x *remote.Handover, r *tend.Rec, host strin
 	}
 	switch len(dirs) {
 	case 0:
-		return "", i18n.E("cli.handoff.no_dir", host)
+		return "", i18n.E(say.none, host)
 	case 1:
-		fmt.Fprint(os.Stderr, i18n.F("cli.handoff.dir", host, dirs[0].Path))
+		fmt.Fprint(os.Stderr, i18n.F(say.one, host, dirs[0].Path))
 		return dirs[0].Path, nil
 	}
 	var b strings.Builder
 	for _, d := range dirs {
 		b.WriteString("\n  " + strings.TrimSpace(d.Path+"  "+d.Branch))
 	}
-	return "", i18n.E("cli.handoff.dirs", len(dirs), host, b.String())
+	return "", i18n.E(say.several, len(dirs), host, b.String())
 }
 
 // indexedRemote is the origin Codex recorded for r, a session on this machine, as the index has it.

@@ -58,6 +58,13 @@ tend memory diff <项目|目录> <机器> [--from <机器>] [--dir <那台的目
 tend memory cp <项目|目录> <机器> <名字…> [--from <机器>] [--dir <那台的目录>]
                                        按名字（可不带 .md）把 Claude 记忆复制到 <机器>（memory.put）：从不覆盖，不同的放进那台的 .incoming/、
                                        不进 MEMORY.md；比较之后那边又变了就拒绝；Codex 的只对比不复制；有没复制成的退出码非 0
+tend env [--dir 目录] [--json]          本机给 AI 的环境：CLI 版本、git、指令文件、skill、MCP、项目配置、模型提供方，只有名字、版本和哈希；
+                                       不给 --dir 只看机器本身；--json 就是协议 env 的回答（migration.md「迁移前的环境诊断」）
+tend env diff <机器> [--session <id> | --dir 目录] [--there 目录] [--json]
+                                       AI 到那台机器上会看到哪些不同：先一行汇总「阻断 · 不对等 · 提示」，再逐项列出级别、差异、证据来源和时间、
+                                       手动处理的提示。--session 比这个会话当时看到的（<机器>:<id> 是那台机器上的会话），目录取它的 cwd；
+                                       那边的目录 = --there，否则和 handoff --host 一样找（同一台机器原样；项目在两边的目录；源目录 remote 在那边唯一的检出），找不到或有几个就报错让给 --there；
+                                       <机器> 是 local 时是本机。mode 2 下只比自己的机器；有阻断项时退出码非 0
 tend today | tend week [查询] [--json]  日报：today 从今天 0 点、week 从本周一 0 点起动过的会话（last:，默认 status:all turns:1，查询可再收窄），
                                        按项目分组（组多的在前）：每条会话的来源、总轮数（索引没有按天的轮数）、最近活动；组里 AI 改得最多的 5 个
                                        文件；项目目录（主仓库优先）里这段时间的提交（git log --since --no-merges，显示 3 条标题）；
