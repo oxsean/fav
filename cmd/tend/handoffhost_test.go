@@ -14,6 +14,7 @@ import (
 	"github.com/oxsean/fav/internal/fixture"
 	"github.com/oxsean/fav/internal/i18n"
 	"github.com/oxsean/fav/internal/tend"
+	"github.com/oxsean/fav/internal/testkit"
 )
 
 // twoHomes are two fixture machines with launchers that run this test binary as tend in each: this process is self,
@@ -54,25 +55,14 @@ func twoHomes(t *testing.T) (self, peer *fixture.Dataset, launcher func(*fixture
 	return self, peer, launcher
 }
 
-// linkStubs makes the launchers' claude and codex stubs links to this test binary, which TestMain turns into a failing
-// CLI: ⚠️ a freshly written script is checked by macOS the first time it runs, for seconds under load, and the
-// environment read runs `<cli> --version` under a timeout.
+// linkStubs makes the launchers' claude and codex stubs failing links to this test binary: the environment read runs
+// `<cli> --version` under a timeout.
 func linkStubs(t *testing.T, d *fixture.Dataset) {
 	t.Helper()
 	if runtime.GOOS == "windows" {
 		return
 	}
-	for _, name := range []string{"claude", "codex"} {
-		stub := filepath.Join(d.Root, "stubs", name)
-		if err := os.Remove(stub); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.Link(os.Args[0], stub); err != nil {
-			if err := os.Symlink(os.Args[0], stub); err != nil {
-				t.Fatal(err)
-			}
-		}
-	}
+	testkit.LinkCLIs(t, filepath.Join(d.Root, "stubs"), map[string]string{"claude": "", "codex": ""})
 }
 
 func writeConfig(t *testing.T, d *fixture.Dataset, cfg map[string]any) {

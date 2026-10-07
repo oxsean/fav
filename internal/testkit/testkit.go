@@ -2,9 +2,12 @@
 package testkit
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
+	"strings"
 	"testing"
 
 	"github.com/oxsean/fav/internal/paths"
@@ -30,6 +33,7 @@ func Shared(p string) bool { return root != "" && paths.Under(p, root) }
 // Main runs a package's tests with every per-user location (tend, Claude, Codex, home, OS config dirs) under a
 // temporary root and always-failing herdr, claude and codex first on PATH; call it from TestMain.
 func Main(m *testing.M) {
+	AnswerAsCLI()
 	var err error
 	root, err = os.MkdirTemp("", "tend-test")
 	if err != nil {
@@ -52,4 +56,50 @@ func Main(m *testing.M) {
 	code := m.Run()
 	os.RemoveAll(root)
 	os.Exit(code)
+}
+
+// fakeVersion + a CLI's name is what a test binary linked as that CLI prints for `<name> --version`.
+const fakeVersion = "TEND_TEST_FAKE_VERSION_"
+
+// AnswerAsCLI (Main calls it; a TestMain that runs something else when an environment variable is set calls it first) makes a test binary run as herdr, claude or codex (by argv[0], when LinkCLIs linked it so) answer like one:
+// the version LinkCLIs set for `--version`, otherwise a failure.
+func AnswerAsCLI() {
+	name := strings.TrimSuffix(filepath.Base(os.Args[0]), ".exe")
+	if name != "herdr" && name != "claude" && name != "codex" {
+		return
+	}
+	if out, ok := os.LookupEnv(fakeVersion + name); ok && slices.Equal(os.Args[1:], []string{"--version"}) {
+		fmt.Println(out)
+		os.Exit(0)
+	}
+	fmt.Fprintln(os.Stderr, "tend test stub: "+name+" is not available here")
+	os.Exit(1)
+}
+
+// LinkCLIs puts links to this test binary into dir, one per key of versions, replacing what is there: each answers
+// `--version` with its value and fails at anything else; an empty value is a CLI that always fails. ⚠️ Never a new
+// script instead: macOS checks it the first time it runs, for seconds under load, and the callers run it under a timeout.
+func LinkCLIs(t testing.TB, dir string, versions map[string]string) {
+	t.Helper()
+	os.MkdirAll(dir, 0o755)
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ext := filepath.Ext(self)
+	if ext != ".exe" {
+		ext = ""
+	}
+	for name, out := range versions {
+		link := filepath.Join(dir, name+ext)
+		os.Remove(link)
+		if err := os.Link(self, link); err != nil {
+			if err := os.Symlink(self, link); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if out != "" {
+			t.Setenv(fakeVersion+name, out)
+		}
+	}
 }

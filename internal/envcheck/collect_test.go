@@ -3,7 +3,6 @@ package envcheck
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -17,20 +16,9 @@ import (
 	"github.com/oxsean/fav/internal/testkit"
 )
 
-// fakeVersion + a CLI's name is what this test binary prints for `<name> --version` when machine links it as that CLI.
-const fakeVersion = "ENVCHECK_FAKE_VERSION_"
+func TestMain(m *testing.M) { testkit.Main(m) }
 
-func TestMain(m *testing.M) {
-	name := strings.TrimSuffix(filepath.Base(os.Args[0]), ".exe")
-	if out, ok := os.LookupEnv(fakeVersion + name); ok && slices.Equal(os.Args[1:], []string{"--version"}) {
-		fmt.Println(out)
-		os.Exit(0)
-	}
-	testkit.Main(m)
-}
-
-// machine builds a fixture dataset and points this process at it, with claude and codex on PATH printing versions:
-// links to this test binary, ⚠️ never a new script, which macOS checks the first time it runs, for seconds under load.
+// machine builds a fixture dataset and points this process at it, with claude and codex on PATH printing versions.
 func machine(t *testing.T, claude, codex string) *fixture.Dataset {
 	t.Helper()
 	d, err := fixture.Build(filepath.Join(t.TempDir(), "machine"), time.Now())
@@ -39,27 +27,13 @@ func machine(t *testing.T, claude, codex string) *fixture.Dataset {
 	}
 	use(t, d)
 	bin := filepath.Join(d.Root, "bin")
-	os.MkdirAll(bin, 0o755)
-	self, err := os.Executable()
-	if err != nil {
-		t.Fatal(err)
-	}
-	ext := filepath.Ext(self)
-	if ext != ".exe" {
-		ext = ""
-	}
+	versions := map[string]string{}
 	for name, out := range map[string]string{"claude": claude, "codex": codex} {
-		if out == "" {
-			continue
+		if out != "" {
+			versions[name] = out
 		}
-		link := filepath.Join(bin, name+ext)
-		if err := os.Link(self, link); err != nil {
-			if err := os.Symlink(self, link); err != nil {
-				t.Fatal(err)
-			}
-		}
-		t.Setenv(fakeVersion+name, out)
 	}
+	testkit.LinkCLIs(t, bin, versions)
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	return d
 }
