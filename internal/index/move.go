@@ -1,12 +1,9 @@
 package index
 
 import (
-	"bufio"
-	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -229,7 +226,9 @@ func (p *MovePlan) Apply(store *tend.Store) (MoveReport, error) {
 				dst = filepath.Join(ClaudeProjectDir(s.NewCwd), filepath.Base(f.From))
 				oldDirs[filepath.Dir(f.From)] = true
 			}
-			if err := rewriteCwd(f.To, dst, p.Old, p.New); err != nil {
+			if _, err := RewriteFile(f.To, dst, nil, func(cwd string) (string, bool) {
+				return paths.Rebase(cwd, p.Old, p.New), paths.Under(cwd, p.Old)
+			}); err != nil {
 				return rep, fmt.Errorf("%s: %w", f.From, err)
 			}
 			e.Files[i].Replaced, e.Files[i].Stamp = dst, tend.FileStamp(dst)
@@ -316,68 +315,6 @@ func sweepProjectDir(old, new string) {
 		os.Rename(filepath.Join(old, e.Name()), dst)
 	}
 	os.Remove(old) // non-empty stays
-}
-
-var cwdKey = []byte(`"cwd":"`)
-
-// rewriteCwd rewrites "cwd":"<old…>" and "cwd":"file://<old…>" line by line into dst, keeping the source's mtime.
-// ⚠️ Only the cwd field: paths in message bodies are history and must match what happened.
-func rewriteCwd(src, dst, old, new string) error {
-	in, err := os.Open(src)
-	if err != nil {
-		return err
-	}
-	defer in.Close()
-	oldQ, newQ := paths.JSON(old), paths.JSON(new)
-	err = fileio.WriteAtomic(dst, 0o600, func(w io.Writer) error {
-		r := bufio.NewReaderSize(in, 1<<20)
-		for {
-			line, err := r.ReadBytes('\n')
-			if len(line) > 0 {
-				if _, werr := w.Write(replaceCwd(line, oldQ, newQ)); werr != nil {
-					return werr
-				}
-			}
-			if err == io.EOF {
-				return nil
-			}
-			if err != nil { // a read error must not look like EOF: renaming a partial file loses data
-				return err
-			}
-		}
-	})
-	if err != nil {
-		return err
-	}
-	if st, err := os.Stat(src); err == nil {
-		os.Chtimes(dst, time.Now(), st.ModTime())
-	}
-	return nil
-}
-
-func replaceCwd(line []byte, old, new string) []byte {
-	if !bytes.Contains(line, cwdKey) {
-		return line
-	}
-	for _, prefix := range []string{`"cwd":"`, `"cwd":"file://`} {
-		from := []byte(prefix + old)
-		i := 0
-		for {
-			j := bytes.Index(line[i:], from)
-			if j < 0 {
-				break
-			}
-			j += i
-			end := j + len(from)
-			if end < len(line) && line[end] != '"' && line[end] != '/' && line[end] != '\\' {
-				i = end
-				continue
-			}
-			line = append(append(append([]byte{}, line[:j]...), []byte(prefix+new)...), line[end:]...)
-			i = j + len(prefix) + len(new)
-		}
-	}
-	return line
 }
 
 func claudeSettings() map[string]json.RawMessage {

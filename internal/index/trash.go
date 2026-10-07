@@ -8,9 +8,8 @@ import (
 	"github.com/oxsean/fav/internal/tend"
 )
 
-// SessionFilesOf is what trashing r moves: the files of every id of its Claude continuation chain (idx may be nil),
-// and its pinned copy.
-func SessionFilesOf(idx *Index, r *tend.Rec) []string {
+// SessionIDs are r's session id and the older ones of its Claude continuation chain (idx nil: its own only).
+func SessionIDs(idx *Index, r *tend.Rec) []string {
 	ids := []string{r.SessionID}
 	if idx != nil {
 		for _, s := range idx.Sessions() {
@@ -19,8 +18,13 @@ func SessionFilesOf(idx *Index, r *tend.Rec) []string {
 			}
 		}
 	}
+	return ids
+}
+
+// SessionFilesOf is what trashing r moves: the files of every id of SessionIDs, and its pinned copy.
+func SessionFilesOf(idx *Index, r *tend.Rec) []string {
 	var files []string
-	for _, id := range ids {
+	for _, id := range SessionIDs(idx, r) {
 		files = append(files, SessionFiles(r.Provider, id)...)
 	}
 	if r.PinnedPath != "" {
