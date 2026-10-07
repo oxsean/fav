@@ -2,6 +2,8 @@ package capture
 
 import (
 	"encoding/json"
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -74,33 +76,108 @@ func ClaudeLive() map[string]Live {
 		if err != nil {
 			continue
 		}
-		var s struct {
-			PID             int    `json:"pid"`
-			SessionID       string `json:"sessionId"`
-			Cwd             string `json:"cwd"`
-			Kind            string `json:"kind"`
-			Name            string `json:"name"`
-			Status          string `json:"status"`
-			StatusUpdatedAt int64  `json:"statusUpdatedAt"`
-			JobID           string `json:"jobId"`
-			ParkedJobID     string `json:"parkedJobId"` // the conversation moved on to a background worker; this process is only the terminal
+		if sid, l, ok := claudeSessionFile(b); ok {
+			out[sid] = l
 		}
-		if json.Unmarshal(b, &s) != nil || s.SessionID == "" || s.ParkedJobID != "" || !proc.Alive(s.PID) {
-			continue
-		}
-		l := Live{Agent: tend.ProviderClaude, Title: s.Name, Cwd: s.Cwd, Since: time.UnixMilli(s.StatusUpdatedAt)}
-		switch s.Status {
-		case "busy":
-			l.Status = "working"
-		case "idle":
-			l.Status = "idle"
-		}
-		if s.Kind == "bg" {
-			l.BackgroundID = s.JobID
-		}
-		out[s.SessionID] = l
 	}
 	return out
+}
+
+// claudeSessionFile is the live session one sessions/<pid>.json names; false when its process is gone or it only
+// holds the terminal of a session parked in the background.
+func claudeSessionFile(b []byte) (string, Live, bool) {
+	var s struct {
+		PID             int    `json:"pid"`
+		SessionID       string `json:"sessionId"`
+		Cwd             string `json:"cwd"`
+		Kind            string `json:"kind"`
+		Name            string `json:"name"`
+		Status          string `json:"status"`
+		StatusUpdatedAt int64  `json:"statusUpdatedAt"`
+		JobID           string `json:"jobId"`
+		ParkedJobID     string `json:"parkedJobId"` // the conversation moved on to a background worker; this process is only the terminal
+	}
+	if json.Unmarshal(b, &s) != nil || s.SessionID == "" || s.ParkedJobID != "" || !proc.Alive(s.PID) {
+		return "", Live{}, false
+	}
+	l := Live{Agent: tend.ProviderClaude, Title: s.Name, Cwd: s.Cwd, Since: time.UnixMilli(s.StatusUpdatedAt)}
+	switch s.Status {
+	case "busy":
+		l.Status = "working"
+	case "idle":
+		l.Status = "idle"
+	}
+	if s.Kind == "bg" {
+		l.BackgroundID = s.JobID
+	}
+	return s.SessionID, l, true
+}
+
+// What LiveState answers: a source it cannot read makes a session unknown, never not running.
+const (
+	LiveYes     = "yes"
+	LiveNo      = "no"
+	LiveUnknown = "unknown"
+)
+
+// Why LiveState answers unknown: stable codes.
+const (
+	WhyNoSessionsDir = "no_sessions_dir" // Claude keeps no sessions/ (a version that does not write it)
+	WhyUnreadable    = "unreadable"      // an entry of sessions/ or the directory itself could not be read
+	WhyHerdr         = "herdr"           // Herdr is up but did not list its agents
+)
+
+// LiveState is whether provider's session sid runs on this machine (a tend run, Claude's sessions/, Codex's lock,
+// Herdr), and why it cannot tell when unknown.
+func LiveState(provider, sid string) (state, why string) {
+	if _, ok := RunLive()[sid]; ok {
+		return LiveYes, ""
+	}
+	switch provider {
+	case tend.ProviderClaude:
+		dir := filepath.Join(ClaudeHome(), "sessions")
+		ents, err := os.ReadDir(dir)
+		switch {
+		case errors.Is(err, fs.ErrNotExist):
+			return LiveUnknown, WhyNoSessionsDir
+		case err != nil:
+			return LiveUnknown, WhyUnreadable
+		}
+		why := ""
+		for _, e := range ents {
+			if filepath.Ext(e.Name()) != ".json" {
+				continue
+			}
+			b, err := os.ReadFile(filepath.Join(dir, e.Name()))
+			if err != nil {
+				why = WhyUnreadable
+				continue
+			}
+			if id, _, ok := claudeSessionFile(b); ok && id == sid {
+				return LiveYes, ""
+			}
+		}
+		if why != "" {
+			return LiveUnknown, why
+		}
+		return LiveNo, "" // ⚠️ Herdr's Claude agents without sessions/*.json are stale (herdrLive)
+	case tend.ProviderCodex:
+		if _, ok := CodexLive()[sid]; ok {
+			return LiveYes, ""
+		}
+	}
+	if herdr.Reachable() {
+		agents, err := herdr.Agents()
+		if err != nil {
+			return LiveUnknown, WhyHerdr
+		}
+		for _, a := range agents {
+			if a.AgentSession != nil && a.AgentSession.Value == sid {
+				return LiveYes, ""
+			}
+		}
+	}
+	return LiveNo, ""
 }
 
 // Non-interactive Codex originators: the Claude Code plugin, codex exec, the SDK.

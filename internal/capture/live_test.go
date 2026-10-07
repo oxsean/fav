@@ -112,3 +112,31 @@ func TestMergeLive(t *testing.T) {
 		t.Fatalf("later non-empty fields win, Status carries Seq and Since:\n got %+v\nwant %+v", got["a"], want)
 	}
 }
+
+// LiveState tells a session nobody runs from one it cannot tell about: no sessions/ directory (a Claude that does not
+// write it) or an unreadable entry is unknown, never no.
+func TestLiveStateTellsUnknownFromNo(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", dir)
+	if state, why := LiveState(tend.ProviderClaude, "s-busy"); state != LiveUnknown || why != WhyNoSessionsDir {
+		t.Fatalf("no sessions/: %s %s", state, why)
+	}
+	sessions := filepath.Join(dir, "sessions")
+	os.MkdirAll(sessions, 0o755)
+	me := strconv.Itoa(os.Getpid())
+	os.WriteFile(filepath.Join(sessions, "1.json"), []byte(`{"pid":`+me+`,"sessionId":"s-busy","status":"busy"}`), 0o644)
+	os.WriteFile(filepath.Join(sessions, "2.json"), []byte(`{"pid":999999,"sessionId":"s-dead","status":"idle"}`), 0o644)
+	os.WriteFile(filepath.Join(sessions, "3.json"), []byte(`{"pid":`+me+`,"sessionId":"s-parked","parkedJobId":"j"}`), 0o644)
+	for sid, want := range map[string]string{"s-busy": LiveYes, "s-dead": LiveNo, "s-parked": LiveNo, "s-none": LiveNo} {
+		if state, why := LiveState(tend.ProviderClaude, sid); state != want || why != "" {
+			t.Errorf("%s: %s %s, want %s", sid, state, why, want)
+		}
+	}
+	os.MkdirAll(filepath.Join(sessions, "4.json"), 0o755)
+	if state, why := LiveState(tend.ProviderClaude, "s-none"); state != LiveUnknown || why != WhyUnreadable {
+		t.Errorf("an entry it cannot read: %s %s", state, why)
+	}
+	if state, _ := LiveState(tend.ProviderClaude, "s-busy"); state != LiveYes {
+		t.Errorf("a running one is told whatever else it cannot read: %s", state)
+	}
+}
