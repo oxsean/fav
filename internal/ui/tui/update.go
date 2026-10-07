@@ -162,7 +162,13 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case liveMsg:
 		m.applyLive(msg)
-		cmd = tea.Batch(tea.Tick(liveEvery, func(time.Time) tea.Msg { return liveTickMsg{} }), m.readPulses())
+		cmd = tea.Batch(tea.Tick(liveEvery, func(time.Time) tea.Msg { return liveTickMsg{} }), m.readPulses(), m.startFollow())
+
+	case followTickMsg:
+		cmd = m.followLive()
+
+	case followMsg:
+		cmd = m.applyFollow(msg)
 
 	case pulseMsg:
 		m.applyPulses(msg)
@@ -206,8 +212,9 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if !msg.once {
 			cmd = tea.Tick(indexEvery, func(time.Time) tea.Msg { return indexTickMsg{} })
 		}
-		if msg.changed && msg.gen == m.idxGen {
-			cmd = tea.Batch(cmd, m.syncText(msg.idx))
+		if (msg.changed || m.follow.text) && msg.gen == m.idxGen {
+			m.follow.text = false
+			cmd = tea.Batch(cmd, m.syncText(m.newestIdx()))
 		}
 
 	case indexTickMsg:

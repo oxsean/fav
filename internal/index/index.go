@@ -8,8 +8,10 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -434,7 +436,7 @@ func (idx *Index) Refresh() (*Index, bool) { return idx.Rescan(nil) }
 func (idx *Index) Rescan(force map[string]bool) (*Index, bool) {
 	next := &Index{path: idx.path, files: make(map[string]*File, len(idx.files)), size: idx.size, torn: idx.torn, wt: idx.wt}
 	seen := 0
-	threads := codexThreadNames()
+	threads := threadNames()
 	for _, c := range candidates() {
 		st, err := os.Stat(c.path)
 		if err != nil {
@@ -445,27 +447,87 @@ func (idx *Index) Rescan(force map[string]bool) (*Index, bool) {
 		if force[c.path] {
 			old = nil
 		}
-		if old != nil && old.Ver == scanVer && old.Size == st.Size() && old.ModTime.Equal(st.ModTime()) {
-			next.files[c.path] = old
-			continue
-		}
-		f := &File{Path: c.path, Provider: c.provider, SessionID: c.sessionID, Ver: scanVer}
-		if old != nil && old.Ver == scanVer && st.Size() >= old.Size {
-			cp := *old
-			f = &cp
-		}
-		f.ModTime = st.ModTime()
-		f.scan()
-		if f.Provider == tend.ProviderCodex {
-			if t := threads[f.SessionID]; t != "" {
-				f.Title = t
-			}
-		}
+		f, scanned := rescanFile(c, st, old, threads)
 		next.files[c.path] = f
-		next.dirty = append(next.dirty, f)
+		if scanned {
+			next.dirty = append(next.dirty, f)
+		}
 	}
 	next.wt = idx.wt.learn(next.files, worktreesPath(idx.path))
 	return next, len(next.dirty) > 0 || seen != len(idx.files)
+}
+
+// RefreshPaths is Refresh limited to these files: grown ones read on from their offset, new ones scanned, vanished ones
+// dropped, unchanged ones cost a stat. It returns the paths that changed, and idx itself when none did.
+func (idx *Index) RefreshPaths(paths []string) (*Index, []string) {
+	var next *Index
+	var changed []string
+	threads := threadNames()
+	for _, p := range paths {
+		if slices.Contains(changed, p) {
+			continue
+		}
+		old := idx.files[p]
+		st, err := os.Stat(p)
+		if err != nil {
+			if old != nil {
+				next = idx.fork(next)
+				delete(next.files, p)
+				changed = append(changed, p)
+			}
+			continue
+		}
+		c, ok := classify(p)
+		if !ok {
+			continue
+		}
+		f, scanned := rescanFile(c, st, old, threads)
+		if !scanned {
+			continue
+		}
+		next = idx.fork(next)
+		next.files[p] = f
+		next.dirty = append(next.dirty, f)
+		changed = append(changed, p)
+	}
+	if next == nil {
+		return idx, nil
+	}
+	fresh := make(map[string]*File, len(next.dirty))
+	for _, f := range next.dirty {
+		fresh[f.Path] = f
+	}
+	next.wt = idx.wt.learn(fresh, worktreesPath(idx.path))
+	return next, changed
+}
+
+// fork is next, or a copy of idx to change when there is none yet.
+func (idx *Index) fork(next *Index) *Index {
+	if next != nil {
+		return next
+	}
+	return &Index{path: idx.path, files: maps.Clone(idx.files), size: idx.size, torn: idx.torn, wt: idx.wt}
+}
+
+// rescanFile is c after a stat: old itself when unchanged, else a copy of old read on from its offset, or a fresh scan.
+func rescanFile(c candidate, st os.FileInfo, old *File, threads func() map[string]string) (*File, bool) {
+	if old != nil && old.Ver == scanVer && old.Size == st.Size() && old.ModTime.Equal(st.ModTime()) {
+		return old, false
+	}
+	f := &File{Path: c.path, Provider: c.provider, SessionID: c.sessionID, Ver: scanVer}
+	if old != nil && old.Ver == scanVer && st.Size() >= old.Size {
+		cp := *old
+		cp.Files = maps.Clone(old.Files) // ⚠️ old belongs to a snapshot others are reading
+		f = &cp
+	}
+	f.ModTime = st.ModTime()
+	f.scan()
+	if f.Provider == tend.ProviderCodex {
+		if t := threads()[f.SessionID]; t != "" {
+			f.Title = t
+		}
+	}
+	return f, true
 }
 
 // Save appends this Refresh's changes; rewrites the whole cache once stale lines outweigh the current ones.
@@ -631,12 +693,41 @@ type candidate struct{ path, provider, sessionID string }
 func candidates() []candidate {
 	var out []candidate
 	for _, p := range capture.ClaudeTranscripts("") {
-		out = append(out, candidate{p, tend.ProviderClaude, strings.TrimSuffix(filepath.Base(p), ".jsonl")})
+		out = append(out, claudeFile(p))
 	}
 	for _, p := range capture.CodexRollouts("") {
 		out = append(out, candidate{p, tend.ProviderCodex, ""})
 	}
 	return out
+}
+
+func claudeFile(p string) candidate {
+	return candidate{p, tend.ProviderClaude, strings.TrimSuffix(filepath.Base(p), ".jsonl")}
+}
+
+// classify is the candidate a path would be among candidates(), by where it lies.
+func classify(p string) (candidate, bool) {
+	if filepath.Ext(p) != ".jsonl" {
+		return candidate{}, false
+	}
+	if paths.Same(filepath.Dir(filepath.Dir(p)), filepath.Join(capture.ClaudeHome(), "projects")) {
+		return claudeFile(p), true
+	}
+	if strings.HasPrefix(filepath.Base(p), "rollout-") && paths.Under(p, capture.CodexHome()) {
+		return candidate{p, tend.ProviderCodex, ""}, true
+	}
+	return candidate{}, false
+}
+
+// threadNames reads Codex's thread names on first use: most refreshes touch no Codex file.
+func threadNames() func() map[string]string {
+	var names map[string]string
+	return func() map[string]string {
+		if names == nil {
+			names = codexThreadNames()
+		}
+		return names
+	}
 }
 
 // session_index.jsonl: {"id":…,"thread_name":…}

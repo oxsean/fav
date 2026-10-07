@@ -131,6 +131,7 @@ type Model struct {
 
 	live       map[string]capture.Live
 	liveHerdr  map[string]capture.Live  // previous Herdr result, needed for "since when"
+	follow     follow                   // running sessions' transcripts stat-ed every second (follow.go)
 	pulse      map[string]capture.Pulse // running sessions' last reply / turn start / context, read after each live poll
 	attn       map[string]attnEntry     // what the user has taken in of each running session (attention.json)
 	lastNeed   map[string]int           // need() at the last check: a change to "needs you" is announced once

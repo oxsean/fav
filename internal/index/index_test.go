@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -420,5 +421,78 @@ func TestARunSessionIsListedThoughItsCLIMarksItOneShot(t *testing.T) {
 	write(t, filepath.Join(home, "node", "runs", "r_0123456789ab", "spec.json"), `{"provider":"claude","session":"rrrr"}`)
 	if ss := idx.Sessions(); len(ss) != 1 || ss[0].SessionID != "rrrr" || len(idx.AgentSessions()) != 0 {
 		t.Fatalf("a run's session is a session: %+v %d", ss, len(idx.AgentSessions()))
+	}
+}
+
+func TestRefreshPathsReadsOnlyTheGivenFiles(t *testing.T) {
+	claude, codex := setup(t)
+	cache := filepath.Join(t.TempDir(), "sessions.jsonl")
+	proj := filepath.Join(claude, "projects", "-Users-me-work-webapp")
+	edit := func(name string) string {
+		return `{"type":"assistant","timestamp":"2026-09-10T01:00:05Z","message":{"content":[{"type":"tool_use","name":"Edit","input":{"file_path":"/Users/me/work/webapp/` + name + `"}}]}}` + "\n"
+	}
+	a, b := filepath.Join(proj, "aaaa.jsonl"), filepath.Join(proj, "bbbb.jsonl")
+	write(t, a, claudeLines("帮我排查搜索分页为什么会重复返回", "继续", "再看看")+edit("a.go"))
+	write(t, b, claudeLines("把登录开关的回退逻辑理一遍", "继续", "再看看"))
+	idx, err := OpenAt(cache)
+	if err != nil {
+		t.Fatal(err)
+	}
+	idx, _ = idx.Refresh()
+	if err := idx.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	if same, changed := idx.RefreshPaths([]string{a, b}); same != idx || changed != nil {
+		t.Fatalf("没变的文件只花一次 stat，快照原样返回：%v", changed)
+	}
+	if same, changed := idx.RefreshPaths([]string{filepath.Join(t.TempDir(), "x.jsonl")}); same != idx || changed != nil {
+		t.Fatalf("不是会话记录的路径不理：%v", changed)
+	}
+
+	appendTo(t, a, claudeLines("第四句")+edit("b.go"))
+	appendTo(t, b, claudeLines("第四句"))
+	c := filepath.Join(proj, "cccc.jsonl")
+	write(t, c, claudeLines("新开的会话第一句话够长", "二", "三"))
+	cx := rolloutPath(codex, 12, "dddd")
+	write(t, cx, codexLines("dddd", "/Users/me/work/env", "Codex Desktop", "把 env 仓库的 CI 修好", "二", "三"))
+	write(t, filepath.Join(codex, "session_index.jsonl"), `{"id":"dddd","thread_name":"修 env CI","updated_at":"x"}`+"\n")
+
+	next, changed := idx.RefreshPaths([]string{a, c, cx, a})
+	slices.Sort(changed)
+	if want := []string{a, c, cx}; sprintf("%q", changed) != sprintf("%q", want) {
+		t.Fatalf("变了的路径各报一次：%q", changed)
+	}
+	if f := next.files[a]; f.Turns != 4 || f.Files["/Users/me/work/webapp/b.go"] != 1 {
+		t.Fatalf("变长的文件从偏移接着读：%+v", f)
+	}
+	if f := idx.files[a]; f.Turns != 3 || f.Files["/Users/me/work/webapp/b.go"] != 0 {
+		t.Fatalf("旧快照不许被改：%+v", f)
+	}
+	if next.files[b].Turns != 3 {
+		t.Fatal("没给的文件等整盘刷新")
+	}
+	if f := next.files[c]; f == nil || f.SessionID != "cccc" || f.Provider != tend.ProviderClaude || f.Turns != 3 {
+		t.Fatalf("新的 Claude 文件按路径认出会话：%+v", f)
+	}
+	if f := next.files[cx]; f == nil || f.SessionID != "dddd" || f.Provider != tend.ProviderCodex || f.Title != "修 env CI" {
+		t.Fatalf("新的 Codex 文件带上线程名：%+v", f)
+	}
+	if err := next.Save(); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := OpenAt(cache)
+	if err != nil || reopened.files[a].Turns != 4 || reopened.files[c] == nil {
+		t.Fatalf("变化落进缓存：%v", err)
+	}
+
+	os.Remove(c)
+	gone, changed := next.RefreshPaths([]string{c})
+	if _, ok := gone.files[c]; ok || len(changed) != 1 || next.files[c] == nil {
+		t.Fatalf("不见了的文件从新快照里去掉：%v", changed)
+	}
+	full, _ := gone.Refresh()
+	if full.files[a].Turns != 4 || full.files[b].Turns != 4 || full.files[cx].Title != "修 env CI" {
+		t.Fatal("之后的整盘刷新接得上")
 	}
 }

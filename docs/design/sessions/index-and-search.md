@@ -20,7 +20,7 @@ tend 管的是本机**全部**会话，收藏只是其中打了 ★ 的一部分
 - **摘要**：收藏的用 `/tend` 写的摘要；没收藏的有回顾就用回顾（标「Claude 自动回顾」/「Codex 最后一轮的总结」），没有才用第一条提示语。回顾也进搜索。
 - **增量**：transcript 是 append-only 的，索引记「已读到的偏移」，下次只补读新增部分。缓存在
   `~/.agent/tend/sessions.jsonl`（一行一个文件，后写覆盖；旧行的字节数超过现行各行时整个重写，否则在跑的会话反复追加大行会让它膨胀）。首次全量建索引读几个 GB 要几秒，在 TUI 后台跑；
-  之后每 10 秒对照一次磁盘，稳态只是一千多次 stat。文件被清理了条目就丢。
+  之后每 10 秒对照一次磁盘，稳态只是一千多次 stat；TUI 里在跑会话的 transcript 另外每秒 stat 一次，变了的只读这几个文件（`Index.RefreshPaths`，见 [tui.md](tui.md)「跑着的会话」）。文件被清理了条目就丢。
 - **标题**：收藏的 title > Claude `/rename` 写的 `custom-title` > Claude 自动的 `ai-title` / Codex `session_index.jsonl` 的 `thread_name`
   > 第一条 ≥12 字的提示语（「继续」「ok」不配当标题）。
 - **不列**：Claude `entrypoint != cli` 的 -p/SDK 会话；Codex 由 `Claude Code` / `codex_exec` / `multica-agent-sdk` 发起的、以及带 `parent_thread_id` 的子代理线程（`capture.CodexOneOff`）；
