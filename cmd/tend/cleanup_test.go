@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -18,6 +19,10 @@ import (
 const asTend = "TEND_TEST_AS_TEND"
 
 func TestMain(m *testing.M) {
+	if name := strings.TrimSuffix(filepath.Base(os.Args[0]), ".exe"); name == "claude" || name == "codex" {
+		fmt.Fprintln(os.Stderr, "tend test stub: "+name+" is not available here")
+		os.Exit(1)
+	}
 	if os.Getenv(asTend) == "1" {
 		main()
 		os.Exit(0)

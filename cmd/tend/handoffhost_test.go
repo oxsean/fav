@@ -42,6 +42,7 @@ func twoHomes(t *testing.T) (self, peer *fixture.Dataset, launcher func(*fixture
 		if err := (*d).WriteLaunchers(os.Args[0]); err != nil {
 			t.Fatal(err)
 		}
+		linkStubs(t, *d)
 	}
 	t.Setenv(asTend, "1")
 	t.Setenv("TEND_HOME", self.Home)
@@ -51,6 +52,27 @@ func twoHomes(t *testing.T) (self, peer *fixture.Dataset, launcher func(*fixture
 		{"name": "self", "tend": []string{launcher(self)}}, {"name": "peer", "tend": []string{launcher(peer)}}}})
 	writeConfig(t, peer, map[string]any{"lang": "en", "node": map[string]any{"allow_dirs": []string{peer.Work}}})
 	return self, peer, launcher
+}
+
+// linkStubs makes the launchers' claude and codex stubs links to this test binary, which TestMain turns into a failing
+// CLI: ⚠️ a freshly written script is checked by macOS the first time it runs, for seconds under load, and the
+// environment read runs `<cli> --version` under a timeout.
+func linkStubs(t *testing.T, d *fixture.Dataset) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		return
+	}
+	for _, name := range []string{"claude", "codex"} {
+		stub := filepath.Join(d.Root, "stubs", name)
+		if err := os.Remove(stub); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Link(os.Args[0], stub); err != nil {
+			if err := os.Symlink(os.Args[0], stub); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
 }
 
 func writeConfig(t *testing.T, d *fixture.Dataset, cfg map[string]any) {
