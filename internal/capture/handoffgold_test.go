@@ -1,12 +1,12 @@
 package capture
 
 import (
+	"bytes"
 	"encoding/json"
 	"flag"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -85,8 +85,11 @@ func TestRemotePackNamesTheMachineNotTheTranscript(t *testing.T) {
 	}
 	b, _ := json.Marshal(f)
 	var back HandoffFacts
-	if err := json.Unmarshal(b, &back); err != nil || !reflect.DeepEqual(back, f) {
-		t.Fatalf("facts round trip: %+v %v", back, err)
+	if err := json.Unmarshal(b, &back); err != nil {
+		t.Fatal(err)
+	}
+	if again, _ := json.Marshal(back); !bytes.Equal(again, b) { // ⚠️ not DeepEqual: a decoded time carries another Location
+		t.Fatalf("facts round trip:\n%s\n%s", b, again)
 	}
 	to := HandoffTarget{Source: "studio", SourceHome: "/home/dev", Dir: `D:\work\proj`, Home: `C:\Users\dev`}
 	pack := RenderHandoff(back, to)
