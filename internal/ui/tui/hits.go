@@ -11,17 +11,19 @@ import (
 	"github.com/oxsean/fav/internal/fulltext"
 	"github.com/oxsean/fav/internal/i18n"
 	"github.com/oxsean/fav/internal/paths"
+	"github.com/oxsean/fav/internal/remote"
 	"github.com/oxsean/fav/internal/render"
 	"github.com/oxsean/fav/internal/tend"
+	"github.com/oxsean/fav/internal/wire"
 )
 
 // hitList: → on a message-search result lists every hit of that session in the left pane; the right pane follows the selection.
 type hitList struct {
 	rec      *tend.Rec
-	key      string // rec.Key(): records are rebuilt on a store reload
+	key      string // msgKey(rec): records are rebuilt on a store reload
 	q        string
 	items    []fulltext.Hit
-	self     map[string]bool // item paths the right pane reads (the newest transcript, or its pinned hard link)
+	self     map[string]bool // item paths the right pane reads (the newest transcript, or its pinned hard link; another machine's: its file id)
 	loading  bool
 	total    int                // every match; items holds the newest hitLimit
 	cancel   context.CancelFunc // the read in flight
@@ -38,7 +40,7 @@ const (
 
 func (m *Model) hitsOpen() bool {
 	hl, r := &m.msg.hl, m.current()
-	if hl.key == "" || r == nil || r.Key() != hl.key || hl.q != m.findQuery() {
+	if hl.key == "" || r == nil || msgKey(r) != hl.key || hl.q != m.findQuery() {
 		return false
 	}
 	hl.rec = r
@@ -51,16 +53,15 @@ func (m *Model) openHits(kw string) tea.Cmd {
 	if r == nil || kw == "" {
 		return nil
 	}
-	if r.Host != "" { // another machine's text is not in the local store: step through what the pane has loaded
-		m.jumpHit(0)
-		return nil
+	if r.Host != "" { // another machine's text is not in the local store: its hits come from there
+		return m.openFarHits(r, kw)
 	}
 	paths := fulltext.Cands([]*tend.Rec{r}, m.idx.PathsBySession())[0].Paths
 	var pin fulltext.Hit
 	if x, ok := m.msgHit(r); ok {
 		pin = fulltext.Hit{Path: x.Path, Off: x.Off}
 	}
-	key, dir, tr := r.Key(), fulltext.Dir(), transcript(r)
+	key, dir, tr := msgKey(r), fulltext.Dir(), transcript(r)
 	var loaded []capture.Message // the right pane's messages: a live session's newest may not be in the text store yet
 	if p := m.probes[r]; p != nil {
 		loaded = p.msgs
@@ -74,7 +75,7 @@ func (m *Model) openHits(kw string) tea.Cmd {
 		if fresh := freshHits(dir, tr, kw, loaded); len(fresh) > 0 {
 			items, total = append(fresh, items...), total+len(fresh)
 		}
-		return hitsMsg{key, kw, pin, items, total}
+		return hitsMsg{key: key, q: kw, pin: pin, items: items, total: total}
 	}
 }
 
@@ -104,11 +105,22 @@ type hitsMsg struct {
 	pin    fulltext.Hit
 	items  []fulltext.Hit
 	total  int
+	err    error // another machine's hits could not be read
 }
 
 func (m *Model) applyHits(msg hitsMsg) tea.Cmd {
 	hl := &m.msg.hl
 	if msg.key != hl.key || msg.q != hl.q || !hl.loading {
+		return nil
+	}
+	if msg.err != nil {
+		host := hl.rec.Host
+		m.closeHits()
+		if wire.Code(msg.err) == wire.CodeUnknownMethod { // its tend has no hits: step through what the pane has loaded
+			m.jumpHit(0)
+			return nil
+		}
+		m.flash(i18n.F("remote.unreachable", host, remote.Reason(msg.err)))
 		return nil
 	}
 	if len(msg.items) == 0 {
@@ -121,7 +133,11 @@ func (m *Model) applyHits(msg hitsMsg) tea.Cmd {
 	cur := 0
 	for i, h := range msg.items {
 		if _, ok := hl.self[h.Path]; !ok {
-			hl.self[h.Path] = paths.SameFile(h.Path, tr)
+			if hl.rec.Host != "" {
+				hl.self[h.Path] = m.farSelf(hl.rec, h.Path)
+			} else {
+				hl.self[h.Path] = paths.SameFile(h.Path, tr)
+			}
 		}
 		if h.Path == msg.pin.Path && h.Off == msg.pin.Off && cur == 0 {
 			cur = i

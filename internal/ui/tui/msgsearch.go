@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"hash/fnv"
@@ -15,7 +16,7 @@ import (
 	"github.com/oxsean/fav/internal/fulltext"
 	"github.com/oxsean/fav/internal/i18n"
 	"github.com/oxsean/fav/internal/index"
-	"github.com/oxsean/fav/internal/paths"
+	"github.com/oxsean/fav/internal/remote"
 	"github.com/oxsean/fav/internal/tend"
 )
 
@@ -26,10 +27,12 @@ import (
 const msgDebounce = 150 * time.Millisecond
 
 type msgState struct {
-	res     map[string]fulltext.Result // hits of the finished search, by Rec.Key (records are rebuilt on a store reload)
-	order   []string                   // ranked
-	key     string                     // search the results belong to
-	want    string                     // search asked for (debounced / running)
+	res     map[string]found // hits of the finished searches, by msgKey (records are rebuilt on a store reload)
+	order   []string         // ranked, this machine's and the other machines' merged
+	local   []msgItem        // this machine's ranked hits
+	far     farSearch
+	key     string // search the results belong to
+	want    string // search asked for (debounced / running)
 	seq     int
 	busy    bool
 	cancel  context.CancelFunc
@@ -95,15 +98,15 @@ func (m *Model) findQuery() string {
 	return m.msgKeywords()
 }
 
-// msgRows are the candidates that hold every keyword, in rank order.
+// msgRows are the candidates that hold every keyword and the other machines' hits, in rank order.
 func (m *Model) msgRows(recs []*tend.Rec) []row {
 	in := make(map[string]*tend.Rec, len(recs))
 	for _, r := range recs {
-		in[r.Key()] = r
+		in[msgKey(r)] = r
 	}
 	var out []row
 	for _, k := range m.msg.order {
-		if r := in[k]; r != nil {
+		if r := cmp.Or(in[k], m.msg.far.rows[k]); r != nil {
 			out = append(out, row{rec: r})
 		}
 	}
@@ -117,13 +120,49 @@ func (m *Model) msgRows(recs []*tend.Rec) []row {
 	return out
 }
 
-func (m *Model) msgHit(r *tend.Rec) (fulltext.Result, bool) {
-	x, ok := m.msg.res[r.Key()]
+func (m *Model) msgHit(r *tend.Rec) (found, bool) {
+	x, ok := m.msg.res[msgKey(r)]
 	return x, ok
 }
 
-// issueMsgSearch schedules a search when the query, scope or store changed; runs after every Update.
+// found is a session's hits: a remote one's transcript is named by file (fileio.ID there), not Path.
+type found struct {
+	fulltext.Result
+	file string
+}
+
+type msgItem struct {
+	key string
+	rec *tend.Rec
+	found
+}
+
+// msgKey: results key by machine and session, so records rebuilt on a store reload still match.
+func msgKey(r *tend.Rec) string { return r.Host + "\x00" + r.Key() }
+
+// mergeMsg ranks this machine's hits and every answered machine's as sessions.grep does.
+func (m *Model) mergeMsg() {
+	lists := [][]msgItem{m.msg.local}
+	for _, name := range m.msg.far.machines {
+		if a := m.msg.far.answers[name]; a != nil {
+			lists = append(lists, a.items)
+		}
+	}
+	items := remote.Interleave(lists, func(x msgItem) bool { return x.AllInOne }, 0)
+	m.msg.res, m.msg.order = make(map[string]found, len(items)), make([]string, 0, len(items))
+	for _, x := range items {
+		m.msg.res[x.key] = x.found
+		m.msg.order = append(m.msg.order, x.key)
+	}
+}
+
+// issueMsgSearch schedules this machine's search when the query, scope or store changed, and the other machines'
+// when the query or the machines shown changed; runs after every Update.
 func (m *Model) issueMsgSearch() tea.Cmd {
+	return tea.Batch(m.issueLocalSearch(), m.issueFarSearch())
+}
+
+func (m *Model) issueLocalSearch() tea.Cmd {
 	key := ""
 	if kw := m.msgKeywords(); kw != "" {
 		q, _ := m.msgQuery()
@@ -139,7 +178,7 @@ func (m *Model) issueMsgSearch() tea.Cmd {
 	}
 	m.msg.seq++
 	if key == "" {
-		m.msg.res, m.msg.order, m.msg.key, m.msg.busy, m.msg.shownQ = nil, nil, "", false, ""
+		m.msg.res, m.msg.order, m.msg.local, m.msg.key, m.msg.busy, m.msg.shownQ = nil, nil, nil, "", false, ""
 		return nil
 	}
 	m.msg.busy = true
@@ -175,13 +214,17 @@ func (m *Model) applyMsgResult(msg msgResultMsg) tea.Cmd {
 		return nil
 	}
 	m.msg.busy, m.msg.key, m.msg.cancel = false, msg.key, nil
-	m.msg.res = make(map[string]fulltext.Result, len(msg.res))
-	m.msg.order = m.msg.order[:0]
+	m.msg.local = make([]msgItem, 0, len(msg.res))
 	for _, x := range msg.res {
-		k := msg.recs[x.Cand].Key()
-		m.msg.res[k] = x
-		m.msg.order = append(m.msg.order, k)
+		r := msg.recs[x.Cand]
+		m.msg.local = append(m.msg.local, msgItem{msgKey(r), r, found{Result: x}})
 	}
+	return m.showMsgResults()
+}
+
+// showMsgResults lists the merged results; new keywords start at the top and land on the first result's hit.
+func (m *Model) showMsgResults() tea.Cmd {
+	m.mergeMsg()
 	if q, _ := m.msgQuery(); q != m.msg.shownQ {
 		m.msg.shownQ, m.msg.toTop = q, true
 	}
@@ -275,8 +318,11 @@ func (m *Model) msgTitle() string {
 			key = "msg.title_typing" // n/N would type into the box
 		}
 		also := ""
-		if fixes := queryOf(m.msgKeywords()).Fixes(); len(fixes) > 0 {
+		if fixes := m.msgFixes(); len(fixes) > 0 {
 			also = i18n.F("msg.also", strings.Join(fixes, " "))
+		}
+		if note := m.farNote(); note != "" {
+			also += " · " + note
 		}
 		title = i18n.F(key, len(m.rows), hits, also, by)
 	}
@@ -324,7 +370,7 @@ func (m *Model) landHit() tea.Cmd {
 		return nil
 	}
 	m.msg.landQ = m.msgKeywords()
-	if x, ok := m.msgHit(r); ok && x.Off >= 0 && paths.SameFile(x.Path, transcript(r)) {
+	if x, ok := m.msgHit(r); ok && x.Off >= 0 && m.inPane(r, x) {
 		return m.showOff(x.Off)
 	}
 	return m.findHit(0)

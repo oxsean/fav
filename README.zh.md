@@ -340,10 +340,11 @@ tend hosts rm <名字…> · tend hosts clear [名字…]   # 删掉机器 / 清
 
 ```bash
 tend sessions host:all                   # 所有机器；host:mba 只看它；不写 host: 只看本机
+tend grep '回调 host:all'                 # 搜消息也搜那几台；没搜全的机器在 stderr 说原因
 tend show mba:<id> · tend resume mba:<id> # 远端会话：预览和检查来自那台机器，恢复执行 `ssh -t mba tend resume …`
 ```
 
-TUI 里用机器筹码（`m`）选本机、全部或某一台；远端行带 `@名字`，预览和 Agents 从那台机器读，恢复在新的 Herdr tab 或当前终端里开 `ssh -t`。远端行上的收藏、状态、归档、编辑（`f` `x` `a` `e`，`u` 撤销）经那台机器上的 tend 写到那边；`tend favorite`、`status`、`done`、`archive`、`edit` 和 fzf 的开关给 `host:id` 也一样。远端行上 `D` 把会话移进那台机器的回收站（在跑的拒绝），回收站筛选里列出各台机器的回收站，`D` 还原；`tend rm host:id` 和 `tend trash --restore host:id` 也一样。那台的 tend 太旧时提示先 `tend hosts install <名字>`。搬目录到会话自己的机器上做。筛选里看得到的机器每 30 秒在后台取一次列表（失败后间隔翻倍，最长 5 分钟），缓存在 `~/.agent/tend/hosts/`；连不上时显示缓存的行和“离线 · 多久前”。
+TUI 里用机器筹码（`m`）选本机、全部或某一台；远端行带 `@名字`，预览和 Agents 从那台机器读，恢复在新的 Herdr tab 或当前终端里开 `ssh -t`。远端行上的收藏、状态、归档、编辑（`f` `x` `a` `e`，`u` 撤销）经那台机器上的 tend 写到那边；`tend favorite`、`status`、`done`、`archive`、`edit` 和 fzf 的开关给 `host:id` 也一样。远端行上 `D` 把会话移进那台机器的回收站（在跑的拒绝），回收站筛选里列出各台机器的回收站，`D` 还原；`tend rm host:id` 和 `tend trash --restore host:id` 也一样。那台的 tend 太旧时提示先 `tend hosts install <名字>`。搬目录到会话自己的机器上做。搜消息（`>`）也经那边的 tend 搜筛选里看得到的机器：哪台答了，它的命中就和本机的一起排进列表（停顿一下或离开搜索框才发出去），`→` 列出远端会话的全部命中；没搜全的机器（离线、tend 旧、正文库还在建）在列表标题里写明。筛选里看得到的机器每 30 秒在后台取一次列表（失败后间隔翻倍，最长 5 分钟），缓存在 `~/.agent/tend/hosts/`；连不上时显示缓存的行和“离线 · 多久前”。
 
 配了 server（`coordinator.url`，即下面的模式二）时，别的机器改经 server 读，不走 ssh：列出 server 让你读的机器（你自己的，和别人共享给你的），去掉本机。只有你自己机器的列表缓存到盘上；连不上 server 时它们显示缓存并标离线，顶栏合成一句“连不上 server”，共享来的不显示。恢复只对你自己的、这里有同名 ssh 主机且就是那台（节点 id 对上）的机器走 ssh；否则对话框给在那台机器上执行的命令，供复制。你自己机器的行照上面那样经 server 改；别人共享来的行标“只读 · 主人”（写主人的名字）：Enter 看对话，不能恢复、不能建成任务，收藏和标签也改不了；谁能看会话在网页上设。机器换了主人或改成共享时，它在盘上的旧缓存删掉。这种模式下 fzf 只列你自己的机器，共享来的在 `tend tui` 里看。
 

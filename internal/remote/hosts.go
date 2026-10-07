@@ -124,15 +124,8 @@ func (h *Hosts) Sessions(ctx context.Context, name string) ([]*tend.Rec, State) 
 // expect is the record's updated_at the editor saw: name answers stale when it has been written since. A tend whose
 // hello lists no put is not sent it: unknown_method, with its version as the detail.
 func (h *Hosts) Put(ctx context.Context, name string, ref Ref, p tend.Patch, expect *time.Time) (*tend.Rec, error) {
-	hello, err := h.t.Hello(ctx, name)
-	if err != nil {
-		return nil, err
-	}
-	if !slices.Contains(hello.Methods, MPut) {
-		return nil, &wire.Error{Code: wire.CodeUnknownMethod, Detail: hello.Version}
-	}
 	var row Row
-	if err := h.Call(ctx, name, MPut, PutParams{Ref: ref, Patch: p, Expect: expect}, &row); err != nil {
+	if err := h.callIfKnown(ctx, name, MPut, PutParams{Ref: ref, Patch: p, Expect: expect}, &row); err != nil {
 		return nil, err
 	}
 	h.putMu.Lock() // one rewrite of a cached list at a time

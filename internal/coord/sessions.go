@@ -4,7 +4,6 @@ import (
 	"cmp"
 	"context"
 	"errors"
-	"maps"
 	"slices"
 	"strings"
 	"sync"
@@ -139,8 +138,6 @@ const (
 	sessionsLimit = 100
 	grepLimit     = 50
 	pageMax       = 500
-	// grepBudget is the time a node searches before it answers with what it found; within machineWait.
-	grepBudget = 3 * time.Second
 )
 
 // machineWait bounds each machine's answer: a slow one is told as timeout, the others answer meanwhile.
@@ -184,18 +181,9 @@ func (c *Coord) sessionMachines(p Principal, host string, words bool) []*session
 		if !m.seenAt.IsZero() {
 			s.since = new(m.seenAt)
 		}
-		for _, id := range slices.Sorted(maps.Keys(seen)) {
-			pr := seen[id]
-			var dirs []string
-			for _, r := range pr.Repos {
-				if d := r.Dirs[name]; d != "" {
-					dirs = append(dirs, d)
-				}
-			}
-			if len(dirs) > 0 {
-				s.projects[id] = pr
-				s.dirs = append(s.dirs, remote.ProjectDirs{ID: pr.ID, Name: pr.Name, Dirs: dirs})
-			}
+		s.dirs = remote.ProjectDirsOn(seen, name)
+		for _, d := range s.dirs {
+			s.projects[d.ID] = seen[d.ID]
 		}
 		out = append(out, s)
 	}
@@ -570,41 +558,8 @@ func (c *Coord) sessionsGrep(ctx context.Context, p Principal, r *wire.Request) 
 		}
 		found.TooLong = found.TooLong || part.tooLong
 	}
-	found.Hits = interleave(lists, limit)
+	found.Hits = remote.Interleave(lists, func(h SessionHit) bool { return h.AllInOne }, limit)
 	return found, nil
-}
-
-// interleave merges each machine's ranked hits: those matching every keyword in one message first, then the rest; in
-// each tier every machine's first before any machine's second.
-func interleave(lists [][]SessionHit, limit int) []SessionHit {
-	out := []SessionHit{}
-	for _, whole := range []bool{true, false} {
-		var tiers [][]SessionHit
-		for _, l := range lists {
-			var tier []SessionHit
-			for _, h := range l {
-				if h.AllInOne == whole {
-					tier = append(tier, h)
-				}
-			}
-			tiers = append(tiers, tier)
-		}
-		for rank := 0; ; rank++ {
-			took := false
-			for _, tier := range tiers {
-				if rank < len(tier) {
-					if len(out) == limit {
-						return out
-					}
-					out, took = append(out, tier[rank]), true
-				}
-			}
-			if !took {
-				break
-			}
-		}
-	}
-	return out
 }
 
 // grepMachine is s's part of a sessions.grep; a node without grep is not searched.
@@ -621,7 +576,7 @@ func (c *Coord) grepMachine(ctx context.Context, s *sessionsOf, sg SessionsGrep,
 		return out
 	}
 	var res remote.GrepResult
-	err := c.call(ctx, s.name, remote.MGrep, remote.GrepParams{Q: sent, All: sg.All, Limit: limit, BudgetMS: int(grepBudget / time.Millisecond),
+	err := c.call(ctx, s.name, remote.MGrep, remote.GrepParams{Q: sent, All: sg.All, Limit: limit, BudgetMS: int(remote.GrepBudget / time.Millisecond),
 		Projects: s.dirs, Also: s.also}, &res)
 	if err != nil {
 		c.failedAnswer(&out.answer, s, err)

@@ -1,12 +1,14 @@
 package main
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"flag"
 	"fmt"
 	"os"
 	"os/exec"
+	"slices"
 	"strings"
 	"time"
 
@@ -15,6 +17,7 @@ import (
 	"github.com/oxsean/fav/internal/i18n"
 	"github.com/oxsean/fav/internal/index"
 	"github.com/oxsean/fav/internal/proc"
+	"github.com/oxsean/fav/internal/remote"
 	"github.com/oxsean/fav/internal/render"
 	"github.com/oxsean/fav/internal/tend"
 )
@@ -56,7 +59,27 @@ func cmdGrep(args []string) error {
 	if err != nil {
 		return err
 	}
-	res := found.Results[:limited(len(found.Results), *limit)]
+	lists := [][]grepRow{make([]grepRow, len(found.Results))}
+	for i, x := range found.Results {
+		lists[0][i] = grepRow{recs[x.Cand], x.Hits, x.Snippet, x.AllInOne}
+	}
+	fixes := found.Fixes
+	for _, g := range grepHosts(query, tend.Parse(scope), *limit) {
+		if gap := g.Gap(); gap != "" {
+			fmt.Fprintln(os.Stderr, i18n.F("remote.down", g.Machine, gap))
+		}
+		var l []grepRow
+		for _, h := range g.Result.Hits {
+			l = append(l, grepRow{h.Row.Session.Rec(g.Machine), h.Hits, h.Snippet, h.AllInOne})
+		}
+		lists = append(lists, l)
+		for _, f := range g.Result.Fixes {
+			if !slices.Contains(fixes, f) {
+				fixes = append(fixes, f)
+			}
+		}
+	}
+	res := remote.Interleave(lists, func(r grepRow) bool { return r.whole }, *limit)
 
 	if *asJSON {
 		type row struct {
@@ -66,27 +89,60 @@ func cmdGrep(args []string) error {
 		}
 		rows := make([]row, len(res))
 		for i, x := range res {
-			rows[i] = row{recs[x.Cand], x.Hits, x.Snippet}
+			rows[i] = row{x.rec, x.hits, x.snippet}
 		}
 		return printJSON(rows)
 	}
-	if len(found.Fixes) > 0 {
-		fmt.Println(strings.TrimPrefix(i18n.F("msg.also", strings.Join(found.Fixes, " ")), " · ") + "\n")
+	if len(fixes) > 0 {
+		fmt.Println(strings.TrimPrefix(i18n.F("msg.also", strings.Join(fixes, " ")), " · ") + "\n")
 	}
 	now := time.Now()
 	w := min(termWidth(), 120)
 	for _, x := range res {
-		r := recs[x.Cand]
-		hits := i18n.F("cli.grep.hits", x.Hits)
+		r := x.rec
+		hits := i18n.F("cli.grep.hits", x.hits)
 		fmt.Println(render.Truncate(r.Title, max(8, w-render.Width(hits)-2)) + "  " + hits)
 		fmt.Println("  " + render.Truncate(render.Meta(r)+" · "+render.When(r.When(), now)+" · "+shortID(r.SessionID), w-2))
-		for _, l := range render.Wrap(x.Snippet, w-4) {
+		for _, l := range render.Wrap(x.snippet, w-4) {
 			fmt.Println("    " + l)
 		}
 		fmt.Println()
 	}
 	fmt.Print(i18n.F("cli.items_count", len(res)))
 	return nil
+}
+
+// grepRow is a session holding every keyword, here or on another machine.
+type grepRow struct {
+	rec     *tend.Rec
+	hits    int
+	snippet string
+	whole   bool // one message holds every keyword
+}
+
+// grepHosts searches the other machines q's host: picks, as the TUI does; the server first in mode 2.
+func grepHosts(query string, q tend.Query, limit int) []remote.Grepped {
+	if !selectsHosts(q) || q.Status == tend.StatusTrash || q.Status == tend.StatusAgent {
+		return nil
+	}
+	h, far := remoteHosts(), farHosts()
+	names := hostsOf(h, q)
+	if len(names) == 0 {
+		return nil
+	}
+	if err := far.reach(); err != nil {
+		fmt.Fprintln(os.Stderr, i18n.F("remote.server_down", remote.Reason(err)))
+		return nil
+	}
+	snap := sessionProjects()
+	return h.GrepAll(context.Background(), names, func(name string) remote.GrepParams {
+		p := remote.GrepParams{Q: query, All: true, Limit: min(cmp.Or(limit, remote.GrepLimit), remote.GrepMax),
+			BudgetMS: int(remote.GrepBudget / time.Millisecond)}
+		if snap.Ready() {
+			p.Projects = remote.ProjectDirsOn(snap.Projects, name)
+		}
+		return p
+	}, remote.GrepWait)
 }
 
 // grep runs a message search over the sessions scope picks; results index into the returned records.

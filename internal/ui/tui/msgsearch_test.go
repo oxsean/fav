@@ -323,9 +323,9 @@ func TestOTogglesNewestHitFirst(t *testing.T) {
 	if m.rows[0].rec != recs[2] {
 		t.Fatalf("relevance first: %v", m.rows[0].rec.Title)
 	}
-	x := m.msg.res[recs[0].Key()]
+	x := m.msg.res[msgKey(recs[0])]
 	x.Latest = time.Now()
-	m.msg.res[recs[0].Key()] = x
+	m.msg.res[msgKey(recs[0])] = x
 	m.typing = false
 	m.search.Blur()
 	m.Update(press("o"))

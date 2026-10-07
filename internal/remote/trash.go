@@ -57,17 +57,9 @@ func (h *Hosts) Trashed(ctx context.Context, name string) (recs []*tend.Rec, day
 	}
 }
 
-// callIf calls method on name when name's hello lists it and the trash methods; an older tend answers unknown_method
-// here, with its version as the detail.
+// callIf is callIfKnown for the trash methods: name's hello lists trash too.
 func (h *Hosts) callIf(ctx context.Context, name, method string, params, out any) error {
-	hello, err := h.t.Hello(ctx, name)
-	if err != nil {
-		return err
-	}
-	if !slices.Contains(hello.Methods, method) || !slices.Contains(hello.Methods, MTrash) {
-		return &wire.Error{Code: wire.CodeUnknownMethod, Detail: hello.Version}
-	}
-	return h.Call(ctx, name, method, params, out)
+	return h.callIfKnown(ctx, name, method, params, out, MTrash)
 }
 
 // TooOld says host's tend is too old for method.
