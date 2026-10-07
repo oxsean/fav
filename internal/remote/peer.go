@@ -1,6 +1,7 @@
 package remote
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"slices"
@@ -73,14 +74,20 @@ func (p Peer) Call(ctx context.Context, method string, params, out any) error {
 }
 
 // End is p as a path mapping needs it.
-func (p Peer) End() pathmap.End {
-	return pathmap.End{OS: p.Hello.OS, Home: p.Hello.Home, Host: p.Hello.Hostname, WSL: p.Hello.WSL != ""}
+func (p Peer) End() pathmap.End { return p.Hello.End() }
+
+// End is the machine that greets with h as a path mapping needs it.
+func (h Hello) End() pathmap.End {
+	return pathmap.End{OS: h.OS, Home: h.Home, Host: h.Hostname, WSL: h.WSL != ""}
 }
 
-// Ref names p for the other end.
+// Label is p as the caller names it, else as it names itself.
+func (p Peer) Label() string { return cmp.Or(p.Name, p.Hello.Hostname, p.Hello.Endpoint) }
+
+// Ref names p for the other end: as the caller names it, this machine by its host name.
 func (p Peer) Ref() PeerRef {
 	e := p.End()
-	return PeerRef{Name: p.Name, Endpoint: p.Hello.Endpoint, NodeID: p.Hello.NodeID, End: End{OS: e.OS, Home: e.Home, Host: e.Host, WSL: e.WSL}}
+	return PeerRef{Name: p.Label(), Endpoint: p.Hello.Endpoint, NodeID: p.Hello.NodeID, End: End{OS: e.OS, Home: e.Home, Host: e.Host, WSL: e.WSL}}
 }
 
 // Same: p and q are one machine.

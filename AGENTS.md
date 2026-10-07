@@ -79,6 +79,7 @@ A hung TUI: on macOS `sample <pid>` prints its stacks; SIGQUIT prints them to th
 | `internal/capture` | current-session detection, resume commands (`CommandSpec`), paged transcript reading (`Messages`), who is running (`live.go`) |
 | `internal/wire` | the protocol: JSON frames over any two-way stream, either end may call, answers out of order, cancel, keepalive |
 | `internal/remote` | other machines' sessions over `wire`: methods and types (`proto.go`), answering side (`local.go`), ssh `Client`, `Hosts` cache, `Source` |
+| `internal/migrate` | a Claude session's whole migration, each machine's half: the manifest (`manifest.go`), the source's plan and reads (`export.go`), the target's staging (`stage.go`), commit and abort (`commit.go`), `migrations.jsonl` (`record.go`), copy relations and changes (`changed.go`), the migration note, first-resume message and reminder (`note.go`); the drivers that call both ends are in `internal/remote` (`migrate.go`) |
 | `internal/envcheck` | a machine's environment for agents and how two compare: `Collect` (CLIs, git, instruction files, skills, MCP, project settings, provider: names, versions and hashes from a fixed list of files and keys, never contents or values), `SeenOf` (what a session saw, from the index's `Env`), `Compare` (block, unequal, hint, each with its evidence); `FileText` serves only the instruction files `Collect` lists |
 | `internal/agent` | provider adapters (claude, codex, fake, command): launch, resume, fork, capabilities |
 | `internal/output` | a run's `output.log` read into events: the one reader of claude, codex and plain text, tool families and titles, turns, the timeline's grouping; `agent.OwnReport` tells the run's own reports |
@@ -110,7 +111,7 @@ A hung TUI: on macOS `sample <pid>` prints its stacks; SIGQUIT prints them to th
 | `internal/ui/fzf`, `internal/render` | `docs/design/sessions/fzf.md` |
 | `internal/capture`, `internal/herdr` | `docs/design/sessions/resume.md`, `docs/design/sessions/external-behaviour.md` |
 | `cmd/tend` | `docs/design/sessions/cli-and-config.md`; task and run commands `docs/design/runs/clients.md` |
-| `internal/memory` | `docs/design/sessions/migration.md` |
+| `internal/memory`, `internal/migrate` | `docs/design/sessions/migration.md` |
 | `internal/remote`, `internal/envcheck`, `tend hosts` | `docs/design/sessions/remote.md`, `docs/design/sessions/migration.md` |
 | `internal/wire`, `internal/dial` | `docs/design/runs/wire.md` |
 | `internal/journal`, `internal/task`, `internal/coord` | `docs/design/runs/coordinator.md`; the task features they carry in `docs/design/tasks/` |

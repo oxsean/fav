@@ -21,6 +21,7 @@ import (
 	"github.com/oxsean/fav/internal/fulltext"
 	"github.com/oxsean/fav/internal/i18n"
 	"github.com/oxsean/fav/internal/index"
+	"github.com/oxsean/fav/internal/migrate"
 	"github.com/oxsean/fav/internal/task"
 	"github.com/oxsean/fav/internal/tend"
 	"github.com/oxsean/fav/internal/wire"
@@ -41,7 +42,7 @@ type localHandler struct {
 
 var methods = []string{MHello, MList, MMessages, MText, MSteps, MPulse, MChecks, MLive, MEcho, MQuery, MPut, MGrep, MHits, MTrash, MRestore,
 	MMemoryList, MMemoryRead, MMemoryTrash, MMemoryRestore, MMemoryPut, MHandoffFacts, MHandoffPut,
-	MEnv, MEnvFile}
+	MEnv, MEnvFile, MExportPlan, MExportRead, MExportDone, MCopies, MImportBegin, MImportChunk, MImportCommit, MImportAbort}
 
 // Scoped is a Handler that answers a method over some of this machine's sessions only: keep names them by session id.
 type Scoped interface {
@@ -264,7 +265,7 @@ func (h *localHandler) list() (List, error) {
 	if err := h.load(0); err != nil {
 		return List{}, err
 	}
-	var rows index.Rows
+	rows := index.Rows{Copies: migrate.Marks()}
 	recs, err := rows.List(h.store, h.idx, h.unfav, nil, tend.Query{Status: "all", All: true, Host: tend.HostLocal})
 	if err != nil {
 		return List{}, err
@@ -349,7 +350,7 @@ func (h *localHandler) query(p QueryParams, keep func(string) bool) (QueryResult
 	if err := h.load(freshness(p.Fresh)); err != nil {
 		return QueryResult{}, err
 	}
-	rows := index.Rows{Belong: belong(p.Projects)}
+	rows := index.Rows{Belong: belong(p.Projects), Copies: migrate.Marks()}
 	recs, err := rows.List(h.store, h.idx, h.unfav, live, q.Scope())
 	if err != nil {
 		return QueryResult{}, err
@@ -561,7 +562,7 @@ func (h *localHandler) grep(ctx context.Context, p GrepParams, keep func(string)
 		h.mu.Unlock()
 		return GrepResult{}, err
 	}
-	rows := index.Rows{Belong: belong(p.Projects)}
+	rows := index.Rows{Belong: belong(p.Projects), Copies: migrate.Marks()}
 	recs, err := rows.List(h.store, h.idx, h.unfav, live, sq)
 	if err != nil {
 		h.mu.Unlock()

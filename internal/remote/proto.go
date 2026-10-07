@@ -149,7 +149,18 @@ func SessionOf(r *tend.Rec) Session {
 		GitBranch: r.GitBranch, GitRemote: r.GitRemote, Repo: r.Repo, Transcript: r.TranscriptPath, Pinned: r.PinnedPath,
 		StartedAt: r.SessionStartedAt, FavoritedAt: r.FavoritedAt, ArchivedAt: r.ArchivedAt, UpdatedAt: r.UpdatedAt,
 		ResumedAt: r.LastResumedAt, Resumes: r.ResumeCount, LastAt: r.LastAt, Turns: r.Turns, Msgs: r.Msgs, App: r.App,
-		CodexArchived: r.CodexArchived, Recap: r.Recap, Files: r.Files}
+		CodexArchived: r.CodexArchived, Recap: r.Recap, Files: r.Files, Copies: copiesOf(r.Copies)}
+}
+
+func copiesOf(cs []tend.Copy) []Copy {
+	if len(cs) == 0 {
+		return nil
+	}
+	out := make([]Copy, len(cs))
+	for i, c := range cs {
+		out[i] = Copy{Migration: c.Migration, Role: c.Role, State: c.State, Peer: PeerRef{Name: c.Peer, Endpoint: c.Endpoint}, At: c.At}
+	}
+	return out
 }
 
 // Rec is s as a record of host.
@@ -164,6 +175,10 @@ func (s Session) Rec(host string) *tend.Rec {
 		if t != nil {
 			*t = t.Local()
 		}
+	}
+	for _, c := range s.Copies {
+		r.Copies = append(r.Copies, tend.Copy{Migration: c.Migration, Role: c.Role, State: c.State, Peer: c.Peer.Name,
+			Endpoint: c.Peer.Endpoint, At: c.At.Local()})
 	}
 	r.Prepare()
 	return r
@@ -340,26 +355,13 @@ type HitsResult struct {
 }
 
 // End is one machine as a path mapping needs it, from its hello (pathmap.End on the wire).
-type End struct {
-	OS   string `json:"os"`
-	Home string `json:"home"`
-	Host string `json:"host,omitempty"`
-	WSL  bool   `json:"wsl,omitempty"`
-}
+type End = migrate.End
 
-// PeerRef names the other machine of a handoff or migration as the initiator saw it.
-type PeerRef struct {
-	Name     string `json:"name"`     // display only: names differ per viewer and mode
-	Endpoint string `json:"endpoint"` // hello.endpoint: what a record matches on
-	NodeID   string `json:"node_id,omitempty"`
-	End      End    `json:"end"`
-}
+// PeerRef names the other machine of a handoff or migration as the initiator saw it; a migration record keeps it.
+type PeerRef = migrate.Peer
 
 // DirPair is a source directory and its counterpart on the target, given explicitly.
-type DirPair struct {
-	From string `json:"from"`
-	To   string `json:"to"`
-}
+type DirPair = migrate.Pair
 
 // HandoffPutParams writes a handoff pack on the target for `tend handoff --open`.
 type HandoffPutParams struct {
@@ -465,6 +467,8 @@ type ExportDoneParams struct {
 	Migration string `json:"migration"`
 	State     string `json:"state"`          // done | aborted
 	Move      bool   `json:"move,omitempty"` // done and move: the original goes to this machine's trash (index.TrashSession)
+	// Committed is, with done, the main transcript as the target committed it: recorded instead of the last plan's.
+	Committed *migrate.Sum `json:"committed,omitempty"`
 }
 
 type ExportDone struct {
@@ -475,6 +479,7 @@ type ImportBeginParams struct {
 	Migration string  `json:"migration"`
 	From      PeerRef `json:"from"`
 	Ref
+	Title    string           `json:"title,omitempty"` // the session's title on the source: the trash entry of a copy it replaces
 	Cwd      string           `json:"cwd"`             // the session's cwd on the source
 	Dir      string           `json:"dir"`             // the directory it gets here
 	Pairs    []DirPair        `json:"pairs,omitempty"` // explicit mappings the rewrite may use, Cwd → Dir first
@@ -484,6 +489,7 @@ type ImportBeginParams struct {
 type ImportBegin struct {
 	Staged    map[string]int64 `json:"staged,omitempty"`    // file → bytes held, matching the manifest's sha so far
 	Committed *Row             `json:"committed,omitempty"` // already committed: the row, nothing more to do
+	Source    *migrate.Sum     `json:"source,omitempty"`    // committed: the source's main transcript it carried
 	Clash     string           `json:"clash,omitempty"`     // "" | forward (an unchanged copy, replaced on commit) | diverged | exists
 }
 
@@ -504,9 +510,10 @@ type ImportCommitParams struct {
 }
 
 type ImportCommit struct {
-	Row      Row      `json:"row"`
-	Files    int      `json:"files"`
-	Unmapped []string `json:"unmapped,omitempty"` // cwd values no pair or home mapped, left as they were
+	Row      Row          `json:"row"`
+	Files    int          `json:"files"`
+	Source   *migrate.Sum `json:"source,omitempty"`   // the source's main transcript it carried
+	Unmapped []string     `json:"unmapped,omitempty"` // cwd values no pair or home mapped, left as they were
 }
 
 type ImportAbortParams struct {
@@ -525,4 +532,5 @@ type Copy struct {
 	Peer      PeerRef   `json:"peer"`
 	At        time.Time `json:"at"`
 	Changed   *bool     `json:"changed,omitempty"` // copies only: this side's transcript moved on since; nil unknown
+	Moved     bool      `json:"moved,omitempty"`   // copies only: the source's original went to its trash
 }

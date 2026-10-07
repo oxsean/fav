@@ -14,17 +14,24 @@ type Rows struct {
 	// Belong names the project a row's directory belongs to ("" for none); the caller brings the projects and the
 	// rule (task.ProjectOf), so this package does not depend on them. nil: every row is in none.
 	Belong func(r *tend.Rec) (id, name string)
+	// Copies are a row's migrations to and from other machines as this machine recorded them; the caller brings them
+	// (migrate.Marks), so this package does not depend on it. nil, and for another machine's row: a row keeps what it
+	// carries (a coordinator's rows carry what their node sent).
+	Copies func(r *tend.Rec) []tend.Copy
 
 	trash, agents, live map[string]*tend.Rec
 }
 
-// Place sets the project of each of recs, as List does before it matches: rows listed elsewhere (another machine's)
-// go through it too.
+// Place sets the project of each of recs, and this machine's own their migrations, as List does before it matches:
+// rows listed elsewhere (another machine's) go through it too.
 func (rs *Rows) Place(recs ...*tend.Rec) {
 	for _, r := range recs {
 		r.ProjectID, r.ProjectName = "", ""
 		if rs.Belong != nil {
 			r.ProjectID, r.ProjectName = rs.Belong(r)
+		}
+		if rs.Copies != nil && r.Host == "" {
+			r.Copies = rs.Copies(r)
 		}
 	}
 }

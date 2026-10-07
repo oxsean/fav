@@ -109,7 +109,10 @@ type Rec struct {
 	// ProjectID and ProjectName: the project its directory belongs to, filled while listing (index.Rows.Belong).
 	ProjectID   string `json:"-"`
 	ProjectName string `json:"-"`
-	extra       string
+	// Copies: its migrations to and from other machines as this machine recorded them, filled while listing
+	// (index.Rows.Copies); another machine's row carries its machine's.
+	Copies []Copy `json:"-"`
+	extra  string
 
 	hay string
 }

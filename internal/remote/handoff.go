@@ -1,7 +1,6 @@
 package remote
 
 import (
-	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -107,9 +106,7 @@ func (x *Handover) Target(dir string) capture.HandoffTarget {
 }
 
 // FromName is the session's machine as the caller names it.
-func (x *Handover) FromName() string {
-	return cmp.Or(x.From.Name, x.From.Hello.Hostname, x.From.Hello.Endpoint)
-}
+func (x *Handover) FromName() string { return x.From.Label() }
 
 // Text is the pack for a new session in dir on To.
 func (x *Handover) Text(dir string) string { return capture.RenderHandoff(x.Facts, x.Target(dir)) }

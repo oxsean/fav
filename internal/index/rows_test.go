@@ -59,3 +59,28 @@ func TestRowsPlaceEachRowBeforeMatching(t *testing.T) {
 		t.Errorf("without Belong a row is in no project")
 	}
 }
+
+// Copies hangs this machine's migrations on its own rows only: another machine's row keeps the ones its machine sent.
+func TestRowsCopiesMarkThisMachinesRows(t *testing.T) {
+	away := []tend.Copy{{Migration: "m1", Role: "to", State: "done", Peer: "mba"}}
+	rows := Rows{Copies: func(r *tend.Rec) []tend.Copy {
+		if r.SessionID == "s1" {
+			return away
+		}
+		return nil
+	}}
+	here, other := &tend.Rec{SessionID: "s1", Copies: []tend.Copy{{Migration: "old"}}}, &tend.Rec{SessionID: "s2"}
+	far := &tend.Rec{SessionID: "s1", Host: "mba", Copies: []tend.Copy{{Migration: "m1", Role: "from"}}}
+	rows.Place(here, other, far)
+	if len(here.Copies) != 1 || here.Copies[0].Migration != "m1" || other.Copies != nil {
+		t.Errorf("this machine's rows: %+v %+v", here.Copies, other.Copies)
+	}
+	if len(far.Copies) != 1 || far.Copies[0].Role != "from" {
+		t.Errorf("another machine's row lost what its machine sent: %+v", far.Copies)
+	}
+	sent := &tend.Rec{SessionID: "s1", Copies: away}
+	(&Rows{}).Place(sent)
+	if len(sent.Copies) != 1 {
+		t.Errorf("without the hook a row keeps what it carries: %+v", sent.Copies)
+	}
+}

@@ -20,7 +20,7 @@ tend 的运行层：为一份任务书在这台或别的机器上启动 agent、
 **不做**
 
 - 工单字段级双向同步、多工作区、开放注册、细粒度 RBAC。
-- 节点之间互传、跨机迁移会话（迁移的设计见 [sessions/migration.md](../sessions/migration.md)「迁移」，未实现）。
+- 节点之间互传：迁移会话的数据经发起端中转，节点只回答自己那一端的 `export.*` / `import.*`（[sessions/migration.md](../sessions/migration.md)「Claude 完整迁移」）。
 - pi / OpenCode / Grok / Gemini 的会话层（只用 command 模板接「运行」层）。
 - `claude --bg` runner、codex 交互式 runner、Tailscale 身份认证。
 - 自己的二进制帧、protobuf / gRPC 和直连数据通道：帧保持 JSON 文本（protobuf 要代码生成、二进制变大、日志没法直接看），真要压缩编码时在 `hello` 协商里加 CBOR 或二进制帧。

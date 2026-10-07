@@ -47,7 +47,7 @@
 5. 放锁、退出。
 
 - 监督进程死后（run 是 unknown）的 `run.stop`：写 `stop` 后拿 run 的 `lock` 收尾：agent 进程还在、且 pid 和 `pid_start` 都对得上 → 结束整棵进程树，写 `stopped{orphan_stopped}`；agent 已不在 → `stopped{supervisor_gone}`；认不出是不是同一个进程（没有 `pid_start`，或还在 starting 没有 pid）→ 不动，仍是 unknown。`proc.Alive` 不把僵尸进程算活着（容器的 init 不回收子进程，否则停止和 unknown 收尾会永远卡住）：Linux 读 `/proc/<pid>/stat`、macOS 用 sysctl，其它 unix 认不出僵尸。
-- `TEND_CRASH_AT=claimed|started|running|ending` 让监督进程在对应切点立即退出（测试用：写完 claim、agent 已起但没记 pid、已记 pid、agent 已退出但没记终态）。
+- `TEND_CRASH_AT=claimed|started|running|ending` 让监督进程在对应切点立即退出（测试用：写完 claim、agent 已起但没记 pid、已记 pid、agent 已退出但没记终态）。判断在 `proc.CrashAt`，会话迁移的切点用同一个变量，名字带 `migrate.` 前缀（[sessions/migration.md](../sessions/migration.md)「Claude 完整迁移」的「测试」）。
 - agent 的环境多了 `TEND_RUN` 和 `TEND_RUN_DIR`（run 目录）。
 - stdout 逐行解析（JSON 才解析）：claude `result`（最后一条消息、`is_error`、`permission_denials`），codex `thread.started`（会话 id）、`item.completed` 的 `agent_message`（最后一条消息）、`error` / `turn.failed`（错误）；claude / codex 以外的 agent，最后一行普通输出当最后一条消息。
 - 运行中每秒：读 `reports.jsonl` 新增（ask → `attention=asked` + `ask`；note → `note`，并清掉 stalled）；超过 `spec.stall_after`（节点 `node.stall_after`，默认 15 分钟，`off` 关闭）没有输出 → `attention=stalled`，再有输出就清掉；只标记，不停。输出在 background 方式下是 stdout / stderr 的字节，herdr 方式下是会话 transcript 变大；报告也算。最后一次输出的时刻按分钟写进 `output_at`。

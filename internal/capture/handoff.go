@@ -84,7 +84,11 @@ type HandoffMeta struct {
 	At       time.Time `json:"at"`
 }
 
-var handoffID = regexp.MustCompile(`^[A-Za-z0-9_-][A-Za-z0-9._-]*$`)
+var safeID = regexp.MustCompile(`^[A-Za-z0-9_-][A-Za-z0-9._-]*$`)
+
+// SafeID: id names a file as it is (ASCII letters, digits, `.`, `_`, `-`, not starting with a dot): a handoff, a
+// migration, a session id taken from another machine.
+func SafeID(id string) bool { return safeID.MatchString(id) }
 
 // PutHandoff keeps a pack another machine wrote for a new session here; the id is all `tend handoff --open` takes.
 func PutHandoff(text string, m HandoffMeta, sessionID string) (id, path string, err error) {
@@ -117,7 +121,7 @@ var unsafeID = regexp.MustCompile(`[^A-Za-z0-9_-]`)
 // OpenHandoff is the pack PutHandoff kept as id: its meta and the path of its text.
 func OpenHandoff(id string) (HandoffMeta, string, error) {
 	var m HandoffMeta
-	if !handoffID.MatchString(id) {
+	if !SafeID(id) {
 		return m, "", i18n.E("handoff.bad_id", id)
 	}
 	path := filepath.Join(handoffDir(), id+".md")

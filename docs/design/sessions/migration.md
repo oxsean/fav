@@ -2,7 +2,7 @@
 
 把会话或记忆从一台机器搬到另一台：交接式迁移、Claude 完整迁移、记忆的管理与迁移、迁移前的环境诊断，以及这部分的已定决策和待核实项。远端合同和只读聚合见 [remote.md](remote.md)。
 
-实现：本机交接包在 `internal/capture`（`handoff.go`）和 `cmd/tend`（`tend handoff`）；交接到另一台机器在 `internal/remote`（`handoff.go`、`peer.go`）和 `cmd/tend`（`handoffhost.go`）；路径映射在 `internal/pathmap`；搬项目目录的文件枚举和改写在 `internal/index`（`move.go`）；记忆的查看、删除、孤儿扫描、对比和按条写入在 `internal/memory`，节点方法 `memory.ls` / `memory.read` / `memory.trash` / `memory.restore` / `memory.put` 和两台机器之间的对比、复制（`CompareMemories`、`CopyMemory`）在 `internal/remote`（`memory.go`），命令是 `tend memory`（含 `diff`、`cp`）和 `tend doctor` 的记忆一节；环境诊断的核心维度见「迁移前的环境诊断」。本文其余部分**未实现**：完整迁移（`import.*`）、交接包里的记忆条目、环境诊断的其余维度和界面，代码里都还没有。
+实现：本机交接包在 `internal/capture`（`handoff.go`）和 `cmd/tend`（`tend handoff`）；交接到另一台机器在 `internal/remote`（`handoff.go`、`peer.go`）和 `cmd/tend`（`handoffhost.go`）；路径映射在 `internal/pathmap`；搬项目目录的文件枚举在 `internal/index`（`move.go`），`cwd` 的改写在 `internal/index`（`rewrite.go` 的 `RewriteFile` / `RewriteCwd`，`tend mv` 和完整迁移共用）；Claude 完整迁移的清单、记录、暂存、提交、迁移说明在 `internal/migrate`，节点方法 `export.*`、`import.*`、`copies` 和驱动函数 `StartMigration`、`Migration.Run`、`Abandon`、`CheckCopies` 在 `internal/remote`（`migrate.go`），会话在不在跑的三态在 `internal/capture`（`LiveState`），命令是 `tend migrate`，首次恢复带说明在 `tend resume`；记忆的查看、删除、孤儿扫描、对比和按条写入在 `internal/memory`，节点方法 `memory.ls` / `memory.read` / `memory.trash` / `memory.restore` / `memory.put` 和两台机器之间的对比、复制（`CompareMemories`、`CopyMemory`）在 `internal/remote`（`memory.go`），命令是 `tend memory`（含 `diff`、`cp`）和 `tend doctor` 的记忆一节；环境诊断的核心维度见「迁移前的环境诊断」。**未实现**：交接包里的记忆条目、环境诊断的其余维度和界面、TUI 的迁移对话框和关系标记、Web 上的迁移。
 
 ## 迁移
 
@@ -23,21 +23,45 @@
 
 ### Claude 完整迁移
 
-未实现。复制走一套导入事务，不复用 `internal/index/move.go` 的移动流程（那是「移走」，而且只按本机系统处理路径）；只复用它的文件枚举和纯改写函数。
+`tend migrate <id|机器:sid> --to <机器> [--dir 目录] [--move] [--dry-run]`，`--abandon` 放弃未完成的。只迁 Claude 会话；源和目标都要是调用者自己的机器（被共享来的机器拒绝，同交接）。两种模式走同一条路：驱动函数只经 `remote.Peer` 调两端的节点方法，本机是进程内的 `Peer`，模式一经 ssh，模式二经 server 的 `node.call`；数据经发起端中转，节点之间不互连。
 
-1. **检查**：
-   - 两边都查「在跑 / 没在跑 / 未知」，未知时拒绝迁移。探测失败不能当成「没在跑」；现有的 `LiveSessions` 把读不到的来源当成空，导入不能照搬这种处理。
-   - 目标机器上有对应的仓库（按项目对应关系找）。
-   - 显示分支、提交、未提交改动和没推送提交的差异。
-   - 环境诊断有阻断项时，不允许迁移。
-2. **清单**：按当前 Claude 版本探测会话有哪些文件：`<sid>.jsonl`、`<sid>/` 子目录、`file-history/<sid>/`，以及当前版本存在的其他文件。`todos/` 这类目录不一定存在，清单不写死。每个文件记下 sha256 和行数。
-3. **传输**：经 `import.begin` / `import.chunk` 流式传到目标机器，先放在暂存区，不直接落到正式位置。
-4. **校验与改写**：目标机器核对哈希，按路径映射（见 [remote.md](remote.md)「路径映射」）改写 `cwd` 字段，再核对行数。拒绝越界路径和符号链接；目标机器已有同一个 id 时不覆盖。同一个迁移重复导入能识别出来。
-5. **提交**：放进目标机器的 `ClaudeProjectDir(新 cwd)`，建索引，写提交标记；然后源机器标记「已迁往 <机器>」。任何一步失败，源机器上的原件都不动。
-6. **验收**：以目标机器上原生 CLI 能恢复这个会话为准，不以 `tend show` 能读出来为准。
-7. **原件**：默认两边都保留。在源机器上恢复前，提醒「已迁走，两边都继续会分叉」。迁移时也可以选「移走」，原件进回收站，可以还原。
-8. **复制关系与分叉检测**：记录新增两个字段：来源机器、迁移去向；两边都记下 `migrated{peer, at, size, sha}`。之后聚合视图里显示「两边一致 / 已分叉 / 未检查」，用户绕过 tend 直接在两边分别 `claude --resume`，也能被发现。回迁时，如果对方的文件是本机文件的前缀，就快进覆盖；否则拒绝。
-9. **迁移说明**：在目标机器第一次恢复时，自动附一条说明作为首条消息（`claude --resume <id> "<说明>"`），内容包括路径映射表、没带过来的未提交改动、诊断里缺的东西。避免 AI 按历史里的旧路径去读文件；tend 不改写历史正文里的路径。
+事务分在两端，发起端不留状态：源机器 S 上是 `<数据目录>/migrations.jsonl` 里的 pending 行，目标机器 T 上是暂存目录 `<数据目录>/import/<迁移 id>/`。
+
+| 步 | 调用 | 做什么 |
+|---|---|---|
+| 1 | S `handoff.facts`、`export.plan{ref}`、`copies`；T `copies` | 会话的事实（定目录用）、清单、在不在跑、git；和 T 之间上一次迁移的关系（见「复制关系」）。在跑、不能确定、两边一致、T 上接着做过、已分叉都拒绝；S 上有发往 T 的 pending 迁移就沿用它的 id，接着做 |
+| 2 | T `node.repos`；S、T `env` | 定目录（同交接，`handoffDir`）；环境诊断，有阻断就停（`--dry-run` 只做到这里，有阻断时退出码非 0） |
+| 3 | S `export.plan{ref, m, to}` | S 记意图：pending 行，带主 transcript 的大小和 sha |
+| 4 | T `import.begin` | 查同 id 冲突；建暂存或接着用，回答各文件已暂存的字节数；已提交过就直接回那一行 |
+| 5 | S `export.read`，T `import.chunk` | 每块 1 MiB，从已暂存处续传 |
+| 6 | S `export.plan{ref, m}` | 再核一遍：文件身份、大小、sha、在不在跑 |
+| 7 | T `import.commit{m, note}` | 改写、放到位、建索引、写说明、记 done（提交标记） |
+| 8 | S `export.done{m, done, move?, committed}` | S 按 T 提交的那份主 transcript 记 done；选了移走就把原件放进 S 的回收站 |
+
+- **清单**（`migrate.Plan`）：续接链上所有会话（`index.SessionIDs`）的文件（`index.SessionFilesOf`），只取 Claude home 下三个目录：`projects/<编码>/<id>.jsonl` 和 `<id>/…`、`file-history/<id>/…`、`todos/<id>…`。路径相对 Claude home、`/` 分隔；`.jsonl` 要改写 `cwd`（transcript 和附属目录里的），其余原样复制。Claude home 下其它一级目录里以会话 id 开头的东西（如 `session-env/`，可能存着环境变量）只列成「没带过去」，不复制。符号链接、非普通文件、越界路径、总量超过 2 GiB 都拒绝。每个文件记下大小、sha256、行数、文件身份（`fileio.ID`）和修改时间，sha 按「身份 + 大小 + 修改时间」在进程内缓存。链上的旧 id（清单的 `aliases`）和会话 id、迁移 id 一样只能是安全的文件名（`capture.SafeID`，和交接包 id 同一条规则），不重复、不等于会话 id；S 规划时、T 在 `import.begin` 都核，不合格回 `bad_request`。
+- **传输**：驱动只读到清单记的大小；`export.read` 每次都核文件身份，变了回 `stale`；`import.chunk` 收到超出清单大小的数据也回 `stale`；`import.chunk` 只收「已暂存长度 == off」的块，重发的块按已收处理；一个文件收齐就核 sha，不对就丢掉重传。
+- **暂存**：`import/<m>/` 下是 `state.json`（迁移的参数和清单）和 `files/<path>`，0600 / 0700。清单换了（第 6 步的重试），sha 没变的文件不重传；空文件不用传。每次 `import.begin` 顺带删掉 7 天没动、也没开始提交的暂存。
+- **改写**（T，提交时）：`index.RewriteFile`（逐行交给 `RewriteCwd`）把每个 `"cwd":"…"` 值 JSON 解码、映射、再编码回去，`file://` 前缀保留，行数不变，其余字节不动（正文里的路径是历史，不改）。映射先按目录对，依次试、第一个对上的算：会话目录 → 目标目录，再是会话所属项目在两台机器上的各仓库目录（`projects.Snapshot.DirPairs`，和交接定目录同一个方法；重复的只留一对），用 `pathmap.Rebase`，分隔符按目标系统；再按 home 映射（`pathmap.Map`）；都对不上就不改，记进迁移说明的「保留原路径」一节。改写后核行数，再保留原来的修改时间（索引按它排序）。
+- **放到位**：先把改写好的文件都写进 `out/`，写 `placing.json`（这次要放哪些文件、各自的 sha），再逐个 `fileio.Move` 到正式位置（跨文件系统时整份复制，保留权限和修改时间）：`projects/` 下按 T 的规则换成 `ClaudeProjectName(目标目录)`。中途失败就把放好的撤回，状态仍是暂存。都放好后 `RescanSave` 刷新这几个文件的索引，写说明，再追加 T 的 done 行（role `from`）：这一行就是提交标记，之后删暂存。再次提交时，已在位、sha 对得上的文件算放过，所以 `import.commit` 可以重复调用。目标目录必须存在（Claude 在 cwd 里恢复），不存在时 `import.begin` 回 `not_found`。
+- **断线与续传**：TUI 退出、ssh 断线、server 重启都不丢已传的部分。再跑一次 `tend migrate` 就从 S 的 pending 行接着做。第 7 步做完、第 8 步没做：`import.begin` 回答已提交，直接补 `export.done`。T 的 done 行记下它提交的那份源主 transcript 的大小和 sha（`source`），`import.begin`（已提交时）和 `import.commit` 都回答它，S 记 done 时按它记，不按自己最后一次规划：S 在补记之前又接着做了（或 T 放到一半崩溃、续做时把那次的旧快照放完），S 记的仍是 T 真正拿到的那份，下一次 `copies` 判出「这台接着做了」，再迁一次就快进过去。这种时候（驱动的 `Behind`）`--move` 不动原件，CLI 提示再跑一次 `tend migrate`。
+- **源会话在迁移中途变了**：第 1、3、6 步都要求 S 上「没在跑」（`capture.LiveState` 三态：没有 `sessions/` 目录、读不出、Herdr 出错都算「不能确定」，照样拒绝）。传输中 `stale`，或第 6 步的清单和第 3 步的不同，就用新清单自动重试一次；还不行就停下，pending 留着。第 6 步发现会话又在跑了，停下并说明原件没动。T 按清单核 sha，所以 T 上不会出现半新半旧的一份。
+- **同 id 冲突和回迁**（T 判）：T 上已经有这个 provider 加 sid 的 transcript 时——
+
+| T 上那份是什么 | 判定 | 做法 |
+|---|---|---|
+| 和 S 之间最近一次迁移（T 的记录 peer 的 endpoint 是 S，role 不限：从 S 迁来的副本，或迁到 S 去的原件）之后没动过（主 transcript 的大小和 sha 等于记下的） | `forward` | 快进 / 回迁：提交时旧文件先进 T 的回收站（标题写「被 <机器> 迁来的一份替换」），可以还原；还原时先删掉替换进来的文件（每个旧文件对应新目录下清单同一路径的那份，目标目录换了也一样），替换进来的已被改过就拒绝还原 |
+| 同上，但之后动过 | `diverged` | 拒绝：两边都接着做过，已分叉 |
+| 没有和 S 的关系记录 | `exists` | 拒绝，不覆盖 |
+
+  链式（A→B→C 再回 A）只认直接的那一对，其余按 `exists` 拒绝。拒绝时 S 把这次迁移记成 aborted。快进时 T 上的会话不能在跑。
+- **移走**：默认复制，两边都留。`--move` 在 T 提交以后才动原件：`export.done{move}` 在 S 上 `index.TrashSession`（续接链和附属目录一起），回收站标题写「迁往 <机器>」，可以还原；会话在跑或不能确定时不移，迁移照样记 done，提示关掉以后带 `--move` 再跑一次（那时只补移走这一步）。
+- **记录**：每台机器一个 `migrations.jsonl`，只追加，持 `filelock` 写，同一个迁移 id 以最后一行为准。一行是 `{migration, role: to | from, provider, session_id, peer{name, endpoint, node_id, end}, state: pending | done | aborted, at, files, size, sha, dir?, note?, noted?, moved?}`；`size` 和 `sha` 是这一边主 transcript 在迁移那一刻的值（S 记 T 提交的那份原件的，T 记改写后的）；T 的一行另有 `source{size, sha}`：它提交的那份源主 transcript。迁移 id 形如 `20261007T153000-a1b2c3d4`。
+- **复制关系与分叉检测**：列表行上只显示关系：`index.Rows.Copies` 钩子（调用方接 `migrate.Marks`）把这台机器的记录挂到本机行的 `Rec.Copies` 上，节点的 `list` / `query` / `grep` 也接，`remote.SessionOf` 带出 `copies`；CLI 卡片上是 `-> 机器`（迁走的）、`<- 机器`（迁来的）、`-> 机器（迁移未完成 · 7 天）`，ASCII 字形。状态只在需要时判断（`tend show`、再迁之前）：两边各回答 `copies`，每条带 `changed`（主 transcript 的大小或 sha 和记下的不同），`CheckCopies` 得出「两边一致 / 这台接着做了 / <机器> 上接着做了 / 已分叉 / 已移走 / 未检查」。用户绕过 tend 直接在两边 `claude --resume` 也能这样发现。不定时检查。
+- **迁移说明**：驱动函数用发起端的语言写：来源和时间、目录对应（改写用的全部目录对）、S 上没带过来的未提交改动和没推送的提交、没复制的 Claude home 条目、环境诊断里不对等的项、记忆没有复制（给出 `tend memory diff` 的命令）。T 提交时补上「保留原路径」一节，写成 `<数据目录>/migrations/<m>/note.md`（0600）。T 上第一次恢复这个会话时（`tend resume`，ssh 远端恢复走的也是它），第一条消息是「这个会话刚从 <机器> 迁过来，先读 <路径>」（`migrate.FirstResume`，`capture.Plan.FirstMessage` 追加到 `claude --resume <id>` 后面；聚焦已有 tab 或 attach 后台会话时不加），发出后记 `noted`。模式二没有 ssh 时给的恢复命令，在迁来的会话上是 `tend resume <id>`，同样带上说明。
+- **源机器上的提醒**：会话最近一次迁移是 S 迁走的（role `to`、done），`tend resume` 在 stderr 打「已迁往 <机器>（<时间>）：两边都接着做会分叉」，不拦。
+- **同一个 id 在两台机器上**：迁移以后同一个 provider 加 sid 会出现在两台机器上。协调器按「机器 + 会话」成行，会话连到哪个任务、在不在跑都按机器分开；没有 `Copies` 钩子时一行保留它带来的 `copies`。
+- **测试**：`migrate` 的单元测试覆盖改写、暂存复用、续传、提交撤回和重复提交、四种同 id 判定、回迁、移走、清理、源文件变化；切点崩溃用 `TEND_CRASH_AT`（和监督进程共用一个变量与判断函数 `proc.CrashAt`）：T 上 `migrate.begun`（建好暂存）、`migrate.half`（一个文件传了一部分）、`migrate.prepared`（`out/` 和 `placing.json` 写好、还没放）、`migrate.placing`（放了第一个文件）、`migrate.placed`（都放好、没记 done），发起端 `migrate.committed`（T 已提交、S 没记 done）；每个切点在子进程里真退出，再跑一次得到和没断过一样的结果。`remote` 用两台进程内的机器测驱动函数的时序、续传、放弃、自动重试、补记 done（源在 T 提交以后又变了时按 T 的那份记、不移原件）和各种拒绝；`cmd/tend` 用两个 fixture 数据集测 CLI（复制、恢复带说明、再迁被拒、快进、`tend show` 的分叉、回迁、崩溃后续传、移走）。
+- **验收**：以目标机器上原生 CLI 能恢复这个会话为准，不以 `tend show` 能读出来为准。
 
 ### Codex：不做完整迁移，列为验证项
 
@@ -163,7 +187,8 @@
 - 命令行：`tend env [--dir 目录] [--json]` 输出本机指纹，`--json` 就是 `env` 的回答；`tend env diff <机器> --session <id>`（针对一个会话）、`--dir 目录`（一个目录）、都不给（两台机器整体比较）；目标机器上的目录和交接到另一台机器一样找（`handoffDir`，见 [resume.md](resume.md)「交接到另一台机器」第 2 步，remote 先取源目录的 origin），找不到或找到几个时要 `--there` 给出；有阻断项时退出码非 0（[cli-and-config.md](cli-and-config.md)）。
 - 想看某个 CLAUDE.md 具体差在哪，点开时才去两边各取那一个文件（`env.file`）做文本对比，不预先传正文。
 - 交接包：`tend handoff <id> --host <机器>` 定下目录后，发起端用同一份 `Report` 写「环境差异」段（`Handover.Diagnose`：源机器经 `env` 回答会话当时看到的，目标机器回答那个目录的）：一行汇总，再列阻断和不对等的条目，只有名字和哈希，不列提示；stderr 也打汇总和阻断项。有阻断也照样交接，新会话从包里读到差异。有一边的 tend 没有 `env` 时，包里写明没有比较和原因。本机交接和同一台机器不加这一段。
-- 未实现：迁移确认框和 TUI 报告面板里一行汇总、展开看明细；完整迁移有阻断项时不能迁；只有不对等项时照样可以迁，确认框里写明「到那边 AI 会缺什么」。
+- 完整迁移：`tend migrate` 在 stderr 打汇总和阻断、不对等的条目；有阻断项时不迁（`Migration.Run` 拒绝，`--dry-run` 退出码非 0）；只有不对等项时照样迁，迁移说明里写明这些差异。
+- 未实现：迁移确认框和 TUI 报告面板里一行汇总、展开看明细，确认框里写明「到那边 AI 会缺什么」。
 
 ## 推后
 
@@ -173,12 +198,16 @@
 | `tend doctor` 检测 Codex `history_mode` | 只看文件名和修改时间没有稳定的信号（见「Codex：不做完整迁移」的风险监控） |
 | 远端机器的孤儿扫描 | `tend doctor` 只扫本机；要看那台就在那台上跑 |
 | TUI 回收站视图里的记忆条目 | 回收站视图只列会话；记忆用 `tend trash --restore` 还原 |
+| 链式迁移（A→B→C 再回 A）的快进 | 只认直接的那一对，其余按 `exists` 拒绝，不会丢数据 |
+| 定时检查分叉 | 检查要读文件，定时就成了轮询；只在 `tend show`、再迁之前检查 |
+| 白名单外的 Claude 目录（如 `session-env/`） | 可能存着环境变量；列出来，不复制 |
+| Web 上发起迁移；模式二由协调器驱动、数据只过一次 server | 要协调器替网页跑驱动函数并推送进度；两端都不是发起端时数据经 server 两次，分块、可续传 |
 
 ## 决定
 
 1. 范围：不做云同步；单用户多机经自己的 SSH 做只读聚合，迁移由用户手动发起。
-2. 机器：Mac、Linux、Windows、WSL 四类都支持，两端都做（发起端和远端）。多机功能的验收：四类机器分别当发起端和远端，全部通过 `tend hosts check`；迁移还要覆盖断线、同 id 冲突、迁移中途源文件变化这几种情况。
-3. 完整迁移默认复制：两边都保留；源机器的记录标「已迁往 <机器>」，在源机器恢复前提醒。
+2. 机器：Mac、Linux、Windows、WSL 四类都支持，两端都做（发起端和远端）。多机功能的验收：每类系统都当两端，用 `tools/test-host` 的子进程 smoke 覆盖（两个数据集互为 `self` 和 `peer`）；发起端用 server 模式在 Mac 和 Windows 的真机上验，测试机之间不配 SSH 密钥；模式一的 ssh 发起端只验 Mac。WSL 不进这一期的验收：`pathmap` 的测试照样覆盖 WSL，以后用到时重搭 `wsl` 目标补跑 smoke。迁移还要覆盖断线、同 id 冲突、迁移中途源文件变化；Claude 完整迁移以目标机器上原生 CLI 能恢复为准，Mac→Windows、Windows→Mac 各一次。
+3. 完整迁移默认复制：两边都保留；源机器上的行标 `-> <机器>`，在源机器恢复时提醒。
 4. 环境诊断只报告差异，不对齐。
 5. Codex 会话完整迁移不做，列为验证项。
 6. 不做 rsync 镜像。
@@ -190,6 +219,6 @@
   - Claude 记忆的加载上限是前 200 行或前 25KB；记忆按 git 仓库存放，可以用 `autoMemoryDirectory` 挪位置。来源：Claude Code 官方文档「How Claude remembers your project」。
   - `codex migrate-rollouts`：结果见「Codex：不做完整迁移，列为验证项」。
 - 未核实：
-  - 除 Mac 外的三类系统经真实 SSH 当发起端：现在只验证过 Mac 经真实 SSH 连另一台 Mac、Linux 容器（docker exec）、Windows（cmd）、WSL 四类远端；另外三类当发起端时只用本机子进程充当远端（`tools/test-host` 的 hosts smoke）。要验证需在测试机之间配 SSH 密钥。
+  - Claude 完整迁移在真机上用原生 CLI 恢复：Mac→Windows、Windows→Mac 各迁一个专门建的测试会话，在目标机器上 `tend resume <id>`（即 `claude --resume`）跑一轮（决定 2）。
   - Windows 上运行 TUI 的终端能力（pty、鼠标、宽字符）是否满足 tend 的要求：需要在一台 Windows 机器上实测，也可以用 `tend hosts check` 一并测。
   - 旧格式 Codex 会话迁移后，原生 `codex resume` 能否接着做（见「Codex：不做完整迁移，列为验证项」）。

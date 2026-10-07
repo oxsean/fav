@@ -59,11 +59,11 @@
 - **握手**：`hello` 先行，返回协议号、tend 版本、操作系统、架构、端点 id、主机名、WSL 发行版、home、路径分隔符、Claude / Codex 的配置目录、支持的方法列表（见 [wire.md](../runs/wire.md)「握手与版本」）。协议号不兼容时，本机提示「远端 tend 需要更新」，不强行读取。
 - **方法**：
   - 已有：`hello`、`list`（整份返回）、`query`（筛选、排序、分页后的一页，见「列表与写入」）、`put`（写一条记录，同上）、`trash` / `restore`（删除到那台机器的回收站、还原，同上）、`grep`（搜消息，`{q, all, limit, budget_ms, projects, also}` → `{hits, building, busy, too_long, fixes}`）、`hits`（一个会话里的命中，`{provider, session_id, q, limit}` → `{hits, total}`）、`messages`（带 `find` 时每条消息带高亮的 `spans`）、`text`（全文，按偏移读）、`steps`、`pulse`、`checks`、`live`、`echo`（中文往返自检）。搜消息这三处的做法见 [index-and-search.md](index-and-search.md)「搜消息」的「节点」。
-  - 交接、记忆、环境和迁移（做法见 [migration.md](migration.md)）：名字、参数和回答的类型在 `proto.go`，`local.go` 把它们分给 `handoff.go`、`memory.go`、`env.go`、`migrate.go`；交接的两个和记忆的五个已在 `methods` 里，其余处理函数现在都回 `unknown_method`，名字也还不在 `methods` 里，对端照「tend 旧」处理。
+  - 交接、记忆、环境和迁移（做法见 [migration.md](migration.md)）：名字、参数和回答的类型在 `proto.go`，`local.go` 把它们分给 `handoff.go`、`memory.go`、`env.go`、`migrate.go`；都在 `methods` 里；对端没有某个方法时照「tend 旧」处理（迁移看目标机器有没有 `import.begin`，`tend show` 看有没有 `copies`）。
     - 交接：`handoff.facts{provider, session_id}` → `capture.HandoffFacts`（源机器：交接包的各段事实，不是成稿：标题、目录、分支、最近活动、transcript 路径、摘要、最近 5 条要求、最后一条回复、改过的文件、`git{status, remote}`，各段上限同本机交接）、`handoff.put{ref, text, dir, provider, from}` → `{id, path}`（目标机器：把成稿写成那台的 `handoff/<id>.md`，同目录 `<id>.json` 记下目录、provider、来源；`provider` 是新会话用的 CLI，`ref` 是源机器上的会话；`text` 为空、`dir` 不是这台的绝对路径、`provider` 不是 claude / codex 回 `bad_request`）。做法见 [resume.md](resume.md)「交接到另一台机器」。
     - 记忆：`memory.ls{dirs, global}` → `{sets}`、`memory.read{file}` → `{text, at, sha}`、`memory.trash{file}` → `{entry}`、`memory.restore{entry}` → `{file}`、`memory.put{dir, kind, name, text, line, expect}` → `{file, incoming, lines, bytes, over}`。
     - 环境：`env{dir, ref?}` → 这台机器的指纹（`envcheck.Print`）、`env.file{kind, name, dir}` → `{text}`。
-    - 迁移，源机器：`export.plan{provider, session_id, migration?, to?}` → `{manifest, live, why, cwd, repo, git}`、`export.read{…, migration, file, off, n, id}` → `{data, eof}`、`export.done{…, migration, state, move}` → `{trashed}`、`copies{provider, session_id}` → `{copies}`；目标机器：`import.begin{migration, from, provider, session_id, cwd, dir, pairs, manifest}` → `{staged, committed, clash}`、`import.chunk{migration, file, off, data}` → `{off}`、`import.commit{migration, note}` → `{row, files, unmapped}`、`import.abort{migration}` → `{}`。`data` 是 base64。
+    - 迁移，源机器：`export.plan{provider, session_id, migration?, to?}` → `{manifest, live, why, cwd, repo, git}`、`export.read{…, migration, file, off, n, id}` → `{data, eof}`、`export.done{…, migration, state, move, committed}` → `{trashed}`、`copies{provider, session_id}` → `{copies}`；目标机器：`import.begin{migration, from, provider, session_id, title, cwd, dir, pairs, manifest}` → `{staged, committed, source, clash}`、`import.chunk{migration, file, off, data}` → `{off}`、`import.commit{migration, note}` → `{row, files, source, unmapped}`、`import.abort{migration}` → `{}`。`data` 是 base64，`export.read` 的 `n` 不超过 4 MiB，`id` 是规划时的文件身份，对不上回 `stale`；`import.begin` 的 `clash` 是 `forward` / `diverged` / `exists` 或空，`committed` 是已提交时的那一行，`source` 是那次提交带过去的源主 transcript（大小、sha），驱动把它作为 `export.done` 的 `committed` 交回源机器；`copies` 每条带 `changed`（这一边的主 transcript 自迁移以后变没变，不知道时不带）和 `moved`（原件已进回收站）。驱动函数在 `migrate.go`，只经 `Peer` 调两端（`StartMigration`、`Migration.Run`、`Abandon`、`CheckCopies`），本机是进程内的 `Peer`。
     - `from`、`to` 和关系里的 `peer` 是另一台机器（`PeerRef{name, endpoint, node_id, end}`）：`name` 只用来显示，按 `endpoint` 认机器，`end` 是路径映射要的那台的系统和 home。
     - 协调器只把它们转给机器主人（[team.md](../tasks/team.md) 第 6 条），节点按 `share_sessions` 再判一次（[node.md](../runs/node.md)「会话的可见范围」）。
   - 未实现：`list` 的 since 游标增量。
@@ -76,14 +76,14 @@
   - `restore{provider, session_id}` → `{title, files}`：和 TUI 的还原同一个函数 `index.RestoreSession`，之后刷新索引，下一次 `query` 就列出它。不在回收站回 `not_found`。
   - 回收站里的会话照样能读：`messages`、`text`、`steps`、`pulse`、`checks` 找不到记录时看回收站，读那里的那份；`put` 和 `hits` 不看，`put` 回 `not_found`。
   - 节点的 `share_sessions` 对这几个方法的约束见 [node.md](../runs/node.md)「会话的可见范围」。
-- **协议数据结构单独定义**：不直接把存储里的 `Rec` 拿来当协议。`Session` 是字段白名单（标题、摘要、标签、路径、时间、轮数等，不含消息）；存储里带 `json:"-"` 的字段（轮数、最后活动时间、改过的文件等）在 `Session` 里都有。列表或筛选要用的新字段加进 `SessionOf` 和 `Session.Rec`（时间转成本机时区）。`Session` 有 `copies`（这个会话和别的机器之间的迁移关系，列表只显示关系，不带 `changed`）；记录上还没有它的来源，`SessionOf` 不填。
+- **协议数据结构单独定义**：不直接把存储里的 `Rec` 拿来当协议。`Session` 是字段白名单（标题、摘要、标签、路径、时间、轮数等，不含消息）；存储里带 `json:"-"` 的字段（轮数、最后活动时间、改过的文件等）在 `Session` 里都有。列表或筛选要用的新字段加进 `SessionOf` 和 `Session.Rec`（时间转成本机时区）。`Session` 有 `copies`（这个会话和别的机器之间的迁移关系，列表只显示关系，不带 `changed`）：节点的 `list` / `query` / `grep` 由 `migrate.Marks` 从这台的 `migrations.jsonl` 填进 `Rec.Copies`，`SessionOf` 带出，`Session.Rec` 带回。
 
 ## 标识
 
 - **机器标识**：一个稳定的端点 id（`hello` 的 `endpoint`：机器 + 操作系统 + WSL 发行版 + 配置目录），能区分 Windows 和 WSL 的不同发行版，以及同一台机器上不同的配置目录。显示名只用来展示。
 - **会话引用**：一律写成「机器 + provider + session id」。完整迁移默认复制，复制后同一个 session id 会同时出现在两台机器上。fzf 的行 key、`pick()` 和命令行参数都支持 `host:sid` 的写法。
 - 会话 id 只允许 `[A-Za-z0-9._-]`。
-- 记录上 `Rec.Host` 标记远端行。记录另加来源机器、迁移去向两个字段（未实现，见 [migration.md](migration.md)「Claude 完整迁移」）。
+- 记录上 `Rec.Host` 标记远端行。`Rec.Copies` 是这个会话的迁移关系（从哪台迁来、迁往哪台），不存进 `records.jsonl`，列表时由 `index.Rows.Copies` 钩子从这台机器的迁移记录现挂，见 [migration.md](migration.md)「Claude 完整迁移」。
 
 ## 路径映射
 
@@ -153,7 +153,7 @@
 - docker / podman 的 `exec` 在恢复时自动加 `-t`。
 - server 模式：
   - 自己的机器在 `config.hosts` 里有同名项时，先经 ssh `hello` 问它的 `node_id`，和 server 名单里那台的对上才走上面的 ssh 恢复（每个进程每台问一次；连不上不记结果）。
-  - 没有同名项或对不上：对话框给在那台机器上执行的恢复命令（`cd <目录> && <agent> resume <id>`，引号按 server 报的那台机器的系统：Windows 用 PowerShell，其余 POSIX），主按钮复制，同网页；命令行的 `tend resume` 打印这条命令并失败退出，fzf 的复制复制它。
+  - 没有同名项或对不上：对话框给在那台机器上执行的恢复命令（`cd <目录> && <agent> resume <id>`，引号按 server 报的那台机器的系统：Windows 用 PowerShell，其余 POSIX），主按钮复制，同网页；命令行的 `tend resume` 打印这条命令并失败退出，fzf 的复制复制它。迁到那台的会话给 `tend resume <id>`，好让首次恢复带上迁移说明（[resume.md](resume.md)「恢复流程」第 7 条）。
   - 别人共享的机器不给恢复：TUI 里 Enter 打开对话，命令行拒绝。
 
 ### 远端行的写入
@@ -235,4 +235,4 @@ server 模式下同样守 30 秒：
 
 ## 未实现
 
-记忆、迁移、环境诊断、增量列表、`grep` 以外读请求的时间预算与部分结果、`cache: meta | none`。迁移、记忆和环境诊断的设计见 [migration.md](migration.md)。
+增量列表、`grep` 以外读请求的时间预算与部分结果、`cache: meta | none`。迁移、记忆和环境诊断各自未实现的部分见 [migration.md](migration.md)。
