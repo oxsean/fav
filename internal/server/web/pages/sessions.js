@@ -272,7 +272,7 @@ export function Sessions({store, wire, router, toasts, commands, session = null,
   const keyOfHit = h => ss.keyOf({...h.row, machine: h.machine});
   const hitOf = search && open ? (found?.hits || []).find(h => keyOfHit(h) === open) : null;
   const listed = (list?.rows || []).find(r => ss.keyOf(r) === open);
-  const row = listed || (hitOf ? {...hitOf.row, machine: hitOf.machine, writable: !!answerOf(hitOf.machine)?.writable} : null);
+  const row = listed || (hitOf ? {...hitOf.row, machine: hitOf.machine, writable: !!answerOf(hitOf.machine)?.writable, ...(hitOf.make ? {make: hitOf.make} : {})} : null);
   const cur = row;
   const tokens = list?.tokens || [];
   const c = ss.chosen(tokens);

@@ -120,7 +120,8 @@ type SessionsGrep struct {
 
 // SessionHit is a hit of sessions.grep.
 type SessionHit struct {
-	Machine string `json:"machine"`
+	Machine string    `json:"machine"`
+	Make    *MakeTask `json:"make,omitempty"` // as SessionRow.Make
 	remote.GrepHit
 }
 
@@ -538,10 +539,11 @@ func (c *Coord) sessionsGrep(ctx context.Context, p Principal, r *wire.Request) 
 	c.mu.Lock()
 	ms := c.sessionMachines(p, q.Host, true)
 	c.mu.Unlock()
+	profiles := c.Profiles()
 	parts := make([]machineHits, len(ms))
 	var wg sync.WaitGroup
 	for i, s := range ms {
-		wg.Go(func() { parts[i] = c.grepMachine(ctx, s, sg, sent, limit) })
+		wg.Go(func() { parts[i] = c.grepMachine(ctx, s, sg, sent, limit, profiles) })
 	}
 	wg.Wait()
 	found := SessionsFound{Hits: []SessionHit{}, Machines: []MachineAnswer{}}
@@ -561,7 +563,7 @@ func (c *Coord) sessionsGrep(ctx context.Context, p Principal, r *wire.Request) 
 }
 
 // grepMachine is s's part of a sessions.grep; a node without grep is not searched.
-func (c *Coord) grepMachine(ctx context.Context, s *sessionsOf, sg SessionsGrep, sent string, limit int) machineHits {
+func (c *Coord) grepMachine(ctx context.Context, s *sessionsOf, sg SessionsGrep, sent string, limit int, profiles []tend.AgentProfile) machineHits {
 	ctx, cancel := context.WithTimeout(ctx, machineWait)
 	defer cancel()
 	h, a, ok := c.reachFor(ctx, s)
@@ -583,8 +585,14 @@ func (c *Coord) grepMachine(ctx context.Context, s *sessionsOf, sg SessionsGrep,
 	out.answer.State, out.answer.Building = AnswerOK, res.Building
 	out.answer.Matched = len(res.Hits)
 	out.fixes, out.tooLong = res.Fixes, res.TooLong
+	resumes := slices.Contains(h.Methods, node.MRunResume)
+	now := time.Now()
 	for _, hit := range res.Hits {
-		out.hits = append(out.hits, SessionHit{Machine: s.name, GrepHit: hit})
+		sh := SessionHit{Machine: s.name, GrepHit: hit}
+		if s.owned {
+			sh.Make = s.makeTask(hit.Row, !resumes, profiles, now)
+		}
+		out.hits = append(out.hits, sh)
 	}
 	return out
 }

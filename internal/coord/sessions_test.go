@@ -1015,6 +1015,47 @@ func TestSessionsGrepInterleavesTheMachinesRanks(t *testing.T) {
 	}
 }
 
+// A hit of sessions.grep says whether its session can become a task as a listed row does, to the machine's owner only.
+func TestAHitSaysWhetherItsSessionCanBecomeATask(t *testing.T) {
+	e := served(t, nil)
+	hit := func(id string, live bool) remote.GrepHit {
+		h := remote.GrepHit{Row: remote.Row{Session: sess(id, 0, "/w", 5)}, Hits: 1}
+		if live {
+			h.Row.Live = &capture.Live{Agent: tend.ProviderClaude}
+		}
+		return h
+	}
+	m := &fakeNode{resume: true, grep: &remote.GrepResult{Hits: []remote.GrepHit{hit("free", false), hit("open", true), hit("working", false)}}}
+	e.attach("m", m)
+	e.attach("unresumed", &fakeNode{grep: &remote.GrepResult{Hits: []remote.GrepHit{hit("u", false)}}})
+	e.runOn("m", "working", "Working on it", ann.User, task.Running)
+	if err := callAs(e.as(ann), MMachineSessions, "scope", task.SessionsSet{Machine: "m", Users: []string{bob.User}}, nil); err != nil {
+		t.Fatal(err)
+	}
+	grep := func(cli *wire.Conn) map[string]SessionHit {
+		var found SessionsFound
+		if err := callAs(cli, MSessionsGrep, "", SessionsGrep{Q: "color"}, &found); err != nil {
+			t.Fatal(err)
+		}
+		out := map[string]SessionHit{}
+		for _, h := range found.Hits {
+			out[h.Row.SessionID] = h
+		}
+		return out
+	}
+	hits := grep(e.as(ann))
+	for id, why := range map[string]string{"free": "", "open": MakeBusy, "working": MakeBusy, "u": MakeOld} {
+		if mk := hits[id].Make; mk == nil || mk.Why != why || mk.Agents[0] != tend.ProviderClaude {
+			t.Errorf("%s: make %+v, want why %q", id, mk, why)
+		}
+	}
+	for id, h := range grep(e.as(bob)) {
+		if h.Make != nil {
+			t.Errorf("bob does not own m: %s %+v", id, h.Make)
+		}
+	}
+}
+
 // people.names answers only the people the caller has reason to know: themselves, the owners of machines they see,
 // the people of projects they see, the owners and approvers of tasks they read; a disabled one is told so.
 func TestPeopleNamesAreThoseTheCallerKnows(t *testing.T) {

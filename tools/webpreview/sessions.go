@@ -443,7 +443,8 @@ func (f *fakeSessions) grep(who string, p coord.SessionsGrep) (coord.SessionsFou
 			if !q.Match(s.rec) {
 				continue
 			}
-			hit := coord.SessionHit{Machine: m.name, GrepHit: remote.GrepHit{Row: f.row(s, who).Row, File: fileOf(s)}}
+			row := f.row(s, who)
+			hit := coord.SessionHit{Machine: m.name, Make: row.Make, GrepHit: remote.GrepHit{Row: row.Row, File: fileOf(s)}}
 			for _, msg := range s.msgs {
 				one := has(msg.Text, words, true)
 				if !one && !has(msg.Text, words, false) {

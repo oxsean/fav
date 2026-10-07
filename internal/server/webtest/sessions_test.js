@@ -519,6 +519,8 @@ for (const f of ['desktop', 'phone']) {
           await act(() => settle());
           eq(root.one('.sv-stale').textContent, words.t('sess.unseen'), 'a hit in the file before the session went on is not shown');
           eq([msgsOf(root), root.find('.sv-at').length], [['The import streams now.'], 0], 'the newest part is');
+          ok(a.keys.active().some(b => b.id === 'makeTask'), 'a hit whose session the list did not load becomes a task: the hit says whether it can');
+          if (desk) eq(buttonOf(root.one('.sv-acts'), words.t('sess.make')).disabled, false, 'from the conversation\'s head');
           if (!desk) await back(root);
           await click(buttonOf(root.one('.sv-machines'), words.t('sess.m.searchAgain')));
         },
