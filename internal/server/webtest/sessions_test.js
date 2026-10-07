@@ -3,10 +3,11 @@
 // not answer, shared and outdated ones read only, owners named once people.names answers, the next page near the
 // end); the viewer's own sessions changed from keys and from buttons (at once, then as the machine answers, undo, a row
 // that no longer fits staying dimmed, an edit that met a change made elsewhere), a shared machine's conversation read
-// only, a records_rev push reading the list again, a task made from a session, a query's tokens drawn as chips; message
-// search with its marks, a hit opened at its place and the way between hits; the side menu's, the machines page's and
-// the phone home's ways in, old addresses, and where back goes; delete (only where the machine has a trash, confirmed,
-// undone by restore, refused while running) and the trash view (dated by deletion, restored without asking).
+// only, a records_rev push and a reset (what she may see changed) reading the list again, a task made from a session,
+// a query's tokens drawn as chips; message search with its marks, a hit opened at its place and the way between hits,
+// a hit made a task; the side menu's, the machines page's and the phone home's ways in, old addresses, and where back
+// goes; delete (only where the machine has a trash, confirmed, undone by restore, refused while running) and the trash
+// view (dated by deletion, restored without asking).
 // core/sessions.js is tested on its own. Its last case hands the resume lines to the Go test, which types them with
 // internal/shell.
 process.env.TZ = 'UTC';
@@ -456,6 +457,12 @@ for (const f of ['desktop', 'phone']) {
           await act(() => settle());
           eq(valueOf(root.one('.sv-q').one('input')), '#docs notes owner:bo status:all', 'a choice drops its token');
           eq(titlesOf(root).slice(0, 2), ['Draft the v1.0 release notes', 'Add the search box'], 'and reads again');
+        },
+        async revoke() {},
+        async revoked() {
+          await act(() => settle());
+          eq(titlesOf(root), ['Draft the v1.0 release notes'], 'what she may see changed: the page asks again by itself');
+          eq(linesOf(root).filter(l => l.includes('bo-laptop')), [], 'bo-laptop is gone from the lines too');
         },
       });
       eq(r.errors, [], 'errors');

@@ -27,15 +27,16 @@ test('state.watch: snapshot parts, live, envelopes, reset', async () => {
       flush();
       atLive = structuredClone(store.state);
       live = {phase: store.phase.value, seq: store.state.seq, tasks: Object.keys(store.state.tasks).sort(), revs: revs(),
-        title: store.state.tasks.t1.title, r1: store.state.runs.r1.last, machines: store.machines.value, inbox: store.inbox.value};
+        title: store.state.tasks.t1.title, r1: store.state.runs.r1.last, machines: store.machines.value, inbox: store.inbox.value, resets: store.resets.value};
     },
   });
   flush();
   eq(before, {phase: 'snapshot', tasks: [], revs: {tasks: 0, runs: 0, projects: 0, shares: 0, drains: 0, agent_defs: 0}}, 'while the parts arrive');
   eq(live, {phase: 'live', seq: 13, tasks: ['t1', 't2', 't3'], title: 'Pay timeout on retry', r1: 'go test ./...',
     revs: {tasks: 1, runs: 1, projects: 1, shares: 1, drains: 1, agent_defs: 1},
-    machines: [{name: 'mba', state: 'connected', slots: 2, active: 1, queued: 0}], inbox: [{task: 't1', reason: 'dispatch'}]}, 'live');
+    machines: [{name: 'mba', state: 'connected', slots: 2, active: 1, queued: 0}], inbox: [{task: 't1', reason: 'dispatch'}], resets: 0}, 'live: a snapshot is no reset');
   eq(revs(), {tasks: 2, runs: 2, projects: 2, shares: 2, drains: 2, agent_defs: 2}, 'versions after the reset');
+  eq(store.resets.value, 1, 'the reset counted');
   eq(errors, [], 'errors');
   return {live: atLive, final: store.state};
 });

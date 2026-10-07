@@ -6,8 +6,8 @@
 // go into their machine's trash (confirmed; undo restores), which the state trash lists and restores from; a machine
 // shared with them, or an older tend, is read only. A query starting with > searches the messages of every
 // machine (on Enter) and opens a session on its best hit. Machines that did not answer say so under the chips. Nothing
-// is polled: the list is read when it opens, again when a machine says its records changed (records_rev), when the
-// page shows again, after a reconnect, and on Refresh.
+// is polled: the list is read when it opens, again when a machine says its records changed (records_rev), when what
+// the viewer may see changes (the coordinator's reset), when the page shows again, after a reconnect, and on Refresh.
 import {useState, useEffect, useRef, useMemo} from '../vendor/hooks.mjs';
 import {html, cx, usePhone, useWords, useSignalValue, useName, useActions, useKeys} from '../ui/base.js';
 import {Picker} from '../ui/picker.js';
@@ -243,6 +243,15 @@ export function Sessions({store, wire, router, toasts, commands, session = null,
     again.current = timers.setTimeout(() => { again.current = null; live.current({keep: true}); }, AGAIN_MS);
   }, [machines]);
   useEffect(() => () => { timers.clearTimeout(again.current); timers.clearTimeout(typing.current); }, []);
+  // A reset says what the viewer may see changed (a machine's sessions shared or no longer): ask again.
+  const resets = useSignalValue(store.resets);
+  const resetsSeen = useRef(resets);
+  useEffect(() => {
+    if (resets === resetsSeen.current) return;
+    resetsSeen.current = resets;
+    if (!search) live.current({keep: true});
+    else if (ss.searchText(q).trim()) setGrepRev(n => n + 1);
+  }, [resets]);
   const wasOpen = useRef(status === 'open');
   useEffect(() => {
     if (status === 'open' && !wasOpen.current) live.current({keep: true});

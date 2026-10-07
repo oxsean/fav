@@ -45,6 +45,8 @@ export function createStore({wire, frame = fn => globalThis.requestAnimationFram
   const rev = Object.fromEntries(tables.map(k => [k, signal(0)]));
   // phase: idle before the watch; snapshot while the parts arrive; live once they are all in.
   const phase = signal('idle');
+  // resets counts the coordinator's resets: what the viewer may see changed (a share, a project, a member).
+  const resets = signal(0);
   const machines = signal([]), inbox = signal(noInbox);
   const affordances = signal(noAffordances());
   let stagedAff = null;
@@ -77,6 +79,7 @@ export function createStore({wire, frame = fn => globalThis.requestAnimationFram
         if (p.mode === 'snapshot') { staged = empty(); stagedAff = noAffordances(); phase.value = 'snapshot'; }
         return;
       case 'reset':
+        resets.value++;
         staged = empty();
         stagedAff = noAffordances();
         phase.value = 'snapshot';
@@ -288,7 +291,7 @@ export function createStore({wire, frame = fn => globalThis.requestAnimationFram
   return {
     // raw is the last page of a run's output as its log has it.
     raw: run => wire.call('run.output.page', {run, before: -1, n: PAGE_EVENTS, raw: true}).then(p => p?.raw ?? ''),
-    state, rev, phase, machines, inbox, affordances, session, prefs, brief, briefOf, output,
+    state, rev, phase, resets, machines, inbox, affordances, session, prefs, brief, briefOf, output,
     // find says whether q is shown anywhere in a run's output; canFind whether the server can look.
     find: (run, q) => find(run, q), canFind: () => !!wire.has?.('run.output.find'),
     // item is one event of a run's output with nothing left out (run.output.item: {event, blobs?}); canItem whether the

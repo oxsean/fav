@@ -5,7 +5,9 @@
 // answered by someone else first, ?frames=team the machines and team pages' data (?as=admin signs in as its admin),
 // ?frames=agents the agent page's (open ?page=agents). The sessions page's calls go to tools/webpreview's fake
 // (POST fake/call), which answers as Ann (?as=admin) or Bo from made-up sessions: open ?frames=team&page=sessions.
-// /api/* answers come from webtest/api.json by method and path; a write it has no answer for succeeds empty.
+// previewReset() in the console stops or restores the sharing of the machines shared with the viewer and pushes the
+// coordinator's reset. /api/* answers come from webtest/api.json by method and path; a write it has no answer for
+// succeeds empty.
 import {boot} from '../../web/pages/boot.js';
 import {sets, answers, socket} from './answer.js';
 
@@ -41,6 +43,17 @@ const api = await (await fetch('webtest/api.json')).json();
 const as = query.get('as');
 // ⚠️ The calls tools/webpreview answers: the sessions page's.
 const faked = new Set(['sessions.query', 'sessions.grep', 'people.names']), node = new Set(['put', 'trash', 'restore', 'messages', 'hits', 'text']);
-const asked = f => (faked.has(f.method) || f.method === 'node.call' && node.has(f.params?.method) ? fetch(`fake/call?as=${as === 'admin' ? 'admin' : 'member'}`, {method: 'POST', body: JSON.stringify({method: f.method, params: f.params})})
-  .then(r => r.json()) : null);
-boot({open: () => socket(table, asked), fetch: fakeFetch(as === 'signedout' ? null : people[as] || people.member, api), clock: () => NOW});
+const fake = (method, params) => fetch(`fake/call?as=${as === 'admin' ? 'admin' : 'member'}`, {method: 'POST', body: JSON.stringify({method, params})}).then(r => r.json());
+let sock = null, watch = 0;
+const asked = f => {
+  if (f.method === 'state.watch') watch = f.id;
+  return faked.has(f.method) || f.method === 'node.call' && node.has(f.params?.method) ? fake(f.method, f.params) : null;
+};
+// previewReset (from the console) has the machines shared with the viewer stop sharing their sessions, or share them
+// again, and pushes the reset the coordinator sends then: the state again from its snapshot.
+globalThis.previewReset = async () => {
+  await fake('preview.revoke');
+  sock?.reply({type: 'push', id: watch, method: 'reset', params: {}});
+  for (const p of table['state.watch']?.pushes || []) if (p.method !== 'open') sock?.reply({...p, id: watch});
+};
+boot({open: () => (sock = socket(table, asked)), fetch: fakeFetch(as === 'signedout' ? null : people[as] || people.member, api), clock: () => NOW});

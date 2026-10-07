@@ -36,6 +36,7 @@ type fakeSessions struct {
 	machines []fakeMachine
 	sessions []*fakeSession
 	greps    int
+	revoked  map[string]bool // machines whose readers previewRevoke took the viewer from
 }
 
 type fakeMachine struct {
@@ -639,6 +640,28 @@ func (f *fakeSessions) serve(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// previewRevoke is the preview's own call (webtest/preview's previewReset): the machines shared with the viewer stop
+// sharing their sessions with them, or share them again.
+const previewRevoke = "preview.revoke"
+
+func (f *fakeSessions) revoke(who string) {
+	if f.revoked == nil {
+		f.revoked = map[string]bool{}
+	}
+	for i := range f.machines {
+		m := &f.machines[i]
+		switch {
+		case m.owner == who:
+		case slices.Contains(m.readers, who):
+			m.readers = slices.DeleteFunc(m.readers, func(r string) bool { return r == who })
+			f.revoked[m.name] = true
+		case f.revoked[m.name]:
+			m.readers = append(m.readers, who)
+			delete(f.revoked, m.name)
+		}
+	}
+}
+
 func (f *fakeSessions) call(who, method string, params json.RawMessage) (any, error) {
 	switch method {
 	case coord.MSessionsQuery:
@@ -671,6 +694,9 @@ func (f *fakeSessions) call(who, method string, params json.RawMessage) (any, er
 			return nil, err
 		}
 		return f.node(who, p)
+	case previewRevoke:
+		f.revoke(who)
+		return struct{}{}, nil
 	}
 	return nil, fmt.Errorf("webpreview: no fake answer for %s", method)
 }
