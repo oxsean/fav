@@ -2,7 +2,6 @@ package tui
 
 import (
 	"cmp"
-	"slices"
 	"strings"
 	"testing"
 
@@ -118,41 +117,5 @@ func TestSkinAccentAndContrastApplyAtOnce(t *testing.T) {
 	m.Update(press("right"))
 	if !m.cfg.HighContrast || !curSkin.Input.High {
 		t.Fatal("high contrast at once")
-	}
-}
-
-func TestSessionArgsAreEditedAsAShellLine(t *testing.T) {
-	t.Setenv("TEND_HOME", t.TempDir())
-	m := sized(t, 120, 40)
-	m.Update(press(","))
-	for i, s := range settingsTable() {
-		if s.label == i18n.F("settings.session_args", "Claude") {
-			m.ov.cursor = i
-		}
-	}
-	type_ := func(line string) {
-		m.Update(press("enter"))
-		m.ov.edit.SetValue(line)
-		m.Update(press("enter"))
-	}
-	type_(`--permission-mode=bypassPermissions --append-system-prompt 'be brief'`)
-	want := []string{"--permission-mode=bypassPermissions", "--append-system-prompt", "be brief"}
-	if got := tend.LoadConfig().SessionArgs[tend.ProviderClaude]; !slices.Equal(m.cfg.SessionArgs[tend.ProviderClaude], want) || !slices.Equal(got, want) {
-		t.Fatalf("saved as words: %q, on disk %q", m.cfg.SessionArgs, got)
-	}
-	if v := ansi.Strip(m.renderSettings()); !strings.Contains(v, `--append-system-prompt 'be brief'`) {
-		t.Fatalf("shown quoted:\n%s", v)
-	}
-	r := &tend.Rec{Provider: tend.ProviderClaude, SessionID: "s1", Cwd: t.TempDir()}
-	if p, _ := capture.PlanResume(r, nil, true); !strings.Contains(p.Spec.Display(), "claude --permission-mode=bypassPermissions --append-system-prompt") {
-		t.Fatalf("the resume dialog's command carries them: %s", p.Spec.Display())
-	}
-	type_(`--x $(whoami)`)
-	if m.notice != i18n.T("settings.args_refused") || !slices.Equal(m.cfg.SessionArgs[tend.ProviderClaude], want) {
-		t.Fatalf("a line the shell would expand is refused, the old value kept: %q %q", m.notice, m.cfg.SessionArgs)
-	}
-	type_("")
-	if m.cfg.SessionArgs != nil || tend.LoadConfig().SessionArgs != nil {
-		t.Fatalf("emptied: %q", m.cfg.SessionArgs)
 	}
 }

@@ -109,8 +109,7 @@ func ResumeOf(r *tend.Rec, name string) (CommandSpec, error) {
 	if r.SessionID == "" {
 		return CommandSpec{}, noSession()
 	}
-	extra := sessionArgs(p)
-	return withArgs(extra)(p.Resume(inMode(r, extra), name))
+	return p.Resume(r, name)
 }
 
 // ForkOf builds the command for a new session carrying r's history.
@@ -122,8 +121,7 @@ func ForkOf(r *tend.Rec) (CommandSpec, error) {
 	if r.SessionID == "" {
 		return CommandSpec{}, noSession()
 	}
-	extra := sessionArgs(p)
-	return withArgs(extra)(p.Fork(inMode(r, extra)))
+	return p.Fork(r)
 }
 
 // StartOf builds the command for a new session of provider in cwd whose first message is prompt ("" = none).
@@ -132,30 +130,7 @@ func StartOf(provider, cwd, prompt string) (CommandSpec, error) {
 	if !ok {
 		return CommandSpec{}, unknown(provider)
 	}
-	return withArgs(sessionArgs(p))(p.Start(cwd, prompt))
-}
-
-// sessionArgs are config session_args for p.
-func sessionArgs(p Provider) []string { return tend.LoadConfig().SessionArgs[p.Name()] }
-
-// inMode is r as its provider resumes it: without the session's permission mode when extra chooses one.
-func inMode(r *tend.Rec, extra []string) *tend.Rec {
-	if r.Permission == (tend.Permission{}) || !SetsPermission(append([]string{r.Provider}, extra...)) {
-		return r
-	}
-	cp := *r
-	cp.Permission = tend.Permission{}
-	return &cp
-}
-
-// withArgs puts extra right after the CLI's name, as the user's alias would.
-func withArgs(extra []string) func(CommandSpec, error) (CommandSpec, error) {
-	return func(c CommandSpec, err error) (CommandSpec, error) {
-		if err == nil && len(extra) > 0 {
-			c.Args = append(slices.Clone(extra), c.Args...)
-		}
-		return c, err
-	}
+	return p.Start(cwd, prompt)
 }
 
 // LaunchOf builds a run's command from its profile.
@@ -220,18 +195,7 @@ func AttachOf(r *tend.Rec, backgroundID string) CommandSpec {
 
 // BypassArgv: the command line runs its agent with every permission prompt skipped or without a sandbox, however the
 // flag is spelled.
-func BypassArgv(argv []string) bool {
-	_, bypass := permissionFlags(argv)
-	return bypass
-}
-
-// SetsPermission: the command line chooses its agent's permission mode, approvals or sandbox.
-func SetsPermission(argv []string) bool {
-	sets, _ := permissionFlags(argv)
-	return sets
-}
-
-func permissionFlags(argv []string) (sets, bypass bool) {
+func BypassArgv(argv []string) (bypass bool) {
 	for i, a := range argv {
 		k, v, joined := strings.Cut(a, "=")
 		if len(a) > 2 && a[0] == '-' && a[1] != '-' { // clap's -sVALUE
@@ -246,19 +210,16 @@ func permissionFlags(argv []string) (sets, bypass bool) {
 				bypass = true
 			}
 		case "--dangerously-skip-permissions", "--allow-dangerously-skip-permissions", "--dangerously-bypass-approvals-and-sandbox", "--yolo":
-			sets, bypass = true, true
-		case "--full-auto", "-a", "--ask-for-approval":
-			sets = true
+			bypass = true
 		case "--permission-mode":
-			sets, bypass = true, bypass || v == "bypassPermissions"
+			bypass = bypass || v == "bypassPermissions"
 		case "-s", "--sandbox":
-			sets, bypass = true, bypass || v == "danger-full-access"
+			bypass = bypass || v == "danger-full-access"
 		case "-c", "--config":
-			sets = sets || strings.HasPrefix(v, "sandbox_mode") || strings.HasPrefix(v, "approval_policy")
 			bypass = bypass || strings.Contains(v, "danger-full-access")
 		}
 	}
-	return sets, bypass
+	return bypass
 }
 
 // Profiles are the agents one can run: the built-in ones, then config's (a config profile replaces a built-in one of

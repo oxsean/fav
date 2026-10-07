@@ -40,11 +40,11 @@
 | Codex `approval_policy` 是 `on-request` / `never` | `-a <值>`（`untrusted` 等现在的 codex 不收的不加） |
 | Codex `sandbox_policy` 是 `read-only` / `workspace-write` / `danger-full-access` | `-s <值>` |
 
-Claude 的放在 CLI 名字后面（`claude --dangerously-skip-permissions --resume <id>`），Codex 的放在子命令后面（`codex resume -a never -s danger-full-access <id>`，`resume` 和 `fork` 都收这两个参数）。新开会话没有原会话，不加。
+Claude 的放在 CLI 名字后面（`claude --dangerously-skip-permissions --resume <id>`），Codex 的放在子命令后面（`codex resume -a never -s danger-full-access <id>`，`resume` 和 `fork` 都收这两个参数）。
 
-设置 `session_args`（provider → 参数列表）加在恢复、分叉、新会话命令的 CLI 名字后面，也就是 alias 放的位置：`claude <参数> --resume <id>`、`codex <参数> resume <id>`。tend 直接执行 CLI，用户 shell 里的 alias 管不到它，又不去读 alias（各 shell 写法不同，也不该悄悄放大权限）。`session_args` 里已有权限类参数（`agent.SetsPermission`，和判断越权的 `BypassArgv` 是同一张表：`--dangerously-skip-permissions`、`--permission-mode`、`--yolo`、`-a`、`-s`、`--full-auto`、`-c sandbox_mode=…` / `approval_policy=…` 等）时它说了算，不再加原会话的模式。
+新会话什么都不加：默认权限由 agent 自己的配置决定（Claude 的 `defaultMode`、Codex 的 `config.toml`）。
 
-只在 `agent.ResumeOf` / `ForkOf` / `StartOf` 一处加（每次读 `config.json`；模式由 provider 的命令构造按 `Rec.Permission` 拼），TUI、`tend resume` / `handoff`、当前终端和 Herdr tab 都经过它，恢复框和 `--dry-run` 显示的命令就是带参数的那条；`claude attach` 和任务运行（`LaunchOf`，用档案的 `args`）不加。别的机器的会话：谁拼命令用谁的设置和索引。经 ssh 恢复时是那台的 `tend resume` 拼（[remote.md](remote.md)「恢复」），用那台的设置和它记下的模式；server 模式给出「在那台机器上执行」的命令是本机拼的，用本机的 `session_args` 和 `Session` 带来的模式，旧节点不带模式就不加。
+模式只在 `agent.ResumeOf` / `ForkOf` 一处拼（provider 的命令构造按 `Rec.Permission`），TUI、`tend resume` / `handoff`、当前终端和 Herdr tab 都经过它，恢复框和 `--dry-run` 显示的命令就是带模式的那条；`claude attach` 和任务运行（`LaunchOf`，用档案的 `args`）不加。别的机器的会话：经 ssh 恢复时是那台的 `tend resume` 拼（[remote.md](remote.md)「恢复」），用它记下的模式；server 模式给出「在那台机器上执行」的命令是本机拼的，用 `Session` 带来的模式，旧节点不带模式就不加。
 
 会话身份识别按可靠性三级降级（依据见 [external-behaviour.md](external-behaviour.md)「Session ID 获取」）：
 

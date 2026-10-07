@@ -13,7 +13,6 @@ import (
 	"github.com/oxsean/fav/internal/i18n"
 	"github.com/oxsean/fav/internal/paths"
 	"github.com/oxsean/fav/internal/render"
-	"github.com/oxsean/fav/internal/shell"
 	"github.com/oxsean/fav/internal/skin"
 	"github.com/oxsean/fav/internal/tend"
 )
@@ -134,8 +133,6 @@ func settingsTable() []setting {
 			}, nil, "", "", nil},
 		{label: "IDE", text: func(m *Model) string { return m.cfg.IDE }, setText: func(m *Model, v string) { m.cfg.IDE = v },
 			hint: i18n.F("settings.ide_hint", capture.DefaultIDE()), ph: capture.DefaultIDE()},
-		sessionArgs(tend.ProviderClaude, "Claude"),
-		sessionArgs(tend.ProviderCodex, "Codex"),
 		{i18n.T("settings.skin"), func() []string {
 			out := []string{}
 			for _, n := range skinNames() {
@@ -171,33 +168,6 @@ func settingsTable() []setting {
 				return nil
 			}, nil, "", "", nil},
 	}
-}
-
-// sessionArgs edits config session_args for provider as one POSIX line.
-func sessionArgs(provider, name string) setting {
-	return setting{label: i18n.F("settings.session_args", name), hint: i18n.F("settings.session_args_hint", provider),
-		text: func(m *Model) string { return shell.POSIX.Join(m.cfg.SessionArgs[provider]) },
-		setText: func(m *Model, v string) {
-			var args []string
-			if v != "" {
-				words, ok := shell.POSIX.Split(provider + " " + v) // after a command name, a word with = is an argument
-				if !ok {
-					m.flash(i18n.T("settings.args_refused"))
-					return
-				}
-				args = words[1:]
-			}
-			if m.cfg.SessionArgs == nil {
-				m.cfg.SessionArgs = map[string][]string{}
-			}
-			m.cfg.SessionArgs[provider] = args
-			if len(args) == 0 {
-				delete(m.cfg.SessionArgs, provider)
-			}
-			if len(m.cfg.SessionArgs) == 0 {
-				m.cfg.SessionArgs = nil
-			}
-		}}
 }
 
 func (m *Model) openSettings() { m.ov = overlay{kind: ovSettings} }

@@ -5,7 +5,6 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/oxsean/fav/internal/shell"
 	"github.com/oxsean/fav/internal/tend"
 	"github.com/oxsean/fav/internal/testkit"
 )
@@ -76,53 +75,6 @@ func TestResumeForkStart(t *testing.T) {
 	}
 }
 
-func TestSessionArgsGoWhereAnAliasPutsThem(t *testing.T) {
-	t.Setenv("TEND_HOME", t.TempDir())
-	c := tend.DefaultConfig()
-	c.SessionArgs = map[string][]string{tend.ProviderClaude: {"--dangerously-skip-permissions"}, tend.ProviderCodex: {"-c", "model=a b"}}
-	if err := c.Save(); err != nil {
-		t.Fatal(err)
-	}
-	cl := &tend.Rec{Provider: tend.ProviderClaude, SessionID: "s1", Cwd: "/w"}
-	cx := &tend.Rec{Provider: tend.ProviderCodex, SessionID: "s1", Cwd: "/w"}
-	resume, _ := ResumeOf(cl, "n")
-	fork, _ := ForkOf(cl)
-	start, _ := StartOf(tend.ProviderClaude, "/w", "hi")
-	cxResume, _ := ResumeOf(cx, "")
-	cxFork, _ := ForkOf(cx)
-	cxStart, _ := StartOf(tend.ProviderCodex, "", "")
-	for got, want := range map[*CommandSpec][]string{
-		&resume:   {"claude", "--dangerously-skip-permissions", "--resume", "s1", "--name", "n"},
-		&fork:     {"claude", "--dangerously-skip-permissions", "--resume", "s1", "--fork-session"},
-		&start:    {"claude", "--dangerously-skip-permissions", "hi"},
-		&cxResume: {"codex", "-c", "model=a b", "resume", "s1"},
-		&cxFork:   {"codex", "-c", "model=a b", "fork", "s1"},
-		&cxStart:  {"codex", "-c", "model=a b"},
-	} {
-		if !slices.Equal(got.Argv(), want) {
-			t.Errorf("%q, want %q", got.Argv(), want)
-		}
-	}
-	if a := AttachOf(cl, "b1"); !slices.Equal(a.Argv(), []string{"claude", "attach", "b1"}) {
-		t.Errorf("attaching to a background session takes no flags: %q", a.Argv())
-	}
-	if l, _ := LaunchOf(LaunchSpec{Profile: Profile{Provider: tend.ProviderClaude}, Dir: "/w"}); slices.Contains(l.Argv(), "--dangerously-skip-permissions") {
-		t.Errorf("runs take their profile's args only: %q", l.Argv())
-	}
-	if words, ok := shell.POSIX.Split(cxStart.ShellLine()); !ok || !slices.Equal(words, cxStart.Argv()) {
-		t.Errorf("an argument with a space survives the Herdr pane's line: %q %v", cxStart.ShellLine(), ok)
-	}
-	if line := shell.PowerShell.Line("", cxResume.Argv()); line != "codex -c 'model=a b' resume s1" {
-		t.Errorf("and the line to run on a Windows machine: %s", line)
-	}
-
-	c.SessionArgs = map[string][]string{tend.ProviderClaude: {}}
-	c.Save()
-	if r, _ := ResumeOf(cl, ""); !slices.Equal(r.Argv(), []string{"claude", "--resume", "s1"}) {
-		t.Errorf("no args: the command as without the setting: %q", r.Argv())
-	}
-}
-
 func TestResumeFollowsTheSessionsPermissionMode(t *testing.T) {
 	t.Setenv("TEND_HOME", t.TempDir())
 	claudeRec := func(mode string) *tend.Rec {
@@ -158,37 +110,6 @@ func TestResumeFollowsTheSessionsPermissionMode(t *testing.T) {
 	}
 	if a := AttachOf(claudeRec("bypassPermissions"), "b1"); !slices.Equal(a.Argv(), []string{"claude", "attach", "b1"}) {
 		t.Errorf("attach takes no mode: %q", a.Argv())
-	}
-
-	c := tend.DefaultConfig()
-	c.SessionArgs = map[string][]string{tend.ProviderClaude: {"--permission-mode", "acceptEdits"}, tend.ProviderCodex: {"--yolo"}}
-	c.Save()
-	if got, _ := ResumeOf(claudeRec("bypassPermissions"), ""); !slices.Equal(got.Argv(), []string{"claude", "--permission-mode", "acceptEdits", "--resume", "s1"}) {
-		t.Errorf("a permission flag in session_args wins over the session's mode: %q", got.Argv())
-	}
-	if got, _ := ForkOf(codexRec("on-request", "workspace-write")); !slices.Equal(got.Argv(), []string{"codex", "--yolo", "fork", "s1"}) {
-		t.Errorf("codex too: %q", got.Argv())
-	}
-	c.SessionArgs = map[string][]string{tend.ProviderClaude: {"--verbose"}}
-	c.Save()
-	if got, _ := ResumeOf(claudeRec("plan"), ""); !slices.Equal(got.Argv(), []string{"claude", "--verbose", "--permission-mode", "plan", "--resume", "s1"}) {
-		t.Errorf("other session_args leave the mode in: %q", got.Argv())
-	}
-}
-
-func TestSetsPermissionReadsTheSameFlagsAsBypass(t *testing.T) {
-	for _, argv := range [][]string{{"claude", "--dangerously-skip-permissions"}, {"claude", "--permission-mode", "plan"},
-		{"claude", "--permission-mode=acceptEdits"}, {"codex", "--yolo"}, {"codex", "-a", "never"}, {"codex", "--ask-for-approval=on-request"},
-		{"codex", "-s", "read-only"}, {"codex", "-sread-only"}, {"codex", "--full-auto"}, {"codex", "-c", "approval_policy=never"},
-		{"codex", "--config=sandbox_mode=workspace-write"}, {"codex", "--dangerously-bypass-approvals-and-sandbox"}} {
-		if !SetsPermission(argv) {
-			t.Errorf("%q", argv)
-		}
-	}
-	for _, argv := range [][]string{{"claude", "--verbose"}, {"claude", "--settings", "{}"}, {"codex", "-c", "model=x"}, {"codex", "-m", "gpt"}} {
-		if SetsPermission(argv) {
-			t.Errorf("%q", argv)
-		}
 	}
 }
 

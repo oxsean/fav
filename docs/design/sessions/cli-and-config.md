@@ -147,7 +147,6 @@ TUI 里 `,`（中文 `，` 也认）打开设置面板，↑↓（`Tab` / `Shift
 | 回收站 | `trash_days` | 7 / 30 / 90 天 / 永久（0） | 30 |
 | 工具输出 | `tool_output_lines` | 不搜（0）/ 3 / 10 / 30 行：每次工具输出进正文库的行数，改了后台整体重建正文库 | 3 |
 | 恢复方式 | `resume_in` | terminal（终端）/ app（桌面 App）/ origin（跟来源走：App 里建的会话用 App） | terminal |
-| Claude 参数 / Codex 参数 | `session_args` | 按 provider 的参数列表，如 `{"claude": ["--dangerously-skip-permissions"]}`；面板里各一项，按 POSIX 写法编辑（引号、反斜杠；`$`、`~`、通配、管道、重定向不收，闪一句不存），空了删掉这一项。用在哪见 [resume.md](resume.md)「Provider」 | 空 |
 | 需要你时 | `notify` | off（只在底栏提示）/ bell（再响铃） | off |
 | 其它机器 | `hosts` | 面板里没有，用 `tend hosts add / rm` 管理（见 [remote.md](remote.md)「配置」） | 空 |
 | Agents 页顺序 | `live_sort` | started / group / active；面板里没有，Agents 页按 `o` 轮 | started |
