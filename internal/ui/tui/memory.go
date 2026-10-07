@@ -380,7 +380,8 @@ func (m *Model) memoryButtons() []btn {
 			trash.act = (*Model).askTrashMemory
 		}
 	}
-	return []btn{read, trash, {keyed(keyName("esc"), i18n.T("btn.close")), false, (*Model).closeOverlay}}
+	compare := btn{i18n.T("memory.btn_compare"), false, (*Model).askCompare}
+	return []btn{read, trash, compare, {keyed(keyName("esc"), i18n.T("btn.close")), false, (*Model).closeOverlay}}
 }
 
 type memTextMsg struct {

@@ -122,6 +122,18 @@ type MemoryPair struct {
 	Diff memory.Comparison `json:"diff"`
 }
 
+// Swap is mp seen from the machine it was compared with.
+func (mp MemoryPair) Swap() MemoryPair {
+	out := MemoryPair{Dirs: DirPair{From: mp.Dirs.To, To: mp.Dirs.From}, From: mp.To, To: mp.From}
+	for _, l := range []struct{ from, to *[]memory.Entry }{{&mp.Diff.OnlyHere, &out.Diff.OnlyThere}, {&mp.Diff.OnlyThere, &out.Diff.OnlyHere},
+		{&mp.Diff.Differ, &out.Diff.Differ}, {&mp.Diff.Same, &out.Diff.Same}} {
+		for _, e := range *l.from {
+			*l.to = append(*l.to, e.Swap())
+		}
+	}
+	return out
+}
+
 // CompareMemories lists each pair's memories on from and to (Codex's global blocks naming no directory with the first
 // pair only) and compares them, the pair and the two homes the only paths mapped; texts are read only where hashes
 // leave it open.

@@ -118,7 +118,7 @@ func openOverlay(m *Model, kind string) {
 		m.setView(viewProjects)
 		m.foldAll(nil)
 		m.flash(i18n.T("remote.old_server"))
-	case "memory-block", "memory", "memory-read", "memory-trashed":
+	case "memory-block", "memory", "memory-read", "memory-trashed", "memory-compare", "memory-compare-read", "memory-copied":
 		dumpMemory(m, kind)
 	case "handoff-host", "handoff-dirs", "handoff-pick-dir", "handoff-no-ssh", "handoff-old", "handoff-env":
 		openHandoffTo(m, kind)

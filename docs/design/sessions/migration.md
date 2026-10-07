@@ -69,7 +69,7 @@
 
 1. **看**
    - 找 Claude 记忆目录和 Claude 同样的规则（`memory.ClaudeDir`）：`~/.claude/settings.json` 有 `autoMemoryDirectory` 就用它；没有就取 git 仓库根（`git rev-parse --git-common-dir` 的上一级，worktree 和子目录都归到主仓库，不在 git 里用目录本身），记忆在 `ClaudeProjectDir(根)/memory`。
-   - 一组（`memory.Set`）就是一个记忆目录：`MEMORY.md` 的行数、字节数，超过 200 行或 25 KB 记 `over`（只对 Claude）；每条（`.md` 文件，不含 `MEMORY.md` 和以 `.` 开头的，所以 `.incoming/` 不算）的标题取 frontmatter 的 `name`，没有就取 `MEMORY.md` 那一行的链接文字，再没有就取文件名；描述取 `description`，没有就取那一行破折号后面的部分；另有修改时间、大小、原文的 `sha`、换行统一成 LF 后的 `norm`，`in_index` 说明 `MEMORY.md` 里有没有指向它的行。
+   - 一组（`memory.Set`）就是一个记忆目录：`MEMORY.md` 的行数、字节数，超过 200 行或 25 KB 记 `over`（只对 Claude）；每条（`.md` 文件，不含 `MEMORY.md` 和以 `.` 开头的，所以 `.incoming/` 不算）的标题取 frontmatter 的 `name`，没有就取 `MEMORY.md` 那一行的链接文字，再没有就取文件名；描述取 `description`，没有就取那一行破折号后面的部分；另有修改时间、大小、原文的 `sha`、换行统一成 LF 后的 `norm`，`in_index` 说明 `MEMORY.md` 里有没有指向它的行。Claude 的组另带 `incoming`：`.incoming/` 里等着手动合并的条目，各项同上（不在索引里）；旧版 tend 不回这一项。
    - Codex 全局记忆按块读：`applies_to` 的 `cwd=` 是绝对路径、并且落在要看的目录下的，归这个目录（一组，`dir` 是这个目录）；`cwd=` 不是绝对路径的（「一类目录」之类的说明）单列一组「没写适用目录」（`dir` 为空），不按 cwd 过滤掉。每块的 `file` 是 `MEMORY.md`，`line` 是块开头的行号。只读。
    - 节点方法：`memory.ls{dirs, global}` 回每个目录的 Claude 组（同一个记忆目录只回一次）和（`global` 时）Codex 全局的各组；`memory.read{file}` 只读记忆根下的普通文件：Claude 的 `projects/<名字>/memory/`、`autoMemoryDirectory`、Codex 的 `memories/`，按解开链接后的真实路径判；其余路径一律回 `unauthorized`，不说存不存在。`tend memory`、`tend memory show` 在本机直接读，`host:` 经这两个方法。
 2. **管**
@@ -81,7 +81,7 @@
    - 整个记忆目录也能进回收站（`tend memory rm <记忆目录>`），还原同上。
    - 「并到新目录」（`memory.Merge`，`tend memory merge`，只对本机）：逐条用 `memory.Write` 写过去，不覆盖：目标没有就写入并把旧 `MEMORY.md` 里指向它的那一行加进目标的 `MEMORY.md`（目标已有这一行就不加）；内容相同的不动；同名而内容不同的写进目标的 `.incoming/`，不进 `MEMORY.md`。旧目录里只有记忆条目时，全部写完整个进回收站；有别的文件就保留旧目录，列出这些文件。
 3. **对比**（`memory.Diff`，`tend memory diff <项目|目录> <机器> [--from <机器>] [--dir <那台的目录>]`）
-   - 配对：给项目时，取它两台都有目录的仓库，一个仓库一对（项目的目录按机器名记，这台是项目表里的本机名）；给目录时，它所在的项目在那台的目录用 `pathmap.Rebase` 接过去，不在项目里就要 `--dir`，不猜。
+   - 配对（`projects.MemoryPairs`，命令行和 TUI 共用）：给项目时，取它两台都有目录的仓库，一个仓库一对（项目的目录按机器名记，这台是项目表里的本机名）；给目录时，它所在的项目在那台的目录用 `pathmap.Rebase` 接过去，不在项目里就要 `--dir`，不猜。
    - 两端都经 `remote.Peer`，和交接同一条路：这台在进程内回答，别的机器模式一经 ssh、模式二经 server 的 `node.call`；两端都必须是自己的机器，`--from` 可以是另一台，两端都不必是这台。两边各 `memory.ls{[这一对的目录], global}`，比较在发起端做（`remote.CompareMemories`）；项目有几个仓库时，Codex 全局记忆里没写适用目录的那组只随第一对比一次。
    - 按类别和名字配对：Claude 的按文件名，Codex 全局的按块标题（块的 `sha` / `norm` 只算它自己那几行，不含和下一块之间的空行）。先比原始 `sha`，再比 `norm`（换行统一成 LF）；还不同、又有映射时，用 `memory.read` 读这一条两边的正文（Codex 的块从文件里切出来，同一个文件只读一次），把那边正文里的路径写成这边的再比。映射只有这一对目录和两边的 home：路径要在词边界上，是映射的目录本身或在它下面，用 `pathmap.Rebase` 接过去，到空白、引号、括号或标点为止；别的文字一律不动。
    - 分四组：只在这边、只在那边、内容不同、相同；相同里标出「只差换行或路径」（`loose`）。任一边的 `MEMORY.md` 超过加载上限时写出来。`--json` 给每一对的目录、两边的 `sets` 和这四组。
@@ -89,7 +89,7 @@
    - 先照 `diff` 比一次，再逐条（`remote.CopyMemory`）：在源机器用 `memory.read` 读正文和源 `MEMORY.md` 里指向它的那一行，`memory.put{dir, kind, name, text, line, expect}` 写到目标。名字可以不带 `.md`。
    - `memory.put`（`memory.Put`）：`dir` 是那台存在的项目目录，或记忆目录本身，记忆目录按那台自己的规则找（`autoMemoryDirectory`、git 仓库根）；`kind` 只收 `claude`，Codex 的回 `bad_request`；`line` 只能是一行，并且指向 `name`。`expect` 是调用方看到的那边这个文件的 `sha`（没有为空），和现在的不一样就回 `stale`、什么也不写：比较之后那边变了，要重新比。对上了交给 `memory.Write`：没有就写入，并把这一行加进 `MEMORY.md`（已经有指向这个文件的行就不加），`MEMORY.md` 按行取并集；内容相同不动；不同就写进 `memory/.incoming/<名字>`，**不进索引**，免得两份互相矛盾的记忆同时进入上下文，由用户来合并；`.incoming/` 里已有另一份不同的同名文件时写成 `<名字去掉 .md>-2.md`、`-3.md`…，那里的也不覆盖。回答带写到哪、是否进了 `.incoming/`、写完以后 `MEMORY.md` 的行数和字节数、是否超过 Claude 的加载上限（前 200 行或前 25KB，超出部分启动时不加载，命令行写出来）。
    - 命令行：已相同的、只差换行或路径的不复制，各说一句；Codex 的条目说只对比不复制；源上没有的名字和 `stale` 的算没复制成，退出码非 0。
-   - 未实现：TUI 的对比浮层（只在这边、只在那边、内容不同三组，勾选后复制到任一边，`.incoming/` 单列「待合并」）。
+   - TUI：记忆浮层的「对比…」（[tui.md](tui.md)「记忆对比」），同一组函数：`projects.MemoryPairs` 配对、`remote.CompareMemories` 比、`remote.CopyMemory` 逐条写，往这边复制时把这一对和条目反过来看（`MemoryPair.Swap`、`Entry.Swap`）。
 5. **Codex 记忆**：只看、只对比，不写。需要带到另一台机器时，放进交接包，或者用户手动复制。
 
 ## 迁移前的环境诊断

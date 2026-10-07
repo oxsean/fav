@@ -29,7 +29,7 @@ func Load(kind, dir string) (Set, bool) {
 	if err != nil {
 		return Set{}, false
 	}
-	s := Set{Kind: kind, Dir: dir, Items: []Item{}}
+	s := Set{Kind: kind, Dir: dir}
 	lines := map[string]indexed{}
 	if b, err := os.ReadFile(filepath.Join(dir, indexName)); err == nil {
 		s.Index = filepath.Join(dir, indexName)
@@ -41,6 +41,18 @@ func Load(kind, dir string) (Set, bool) {
 			}
 		}
 	}
+	s.Items = items(dir, ents, lines)
+	if kind == KindClaude {
+		if ents, err := os.ReadDir(filepath.Join(dir, incomingDir)); err == nil {
+			s.Incoming = items(filepath.Join(dir, incomingDir), ents, nil)
+		}
+	}
+	return s, true
+}
+
+// items are the memory files among dir's ents, the newest first, described by their front matter and lines.
+func items(dir string, ents []os.DirEntry, lines map[string]indexed) []Item {
+	out := []Item{}
 	for _, e := range ents {
 		name := e.Name()
 		if !e.Type().IsRegular() || name == indexName || strings.HasPrefix(name, ".") || filepath.Ext(name) != ".md" {
@@ -69,10 +81,10 @@ func Load(kind, dir string) (Set, bool) {
 		if it.Title == "" {
 			it.Title = strings.TrimSuffix(name, ".md")
 		}
-		s.Items = append(s.Items, it)
+		out = append(out, it)
 	}
-	slices.SortFunc(s.Items, func(a, b Item) int { return b.At.Compare(a.At) })
-	return s, true
+	slices.SortFunc(out, func(a, b Item) int { return b.At.Compare(a.At) })
+	return out
 }
 
 // lineFor is the MEMORY.md line pointing at name in dir, "" when there is none.

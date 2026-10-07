@@ -685,6 +685,8 @@ func (m *Model) overlayKey(msg tea.KeyPressMsg) tea.Cmd {
 		return m.makeTaskKey(msg)
 	case ovMemory:
 		return m.memoryKey(msg)
+	case ovMemCompare:
+		return m.memCompareKey(msg)
 	case ovMessage:
 		switch a := keyAct(inReader, msg.String()); a {
 		case actClose:
@@ -923,7 +925,13 @@ func (m *Model) wheel(dir, x int) bool {
 		m.ov.mem.clamp()
 		return m.ov.mem.cursor != before
 	}
-	if m.ov.kind == ovMessage || m.ov.kind == ovHelp || m.ov.kind == ovHandoff || m.ov.kind == ovMemory {
+	if m.ov.kind == ovMemCompare && m.ov.mcmp.read == nil {
+		before := m.ov.mcmp.cursor
+		m.ov.mcmp.cursor += dir
+		m.ov.mcmp.clamp()
+		return m.ov.mcmp.cursor != before
+	}
+	if m.ov.kind == ovMessage || m.ov.kind == ovHelp || m.ov.kind == ovHandoff || m.ov.kind == ovMemory || m.ov.kind == ovMemCompare {
 		n := min(max(m.ov.cursor+dir*m.wheelStep, 0), m.ov.scrollMax)
 		if n == m.ov.cursor {
 			return false

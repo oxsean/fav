@@ -25,6 +25,12 @@ type Entry struct {
 	Loose bool   `json:"loose,omitempty"` // the same only once line endings and the mapped paths are set aside
 }
 
+// Swap is e seen from the other machine.
+func (e Entry) Swap() Entry {
+	e.Here, e.There = e.There, e.Here
+	return e
+}
+
 // Comparison is two machines' memories item by item.
 type Comparison struct {
 	OnlyHere  []Entry `json:"only_here"`

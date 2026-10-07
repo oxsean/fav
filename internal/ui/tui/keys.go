@@ -14,20 +14,21 @@ import (
 type scope uint16
 
 const (
-	inList     scope = 1 << iota // main screen: list, right pane, hits
-	inResume                     // the resume dialog (Enter on a session)
-	inConfirm                    // yes / cancel confirmations
-	inStart                      // new-session dialog
-	inHandoff                    // handoff dialog
-	inPeek                       // peek at a Herdr agent (outside its reply input)
-	inReader                     // help and the full-message view
-	inTaskForm                   // the task form (its text fields take every other key)
-	inTaskRun                    // the run dialog: machine, agent, buttons
-	inProject                    // the 「项目」 dialog (its name box takes every letter)
-	inMemory                     // the memory overlay's list (reading one is inReader)
+	inList       scope = 1 << iota // main screen: list, right pane, hits
+	inResume                       // the resume dialog (Enter on a session)
+	inConfirm                      // yes / cancel confirmations
+	inStart                        // new-session dialog
+	inHandoff                      // handoff dialog
+	inPeek                         // peek at a Herdr agent (outside its reply input)
+	inReader                       // help and the full-message view
+	inTaskForm                     // the task form (its text fields take every other key)
+	inTaskRun                      // the run dialog: machine, agent, buttons
+	inProject                      // the 「项目」 dialog (its name box takes every letter)
+	inMemory                       // the memory overlay's list (reading one is inReader)
+	inMemCompare                   // two machines' memories compared (reading one is inReader)
 )
 
-var scopes = []scope{inList, inResume, inConfirm, inStart, inHandoff, inPeek, inReader, inTaskForm, inTaskRun, inProject, inMemory}
+var scopes = []scope{inList, inResume, inConfirm, inStart, inHandoff, inPeek, inReader, inTaskForm, inTaskRun, inProject, inMemory, inMemCompare}
 
 // tier is how much an action changes. ⚠️ Rules for new keys:
 // tierStart never gets a list key (only a dialog's Enter or the same key pressed twice runs it);
@@ -147,8 +148,8 @@ var bindings = []binding{
 	{act: actSort, in: inList, keys: []string{"o", "ctrl+o"}},
 	{act: actDown, in: inList, keys: []string{"j", "down", "ctrl+n"}},
 	{act: actUp, in: inList, keys: []string{"k", "up", "ctrl+p"}},
-	{act: actPageDown, in: inList, keys: []string{"pgdown", "ctrl+f"}},
-	{act: actPageUp, in: inList, keys: []string{"pgup", "ctrl+b"}},
+	{act: actPageDown, in: inList | inMemCompare, keys: []string{"pgdown", "ctrl+f"}},
+	{act: actPageUp, in: inList | inMemCompare, keys: []string{"pgup", "ctrl+b"}},
 	{act: actHalfDown, in: inList, keys: []string{"ctrl+d"}},
 	{act: actHalfUp, in: inList, keys: []string{"ctrl+u"}},
 	{act: actTop, in: inList, keys: []string{"g", "home"}},
@@ -197,7 +198,7 @@ var bindings = []binding{
 	{act: actBack, in: inList, keys: []string{"esc"}},
 	{act: actQuit, in: inList, keys: []string{"q", "ctrl+c"}},
 
-	{act: actEnter, in: inResume | inConfirm | inStart | inHandoff | inPeek | inMemory, keys: []string{"enter"}},
+	{act: actEnter, in: inResume | inConfirm | inStart | inHandoff | inPeek | inMemory | inMemCompare, keys: []string{"enter"}},
 	{act: actResume, in: inResume, tier: tierStart, keys: []string{"r"}}, // the dialog is the confirmation: r = Enter
 	{act: actTerminal, in: inResume, tier: tierStart, keys: []string{"t", "ctrl+t"}},
 	{act: actApp, in: inResume, tier: tierStart, keys: []string{"p"}},
@@ -208,23 +209,23 @@ var bindings = []binding{
 	{act: actFiles, in: inResume, tier: tierStart, keys: []string{"o"}},
 	{act: actTitle, in: inResume, keys: []string{"n"}},
 	{act: actTask, in: inResume, keys: []string{"g"}}, // the task the session's run worked for
-	{act: actFocusPrev, in: inResume | inConfirm | inStart | inHandoff | inMemory, keys: []string{"shift+tab", "left", "h"}},
-	{act: actFocusNext, in: inResume | inConfirm | inStart | inHandoff | inMemory, keys: []string{"tab", "right", "l"}},
-	{act: actClose, in: inResume | inStart | inHandoff | inPeek | inMemory, keys: []string{"esc", "q"}},
+	{act: actFocusPrev, in: inResume | inConfirm | inStart | inHandoff | inMemory | inMemCompare, keys: []string{"shift+tab", "left", "h"}},
+	{act: actFocusNext, in: inResume | inConfirm | inStart | inHandoff | inMemory | inMemCompare, keys: []string{"tab", "right", "l"}},
+	{act: actClose, in: inResume | inStart | inHandoff | inPeek | inMemory | inMemCompare, keys: []string{"esc", "q"}},
 
 	{act: actConfirm, in: inConfirm, tier: tierHeavy, keys: []string{"y"}},
 	{act: actClose, in: inConfirm, keys: []string{"esc", "q", "n"}},
 
 	{act: actClaude, in: inStart | inHandoff, tier: tierStart, keys: []string{"1"}},
 	{act: actCodex, in: inStart | inHandoff, tier: tierStart, keys: []string{"2"}},
-	{act: actDown, in: inStart | inHandoff | inReader | inMemory, keys: []string{"j", "down", "ctrl+n"}},
-	{act: actUp, in: inStart | inHandoff | inReader | inMemory, keys: []string{"k", "up", "ctrl+p"}},
+	{act: actDown, in: inStart | inHandoff | inReader | inMemory | inMemCompare, keys: []string{"j", "down", "ctrl+n"}},
+	{act: actUp, in: inStart | inHandoff | inReader | inMemory | inMemCompare, keys: []string{"k", "up", "ctrl+p"}},
 	{act: actPageDown, in: inHandoff | inReader | inMemory, keys: []string{"space", "pgdown", "ctrl+f"}},
 	{act: actPageUp, in: inHandoff | inReader | inMemory, keys: []string{"pgup", "ctrl+b", "b"}},
-	{act: actHalfDown, in: inHandoff | inReader | inMemory, keys: []string{"ctrl+d"}},
-	{act: actHalfUp, in: inHandoff | inReader | inMemory, keys: []string{"ctrl+u"}},
-	{act: actTop, in: inHandoff | inReader | inMemory, keys: []string{"g", "home"}},
-	{act: actBottom, in: inHandoff | inReader | inMemory, keys: []string{"G", "end"}},
+	{act: actHalfDown, in: inHandoff | inReader | inMemory | inMemCompare, keys: []string{"ctrl+d"}},
+	{act: actHalfUp, in: inHandoff | inReader | inMemory | inMemCompare, keys: []string{"ctrl+u"}},
+	{act: actTop, in: inHandoff | inReader | inMemory | inMemCompare, keys: []string{"g", "home"}},
+	{act: actBottom, in: inHandoff | inReader | inMemory | inMemCompare, keys: []string{"G", "end"}},
 	{act: actEdit, in: inHandoff, keys: []string{"e", "ctrl+e"}},
 	{act: actCopy, in: inHandoff | inReader, keys: []string{"y", "ctrl+y"}},
 	{act: actHost, in: inHandoff, keys: []string{"m"}}, // the machine the new session starts on, as m picks machines in the list
@@ -262,7 +263,7 @@ var bindings = []binding{
 	{act: actUp, in: inProject, keys: []string{"up", "ctrl+p"}},
 	{act: actLeft, in: inProject, keys: []string{"left"}},
 	{act: actRight, in: inProject, keys: []string{"right"}},
-	{act: actTick, in: inProject | inHandoff, tier: tierRecord, keys: []string{"x", "ctrl+x"}}, // ticks a directory; Ctrl+X while the name box types
+	{act: actTick, in: inProject | inHandoff | inMemCompare, tier: tierRecord, keys: []string{"x", "ctrl+x"}}, // ticks a directory or a memory; Ctrl+X while the name box types
 }
 
 var keyIndex = func() map[scope]map[string]*binding {

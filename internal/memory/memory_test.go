@@ -381,6 +381,31 @@ func TestWriteNeverOverwrites(t *testing.T) {
 	}
 }
 
+// TestLoadListsIncomingApart: what Write put under .incoming/ is listed apart from the memories, and reads.
+func TestLoadListsIncomingApart(t *testing.T) {
+	homes(t)
+	mem := ClaudeDir(t.TempDir())
+	write(t, filepath.Join(mem, "MEMORY.md"), "- [B](b.md) — second")
+	write(t, filepath.Join(mem, "b.md"), "beta\n")
+	w, err := Write(mem, "b.md", []byte("---\nname: theirs\n---\nother beta\n"), "")
+	if err != nil || !w.Incoming {
+		t.Fatalf("different: %+v %v", w, err)
+	}
+	s, ok := Load(KindClaude, mem)
+	if !ok || len(s.Items) != 1 || s.Items[0].File != filepath.Join(mem, "b.md") {
+		t.Fatalf("the memories leave .incoming/ out: %+v", s.Items)
+	}
+	if len(s.Incoming) != 1 || s.Incoming[0].File != w.File || s.Incoming[0].Title != "theirs" || s.Incoming[0].InIndex || s.Incoming[0].SHA == "" {
+		t.Fatalf("the incoming one is listed apart: %+v", s.Incoming)
+	}
+	if text, _, _, err := Read(w.File); err != nil || !strings.Contains(text, "other beta") {
+		t.Errorf("and reads: %q %v", text, err)
+	}
+	if s, _ := Load(KindCodexGlobal, mem); len(s.Incoming) != 0 {
+		t.Errorf("only Claude's sets have one: %+v", s.Incoming)
+	}
+}
+
 func TestMergeCopiesThenTrashesTheOldDirectory(t *testing.T) {
 	homes(t)
 	from, to := ClaudeDir(t.TempDir()), ClaudeDir(t.TempDir())

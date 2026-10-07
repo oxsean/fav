@@ -216,6 +216,8 @@ type memNode struct {
 	calls    []string
 	trashed  map[string]memory.Item // entry → the memory
 	listDirs [][]string
+	puts     []remote.MemoryPutParams
+	over     bool // MEMORY.md is over the load limit after a put
 }
 
 const shopDir = "/home/u/dev/shop"
@@ -271,6 +273,8 @@ func (n *memNode) handle(method string, params json.RawMessage) (any, error) {
 		delete(n.trashed, p.Entry)
 		n.sets[0].Items = append(n.sets[0].Items, it)
 		return remote.MemoryFile{File: it.File}, nil
+	case remote.MMemoryPut:
+		return n.put(params)
 	}
 	return nil, &wire.Error{Code: wire.CodeUnknownMethod}
 }
@@ -402,12 +406,17 @@ func TestMemoryOverlayOnAnotherPersonsMachine(t *testing.T) {
 var dumpT *testing.T
 
 // dumpMemory: the demo project on this machine, mba (answering memory.*) and win (offline), the cursor on its heading;
-// then the overlay, a memory read, or one deleted with the undo offered.
+// then the overlay, a memory read, or one deleted with the undo offered; or the comparison with mba, one of its
+// memories read on both sides, or two copied to mba (one new, one into .incoming/).
 func dumpMemory(m *Model, kind string) {
 	t := dumpT
 	n := newHandoffNode("mba", "linux", "/home/u")
 	n.mem = newMemNode()
 	n.hello.Methods = append(n.hello.Methods, memMethods...)
+	compare := strings.HasPrefix(kind, "memory-co")
+	if compare {
+		n.hello.Methods = append(n.hello.Methods, remote.MMemoryPut)
+	}
 	m.useHosts(remote.NewHostsDial([]tend.Host{{Name: "mba"}, {Name: "win"}}, i18n.ZH, func(h tend.Host) (*remote.Client, error) {
 		if h.Name == "mba" {
 			return remote.Pipe(n), nil
@@ -418,6 +427,16 @@ func dumpMemory(m *Model, kind string) {
 	m.remote["win"].err = &wire.Error{Code: wire.CodeOffline}
 	demoProject(m)
 	memoryHomes(t, m.proj.snap.Projects["p_demo"].Repos[0].Dirs["local"])
+	if compare {
+		dir := m.proj.snap.Projects["p_demo"].Repos[0].Dirs["mba"]
+		mem := "/home/u/.claude/projects/" + strings.ReplaceAll(dir, "/", "-") + "/memory"
+		n.mem = cmpNode(mem, dir, map[string]string{
+			"deploy.md": "---\nname: deploy-steps\ndescription: Staging deploys from main\n---\n\nRun the release script; never from a branch.\n",
+			"oauth.md":  "The callback decodes state twice.\n", "cart.md": "Round the cart total once.\n"},
+			"- [Deploy steps](deploy.md) — how staging is deployed\n- [OAuth state](oauth.md)\n- [Cart totals](cart.md)\n", "")
+		n.mem.sets[0].Incoming = []memory.Item{{File: mem + "/.incoming/notes.md", Title: "release notes (from win)", At: time.Now().Add(-26 * time.Hour)}}
+		n.mem.texts[mem+"/.incoming/notes.md"] = "Release notes are written by hand.\n"
+	}
 	m.cursor = slices.IndexFunc(m.rows, func(r row) bool { return groupProject(r.group) == "p_demo" })
 	pump(m, m.memoryHere())
 	waitFor(t, m, func() bool { return !m.mems[m.groupUnderCursor()].busy() })
@@ -435,6 +454,26 @@ func dumpMemory(m *Model, kind string) {
 		key(m, "D")
 		key(m, "y")
 		waitFor(t, m, func() bool { return m.undo != nil && !m.ov.mem.view.busy() })
+	case "memory-compare", "memory-compare-read", "memory-copied":
+		m.askCompare()
+		key(m, "enter")
+		waitCompared(t, m)
+		cmpGoTo(t, m, cmpDiffer, "oauth.md")
+		switch kind {
+		case "memory-compare-read":
+			key(m, "enter")
+			waitFor(t, m, func() bool { r := m.ov.mcmp.read; return !r.loading[0] && !r.loading[1] })
+			key(m, "tab")
+		case "memory-copied":
+			key(m, "x")
+			cmpGoTo(t, m, cmpOnlyHere, "stray.md")
+			key(m, "x")
+			clickText(t, m, i18n.F("memory.btn_copy_to", "mba"))
+			waitCompared(t, m)
+		default:
+			cmpGoTo(t, m, cmpOnlyHere, "stray.md")
+			key(m, "x")
+		}
 	}
 }
 

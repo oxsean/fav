@@ -206,7 +206,7 @@ func (m *Model) remoteList(q tend.Query) []*tend.Rec {
 // lacking are the methods asked for on demand that hello does not list.
 func lacking(hello remote.Hello) map[string]bool {
 	out := map[string]bool{}
-	for _, method := range []string{remote.MPut, remote.MTrash, remote.MRestore, remote.MHandoffPut, remote.MMemoryList, remote.MMemoryTrash} {
+	for _, method := range []string{remote.MPut, remote.MTrash, remote.MRestore, remote.MHandoffPut, remote.MMemoryList, remote.MMemoryTrash, remote.MMemoryPut} {
 		if !slices.Contains(hello.Methods, method) {
 			out[method] = true
 		}

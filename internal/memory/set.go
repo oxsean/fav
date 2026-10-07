@@ -17,9 +17,12 @@ type Set struct {
 	Dir   string `json:"dir"`
 	Index string `json:"index,omitempty"` // its MEMORY.md
 	Items []Item `json:"items"`
-	Lines int    `json:"lines,omitzero"` // of MEMORY.md
-	Bytes int64  `json:"bytes,omitzero"`
-	Over  bool   `json:"over,omitempty"` // MEMORY.md passes what Claude loads: 200 lines or 25 KB
+	// Incoming are Claude's memories under .incoming/: written there because another held the name, never indexed,
+	// waiting to be merged by hand.
+	Incoming []Item `json:"incoming,omitempty"`
+	Lines    int    `json:"lines,omitzero"` // of MEMORY.md
+	Bytes    int64  `json:"bytes,omitzero"`
+	Over     bool   `json:"over,omitempty"` // MEMORY.md passes what Claude loads: 200 lines or 25 KB
 }
 
 type Item struct {

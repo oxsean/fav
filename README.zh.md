@@ -256,6 +256,7 @@ TUI 里的 `?` 只列简短版；这里是逐条的完整说明，包括操作�
 | `:` | 瞄一眼：写一句话，Enter 作为 agent 的下一句发出 |
 | `↑ / ↓` `Ctrl+N / Ctrl+P` `x` `Ctrl+X` | 项目对话框：在列表里移动，勾选目录（输入名字时也能用 `Ctrl+X`） |
 | `Enter` `D` `u` `Ctrl+Z` | 记忆浮层：读一条（`Tab / Shift+Tab` 下一条 / 上一条），确认后把 Claude 记忆放进它那台的回收站，撤销 |
+| `x` `Ctrl+X` `Enter` | 记忆浮层「对比…」项目的另一台机器：勾选 Claude 记忆（再复制到任一边，不覆盖；不同的放进 `.incoming/`，列在「待合并」），读一条，两边各一个 tab（`Tab` 切换） |
 
 **其他**
 
@@ -322,7 +323,7 @@ tend rm <id>                              # 单条进回收站；所有 <id> 也
 tend trash [host:mba|host:all] [--json]  # 看回收站（host: 看别的机器的或每台的）；--purge 清过期的，--purge --all 清空（会确认）
 tend doctor [--compact]                  # 体检：数据文件、失效会话、回收站过期、空闲几小时的 agent、没人留的大文件、孤儿记忆；--compact 压实
 tend memory [项目|目录] [host:mba]       # Claude 项目记忆和适用的 Codex 全局记忆；show <文件> 读一条，rm <文件|目录> 进回收站，merge <旧> <新> 并过去；TUI 里按 i
-tend memory diff <项目|目录> mba         # 和另一台逐条对比；cp <项目|目录> mba <名字…> 按条复制，不覆盖（不同的放进那台的 .incoming/）
+tend memory diff <项目|目录> mba         # 和另一台逐条对比；cp <项目|目录> mba <名字…> 按条复制，不覆盖（不同的放进那台的 .incoming/）；TUI 里 i 再「对比…」
 ```
 
 ### 其它机器：`hosts`

@@ -259,6 +259,7 @@ Keys that start a process, a tab or an app only focus their button; the same key
 | `:` | peek: type a line; Enter sends it as the agent's next prompt |
 | `↑ / ↓` `Ctrl+N / Ctrl+P` `x` `Ctrl+X` | project: move in the list, tick a directory (`Ctrl+X` also while typing a name) |
 | `Enter` `D` `u` `Ctrl+Z` | memories: read one (`Tab / Shift+Tab` the next / previous), put a Claude memory into its machine's trash after confirming, undo that |
+| `x` `Ctrl+X` `Enter` | memories, Compare… with another machine of the project: tick a Claude memory (then Copy to either side, never over another; a different one waits in `.incoming/`, listed to merge), read one with a tab per side (`Tab` switches) |
 
 **Other**
 
@@ -325,7 +326,7 @@ tend rm <id>                             # one session to the trash; every <id> 
 tend trash [host:mba|host:all] [--json]  # list the trash (host: another machine's, or every one's); --purge removes expired entries, --purge --all empties it (asks)
 tend doctor [--compact]                  # check data files, dead sessions, trash expiry, agents idle for hours, big old transcripts nobody kept, orphaned memories; --compact rewrites the store
 tend memory [project|dir] [host:mba]     # Claude's project memory and the Codex global memories that apply; show <file>, rm <file|dir> (to the trash), merge <old> <new>; TUI: i
-tend memory diff <project|dir> mba       # compare them with another machine's item by item; cp <project|dir> mba <name…> copies, never over another (a different one waits in .incoming/)
+tend memory diff <project|dir> mba       # compare them with another machine's item by item; cp <project|dir> mba <name…> copies, never over another (a different one waits in .incoming/); TUI: i, Compare…
 ```
 
 ### Other machines: `hosts`
