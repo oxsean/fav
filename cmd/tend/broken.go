@@ -150,7 +150,7 @@ func pickBroken(list []broken, args []string) ([]broken, error) {
 			hit = list[n-1]
 		} else {
 			var n int
-			hit, n = matchRef(list, a, brokenKeys)
+			hit, n = index.MatchRef(list, a, brokenKeys)
 			switch {
 			case n == 0 && err == nil:
 				return nil, i18n.E("cli.broken.bad_number", a)
@@ -198,7 +198,7 @@ func brokenQuery(words []string) tend.Query {
 
 func splitIDs(list []broken, query []string) (sel, rest []string) {
 	for _, w := range query {
-		if _, n := matchRef(list, w, brokenKeys); n == 1 {
+		if _, n := index.MatchRef(list, w, brokenKeys); n == 1 {
 			sel = append(sel, w)
 		} else {
 			rest = append(rest, w)

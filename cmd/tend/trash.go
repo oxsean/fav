@@ -86,7 +86,7 @@ func cmdTrash(args []string) error {
 		if err != nil {
 			return err
 		}
-		hit, n := matchRef(entries, *restore, func(e tend.TrashEntry) (string, string) {
+		hit, n := index.MatchRef(entries, *restore, func(e tend.TrashEntry) (string, string) {
 			if e.Record != nil {
 				return e.SessionID, e.Record.ID
 			}
@@ -218,7 +218,7 @@ func restoreFar(ref string) (done bool, err error) {
 	if err != nil {
 		return true, errors.New(remote.Refused(name, remote.MRestore, err))
 	}
-	r, n := matchRef(recs, sub, recKeys)
+	r, n := index.MatchRef(recs, sub, index.RecKeys)
 	switch {
 	case n == 0:
 		return true, i18n.E("cli.trash.not_found", ref)

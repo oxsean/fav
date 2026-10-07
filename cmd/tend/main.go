@@ -185,16 +185,6 @@ func parseMixed(fs *flag.FlagSet, args []string) ([]string, error) {
 	}
 }
 
-// matchRef finds the items whose session id starts with ref or whose record id is ref: the last hit and how many.
-func matchRef[T any](items []T, ref string, keys func(T) (sid, id string)) (hit T, n int) {
-	for _, it := range items {
-		if sid, id := keys(it); strings.HasPrefix(sid, ref) || id != "" && id == ref {
-			hit, n = it, n+1
-		}
-	}
-	return hit, n
-}
-
 func refErr(ref string, n int) error {
 	switch {
 	case n == 0:
@@ -205,11 +195,8 @@ func refErr(ref string, n int) error {
 	return nil
 }
 
-func recKeys(r *tend.Rec) (string, string) { return r.SessionID, r.ID }
-
-// pick resolves a record id or session id prefix: favorites, indexed sessions, running ones, then any file the index
-// has (one-shot runs, silent sessions, older ids of a chain); more than one session is an error. A session never
-// favorited comes back with an empty ID. host:ref looks on that configured host (Rec.Host set).
+// pick resolves a record id or session id prefix on this machine (index.Find); more than one session is an error.
+// host:ref looks on that configured host, by the same rule there (Rec.Host set).
 func pick(s *tend.Store, ref string) (*tend.Rec, error) {
 	if ref == "" {
 		return nil, errors.New(i18n.T("cli.missing_id"))
@@ -217,30 +204,11 @@ func pick(s *tend.Store, ref string) (*tend.Rec, error) {
 	if r, ok, err := pickHost(ref); ok {
 		return r, err
 	}
-	if r := s.Get(ref); r != nil {
-		return r, nil
-	}
-	if r, n := matchRef(s.All(), ref, recKeys); n > 0 {
-		return r, refErr(ref, n)
-	}
-	idx, err := index.Open()
+	r, n, err := index.Find(s, index.Open, ref)
 	if err != nil {
 		return nil, err
 	}
-	sessionKeys := func(ss *index.Session) (string, string) { return ss.SessionID, "" }
-	if ss, n := matchRef(idx.Sessions(), ref, sessionKeys); n > 0 {
-		return ss.Rec(), refErr(ref, n)
-	}
-	var rows index.Rows
-	running, _ := rows.List(s, idx, nil, capture.LiveSessions(), tend.Query{Status: tend.StatusLive, All: true})
-	if r, n := matchRef(running, ref, recKeys); n > 0 {
-		return r, refErr(ref, n)
-	}
-	f, n := idx.FileByPrefix(ref) // one-shot runs, silent sessions, older ids of a chain
-	if err := refErr(ref, n); err != nil {
-		return nil, err
-	}
-	return f.Rec(), nil
+	return r, refErr(ref, n)
 }
 
 type skillInput struct {

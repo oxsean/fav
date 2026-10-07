@@ -120,6 +120,23 @@ func (h *Hosts) Sessions(ctx context.Context, name string) ([]*tend.Rec, State) 
 	return recs(name, l.Sessions), State{At: now, Version: v}
 }
 
+// Find resolves ref, a record id or session id prefix, on name as that machine's own commands do (QueryParams.ID): a
+// session its lists hide is found too. r is set when exactly one session matches, n is how many do. A tend that does
+// not answer the id answers unknown_method.
+func (h *Hosts) Find(ctx context.Context, name, ref string) (r *tend.Rec, n int, err error) {
+	var res QueryResult
+	if err := h.callIfKnown(ctx, name, MQuery, QueryParams{ID: ref, Limit: 1}, &res); err != nil {
+		return nil, 0, err
+	}
+	if res.ID != ref {
+		return nil, 0, &wire.Error{Code: wire.CodeUnknownMethod, Detail: MQuery}
+	}
+	if res.Matched == 1 && len(res.Rows) == 1 {
+		r = res.Rows[0].Rec(name)
+	}
+	return r, res.Matched, nil
+}
+
 // Put writes p to the session ref on name and returns the row as name wrote it, which also replaces the cached one.
 // expect is the record's updated_at the editor saw: name answers stale when it has been written since. A tend whose
 // hello lists no put is not sent it: unknown_method, with its version as the detail.

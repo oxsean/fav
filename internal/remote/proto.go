@@ -250,6 +250,10 @@ type QueryParams struct {
 	Projects []ProjectDirs     `json:"projects,omitempty"`
 	Also     map[string]string `json:"also,omitempty"`  // session id → its task's text, which keywords match too
 	Fresh    bool              `json:"fresh,omitempty"` // refresh the index first
+	// ID, when set, replaces the query: the session this record id or session id (prefix) names here, as this
+	// machine's own commands resolve it (index.Find), sessions the lists hide included. The result echoes it, with the
+	// session in Rows when exactly one matches and the count in Matched; an older tend ignores it and leaves it out.
+	ID string `json:"id,omitempty"`
 }
 
 // Row is a listed session.
@@ -273,7 +277,8 @@ type QueryResult struct {
 	Tokens  []tend.Token `json:"tokens"`
 	Status  string       `json:"status,omitempty"` // agent: rows not listed here (the TUI's only)
 	// TrashDays: this machine's trash_days, after which a trashed session is purged (0: never).
-	TrashDays int `json:"trash_days,omitempty"`
+	TrashDays int    `json:"trash_days,omitempty"`
+	ID        string `json:"id,omitempty"` // QueryParams.ID, answered
 }
 
 // PutParams writes a patch to a session's record; a session without one gets one (not a favorite).

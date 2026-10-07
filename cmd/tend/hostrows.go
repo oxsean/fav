@@ -384,8 +384,10 @@ func hostTrash(q tend.Query) []*tend.Rec {
 	return out
 }
 
-// pickHost resolves host:ref (a configured host, then a record id or session id prefix there); ok is false when ref
-// names no configured host. A full key found in the host's cached list is taken from there without reaching it.
+// pickHost resolves host:ref (a configured host, then a record id or session id prefix there, as that machine resolves
+// its own: Hosts.Find); ok is false when ref names no configured host. A full key found in the host's cached list is
+// taken from there without reaching it, and a prefix from that list while the host cannot be reached. An older tend
+// there is looked up in its list, and what that list leaves out says to update it.
 func pickHost(ref string) (r *tend.Rec, ok bool, err error) {
 	name, sub, found := strings.Cut(ref, ":")
 	if !found {
@@ -402,20 +404,30 @@ func pickHost(ref string) (r *tend.Rec, ok bool, err error) {
 		return nil, true, errors.New(i18n.T("cli.missing_id"))
 	}
 	cached, _ := h.Cached(name)
-	if r, n := matchRef(cached, sub, recKeys); n == 1 && (r.SessionID == sub || r.ID == sub) {
+	if r, n := index.MatchRef(cached, sub, index.RecKeys); n == 1 && (r.SessionID == sub || r.ID == sub) {
 		return r, true, nil
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), hostTimeout)
 	defer cancel()
 	far.reach()
-	recs, st := h.Sessions(ctx, name)
-	if r, n := matchRef(recs, sub, recKeys); n > 0 {
-		return r, true, refErr(ref, n)
+	r, n, err := h.Find(ctx, name, sub)
+	if wire.Code(err) == wire.CodeUnknownMethod {
+		recs, st := h.Sessions(ctx, name)
+		if r, n := index.MatchRef(recs, sub, index.RecKeys); n > 0 {
+			return r, true, refErr(ref, n)
+		}
+		if st.Err == nil {
+			return nil, true, errors.New(remote.TooOld(name, remote.MQuery))
+		}
+		err = st.Err
 	}
-	if st.Err != nil {
-		return nil, true, errors.New(i18n.F("remote.unreachable", name, remote.Reason(st.Err)))
+	if err != nil {
+		if r, n := index.MatchRef(cached, sub, index.RecKeys); n > 0 {
+			return r, true, refErr(ref, n)
+		}
+		return nil, true, errors.New(i18n.F("remote.unreachable", name, remote.Reason(err)))
 	}
-	return nil, true, refErr(ref, 0)
+	return r, true, refErr(ref, n)
 }
 
 // pickLocal is pick for commands that write: another machine's records are read-only here.

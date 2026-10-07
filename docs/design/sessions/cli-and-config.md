@@ -23,7 +23,8 @@ tend favorite|unfavorite <id>
 tend pin|unpin <id>
 tend rm <id> [-y]                      挪进回收站；正在跑的拒绝（别名 delete）；host:sid 挪进那台机器的回收站
                                        所有 <id> 都先按 record id 找，找不到当 session id（前缀也行，多于一条命中报歧义）
-                                       到收藏、索引、在跑的会话里找，最后按前缀认索引里 skip 的、没说过话的文件和续接链的旧 id；
+                                       到收藏、索引、在跑的会话里找，最后按前缀认索引里 skip 的、没说过话的文件和续接链的旧 id
+                                       （index.Find）；host:<id> 由那台机器按同一条规则找（列表隐藏的也找得到），
                                        没收藏的会话第一次改状态 / 编辑时建记录（不算收藏）。
 tend trash [host:<机器>|host:all] [--json] [--restore <id|sid>] [--purge [--all] [-y]]
                                        不带 host: 列本机的回收站；host:<机器> 只列那台的，host:all 列本机和每台自己的机器
@@ -121,6 +122,7 @@ tend uninstall-skill                    只删 ~/.claude、~/.codex 下的 tend 
 
 - 单机：`config.hosts` 经 ssh。
 - server（`coordinator.url`）：第一次要读别的机器时拨 server 一次（5 秒为限，`hello` + `machine.list`），经 `node.call` 读它让看的人读的机器（去掉本机），`host:` 用 server 的机器名，不退回 ssh。拨不上时 stderr 一行「连不上 server：原因 · 别的机器显示缓存」，只列自己机器的缓存。fzf 守 30 秒规则、不列别人共享的机器，`tend resume` 的规则，都见 [remote.md](remote.md)「server 模式」「恢复」「fzf」。
+- 找 `host:<id>`（`pickHost`）：那台缓存的列表里有这个完整的 session id 或记录 id 时直接用，不连它；否则经 `Hosts.Find` 请那台按它自己的规则（`index.Find`，和本机同一条）找，列表隐藏的会话（`claude -p` 等）也找得到。连不上时按缓存的列表认前缀，再找不到报连不上；那台的 tend 旧（回答里没有 `id`）时按它的列表认，列表里没有就提示先 `tend hosts install <机器>`。
 - 写记录：`favorite` / `unfavorite` / `archive` / `unarchive` / `status` / `done` / `edit` 和 fzf 的 `fzf-pick toggle*` 接受 `host:sid`，经那台机器的 `put` 写（`remotePick`、`writeRec`）；`edit` 先从那台重读这一行，再开编辑器，存时带它的 `updated_at`，那边改过就失败。server 模式下拨不上 server、或机器是别人共享的，就拒绝；那台的 tend 旧（没有 `put`）时提示先 `tend hosts install <机器>`。`rm` 和 `trash --restore` 也接受 `host:sid`，经那台的 `trash` / `restore`（`rmFar`、`restoreFar`，同一组 `Hosts` 方法），在跑的会话那台回 `busy`，同样拒绝。`pin`、`open`、`resume --fork`、不带 `--host` 的 `handoff` 等仍只对本机的记录；`handoff --host` 读 `host:sid` 那台的 `handoff.facts`。见 [remote.md](remote.md)「远端行的写入」。
 
 CLI 卡片的第二行在元信息后接迁移关系：`-> 机器`（迁往）、`<- 机器`（迁来），未完成的写 `-> 机器（迁移未完成 · 多久）`。

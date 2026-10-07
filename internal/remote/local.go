@@ -329,6 +329,9 @@ func (h *localHandler) query(p QueryParams, keep func(string) bool) (QueryResult
 	case !ok:
 		return QueryResult{}, &wire.Error{Code: wire.CodeBadRequest, Detail: "sort"}
 	}
+	if p.ID != "" {
+		return h.found(p.ID, keep)
+	}
 	res := QueryResult{Rows: []Row{}, Tokens: tend.Tokens(p.Q)}
 	if res.Tokens == nil {
 		res.Tokens = []tend.Token{}
@@ -371,6 +374,35 @@ func (h *localHandler) query(p QueryParams, keep func(string) bool) (QueryResult
 		}
 		res.Rows = append(res.Rows, row)
 	}
+	return res, nil
+}
+
+// found answers QueryParams.ID: the session ref names here by index.Find, as a listed row (its record, its
+// migrations), when exactly one matches and keep keeps it.
+func (h *localHandler) found(ref string, keep func(string) bool) (QueryResult, error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if err := h.load(queryFresh); err != nil {
+		return QueryResult{}, err
+	}
+	r, n, err := index.Find(h.store, func() (*index.Index, error) { return h.idx, nil }, ref)
+	if err != nil {
+		return QueryResult{}, err
+	}
+	if n == 1 && keep != nil && !keep(r.SessionID) {
+		n = 0
+	}
+	res := QueryResult{ID: ref, Rows: []Row{}, Tokens: []tend.Token{}, Matched: n}
+	if n != 1 {
+		return res, nil
+	}
+	if listed := h.find(Ref{Provider: r.Provider, SessionID: r.SessionID}); listed != nil {
+		r = listed
+	}
+	cp := *r
+	rows := index.Rows{Copies: migrate.Marks()}
+	rows.Place(&cp)
+	res.Rows = append(res.Rows, rowOf(&cp, nil))
 	return res, nil
 }
 
