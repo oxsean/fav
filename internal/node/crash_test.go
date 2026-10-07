@@ -10,9 +10,9 @@ import (
 // crashed starts a run whose supervisor exits at point, and waits until it is gone.
 func crashed(t *testing.T, n *Node, point string, args ...string) Snapshot {
 	t.Helper()
-	t.Setenv(EnvCrashAt, point)
+	t.Setenv(proc.EnvCrashAt, point)
 	s := start(t, n, StartParams{Task: "t_1", Profile: fake(args...), Brief: "b"})
-	t.Setenv(EnvCrashAt, "")
+	t.Setenv(proc.EnvCrashAt, "")
 	return wait(t, n, s.Run, func(s Snapshot) bool { return s.State.State == StateUnknown || Terminal(s.State.State) })
 }
 

@@ -133,7 +133,7 @@ func Supervise(dir string) error {
 	if time.Since(spec.Created) > notLaunched { // snapshots already report it not launched
 		return s.end(StateFailed, "not_launched", nil)
 	}
-	crashAt("claimed")
+	proc.CrashAt("claimed")
 	if err := s.save(); err != nil {
 		return err // ⚠️ the agent starts only after its first state is written: the node reports it not launched
 	}
@@ -211,16 +211,6 @@ func (s *sup) keep(f func(*State)) error {
 }
 
 func (s *sup) stopAsked() bool { return paths.Exists(filepath.Join(s.dir, "stop")) }
-
-// EnvCrashAt names a point where the supervisor exits at once, as if killed: claimed, started (agent running, no
-// pid recorded), running (pid recorded), ending (agent exited, no end recorded). Tests only.
-const EnvCrashAt = "TEND_CRASH_AT"
-
-func crashAt(point string) {
-	if os.Getenv(EnvCrashAt) == point {
-		os.Exit(86)
-	}
-}
 
 // finish ends a run someone stopped: nothing it asked for waits any more.
 func (s *sup) finish(state, reason string, code *int) error {
@@ -563,12 +553,12 @@ func (s *sup) run() error {
 	s.mu.Lock()
 	s.seen = now
 	s.mu.Unlock()
-	crashAt("started")
+	proc.CrashAt("started")
 	s.keep(func(st *State) {
 		st.State, st.Pid, st.PidStart, st.StartedAt, st.Pane = StateRunning, c.Process.Pid, proc.StartTime(c.Process.Pid), &now, pane["pane"]
 		st.Caps = s.caps()
 	})
-	crashAt("running")
+	proc.CrashAt("running")
 	var fast <-chan time.Time
 	if s.in != nil {
 		s.startStream()
@@ -605,7 +595,7 @@ func (s *sup) run() error {
 			}
 			s.reports()
 			s.flushOut()
-			crashAt("ending")
+			proc.CrashAt("ending")
 			var ee *exec.ExitError
 			well := asked.IsZero() && code == 0 && (err == nil || errors.As(err, &ee))
 			if w := s.spec.Work; w != nil && !w.ReadOnly && well {
