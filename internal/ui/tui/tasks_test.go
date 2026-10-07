@@ -4,8 +4,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
+	"runtime"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -87,7 +90,16 @@ func pump(m *Model, cmd tea.Cmd) {
 			continue
 		}
 		got := make(chan tea.Msg, 1)
-		go func() { got <- c() }()
+		if isTick(c) {
+			go func() { got <- c() }()
+		} else {
+			wg := working[m]
+			if wg == nil {
+				wg = &sync.WaitGroup{}
+				working[m] = wg
+			}
+			wg.Go(func() { got <- c() })
+		}
 		var msg tea.Msg
 		select {
 		case msg = <-got:
@@ -107,6 +119,33 @@ func pump(m *Model, cmd tea.Cmd) {
 
 // late are the commands pump stopped waiting for, per model.
 var late = map[*Model][]chan tea.Msg{}
+
+// working are the commands pump started that do more than wait for a tick, per model: one still running when the test
+// ends may still write to its directories.
+var working = map[*Model]*sync.WaitGroup{}
+
+func isTick(c tea.Cmd) bool {
+	return strings.HasPrefix(runtime.FuncForPC(reflect.ValueOf(c).Pointer()).Name(), "charm.land/bubbletea/v2.Tick.")
+}
+
+// awaitCommands waits for the commands pump started for m to end; their connections must be closed by now, or the ones
+// waiting for pushes never end.
+func awaitCommands(t *testing.T, m *Model) {
+	t.Helper()
+	wg := working[m]
+	delete(working, m)
+	delete(late, m)
+	if wg == nil {
+		return
+	}
+	done := make(chan struct{})
+	go func() { wg.Wait(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(15 * time.Second):
+		t.Errorf("commands still running 15 s after the test ended")
+	}
+}
 
 func key(m *Model, k string) {
 	_, cmd := m.Update(press(k))

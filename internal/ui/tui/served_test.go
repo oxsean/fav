@@ -30,22 +30,28 @@ const testServer = "https://tend.example"
 // servedRig: Ann's TUI in mode 2 on her machine ann-mac; she owns mba too, Bob owns bobs and lets her read it. Every
 // node answers with the same fixture machine's sessions.
 type servedRig struct {
-	m     *Model
-	tm    *coordtest.Team
-	nodes map[string]*node.Node
-	d     *fx.Dataset
-	mu    sync.Mutex
-	cl    *coord.Client // the connection node.call goes through, as cmd/tend's link holds it
-	down  bool          // connecting fails
+	m      *Model
+	opened []*Model
+	tm     *coordtest.Team
+	nodes  map[string]*node.Node
+	d      *fx.Dataset
+	mu     sync.Mutex
+	cl     *coord.Client // the connection node.call goes through, as cmd/tend's link holds it
+	down   bool          // connecting fails
+	ended  bool          // the test is over: node calls fail at once
+	calls  sync.WaitGroup
 }
 
 func (s *servedRig) call(ctx context.Context, machine, method string, params json.RawMessage, out any) error {
 	s.mu.Lock()
 	cl := s.cl
-	s.mu.Unlock()
-	if cl == nil {
+	if cl == nil || s.ended {
+		s.mu.Unlock()
 		return &wire.Error{Code: wire.CodeOffline}
 	}
+	s.calls.Add(1)
+	s.mu.Unlock()
+	defer s.calls.Done()
 	return cl.Call(ctx, coord.MNodeCall, coord.NodeCall{Machine: machine, Method: method, Params: params}, out)
 }
 
@@ -66,11 +72,17 @@ func newServedRig(t *testing.T, ssh map[string]string) *servedRig {
 	if err != nil {
 		t.Fatal(err)
 	}
+	s := &servedRig{d: d, nodes: map[string]*node.Node{}}
+	t.Cleanup(func() { // after every connection closed, before the machine's directory is removed
+		for _, m := range s.opened {
+			awaitCommands(t, m)
+		}
+	})
 	t.Setenv("TEND_HOME", d.Home)
 	t.Setenv("CLAUDE_CONFIG_DIR", d.Claude)
 	t.Setenv("CODEX_HOME", d.Codex)
 	ann, bob := coord.User{ID: "u_ann", Name: "Ann"}, coord.User{ID: "u_bob", Name: "Bob"}
-	s := &servedRig{tm: coordtest.NewTeam(t, ann, bob), d: d, nodes: map[string]*node.Node{}}
+	s.tm = coordtest.NewTeam(t, ann, bob)
 	for name, owner := range map[string]string{"ann-mac": ann.ID, "mba": ann.ID, "bobs": bob.ID} {
 		s.nodes[name] = node.New(t.TempDir())
 		s.tm.Attach(name, owner, s.nodes[name])
@@ -85,6 +97,14 @@ func newServedRig(t *testing.T, ssh map[string]string) *servedRig {
 	}
 	s.m = s.open(t, ssh)
 	return s
+}
+
+// endCalls fails the node calls from now on and waits for the ones under way.
+func (s *servedRig) endCalls() {
+	s.mu.Lock()
+	s.ended = true
+	s.mu.Unlock()
+	s.calls.Wait()
 }
 
 // open is a new TUI on the rig, as cmd/tend's runTUI builds it.
@@ -115,9 +135,11 @@ func (s *servedRig) open(t *testing.T, ssh map[string]string) *Model {
 			return nil, &wire.Error{Code: wire.CodeOffline, Detail: "dial tcp: connection refused"}
 		}
 		s.cl = s.tm.Client(coord.Principal{User: "u_ann"}, o)
+		t.Cleanup(s.endCalls) // before that connection closes: a node answers a call once it has written what the call changes
 		return s.cl, nil
 	})
 	m.setView(viewSessions)
+	s.opened = append(s.opened, m)
 	return m
 }
 
