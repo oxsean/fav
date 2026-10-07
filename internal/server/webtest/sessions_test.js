@@ -7,7 +7,7 @@
 // a query's tokens drawn as chips; message search with its marks, a hit opened at its place and the way between hits,
 // a hit made a task; the side menu's, the machines page's and the phone home's ways in, old addresses, and where back
 // goes; delete (only where the machine has a trash, confirmed, undone by restore, refused while running) and the trash
-// view (dated by deletion, restored without asking).
+// view (dated by deletion, restored without asking, closing a conversation going in or out leaves unlisted).
 // core/sessions.js is tested on its own. Its last case hands the resume lines to the Go test, which types them with
 // internal/shell.
 process.env.TZ = 'UTC';
@@ -584,6 +584,13 @@ for (const f of ['desktop', 'phone']) for (const lang of ['zh', 'en']) {
     const writes = ['favorite', 'archive', 'done', 'edit', 'makeTask'];
     const bound = () => a.keys.active().map(b => b.id);
     const port = 'Port the importer', regex = 'Scratch: regex for log lines';
+    const pickState = async label => {
+      if (desk) await click(root.one('.seg').find('[role=radio]').find(x => x.textContent === label));
+      else {
+        await click(root.find('.sv-chip').find(c => c.find('.k')[0]?.textContent === t('sess.f.state')));
+        await click(optionOf(root, label));
+      }
+    };
     try {
       await r.srv.play('sessions-trash', {
         async mount() { a = app(r); root = await mount(a.vnode(), f); },
@@ -658,16 +665,11 @@ for (const f of ['desktop', 'phone']) for (const lang of ['zh', 'en']) {
           ok(toastsOf(root).includes(w('sess.readOnlyKey', 'Bo Lin', 'bo-laptop')), 'the key says why it does nothing');
           if (!desk) await back(root);
         },
-        async toTrash() {
-          if (desk) await click(root.one('.seg').find('[role=radio]').find(x => x.textContent === t('sess.st.trash')));
-          else {
-            await click(root.find('.sv-chip').find(c => c.find('.k')[0]?.textContent === t('sess.f.state')));
-            await click(optionOf(root, t('sess.st.trash')));
-          }
-        },
+        async toTrash() { await pickState(t('sess.st.trash')); },
         async trash() {
           await act(() => settle());
-          eq(a.router.route.value.q, 'status:trash', 'the trash is status:trash');
+          eq([a.router.route.value.q, a.router.route.value.open], ['status:trash', undefined], 'the trash is status:trash; Bo\'s session, not in it, closes');
+          if (desk) eq(root.one('.sess-pane').textContent, t('sess.pick'), 'not no such session');
           eq(titlesOf(root), [port, regex], 'what was deleted');
           ok(root.textContent.includes(w('sess.trashHead', 2)), 'counted');
           eq(linesOf(root), [w('sess.m.sharedRuns', 'bo-laptop', 'Bo Lin'), w('sess.m.oldTrash', 'linux'), w('sess.m.oldTrash', 'mini')], 'an outdated machine\'s trash is in its TUI');
@@ -699,6 +701,20 @@ for (const f of ['desktop', 'phone']) for (const lang of ['zh', 'en']) {
         async regex() {
           await act(() => settle());
           ok(conv().one('.sv-trash').textContent.includes(w('sess.inTrash', 'mba', when('2026-09-14T10:00:00Z', NOW), 14)), 'purged in what is left of 30 days');
+          await pickState(t('sess.st.open'));
+        },
+        async leftTrash() {
+          await act(() => settle());
+          eq([a.router.route.value.q, a.router.route.value.open, root.find('.sess-conv').length], [undefined, undefined, 0], 'out of the trash its session closes');
+          if (desk) eq(root.one('.sess-pane').textContent, t('sess.pick'), 'not no such session');
+          await pickState(t('sess.st.trash'));
+        },
+        async backInTrash() {
+          await act(() => settle());
+          await click(rowsOf(root)[0]);
+        },
+        async regexAgain() {
+          await act(() => settle());
           await deleteKey();
         },
         async emptied() {

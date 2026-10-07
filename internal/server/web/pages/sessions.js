@@ -206,7 +206,12 @@ export function Sessions({store, wire, router, toasts, commands, session = null,
   const setQ = v => go({q: v.trim()});
   useEffect(() => { if (q !== text.trim()) setText(q); }, [q]);
 
-  // load reads the list from the top; keep reads as many rows as are listed (a record changed, the page came back).
+  const openNow = useRef(open), listNow = useRef(null);
+  openNow.current = open;
+  listNow.current = list;
+
+  // load reads the list from the top; keep reads as many rows as are listed (a record changed, the page came back); one
+  // that goes into the trash view or out of it closes, in place, a conversation it no longer lists.
   const load = ({keep = false, fresh = false} = {}) => {
     if (search) return;
     const n = ++seq.current;
@@ -215,6 +220,9 @@ export function Sessions({store, wire, router, toasts, commands, session = null,
     if (!keep) setList(o => (o ? {...o, loading: true} : null));
     ss.query(wire, {q, all, sort, limit: shown, fresh}).then(a => {
       if (n !== seq.current) return;
+      const trashed = l => ss.chosen(l?.tokens).status?.value === ss.TRASH;
+      const listed = (a.rows || []).some(r => ss.keyOf(r) === openNow.current);
+      if (openNow.current && !listed && listNow.current && trashed(listNow.current) !== trashed(a)) go({open: ''});
       setList({...a, rows: a.rows || [], machines: a.machines || [], loading: false, error: null});
       people.ask((a.machines || []).map(m => m.owner).filter(Boolean));
     }, e => n === seq.current && setList(o => ({...(o || {rows: [], machines: [], tokens: []}), loading: false, error: e})));
@@ -292,8 +300,6 @@ export function Sessions({store, wire, router, toasts, commands, session = null,
   // A row's record changes: at once in the list, then as its machine answers; undo puts back what it had.
   const replace = (key, fn) => setList(o => (o ? {...o, rows: o.rows.map(r => (ss.keyOf(r) === key ? fn(r) : r))} : o));
   const busy = (key, on) => setPending(p => { const n = new Set(p); if (on) n.add(key); else n.delete(key); return n; });
-  const listNow = useRef(null);
-  listNow.current = list;
   const rowNow = key => (listNow.current?.rows || []).find(r => ss.keyOf(r) === key);
   const send = (r, patch, expect = '') => {
     const key = ss.keyOf(r);
@@ -372,8 +378,6 @@ export function Sessions({store, wire, router, toasts, commands, session = null,
   };
 
   // A session deleted or restored leaves the list at once, its machine's counts with it, and its conversation closes.
-  const openNow = useRef(open);
-  openNow.current = open;
   const gone = r => {
     const key = ss.keyOf(r);
     if (openNow.current === key) { if (phone) router.back(here({open: ''})); else go({open: ''}); }
