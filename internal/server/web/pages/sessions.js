@@ -273,21 +273,25 @@ export function Sessions({store, wire, router, toasts, commands, session = null,
     return () => doc.removeEventListener('visibilitychange', shown);
   }, [doc]);
 
-  // Message search goes out on Enter only: it asks every machine.
+  const keyOfHit = h => ss.keyOf({...h.row, machine: h.machine});
+
+  // Message search goes out on Enter only: it asks every machine. Its answer keeps the words it was for, which an open
+  // hit marks until the next answer; one that no longer has the open session closes it in place.
   useEffect(() => {
     if (!search || !ss.searchText(q).trim()) { setFound(null); return; }
     const n = ++grepSeq.current;
     setFound(o => (o ? {...o, loading: true} : {hits: [], machines: [], loading: true}));
     ss.grep(wire, {q, all}).then(a => {
       if (n !== grepSeq.current) return;
-      setFound({...a, hits: a.hits || [], machines: a.machines || [], loading: false});
+      const hits = a.hits || [];
+      if (openNow.current && !hits.some(h => keyOfHit(h) === openNow.current)) go({open: ''});
+      setFound({...a, hits, machines: a.machines || [], loading: false, q});
       people.ask((a.machines || []).map(m => m.owner).filter(Boolean));
     }, e => n === grepSeq.current && setFound({hits: [], machines: [], loading: false, error: e}));
   }, [q, all, search, grepRev]);
 
   const answers = (search ? found?.machines : list?.machines) || [];
   const answerOf = m => answers.find(x => x.name === m);
-  const keyOfHit = h => ss.keyOf({...h.row, machine: h.machine});
   const hitOf = search && open ? (found?.hits || []).find(h => keyOfHit(h) === open) : null;
   const listed = (list?.rows || []).find(r => ss.keyOf(r) === open);
   const row = listed || (hitOf ? {...hitOf.row, machine: hitOf.machine, writable: !!answerOf(hitOf.machine)?.writable, ...(hitOf.make ? {make: hitOf.make} : {})} : null);
@@ -559,11 +563,11 @@ export function Sessions({store, wire, router, toasts, commands, session = null,
     : answerOf(cur.machine)?.state === ss.answer.old ? f('sess.oldRO', cur.machine, cur.machine) : t('sess.roOther');
   const curAnswer = cur ? answerOf(cur.machine) : null;
   const trashed = cur && inTrash ? {at: cur.deleted_at || cur.updated_at, days: curAnswer?.trash_days || 0, restore: ss.restorable(cur, curAnswer) ? () => restoreRow(cur) : null} : null;
-  const conv = cur && html`<${Conversation} key=${ss.keyOf(cur)} wire=${wire} row=${cur} os=${machines.find(m => m.name === cur.machine)?.os || ''} copy=${copy} toasts=${toasts} now=${at}
+  const conv = cur && html`<${Conversation} key=${ss.keyOf(cur) + (hitOf ? ' ' + found.q : '')} wire=${wire} row=${cur} os=${machines.find(m => m.name === cur.machine)?.os || ''} copy=${copy} toasts=${toasts} now=${at}
     onTask=${id => router.go({page: 'tasks', task: id})} project=${cur.project_id ? projectName(cur.project_id) : ''} owner=${curOwner ? name(curOwner) : ''} readOnly=${readOnly}
     trashed=${trashed} more=${curMore(cur)}
     on=${id => (id === 'edit' ? edit(cur) : flip(cur, id))} makeTask=${canMake(cur) ? () => makeTask(cur) : null} makeWhy=${canMake(cur) ? makeWhy(w, cur, online) : ''}
-    at=${hitOf ? {off: hitOf.off, file: hitOf.file || ''} : null} find=${hitOf ? q : ''} />`;
+    at=${hitOf ? {off: hitOf.off, file: hitOf.file || ''} : null} find=${hitOf ? found.q : ''} />`;
 
   const rows = list?.rows || [];
   const totals = answers.reduce((s, a) => ({total: s.total + (a.total || 0), matched: s.matched + (a.matched || 0), running: s.running + (a.running || 0)}), {total: 0, matched: 0, running: 0});

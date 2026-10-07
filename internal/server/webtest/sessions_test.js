@@ -5,11 +5,11 @@
 // that no longer fits staying dimmed, an edit that met a change made elsewhere), a shared machine's conversation read
 // only, a records_rev push and a reset (what she may see changed) reading the list again, a task made from a session,
 // a query's tokens drawn as chips; message search with its marks, a hit opened at its place and the way between hits,
-// a hit made a task; the side menu's, the machines page's and the phone home's ways in, old addresses, and where back
-// goes; delete (only where the machine has a trash, confirmed, undone by restore, refused while running) and the trash
-// view (dated by deletion, restored without asking, closing a conversation going in or out leaves unlisted).
-// core/sessions.js is tested on its own. Its last case hands the resume lines to the Go test, which types them with
-// internal/shell.
+// a hit made a task, other words closing a hit they do not find; the side menu's, the machines page's and the phone
+// home's ways in, old addresses, and where back goes; delete (only where the machine has a trash, confirmed, undone by
+// restore, refused while running) and the trash view (dated by deletion, restored without asking, closing a
+// conversation going in or out leaves unlisted). core/sessions.js is tested on its own. Its last case hands the resume
+// lines to the Go test, which types them with internal/shell.
 process.env.TZ = 'UTC';
 import {readFileSync} from 'node:fs';
 import {render, options} from '../web/vendor/preact.mjs';
@@ -545,9 +545,25 @@ for (const f of ['desktop', 'phone']) {
         async again() {
           await act(() => settle());
           eq(linesOf(root).length, 2, 'built: no line for it');
+          if (desk) eq(a.router.route.value.open, 'mba/codex:x-port', 'a search whose hits still have the open session keeps it');
+        },
+        async words() {
+          const input = root.one('.sv-q').one('input');
+          await type(input, '> streams');
+          await act(() => input.dispatch('keydown', {key: 'Enter'}));
+        },
+        async wordsFound() {
+          await act(() => settle());
+          if (!desk) await click(rowsOf(root)[0]);
+        },
+        async streams() {
+          await act(() => settle());
+          eq([a.router.route.value.open, root.one('.sv-at').getAttribute('data-off'), nav().find('span')[0].textContent], ['mba/codex:x-port', '60', words.f('sess.hitNav', 1, 1)],
+            'other words that still find the open session read it at their best hit');
+          eq(root.find('.sv-later').length, 0, 'the newest message: nothing after it');
+          if (!desk) await back(root);
         },
         async long() {
-          if (desk) await act(() => a.router.go({page: 'sessions', q: '> chekout total'}, {replace: true}));
           const input = root.one('.sv-q').one('input');
           await type(input, '> a b c');
           await act(() => input.dispatch('keydown', {key: 'Enter'}));
@@ -555,6 +571,8 @@ for (const f of ['desktop', 'phone']) {
         async tooLong() {
           await act(() => settle());
           ok(linesOf(root).includes(words.f('sess.tooLong', ss.WORDS)), 'too many words: how many it takes');
+          eq([a.router.route.value.q, a.router.route.value.open], ['> a b c', undefined], 'other words without the open session close it, in place');
+          if (desk) eq(root.one('.sess-pane').textContent, words.t('sess.pick'), 'not no such session');
         },
       });
       eq(r.errors, [], 'errors');
