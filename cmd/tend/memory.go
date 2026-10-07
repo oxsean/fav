@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"context"
 	"errors"
+	"flag"
 	"fmt"
 	"os"
 	"slices"
@@ -12,12 +13,18 @@ import (
 
 	"github.com/oxsean/fav/internal/i18n"
 	"github.com/oxsean/fav/internal/memory"
+	"github.com/oxsean/fav/internal/node"
+	"github.com/oxsean/fav/internal/pathmap"
 	"github.com/oxsean/fav/internal/remote"
 	"github.com/oxsean/fav/internal/render"
 	"github.com/oxsean/fav/internal/shell"
+	"github.com/oxsean/fav/internal/task"
+	"github.com/oxsean/fav/internal/tend"
+	"github.com/oxsean/fav/internal/wire"
 )
 
-// cmdMemory lists, reads, trashes and merges the agents' memories: tend memory [project|dir] [host:<name>], show, rm, merge.
+// cmdMemory lists, reads, trashes, merges, compares and copies the agents' memories: tend memory [project|dir]
+// [host:<name>], show, rm, merge, diff, cp.
 func cmdMemory(args []string) error {
 	switch first(args) {
 	case "show":
@@ -26,6 +33,10 @@ func cmdMemory(args []string) error {
 		return memoryRm(args[1:])
 	case "merge":
 		return memoryMerge(args[1:])
+	case "diff":
+		return memoryDiff(args[1:])
+	case "cp":
+		return memoryCp(args[1:])
 	}
 	return memoryList(args)
 }
@@ -48,15 +59,25 @@ func hostArg(pos []string) (rest []string, name string, err error) {
 	return rest, name, nil
 }
 
+// projectNamed is the project whose id or name is target, nil for none.
+func projectNamed(target string) *task.Project {
+	if target == "" {
+		return nil
+	}
+	for _, p := range sessionProjects().Projects {
+		if p.ID == target || strings.EqualFold(p.Name, target) {
+			return p
+		}
+	}
+	return nil
+}
+
 // memoryDirs are the directories of the project named target on machine (this one when ""), else target itself.
 func memoryDirs(target, machine string) ([]string, error) {
 	if target != "" {
 		s := sessionProjects()
 		on := cmp.Or(machine, s.Here)
-		for _, p := range s.Projects {
-			if p.ID != target && !strings.EqualFold(p.Name, target) {
-				continue
-			}
+		if p := projectNamed(target); p != nil {
 			var dirs []string
 			for _, r := range p.Repos {
 				if d := r.Dirs[on]; d != "" {
@@ -270,4 +291,261 @@ func memoryMerge(args []string) error {
 		fmt.Print(i18n.F("cli.memory.merge_kept", strings.Join(m.Left, ", ")))
 	}
 	return nil
+}
+
+// memoryEnds are the two machines of tend memory diff and cp, From the one copied from, and the directories paired on
+// them.
+type memoryEnds struct {
+	from, to remote.Peer
+	pairs    []remote.DirPair
+}
+
+func (e memoryEnds) name(p remote.Peer) string { return cmp.Or(p.Name, tend.HostLocal) }
+
+// memoryEndsOf reaches from (this machine for "") and machine, the viewer's own both, and pairs target's directories
+// on them: a project's repositories found on both, else the directory target on from with there, or with what its
+// project's directory on machine makes of it.
+func memoryEndsOf(ctx context.Context, target, machine, from, there string) (memoryEnds, error) {
+	var e memoryEnds
+	var err error
+	if e.from, err = ownPeer(ctx, from, "cli.memory.not_mine", "cli.memory.server_old"); err != nil {
+		return e, err
+	}
+	if e.to, err = ownPeer(ctx, machine, "cli.memory.not_mine", "cli.memory.server_old"); err != nil {
+		return e, err
+	}
+	s := sessionProjects()
+	fromKey, toKey := cmp.Or(e.from.Name, s.Here), cmp.Or(e.to.Name, s.Here)
+	if p := projectNamed(target); p != nil && there == "" {
+		for _, r := range p.Repos {
+			if a, b := r.Dirs[fromKey], r.Dirs[toKey]; a != "" && b != "" {
+				e.pairs = append(e.pairs, remote.DirPair{From: a, To: b})
+			}
+		}
+		if len(e.pairs) == 0 {
+			return e, i18n.E("cli.memory.no_pair", p.Name, e.name(e.from), e.name(e.to))
+		}
+		return e, nil
+	}
+	src := target
+	if e.from.Name == "" {
+		if src, err = absDir(target); err != nil {
+			return e, err
+		}
+	} else if !pathmap.Abs(src) {
+		return e, i18n.E("cli.handoff.dir_abs", src)
+	}
+	if there != "" {
+		if !pathmap.Abs(there) {
+			return e, i18n.E("cli.handoff.dir_abs", there)
+		}
+		e.pairs = []remote.DirPair{{From: src, To: there}}
+		return e, nil
+	}
+	if p := s.Holding(fromKey, src); p != nil {
+		for _, r := range p.Repos {
+			if d, ok := pathmap.Rebase(src, r.Dirs[fromKey], r.Dirs[toKey], e.from.End(), e.to.End()); ok && r.Dirs[toKey] != "" {
+				e.pairs = []remote.DirPair{{From: src, To: d}}
+				return e, nil
+			}
+		}
+	}
+	return e, i18n.E("cli.memory.no_dir_there", e.name(e.to), src)
+}
+
+// refused says why the machine of e that err came from did not answer a memory method.
+func (e memoryEnds) refused(err error) error {
+	p := e.to
+	var pe *remote.PeerError
+	if errors.As(err, &pe) {
+		p = pe.Peer
+	}
+	host := e.name(p)
+	if share := p.Hello.Share; wire.Code(err) == wire.CodeUnauthorized && share != "" && share != node.ShareAll {
+		return i18n.E("cli.memory.share", host, share)
+	}
+	return errors.New(remote.MemoryRefused(host, err))
+}
+
+func memorySyncFlags(name string) (*flag.FlagSet, *string, *string) {
+	fs := newFlags(name)
+	from := fs.String("from", "", i18n.T("cli.memory.flag_from"))
+	dir := fs.String("dir", "", i18n.T("cli.memory.flag_dir"))
+	return fs, from, dir
+}
+
+// memoryDiff compares a project's memories on two machines item by item: tend memory diff <project|dir> <machine>.
+func memoryDiff(args []string) error {
+	fs, from, dir := memorySyncFlags("memory diff")
+	asJSON := fs.Bool("json", false, i18n.T("cli.flag_json"))
+	pos, err := parseMixed(fs, args)
+	if err != nil {
+		return err
+	}
+	if len(pos) != 2 {
+		return errors.New(i18n.T("cli.memory.diff_usage"))
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), hostTimeout)
+	defer cancel()
+	e, err := memoryEndsOf(ctx, pos[0], pos[1], *from, *dir)
+	if err != nil {
+		return err
+	}
+	pairs, err := remote.CompareMemories(ctx, e.from, e.to, e.pairs)
+	if err != nil {
+		return e.refused(err)
+	}
+	if *asJSON {
+		return printJSON(pairs)
+	}
+	copyable := false
+	for i, p := range pairs {
+		if i > 0 {
+			fmt.Println()
+		}
+		fmt.Print(i18n.F("cli.memory.diff_pair", e.name(e.from), p.Dirs.From, e.name(e.to), p.Dirs.To))
+		for _, g := range []struct {
+			key     string
+			machine string
+			entries []memory.Entry
+		}{{"cli.memory.diff_only", e.name(e.from), p.Diff.OnlyHere}, {"cli.memory.diff_only", e.name(e.to), p.Diff.OnlyThere}} {
+			if len(g.entries) > 0 {
+				fmt.Print(i18n.F(g.key, g.machine, len(g.entries)))
+				printEntries(g.entries)
+			}
+		}
+		if len(p.Diff.Differ) > 0 {
+			fmt.Print(i18n.F("cli.memory.diff_differ", len(p.Diff.Differ)))
+			printEntries(p.Diff.Differ)
+		}
+		loose := 0
+		for _, x := range p.Diff.Same {
+			if x.Loose {
+				loose++
+			}
+		}
+		fmt.Print(i18n.F("cli.memory.diff_same", len(p.Diff.Same), loose))
+		for _, side := range []struct {
+			machine string
+			sets    []memory.Set
+		}{{e.name(e.from), p.From}, {e.name(e.to), p.To}} {
+			if slices.ContainsFunc(side.sets, func(s memory.Set) bool { return s.Over }) {
+				fmt.Print(i18n.F("cli.memory.over_on", side.machine))
+			}
+		}
+		copyable = copyable || slices.ContainsFunc(append(slices.Clone(p.Diff.OnlyHere), p.Diff.Differ...),
+			func(x memory.Entry) bool { return x.Kind == memory.KindClaude })
+	}
+	if copyable {
+		cp := []string{"tend", "memory", "cp", pos[0], pos[1]}
+		if *from != "" {
+			cp = append(cp, "--from", *from)
+		}
+		if *dir != "" {
+			cp = append(cp, "--dir", *dir)
+		}
+		fmt.Print(i18n.F("cli.memory.diff_hint", shell.User().Join(cp)))
+	}
+	return nil
+}
+
+func printEntries(es []memory.Entry) {
+	for _, x := range es {
+		it := x.Here
+		if it == nil {
+			it = x.There
+		}
+		if x.Kind == memory.KindClaude {
+			fmt.Print(i18n.F("cli.memory.diff_claude", x.Name, it.Title))
+		} else {
+			fmt.Print(i18n.F("cli.memory.diff_codex", x.Name))
+		}
+	}
+}
+
+// memoryCp copies Claude memories of a project from one machine to another by name, never over another: tend memory
+// cp <project|dir> <machine> <name…>.
+func memoryCp(args []string) error {
+	fs, from, dir := memorySyncFlags("memory cp")
+	pos, err := parseMixed(fs, args)
+	if err != nil {
+		return err
+	}
+	if len(pos) < 3 {
+		return errors.New(i18n.T("cli.memory.cp_usage"))
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), hostTimeout)
+	defer cancel()
+	e, err := memoryEndsOf(ctx, pos[0], pos[1], *from, *dir)
+	if err != nil {
+		return err
+	}
+	src, dst := e.name(e.from), e.name(e.to)
+	pairs, err := remote.CompareMemories(ctx, e.from, e.to, e.pairs)
+	if err != nil {
+		return e.refused(err)
+	}
+	failed := 0
+	for _, name := range pos[2:] {
+		file := name
+		if !strings.HasSuffix(file, ".md") {
+			file += ".md"
+		}
+		found := false
+		for _, p := range pairs {
+			x, ok := memoryEntry(p.Diff, file, name)
+			if !ok {
+				continue
+			}
+			found = true
+			switch {
+			case x.Kind != memory.KindClaude:
+				fmt.Print(i18n.F("cli.memory.cp_codex", name))
+				failed++
+				continue
+			case x.There != nil && x.There.SHA == x.Here.SHA:
+				fmt.Print(i18n.F("cli.memory.cp_same", file, dst))
+				continue
+			case x.Loose:
+				fmt.Print(i18n.F("cli.memory.cp_same_loose", file, dst))
+				continue
+			}
+			res, err := remote.CopyMemory(ctx, e.from, e.to, p, x)
+			switch {
+			case wire.Code(err) == wire.CodeStale:
+				fmt.Fprint(os.Stderr, i18n.F("cli.memory.cp_stale", file, dst))
+				failed++
+				continue
+			case err != nil:
+				return e.refused(err)
+			case res.Incoming:
+				fmt.Print(i18n.F("cli.memory.cp_incoming", file, dst, res.File))
+			default:
+				fmt.Print(i18n.F("cli.memory.cp_done", file, dst, res.File))
+			}
+			if res.Over {
+				fmt.Print(i18n.F("cli.memory.over_on", dst))
+			}
+		}
+		if !found {
+			fmt.Fprint(os.Stderr, i18n.F("cli.memory.cp_missing", name, src))
+			failed++
+		}
+	}
+	if failed > 0 {
+		return i18n.E("cli.memory.cp_failed", failed)
+	}
+	return nil
+}
+
+// memoryEntry is the entry of c that is on the From side: a Claude memory by its file name, a Codex block by its title.
+func memoryEntry(c memory.Comparison, file, title string) (memory.Entry, bool) {
+	for _, l := range [][]memory.Entry{c.OnlyHere, c.Differ, c.Same} {
+		for _, x := range l {
+			if x.Kind == memory.KindClaude && x.Name == file || x.Kind != memory.KindClaude && x.Name == title {
+				return x, true
+			}
+		}
+	}
+	return memory.Entry{}, false
 }

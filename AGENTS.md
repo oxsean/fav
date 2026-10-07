@@ -75,7 +75,7 @@ A hung TUI: on macOS `sample <pid>` prints its stacks; SIGQUIT prints them to th
 |---|---|
 | `internal/tend` | `Rec`, `Store` (append-only JSONL, last line per id wins), `Query`, the trash manifest |
 | `internal/index` | the session index, `Rows`, trash / restore, `PlanMove` / `Apply` for moving a project directory |
-| `internal/memory` | the agents' memories on this machine: where Claude's project memory lives, Codex's global blocks by `applies_to`, reading under the memory roots only, trash and restore with the memory's index line, `Write` never over another, `Merge`, the orphan `Scan` |
+| `internal/memory` | the agents' memories on this machine: where Claude's project memory lives, Codex's global blocks by `applies_to`, reading under the memory roots only, trash and restore with the memory's index line, `Write` never over another, `Put` when what is there is what the caller saw, `Merge`, `Diff` of two machines' sets, the orphan `Scan` |
 | `internal/capture` | current-session detection, resume commands (`CommandSpec`), paged transcript reading (`Messages`), who is running (`live.go`) |
 | `internal/wire` | the protocol: JSON frames over any two-way stream, either end may call, answers out of order, cancel, keepalive |
 | `internal/remote` | other machines' sessions over `wire`: methods and types (`proto.go`), answering side (`local.go`), ssh `Client`, `Hosts` cache, `Source` |

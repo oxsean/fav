@@ -322,6 +322,7 @@ tend rm <id>                             # one session to the trash; every <id> 
 tend trash [host:mba|host:all] [--json]  # list the trash (host: another machine's, or every one's); --purge removes expired entries, --purge --all empties it (asks)
 tend doctor [--compact]                  # check data files, dead sessions, trash expiry, agents idle for hours, big old transcripts nobody kept, orphaned memories; --compact rewrites the store
 tend memory [project|dir] [host:mba]     # Claude's project memory and the Codex global memories that apply; show <file>, rm <file|dir> (to the trash), merge <old> <new>
+tend memory diff <project|dir> mba       # compare them with another machine's item by item; cp <project|dir> mba <name…> copies, never over another (a different one waits in .incoming/)
 ```
 
 ### Other machines: `hosts`

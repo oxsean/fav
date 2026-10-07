@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/oxsean/fav/internal/fileio"
@@ -23,10 +24,11 @@ type Written struct {
 	Over     bool
 }
 
-// Write puts one memory into the Claude memory directory dir and adds line to its MEMORY.md, never over another:
-// the same text is left as it is, a different one goes to .incoming/<name>.
+// Write puts one memory into the Claude memory directory dir and adds line to its MEMORY.md unless a line there
+// already points at name, never over another: the same text is left as it is, a different one goes to
+// .incoming/<name>, or beside an incoming one of another text there.
 func Write(dir, name string, data []byte, line string) (Written, error) {
-	if name == "" || name != filepath.Base(name) || name == indexName || strings.HasPrefix(name, ".") || filepath.Ext(name) != ".md" {
+	if !memoryName(name) {
 		return Written{}, errors.New("not a memory file name: " + name)
 	}
 	p := filepath.Join(dir, name)
@@ -34,8 +36,8 @@ func Write(dir, name string, data []byte, line string) (Written, error) {
 	switch old, err := os.ReadFile(p); {
 	case err == nil && bytes.Equal(old, data):
 	case err == nil:
-		w.File, w.Incoming = filepath.Join(dir, incomingDir, name), true
-		if err := fileio.WriteFile(w.File, data, 0o644); err != nil {
+		w.Incoming = true
+		if w.File, err = incoming(dir, name, data); err != nil {
 			return Written{}, err
 		}
 	case os.IsNotExist(err):
@@ -45,7 +47,7 @@ func Write(dir, name string, data []byte, line string) (Written, error) {
 	default:
 		return Written{}, err
 	}
-	if line != "" && !w.Incoming {
+	if line != "" && !w.Incoming && lineFor(dir, name) == "" {
 		if err := editIndex(dir, func(lines []string) []string { return add(lines, line) }); err != nil {
 			return Written{}, err
 		}
@@ -54,6 +56,30 @@ func Write(dir, name string, data []byte, line string) (Written, error) {
 		w.Lines, w.Bytes, w.Over = s.Lines, s.Bytes, s.Over
 	}
 	return w, nil
+}
+
+func memoryName(name string) bool {
+	return name != "" && name == filepath.Base(name) && name != indexName && !strings.HasPrefix(name, ".") && filepath.Ext(name) == ".md"
+}
+
+// incoming writes data under dir's .incoming/ as name, or name-2.md, -3… when another text holds the name; the same
+// text already there is where it is.
+func incoming(dir, name string, data []byte) (string, error) {
+	stem := strings.TrimSuffix(name, ".md")
+	for n := 1; ; n++ {
+		p := filepath.Join(dir, incomingDir, name)
+		if n > 1 {
+			p = filepath.Join(dir, incomingDir, stem+"-"+strconv.Itoa(n)+".md")
+		}
+		switch old, err := os.ReadFile(p); {
+		case err == nil && bytes.Equal(old, data):
+			return p, nil
+		case os.IsNotExist(err):
+			return p, fileio.WriteFile(p, data, 0o644)
+		case err != nil:
+			return "", err
+		}
+	}
 }
 
 // Merged is what Merge did with each memory of the old directory; Left are files it does not copy, which keep the

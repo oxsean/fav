@@ -2,7 +2,7 @@
 
 把会话或记忆从一台机器搬到另一台：交接式迁移、Claude 完整迁移、记忆的管理与迁移、迁移前的环境诊断，以及这部分的已定决策和待核实项。远端合同和只读聚合见 [remote.md](remote.md)。
 
-实现：本机交接包在 `internal/capture`（`handoff.go`）和 `cmd/tend`（`tend handoff`）；路径映射在 `internal/pathmap`；搬项目目录的文件枚举和改写在 `internal/index`（`move.go`）；记忆的查看、删除和孤儿扫描在 `internal/memory`，节点方法 `memory.ls` / `memory.read` / `memory.trash` / `memory.restore` 在 `internal/remote`（`memory.go`），命令是 `tend memory` 和 `tend doctor` 的记忆一节。本文其余部分**未实现**：跨机器交接、完整迁移（`import.*`）、记忆的对比和同步（`memory.put`、`memory diff`）、环境诊断（`env`、`env diff`），代码里都还没有。
+实现：本机交接包在 `internal/capture`（`handoff.go`）和 `cmd/tend`（`tend handoff`）；路径映射在 `internal/pathmap`；搬项目目录的文件枚举和改写在 `internal/index`（`move.go`）；记忆的查看、删除、孤儿扫描、对比和按条写入在 `internal/memory`，节点方法 `memory.ls` / `memory.read` / `memory.trash` / `memory.restore` / `memory.put` 和两台机器之间的对比、复制（`CompareMemories`、`CopyMemory`）在 `internal/remote`（`memory.go`），命令是 `tend memory`（含 `diff`、`cp`）和 `tend doctor` 的记忆一节。本文其余部分**未实现**：跨机器交接、完整迁移（`import.*`）、环境诊断（`env`、`env diff`），代码里都还没有。
 
 ## 迁移
 
@@ -63,7 +63,7 @@
 
 难点：项目记忆按路径存放，四类机器上同一个仓库的路径各不相同，所以记忆天然是每台机器各一份；记忆正文里也有绝对路径；Codex 的记忆由它自己维护。
 
-`tend mv` 搬项目目录时，旧项目目录里 transcript 以外剩下的东西（`memory/` 等）一起搬到新目录（`internal/index/move.go` 的 `sweepProjectDir`）。下面 1、2 已实现，3–5 未实现。
+`tend mv` 搬项目目录时，旧项目目录里 transcript 以外剩下的东西（`memory/` 等）一起搬到新目录（`internal/index/move.go` 的 `sweepProjectDir`）。下面 1–5 都已实现，只有第 4 条的 TUI 浮层未实现。
 
 ### 做法
 
@@ -80,11 +80,16 @@
    - 删一条记忆（`memory.Trash`，`tend memory rm`、`memory.trash`）：只删 Claude 记忆目录里的条目文件，不删 `MEMORY.md`，不碰 Codex 的记忆。文件进 tend 回收站（`TrashEntry` 的 `kind: "memory"`，`line` 是从 `MEMORY.md` 去掉的那一行原文），条目 id 是它在回收站里的目录名。还原（`memory.Restore`，`tend trash --restore <id>`、`memory.restore`）把文件放回，原处已有同名文件就拒绝，那一行加回 `MEMORY.md` 末尾（已有就不加）。`tend trash` 和会话一起列出记忆条目；TUI 的回收站视图仍只列会话。
    - 整个记忆目录也能进回收站（`tend memory rm <记忆目录>`），还原同上。
    - 「并到新目录」（`memory.Merge`，`tend memory merge`，只对本机）：逐条用 `memory.Write` 写过去，不覆盖：目标没有就写入并把旧 `MEMORY.md` 里指向它的那一行加进目标的 `MEMORY.md`（目标已有这一行就不加）；内容相同的不动；同名而内容不同的写进目标的 `.incoming/`，不进 `MEMORY.md`。旧目录里只有记忆条目时，全部写完整个进回收站；有别的文件就保留旧目录，列出这些文件。
-3. **按条复制**（未实现，随完整迁移）：列出两边的差异，用户确认后按条复制，不覆盖目标机器已有的记忆。
-4. **对比与同步界面**（未实现）
-   - 两台机器上的同一个项目按项目对应关系配对。
-   - `memory diff <项目> <机器>`：列出只在这边、只在那边、两边内容不同的条目。比较时同时给出原始哈希和规范化之后的结果；路径只按明确的映射转换，不对全文做替换。
-   - 同步：按条复制，不自动合并正文；`MEMORY.md` 按行取并集。冲突时对方那份放进 `memory/.incoming/`，**不进索引**，免得两份互相矛盾的记忆同时进入上下文，由用户来合并；合并后检查 `MEMORY.md` 是否超过 Claude 的加载上限：前 200 行或前 25KB，超出部分启动时不加载。
+3. **对比**（`memory.Diff`，`tend memory diff <项目|目录> <机器> [--from <机器>] [--dir <那台的目录>]`）
+   - 配对：给项目时，取它两台都有目录的仓库，一个仓库一对（项目的目录按机器名记，这台是项目表里的本机名）；给目录时，它所在的项目在那台的目录用 `pathmap.Rebase` 接过去，不在项目里就要 `--dir`，不猜。
+   - 两端都经 `remote.Peer`，和交接同一条路：这台在进程内回答，别的机器模式一经 ssh、模式二经 server 的 `node.call`；两端都必须是自己的机器，`--from` 可以是另一台，两端都不必是这台。两边各 `memory.ls{[这一对的目录], global}`，比较在发起端做（`remote.CompareMemories`）；项目有几个仓库时，Codex 全局记忆里没写适用目录的那组只随第一对比一次。
+   - 按类别和名字配对：Claude 的按文件名，Codex 全局的按块标题（块的 `sha` / `norm` 只算它自己那几行，不含和下一块之间的空行）。先比原始 `sha`，再比 `norm`（换行统一成 LF）；还不同、又有映射时，用 `memory.read` 读这一条两边的正文（Codex 的块从文件里切出来，同一个文件只读一次），把那边正文里的路径写成这边的再比。映射只有这一对目录和两边的 home：路径要在词边界上，是映射的目录本身或在它下面，用 `pathmap.Rebase` 接过去，到空白、引号、括号或标点为止；别的文字一律不动。
+   - 分四组：只在这边、只在那边、内容不同、相同；相同里标出「只差换行或路径」（`loose`）。任一边的 `MEMORY.md` 超过加载上限时写出来。`--json` 给每一对的目录、两边的 `sets` 和这四组。
+4. **按条复制**（`memory.put`，`tend memory cp <项目|目录> <机器> <名字…> [--from <机器>] [--dir …]`）
+   - 先照 `diff` 比一次，再逐条（`remote.CopyMemory`）：在源机器用 `memory.read` 读正文和源 `MEMORY.md` 里指向它的那一行，`memory.put{dir, kind, name, text, line, expect}` 写到目标。名字可以不带 `.md`。
+   - `memory.put`（`memory.Put`）：`dir` 是那台存在的项目目录，或记忆目录本身，记忆目录按那台自己的规则找（`autoMemoryDirectory`、git 仓库根）；`kind` 只收 `claude`，Codex 的回 `bad_request`；`line` 只能是一行，并且指向 `name`。`expect` 是调用方看到的那边这个文件的 `sha`（没有为空），和现在的不一样就回 `stale`、什么也不写：比较之后那边变了，要重新比。对上了交给 `memory.Write`：没有就写入，并把这一行加进 `MEMORY.md`（已经有指向这个文件的行就不加），`MEMORY.md` 按行取并集；内容相同不动；不同就写进 `memory/.incoming/<名字>`，**不进索引**，免得两份互相矛盾的记忆同时进入上下文，由用户来合并；`.incoming/` 里已有另一份不同的同名文件时写成 `<名字去掉 .md>-2.md`、`-3.md`…，那里的也不覆盖。回答带写到哪、是否进了 `.incoming/`、写完以后 `MEMORY.md` 的行数和字节数、是否超过 Claude 的加载上限（前 200 行或前 25KB，超出部分启动时不加载，命令行写出来）。
+   - 命令行：已相同的、只差换行或路径的不复制，各说一句；Codex 的条目说只对比不复制；源上没有的名字和 `stale` 的算没复制成，退出码非 0。
+   - 未实现：TUI 的对比浮层（只在这边、只在那边、内容不同三组，勾选后复制到任一边，`.incoming/` 单列「待合并」）。
 5. **Codex 记忆**：只看、只对比，不写。需要带到另一台机器时，放进交接包，或者用户手动复制。
 
 ## 迁移前的环境诊断

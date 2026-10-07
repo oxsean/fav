@@ -40,7 +40,7 @@ type localHandler struct {
 }
 
 var methods = []string{MHello, MList, MMessages, MText, MSteps, MPulse, MChecks, MLive, MEcho, MQuery, MPut, MGrep, MHits, MTrash, MRestore,
-	MMemoryList, MMemoryRead, MMemoryTrash, MMemoryRestore, MHandoffFacts, MHandoffPut}
+	MMemoryList, MMemoryRead, MMemoryTrash, MMemoryRestore, MMemoryPut, MHandoffFacts, MHandoffPut}
 
 // Scoped is a Handler that answers a method over some of this machine's sessions only: keep names them by session id.
 type Scoped interface {

@@ -29,6 +29,8 @@ func List(dirs []string, global bool) []Set {
 	return out
 }
 
+const groupHead = "# Task Group:"
+
 type block struct {
 	item Item
 	cwd  string // "" when applies_to names no absolute directory
@@ -46,10 +48,14 @@ func codexGlobal(dirs []string) []Set {
 		return nil
 	}
 	var blocks []block
-	for i, l := range strings.Split(string(normalize(b)), "\n") {
+	raw, lines := strings.Split(string(b), "\n"), strings.Split(string(normalize(b)), "\n")
+	for i, l := range lines {
 		switch {
-		case strings.HasPrefix(l, "# Task Group:"):
-			blocks = append(blocks, block{item: Item{File: p, Title: strings.TrimSpace(strings.TrimPrefix(l, "# Task Group:")), At: info.ModTime(), Line: i + 1}})
+		case strings.HasPrefix(l, groupHead):
+			end := blockEnd(lines, i+1)
+			it := Item{File: p, Title: strings.TrimSpace(strings.TrimPrefix(l, groupHead)), At: info.ModTime(), Line: i + 1,
+				SHA: digest([]byte(strings.Join(raw[i:end], "\n") + "\n")), Norm: digest([]byte(strings.Join(lines[i:end], "\n") + "\n"))}
+			blocks = append(blocks, block{item: it})
 		case len(blocks) == 0:
 		case strings.HasPrefix(l, "scope:") && blocks[len(blocks)-1].item.Description == "":
 			blocks[len(blocks)-1].item.Description = strings.TrimSpace(strings.TrimPrefix(l, "scope:"))

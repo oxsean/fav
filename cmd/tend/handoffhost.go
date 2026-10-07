@@ -93,6 +93,12 @@ func handoffOpenLine(id string) string { return "tend handoff --open " + id }
 // handoffPeer is the machine name: this one for "" or local, else a configured host (mode 1) or one of the viewer's
 // own machines the server knows (mode 2), whose server forwards the handoff methods.
 func handoffPeer(ctx context.Context, name string) (remote.Peer, error) {
+	return ownPeer(ctx, name, "cli.handoff.not_mine", "cli.handoff.server_old")
+}
+
+// ownPeer is handoffPeer for any work between the viewer's own machines; notMine and serverOld are the keys of what
+// it says when the machine is shared with the viewer or the server is too old to forward that work.
+func ownPeer(ctx context.Context, name, notMine, serverOld string) (remote.Peer, error) {
 	if name == "" || name == tend.HostLocal {
 		return herePeer(), nil
 	}
@@ -109,10 +115,10 @@ func handoffPeer(ctx context.Context, name string) (remote.Peer, error) {
 			return remote.Peer{}, i18n.E("remote.put_server_down", remote.Reason(err))
 		}
 		if !far.mine(n) {
-			return remote.Peer{}, i18n.E("cli.handoff.not_mine", n)
+			return remote.Peer{}, i18n.E(notMine, n)
 		}
 		if !slices.Contains(far.features, remote.FeatureMigrate) {
-			return remote.Peer{}, errors.New(i18n.T("cli.handoff.server_old"))
+			return remote.Peer{}, errors.New(i18n.T(serverOld))
 		}
 	}
 	p, err := h.Peer(ctx, n)

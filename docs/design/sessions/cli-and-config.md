@@ -52,6 +52,12 @@ tend memory show <文件> [host:<机器>]    读一条：只认记忆根下的�
 tend memory rm <文件|记忆目录> [host:<机器>] [-y]
                                        一条进回收站并从 MEMORY.md 去掉它那一行；给记忆目录时整个目录进回收站（doctor 建议的临时目录孤儿）
 tend memory merge <旧> <新>             只对本机：两个参数各是记忆目录或项目目录；逐条复制、不覆盖，冲突的放进 .incoming/，全部复制完旧目录进回收站
+tend memory diff <项目|目录> <机器> [--from <机器>] [--dir <那台的目录>] [--json]
+                                       逐条对比 --from（默认这台）和 <机器> 上这个项目的记忆：只在一边、内容不同、相同（只差换行或路径的标出）；
+                                       项目按仓库配对，目录按它所在的项目对过去，不在项目里要 --dir；两端只能是自己的机器
+tend memory cp <项目|目录> <机器> <名字…> [--from <机器>] [--dir <那台的目录>]
+                                       按名字（可不带 .md）把 Claude 记忆复制到 <机器>（memory.put）：从不覆盖，不同的放进那台的 .incoming/、
+                                       不进 MEMORY.md；比较之后那边又变了就拒绝；Codex 的只对比不复制；有没复制成的退出码非 0
 tend today | tend week [查询] [--json]  日报：today 从今天 0 点、week 从本周一 0 点起动过的会话（last:，默认 status:all turns:1，查询可再收窄），
                                        按项目分组（组多的在前）：每条会话的来源、总轮数（索引没有按天的轮数）、最近活动；组里 AI 改得最多的 5 个
                                        文件；项目目录（主仓库优先）里这段时间的提交（git log --since --no-merges，显示 3 条标题）；

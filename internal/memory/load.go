@@ -81,7 +81,12 @@ func lineFor(dir, name string) string {
 	if err != nil {
 		return ""
 	}
-	for _, l := range strings.Split(string(b), "\n") {
+	return IndexLine(string(b), name)
+}
+
+// IndexLine is the line of the MEMORY.md text pointing at name, "" when there is none.
+func IndexLine(text, name string) string {
+	for _, l := range strings.Split(text, "\n") {
 		l = strings.TrimRight(l, "\r")
 		if m := indexLine.FindStringSubmatch(l); m != nil && filepath.Clean(filepath.FromSlash(m[2])) == name {
 			return l
