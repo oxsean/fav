@@ -89,7 +89,7 @@ internal/shell/          shell 命令行的唯一出处：POSIX / PowerShell / c
 internal/filelock/       文件锁的唯一出处：flock / LockFileEx 的 Lock、TryLock、Held
 internal/fixture/        合成测试机器（Claude / Codex transcript、收藏、项目目录，原生路径）
 internal/testkit/        测试共用：JSONString、PosixOnly、Main（TestMain 把家目录、系统配置目录、三个 agent 目录指到临时根，PATH 前放必失败的 herdr / claude / codex）
-internal/fileio/         文件原语：WriteAtomic / WriteFile、Lines（可续读的整行扫描，索引 / 正文库 / 全文搜索共用）、ID（文件身份：Unix dev+inode，Windows 卷序列号+文件索引）；Windows 上原子替换碰到拒绝访问或共享冲突时重试（5 ms 起翻倍、单次封顶 100 ms、共约 2 秒），因为 Go 自己的读者打开文件不带 FILE_SHARE_DELETE
+internal/fileio/         文件原语：WriteAtomic / WriteFile、ReadJSON / WriteJSON、Move（文件或目录树，跨文件系统时复制并保留权限和修改时间，回收站和迁移共用）、Lines（可续读的整行扫描，索引 / 正文库 / 全文搜索共用）、ID（文件身份：Unix dev+inode，Windows 卷序列号+文件索引）；Windows 上原子替换碰到拒绝访问或共享冲突时重试（5 ms 起翻倍、单次封顶 100 ms、共约 2 秒），因为 Go 自己的读者打开文件不带 FILE_SHARE_DELETE
 internal/docscheck/      只有测试：AGENTS.md、README、SKILL.md 提到的文件、符号、环境变量、测试名、子命令必须存在
 internal/platformcheck/  只有测试：在归属包之外重复写平台规则（含文件身份、盘符）就失败
 internal/render/         候选行与 preview 渲染，两个 UI 共用

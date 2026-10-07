@@ -172,7 +172,7 @@ func MoveToTrash(e TrashEntry, paths []string) (TrashEntry, error) {
 				continue
 			}
 			to := filepath.Join(e.Dir, strconv.Itoa(i)+"-"+filepath.Base(p))
-			if err := moveAny(p, to); err != nil {
+			if err := move(p, to); err != nil {
 				return nil, err
 			}
 			moved = append(moved, Moved{From: p, To: to})
@@ -190,7 +190,7 @@ func MoveToTrash(e TrashEntry, paths []string) (TrashEntry, error) {
 	})
 	if err != nil && dir != "" { // ⚠️ nothing may stay in a directory no entry owns: the purge would delete it
 		for _, f := range slices.Backward(moved) {
-			moveAny(f.To, f.From)
+			move(f.To, f.From)
 		}
 		os.Remove(dir)
 	}
@@ -227,7 +227,7 @@ func TrashMemory(e TrashEntry, path string) (TrashEntry, error) {
 			return nil, err
 		}
 		to := filepath.Join(e.Dir, filepath.Base(path))
-		if err := moveAny(path, to); err != nil {
+		if err := move(path, to); err != nil {
 			os.Remove(e.Dir)
 			return nil, err
 		}
@@ -255,7 +255,7 @@ func RestoreMemory(id string) (TrashEntry, error) {
 			if err := os.MkdirAll(filepath.Dir(f.From), 0o700); err != nil {
 				return nil, err
 			}
-			if err := moveAny(f.To, f.From); err != nil {
+			if err := move(f.To, f.From); err != nil {
 				return nil, err
 			}
 		}
@@ -303,7 +303,7 @@ func (e TrashEntry) restore() error {
 		if f.Replaced != "" {
 			os.RemoveAll(f.Replaced)
 		}
-		if err := moveAny(f.To, f.From); err != nil {
+		if err := move(f.To, f.From); err != nil {
 			return err
 		}
 	}
@@ -350,53 +350,4 @@ func PurgeTrash(days int) (int, error) {
 	return n, err
 }
 
-var rename = os.Rename
-
-func moveAny(from, to string) error {
-	if err := rename(from, to); err == nil {
-		return nil
-	}
-	st, err := os.Lstat(from)
-	if err != nil {
-		return err
-	}
-	if st.IsDir() {
-		if err := copyDir(from, to); err != nil {
-			return err
-		}
-	} else if err := copyFile(from, to, st.Mode()); err != nil {
-		return err
-	}
-	return os.RemoveAll(from)
-}
-
-func copyFile(from, to string, mode os.FileMode) error {
-	in, err := os.Open(from)
-	if err != nil {
-		return err
-	}
-	defer in.Close()
-	out, err := os.OpenFile(to, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, mode.Perm())
-	if err != nil {
-		return err
-	}
-	if _, err := io.Copy(out, in); err != nil {
-		out.Close()
-		return err
-	}
-	return out.Close()
-}
-
-func copyDir(from, to string) error {
-	return filepath.Walk(from, func(p string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-		rel, _ := filepath.Rel(from, p)
-		dst := filepath.Join(to, rel)
-		if info.IsDir() {
-			return os.MkdirAll(dst, info.Mode().Perm())
-		}
-		return copyFile(p, dst, info.Mode())
-	})
-}
+var move = fileio.Move

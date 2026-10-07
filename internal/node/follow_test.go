@@ -39,7 +39,7 @@ func newFollowRun(t *testing.T) *followRun {
 	}
 	r.unlock = unlock
 	t.Cleanup(func() { r.end() })
-	if err := writeJSON(filepath.Join(r.dir, "state.json"), State{Rev: 1, State: StateRunning}); err != nil {
+	if err := fileio.WriteJSON(filepath.Join(r.dir, "state.json"), State{Rev: 1, State: StateRunning}); err != nil {
 		t.Fatal(err)
 	}
 	return r
@@ -76,7 +76,7 @@ func (r *followRun) roll() {
 
 func (r *followRun) end() {
 	if r.unlock != nil {
-		writeJSON(filepath.Join(r.dir, "state.json"), State{Rev: 2, State: StateExited})
+		fileio.WriteJSON(filepath.Join(r.dir, "state.json"), State{Rev: 2, State: StateExited})
 		r.unlock()
 		r.unlock = nil
 	}

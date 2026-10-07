@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/oxsean/fav/internal/capture"
+	"github.com/oxsean/fav/internal/fileio"
 	"github.com/oxsean/fav/internal/fixture"
 )
 
@@ -155,7 +156,7 @@ func fakeVerdict(dir, verdicts string) error {
 	vs := strings.Split(verdicts, ",")
 	count := filepath.Join(dir, ".tend-fake-verdicts")
 	var spec Spec
-	if runDir := os.Getenv(EnvRunDir); readJSON(filepath.Join(runDir, "spec.json"), &spec) == nil && spec.Task != "" {
+	if runDir := os.Getenv(EnvRunDir); fileio.ReadJSON(filepath.Join(runDir, "spec.json"), &spec) == nil && spec.Task != "" {
 		count = filepath.Join(filepath.Dir(filepath.Dir(runDir)), "fake", spec.Task+".verdicts")
 		os.MkdirAll(filepath.Dir(count), 0o700)
 	}

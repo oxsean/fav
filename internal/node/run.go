@@ -284,7 +284,7 @@ func (n *Node) Start(p StartParams) (Snapshot, error) {
 				return err
 			}
 		}
-		return writeJSON(filepath.Join(tmp, "spec.json"), spec)
+		return fileio.WriteJSON(filepath.Join(tmp, "spec.json"), spec)
 	})
 	if errors.Is(err, os.ErrExist) { // another Start or a stop's tombstone got here first
 		return n.Snapshot(p.Run)
@@ -297,7 +297,7 @@ func (n *Node) Start(p StartParams) (Snapshot, error) {
 		var pane string
 		pane, err = n.Launch(dir, spec)
 		if err == nil && pane != "" {
-			writeJSON(filepath.Join(dir, "pane.json"), map[string]string{"pane": pane})
+			fileio.WriteJSON(filepath.Join(dir, "pane.json"), map[string]string{"pane": pane})
 		}
 		if err != nil {
 			reason = err.Error()
@@ -355,7 +355,7 @@ func (n *Node) busy(dir string) string {
 		}
 		used++
 		var spec Spec
-		if readJSON(filepath.Join(n.runDir(e.Name()), "spec.json"), &spec) != nil || spec.Dir == "" {
+		if fileio.ReadJSON(filepath.Join(n.runDir(e.Name()), "spec.json"), &spec) != nil || spec.Dir == "" {
 			continue
 		}
 		if other, err := realPath(spec.Dir); err == nil && real != "" && paths.Same(other, real) {
@@ -632,13 +632,13 @@ func (n *Node) Stop(r RunRef) (Snapshot, error) {
 	if !paths.Exists(dir) {
 		now := time.Now()
 		err := n.publish(dir, func(tmp string) error { // a tombstone: a start arriving later finds the run stopped
-			if err := writeJSON(filepath.Join(tmp, "spec.json"), Spec{Run: r.Run, Coordinator: r.Coordinator, Created: now}); err != nil {
+			if err := fileio.WriteJSON(filepath.Join(tmp, "spec.json"), Spec{Run: r.Run, Coordinator: r.Coordinator, Created: now}); err != nil {
 				return err
 			}
 			if !claim(tmp) {
 				return os.ErrExist
 			}
-			return writeJSON(filepath.Join(tmp, "state.json"), State{Rev: 1, State: StateStopped, Reason: "never_started", EndedAt: &now})
+			return fileio.WriteJSON(filepath.Join(tmp, "state.json"), State{Rev: 1, State: StateStopped, Reason: "never_started", EndedAt: &now})
 		})
 		if err != nil && !errors.Is(err, os.ErrExist) {
 			return Snapshot{}, err
@@ -684,7 +684,7 @@ func settle(dir string) {
 	now := time.Now()
 	st.Rev++
 	st.State, st.Reason, st.EndedAt, st.Attention, st.Ask = StateStopped, reason, &now, "", ""
-	writeJSON(filepath.Join(dir, "state.json"), st)
+	fileio.WriteJSON(filepath.Join(dir, "state.json"), st)
 }
 
 // claim takes the one right to decide how run directory dir goes: its supervisor claims it before it writes a state,
@@ -703,12 +703,12 @@ func claim(dir string) bool {
 func decide(dir string, st State) (State, error) {
 	state := filepath.Join(dir, "state.json")
 	if claim(dir) || !paths.Exists(state) && !filelock.Held(filepath.Join(dir, "lock")) { // a claimant that died unwritten
-		if err := writeJSON(state, st); err != nil {
+		if err := fileio.WriteJSON(state, st); err != nil {
 			return State{}, err
 		}
 	}
 	var got State
-	err := readJSON(filepath.Join(dir, "state.json"), &got)
+	err := fileio.ReadJSON(filepath.Join(dir, "state.json"), &got)
 	return got, err
 }
 
@@ -720,7 +720,7 @@ func (n *Node) Snapshot(id string) (Snapshot, error) {
 	}
 	var spec Spec
 	created := time.Time{}
-	switch err := readJSON(filepath.Join(dir, "spec.json"), &spec); {
+	switch err := fileio.ReadJSON(filepath.Join(dir, "spec.json"), &spec); {
 	case err == nil:
 		created = spec.Created
 	case errors.Is(err, os.ErrNotExist): // Start is still writing it, or died before it did
@@ -770,7 +770,7 @@ func (n *Node) List(coordinator string, ack []string, only ...string) ([]Snapsho
 		var out []Snapshot
 		for _, id := range only {
 			var spec Spec
-			if !runID.MatchString(id) || readJSON(filepath.Join(n.runDir(id), "spec.json"), &spec) == nil && spec.Coordinator != coordinator {
+			if !runID.MatchString(id) || fileio.ReadJSON(filepath.Join(n.runDir(id), "spec.json"), &spec) == nil && spec.Coordinator != coordinator {
 				continue
 			}
 			if s, err := n.Snapshot(id); err == nil {
@@ -808,7 +808,7 @@ func (n *Node) List(coordinator string, ack []string, only ...string) ([]Snapsho
 			continue
 		}
 		var spec Spec
-		if readJSON(filepath.Join(dir, "spec.json"), &spec) == nil && spec.Coordinator != coordinator {
+		if fileio.ReadJSON(filepath.Join(dir, "spec.json"), &spec) == nil && spec.Coordinator != coordinator {
 			continue
 		}
 		if len(only) > 0 && !slices.Contains(only, id) {
@@ -853,8 +853,8 @@ func (n *Node) forget(id string) {
 	dir := n.runDir(id)
 	var spec Spec
 	var st State
-	readJSON(filepath.Join(dir, "spec.json"), &spec)
-	readJSON(filepath.Join(dir, "state.json"), &st)
+	fileio.ReadJSON(filepath.Join(dir, "spec.json"), &spec)
+	fileio.ReadJSON(filepath.Join(dir, "state.json"), &st)
 	if !Terminal(st.State) && proc.Alive(st.Pid) {
 		return // its agent outlived the supervisor: its session stays guarded while it runs
 	}
@@ -864,7 +864,7 @@ func (n *Node) forget(id string) {
 		}
 	}
 	var tr trees
-	if readJSON(filepath.Join(dir, treesFile), &tr) == nil {
+	if fileio.ReadJSON(filepath.Join(dir, treesFile), &tr) == nil {
 		tr.unref(id)
 	}
 	os.RemoveAll(dir)
@@ -875,28 +875,12 @@ func (n *Node) forget(id string) {
 func readState(dir string, st *State) error {
 	var err error
 	for i := 0; i < 5; i++ {
-		if err = readJSON(filepath.Join(dir, "state.json"), st); err == nil || errors.Is(err, os.ErrNotExist) {
+		if err = fileio.ReadJSON(filepath.Join(dir, "state.json"), st); err == nil || errors.Is(err, os.ErrNotExist) {
 			return err
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
 	return err
-}
-
-func writeJSON(path string, v any) error {
-	b, err := json.MarshalIndent(v, "", "  ")
-	if err != nil {
-		return err
-	}
-	return fileio.WriteFile(path, append(b, '\n'), 0o600)
-}
-
-func readJSON(path string, v any) error {
-	b, err := os.ReadFile(path)
-	if err != nil {
-		return err
-	}
-	return json.Unmarshal(b, v)
 }
 
 func newUUID() string {

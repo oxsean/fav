@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/oxsean/fav/internal/agent"
+	"github.com/oxsean/fav/internal/fileio"
 	"github.com/oxsean/fav/internal/output"
 	"github.com/oxsean/fav/internal/paths"
 	"github.com/oxsean/fav/internal/wire"
@@ -616,7 +617,7 @@ func (n *Node) Interrupt(p InterruptParams) (Interrupted, error) {
 	}
 	dir := n.runDir(p.Run)
 	var spec Spec
-	if err := readJSON(filepath.Join(dir, "spec.json"), &spec); err != nil {
+	if err := fileio.ReadJSON(filepath.Join(dir, "spec.json"), &spec); err != nil {
 		if !paths.Exists(dir) || errors.Is(err, os.ErrNotExist) {
 			return Interrupted{}, &wire.Error{Code: wire.CodeNotFound, Detail: p.Run}
 		}
@@ -658,7 +659,7 @@ func (n *Node) Send(p SendParams) (Snapshot, error) {
 	}
 	dir := n.runDir(p.Run)
 	var spec Spec
-	if err := readJSON(filepath.Join(dir, "spec.json"), &spec); err != nil {
+	if err := fileio.ReadJSON(filepath.Join(dir, "spec.json"), &spec); err != nil {
 		if !paths.Exists(dir) || errors.Is(err, os.ErrNotExist) {
 			return Snapshot{}, &wire.Error{Code: wire.CodeNotFound, Detail: p.Run}
 		}

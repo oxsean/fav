@@ -17,6 +17,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/oxsean/fav/internal/fileio"
 	"github.com/oxsean/fav/internal/paths"
 	"github.com/oxsean/fav/internal/wire"
 )
@@ -397,7 +398,7 @@ func binary(b []byte) bool {
 // endChanges records what the run changed when it ends: the end tree and its ref, then changes.json.
 func (s *sup) endChanges() {
 	var tr trees
-	if readJSON(filepath.Join(s.dir, treesFile), &tr) != nil {
+	if fileio.ReadJSON(filepath.Join(s.dir, treesFile), &tr) != nil {
 		return
 	}
 	cs := changeSet{Git: tr.Git}
@@ -413,7 +414,7 @@ func (s *sup) endChanges() {
 		}
 		tr.End = end
 		tr.ref(s.spec.Run, "end", end)
-		writeJSON(filepath.Join(s.dir, treesFile), tr)
+		fileio.WriteJSON(filepath.Join(s.dir, treesFile), tr)
 		if cs.Files, err = gitChanges(tr, s.spec.Dir, end, touched); err != nil {
 			s.warnChanges(err)
 			return
@@ -422,7 +423,7 @@ func (s *sup) endChanges() {
 	} else {
 		cs.Files, cs.Snapshot = localChanges(s.dir, s.spec.Dir, touched, s.slim)
 	}
-	writeJSON(filepath.Join(s.dir, changesFile), cs)
+	fileio.WriteJSON(filepath.Join(s.dir, changesFile), cs)
 	os.Remove(filepath.Join(s.dir, liveIndex))
 }
 
@@ -445,7 +446,7 @@ func (s *sup) startChanges() {
 			s.warnChanges(err)
 		}
 	}
-	writeJSON(filepath.Join(s.dir, treesFile), tr)
+	fileio.WriteJSON(filepath.Join(s.dir, treesFile), tr)
 }
 
 // warnChanges logs why the run's changes cannot be counted; its methods answer gone.
@@ -471,14 +472,14 @@ func (n *Node) changesOf(run string) (changeSet, Spec, trees, error) {
 		return changeSet{}, spec, tr, &wire.Error{Code: wire.CodeNotFound, Detail: run}
 	}
 	dir := n.runDir(run)
-	if err := readJSON(filepath.Join(dir, "spec.json"), &spec); err != nil {
+	if err := fileio.ReadJSON(filepath.Join(dir, "spec.json"), &spec); err != nil {
 		return changeSet{}, spec, tr, &wire.Error{Code: wire.CodeNotFound, Detail: run}
 	}
-	if readJSON(filepath.Join(dir, treesFile), &tr) != nil || tr.Git && tr.Base == "" {
+	if fileio.ReadJSON(filepath.Join(dir, treesFile), &tr) != nil || tr.Git && tr.Base == "" {
 		return changeSet{}, spec, tr, errGone
 	}
 	var cs changeSet
-	if readJSON(filepath.Join(dir, changesFile), &cs) == nil {
+	if fileio.ReadJSON(filepath.Join(dir, changesFile), &cs) == nil {
 		return cs, spec, tr, nil
 	}
 	snap, err := n.Snapshot(run)

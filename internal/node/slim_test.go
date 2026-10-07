@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/oxsean/fav/internal/fileio"
 	"github.com/oxsean/fav/internal/output"
 )
 
@@ -304,7 +305,7 @@ func TestSuperviseSlimsTheLog(t *testing.T) {
 		id := NewRunID()
 		dir := n.runDir(id)
 		os.MkdirAll(dir, 0o700)
-		writeJSON(filepath.Join(dir, "spec.json"), Spec{Run: id, Argv: []string{os.Args[0], "_cat", said}, Dir: c.dir, Runner: RunnerBackground, Created: time.Now()})
+		fileio.WriteJSON(filepath.Join(dir, "spec.json"), Spec{Run: id, Argv: []string{os.Args[0], "_cat", said}, Dir: c.dir, Runner: RunnerBackground, Created: time.Now()})
 		os.WriteFile(filepath.Join(dir, "prompt.md"), nil, 0o600)
 		if err := Supervise(dir); err != nil {
 			t.Fatal(err)

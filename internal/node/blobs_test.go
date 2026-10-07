@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/oxsean/fav/internal/fileio"
 	"github.com/oxsean/fav/internal/filelock"
 )
 
@@ -17,8 +18,8 @@ func fakeBlobs(t *testing.T, n *Node, id string, created time.Time, state string
 	if err := os.MkdirAll(filepath.Join(dir, blobsDir), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	writeJSON(filepath.Join(dir, "spec.json"), Spec{Run: id, Created: created})
-	writeJSON(filepath.Join(dir, "state.json"), State{State: state})
+	fileio.WriteJSON(filepath.Join(dir, "spec.json"), Spec{Run: id, Created: created})
+	fileio.WriteJSON(filepath.Join(dir, "state.json"), State{State: state})
 	os.WriteFile(filepath.Join(dir, blobsDir, strings.Repeat("a", 64)), make([]byte, size), 0o600)
 	return dir
 }

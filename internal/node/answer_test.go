@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/oxsean/fav/internal/agent"
+	"github.com/oxsean/fav/internal/fileio"
 	"github.com/oxsean/fav/internal/filelock"
 	"github.com/oxsean/fav/internal/tend"
 )
@@ -105,8 +106,8 @@ func TestAnAnswerThatDidNotReachTheAgentKeepsItsRequest(t *testing.T) {
 	run := NewRunID()
 	dir := n.runDir(run)
 	os.MkdirAll(dir, 0o700)
-	writeJSON(filepath.Join(dir, "spec.json"), Spec{Run: run, Stream: true, Created: time.Now()})
-	writeJSON(filepath.Join(dir, "state.json"), State{Rev: 1, State: StateRunning, Sup: os.Getpid(), Requests: g.s.st.Requests})
+	fileio.WriteJSON(filepath.Join(dir, "spec.json"), Spec{Run: run, Stream: true, Created: time.Now()})
+	fileio.WriteJSON(filepath.Join(dir, "state.json"), State{Rev: 1, State: StateRunning, Sup: os.Getpid(), Requests: g.s.st.Requests})
 	unlock, err := filelock.TryLock(filepath.Join(dir, "lock")) // as its supervisor
 	if err != nil {
 		t.Fatal(err)

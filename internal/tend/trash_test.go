@@ -6,12 +6,13 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"runtime"
 	"slices"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/oxsean/fav/internal/fileio"
 )
 
 func TestTrashRoundTrip(t *testing.T) {
@@ -190,57 +191,21 @@ func TestConcurrentTrashWritersKeepEveryEntry(t *testing.T) {
 	}
 }
 
-func TestMoveFallsBackToCopyAcrossDevices(t *testing.T) {
-	rename = func(string, string) error { return errors.New("invalid cross-device link") }
-	t.Cleanup(func() { rename = os.Rename })
-	src, dst := t.TempDir(), t.TempDir()
-	tree := filepath.Join(src, "s1")
-	os.MkdirAll(filepath.Join(tree, "sub"), 0o755)
-	os.WriteFile(filepath.Join(tree, "sub", "x"), []byte("x"), 0o640)
-	file := filepath.Join(src, "s1.jsonl")
-	os.WriteFile(file, []byte("{}\n"), 0o600)
-
-	if err := moveAny(tree, filepath.Join(dst, "s1")); err != nil {
-		t.Fatal(err)
-	}
-	if err := moveAny(file, filepath.Join(dst, "s1.jsonl")); err != nil {
-		t.Fatal(err)
-	}
-	if b, err := os.ReadFile(filepath.Join(dst, "s1", "sub", "x")); err != nil || string(b) != "x" {
-		t.Fatalf("nested file not copied: %v", err)
-	}
-	if b, err := os.ReadFile(filepath.Join(dst, "s1.jsonl")); err != nil || string(b) != "{}\n" {
-		t.Fatalf("file not copied: %v", err)
-	}
-	if runtime.GOOS != "windows" {
-		if st, _ := os.Stat(filepath.Join(dst, "s1", "sub", "x")); st.Mode().Perm() != 0o640 {
-			t.Errorf("mode not kept: %v", st.Mode())
-		}
-	}
-	for _, p := range []string{tree, file} {
-		if _, err := os.Lstat(p); !os.IsNotExist(err) {
-			t.Errorf("%s: the source stays after the copy", p)
-		}
-	}
-}
-
 func TestAFailedMoveToTrashPutsTheFilesBack(t *testing.T) {
 	t.Setenv("TEND_HOME", t.TempDir())
 	src := t.TempDir()
-	ok, broken := filepath.Join(src, "s1.jsonl"), filepath.Join(src, "s1-link")
+	ok, broken := filepath.Join(src, "s1.jsonl"), filepath.Join(src, "s1-sub")
 	os.WriteFile(ok, []byte("{}\n"), 0o644)
-	if err := os.Symlink(filepath.Join(src, "nowhere"), broken); err != nil {
-		t.Skip("no symlinks here")
-	}
-	rename = func(from, to string) error {
+	os.WriteFile(broken, []byte("{}\n"), 0o644)
+	move = func(from, to string) error {
 		if from == broken {
-			return errors.New("cross-device")
+			return errors.New("cannot be copied")
 		}
-		return os.Rename(from, to)
+		return fileio.Move(from, to)
 	}
-	t.Cleanup(func() { rename = os.Rename })
+	t.Cleanup(func() { move = fileio.Move })
 	if _, err := MoveToTrash(TrashEntry{Provider: ProviderClaude, SessionID: "s1"}, []string{ok, broken}); err == nil {
-		t.Fatal("the dangling link cannot be copied")
+		t.Fatal("the second file cannot be moved")
 	}
 	if _, err := os.Stat(ok); err != nil {
 		t.Fatalf("the file moved before the failure is not back: %v", err)

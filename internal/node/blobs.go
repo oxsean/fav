@@ -30,7 +30,7 @@ func (n *Node) blobRuns() []runBlobs {
 			continue
 		}
 		var spec Spec
-		readJSON(filepath.Join(dir, "spec.json"), &spec)
+		fileio.ReadJSON(filepath.Join(dir, "spec.json"), &spec)
 		s, err := n.Snapshot(e.Name())
 		out = append(out, runBlobs{dir: dir, bytes: b, created: spec.Created,
 			ended: err == nil && (Terminal(s.State.State) || s.State.State == StateUnknown)})

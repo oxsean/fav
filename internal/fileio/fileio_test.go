@@ -2,12 +2,14 @@ package fileio
 
 import (
 	"context"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 )
 
 func collect(t *testing.T, path string, from int64, max int) ([]string, []int64, int64) {
@@ -150,5 +152,44 @@ func TestAnOpenFileKeepsItsIDWhateverItsPathNamesNow(t *testing.T) {
 	}
 	if IDOf(f) != id || ID(p) == id {
 		t.Fatalf("the open file is the one it opened: %q, the path names another: %q", IDOf(f), ID(p))
+	}
+}
+
+func TestMoveFallsBackToCopyAcrossDevices(t *testing.T) {
+	rename = func(string, string) error { return errors.New("invalid cross-device link") }
+	t.Cleanup(func() { rename = Rename })
+	src, dst := t.TempDir(), t.TempDir()
+	tree := filepath.Join(src, "s1")
+	os.MkdirAll(filepath.Join(tree, "sub"), 0o755)
+	os.WriteFile(filepath.Join(tree, "sub", "x"), []byte("x"), 0o640)
+	file := filepath.Join(src, "s1.jsonl")
+	os.WriteFile(file, []byte("{}\n"), 0o600)
+	then := time.Now().Add(-48 * time.Hour).Truncate(time.Second)
+	os.Chtimes(file, then, then)
+
+	if err := Move(tree, filepath.Join(dst, "s1")); err != nil {
+		t.Fatal(err)
+	}
+	if err := Move(file, filepath.Join(dst, "s1.jsonl")); err != nil {
+		t.Fatal(err)
+	}
+	if b, err := os.ReadFile(filepath.Join(dst, "s1", "sub", "x")); err != nil || string(b) != "x" {
+		t.Fatalf("nested file not copied: %v", err)
+	}
+	if b, err := os.ReadFile(filepath.Join(dst, "s1.jsonl")); err != nil || string(b) != "{}\n" {
+		t.Fatalf("file not copied: %v", err)
+	}
+	if st, _ := os.Stat(filepath.Join(dst, "s1.jsonl")); !st.ModTime().Equal(then) {
+		t.Errorf("time not kept: %v", st.ModTime())
+	}
+	if runtime.GOOS != "windows" {
+		if st, _ := os.Stat(filepath.Join(dst, "s1", "sub", "x")); st.Mode().Perm() != 0o640 {
+			t.Errorf("mode not kept: %v", st.Mode())
+		}
+	}
+	for _, p := range []string{tree, file} {
+		if _, err := os.Lstat(p); !os.IsNotExist(err) {
+			t.Errorf("%s: the source stays after the copy", p)
+		}
 	}
 }

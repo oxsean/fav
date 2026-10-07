@@ -119,7 +119,7 @@ func Supervise(dir string) error {
 	}
 	defer unlock()
 	var spec Spec
-	if err := readJSON(filepath.Join(dir, "spec.json"), &spec); err != nil {
+	if err := fileio.ReadJSON(filepath.Join(dir, "spec.json"), &spec); err != nil {
 		return err
 	}
 	if paths.Exists(filepath.Join(dir, "state.json")) || !claim(dir) { // decided already: never start twice
@@ -184,7 +184,7 @@ type outcome struct {
 
 func (s *sup) save() error {
 	s.st.Rev++
-	return writeJSON(filepath.Join(s.dir, "state.json"), s.st)
+	return fileio.WriteJSON(filepath.Join(s.dir, "state.json"), s.st)
 }
 
 func (s *sup) set(f func(*State)) error {
@@ -549,7 +549,7 @@ func (s *sup) run() error {
 	}
 	now := time.Now()
 	var pane map[string]string
-	readJSON(filepath.Join(s.dir, "pane.json"), &pane)
+	fileio.ReadJSON(filepath.Join(s.dir, "pane.json"), &pane)
 	s.mu.Lock()
 	s.seen = now
 	s.mu.Unlock()

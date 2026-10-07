@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/oxsean/fav/internal/agent"
+	"github.com/oxsean/fav/internal/fileio"
 	"github.com/oxsean/fav/internal/tend"
 	"github.com/oxsean/fav/internal/wire"
 )
@@ -214,8 +215,8 @@ func TestOnlyAStreamRunIsInterrupted(t *testing.T) {
 	run := NewRunID()
 	dir := n.runDir(run)
 	os.MkdirAll(dir, 0o700)
-	writeJSON(filepath.Join(dir, "spec.json"), Spec{Run: run, Created: time.Now()})
-	writeJSON(filepath.Join(dir, "state.json"), State{Rev: 1, State: StateRunning, Sup: os.Getpid()})
+	fileio.WriteJSON(filepath.Join(dir, "spec.json"), Spec{Run: run, Created: time.Now()})
+	fileio.WriteJSON(filepath.Join(dir, "state.json"), State{Rev: 1, State: StateRunning, Sup: os.Getpid()})
 	if _, err := n.Interrupt(InterruptParams{Run: run, Turn: 1}); wire.Code(err) != wire.CodeConflict {
 		t.Fatalf("%v", err)
 	}

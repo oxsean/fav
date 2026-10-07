@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/oxsean/fav/internal/fileio"
 	"github.com/oxsean/fav/internal/filelock"
 	"github.com/oxsean/fav/internal/wire"
 )
@@ -30,7 +31,7 @@ func act(t *testing.T, n *Node, dir string, work *Workspace, a actScript) (strin
 	id := NewRunID()
 	runDir := n.runDir(id)
 	os.MkdirAll(runDir, 0o700)
-	writeJSON(filepath.Join(runDir, "spec.json"), Spec{Run: id, Argv: []string{os.Args[0], "_act", script}, Dir: dir, Runner: RunnerBackground,
+	fileio.WriteJSON(filepath.Join(runDir, "spec.json"), Spec{Run: id, Argv: []string{os.Args[0], "_act", script}, Dir: dir, Runner: RunnerBackground,
 		Created: time.Now(), Work: work})
 	os.WriteFile(filepath.Join(runDir, "prompt.md"), nil, 0o600)
 	if err := Supervise(runDir); err != nil {
@@ -152,8 +153,8 @@ func running(t *testing.T, n *Node, dir string) string {
 	id := NewRunID()
 	runDir := n.runDir(id)
 	os.MkdirAll(runDir, 0o700)
-	writeJSON(filepath.Join(runDir, "spec.json"), Spec{Run: id, Dir: dir, Created: time.Now(), Work: &Workspace{Checkout: dir}})
-	writeJSON(filepath.Join(runDir, "state.json"), State{State: StateRunning})
+	fileio.WriteJSON(filepath.Join(runDir, "spec.json"), Spec{Run: id, Dir: dir, Created: time.Now(), Work: &Workspace{Checkout: dir}})
+	fileio.WriteJSON(filepath.Join(runDir, "state.json"), State{State: StateRunning})
 	unlock, err := filelock.Lock(filepath.Join(runDir, "lock"))
 	if err != nil {
 		t.Fatal(err)

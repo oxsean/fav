@@ -75,8 +75,8 @@ func RunSessions() map[string]RunSession {
 			Session string `json:"session"`
 			Pid     int    `json:"pid"`
 		}
-		readJSONFile(filepath.Join(dir, "spec.json"), &spec)
-		ended := readJSONFile(filepath.Join(dir, "state.json"), &st) &&
+		fileio.ReadJSON(filepath.Join(dir, "spec.json"), &spec)
+		ended := fileio.ReadJSON(filepath.Join(dir, "state.json"), &st) == nil &&
 			(st.State == "exited" || st.State == "stopped" || st.State == "failed")
 		sid := st.Session
 		if sid == "" {
@@ -89,11 +89,6 @@ func RunSessions() map[string]RunSession {
 			Open: !ended && (filelock.Held(filepath.Join(dir, "lock")) || proc.Alive(st.Pid))}
 	}
 	return out
-}
-
-func readJSONFile(path string, v any) bool {
-	b, err := os.ReadFile(path)
-	return err == nil && json.Unmarshal(b, v) == nil
 }
 
 // RunLive: the open runs as live sessions.

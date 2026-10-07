@@ -14,6 +14,7 @@ import (
 
 	"github.com/oxsean/fav/internal/agent"
 	"github.com/oxsean/fav/internal/capture"
+	"github.com/oxsean/fav/internal/fileio"
 	"github.com/oxsean/fav/internal/filelock"
 	"github.com/oxsean/fav/internal/paths"
 	"github.com/oxsean/fav/internal/proc"
@@ -242,11 +243,11 @@ func TestARunThatNeverGotItsSupervisorFails(t *testing.T) {
 func age(t *testing.T, n *Node, id string) {
 	t.Helper()
 	var spec Spec
-	if err := readJSON(filepath.Join(n.runDir(id), "spec.json"), &spec); err != nil {
+	if err := fileio.ReadJSON(filepath.Join(n.runDir(id), "spec.json"), &spec); err != nil {
 		t.Fatal(err)
 	}
 	spec.Created = spec.Created.Add(-time.Minute)
-	writeJSON(filepath.Join(n.runDir(id), "spec.json"), spec)
+	fileio.WriteJSON(filepath.Join(n.runDir(id), "spec.json"), spec)
 }
 
 func noLaunch(string, Spec) (string, error) { return "", nil }
@@ -417,8 +418,8 @@ func TestAnUnknownRunCanBeAcknowledged(t *testing.T) {
 	n := New(t.TempDir())
 	n.Launch = noLaunch
 	s := start(t, n, StartParams{Task: "t_1", Profile: fake()})
-	writeJSON(filepath.Join(n.runDir(s.Run), "claim"), nil)
-	writeJSON(filepath.Join(n.runDir(s.Run), "state.json"), State{Rev: 2, State: StateRunning})
+	fileio.WriteJSON(filepath.Join(n.runDir(s.Run), "claim"), nil)
+	fileio.WriteJSON(filepath.Join(n.runDir(s.Run), "state.json"), State{Rev: 2, State: StateRunning})
 	n.List("c1", []string{s.Run})
 	if !paths.Exists(filepath.Join(n.runDir(s.Run), "acked")) {
 		t.Fatal("a run whose supervisor is gone is acknowledged once its coordinator gave up on it")
@@ -467,7 +468,7 @@ func TestANodeRunsItsOwnProfilesAndNoBypass(t *testing.T) {
 		t.Fatal(err)
 	}
 	var spec Spec
-	readJSON(filepath.Join(n.runDir(s.Run), "spec.json"), &spec)
+	fileio.ReadJSON(filepath.Join(n.runDir(s.Run), "spec.json"), &spec)
 	if !slices.Contains(spec.Argv, "_fake-agent") || !slices.Contains(spec.Argv, "7") {
 		t.Fatalf("the node's own lint profile runs, not the coordinator's: %v", spec.Argv)
 	}
@@ -487,7 +488,7 @@ func TestListIsPerCoordinatorAndForgetsOldAcknowledgedRuns(t *testing.T) {
 		t.Fatalf("%+v", runs)
 	}
 	now := time.Now()
-	writeJSON(filepath.Join(n.runDir(a.Run), "state.json"), State{Rev: 3, State: StateExited, EndedAt: &now})
+	fileio.WriteJSON(filepath.Join(n.runDir(a.Run), "state.json"), State{Rev: 3, State: StateExited, EndedAt: &now})
 	n.List("a", []string{a.Run})
 	old := now.Add(-keepDone - time.Hour)
 	os.Chtimes(filepath.Join(n.runDir(a.Run), "acked"), old, old)
@@ -540,7 +541,7 @@ func TestASessionOutlivesItsRunDirectory(t *testing.T) {
 	n.Launch = noLaunch
 	s := start(t, n, StartParams{Task: "t_1", Profile: fake(), Title: "fix it"})
 	now := time.Now()
-	writeJSON(filepath.Join(n.runDir(s.Run), "state.json"), State{Rev: 3, State: StateExited, EndedAt: &now})
+	fileio.WriteJSON(filepath.Join(n.runDir(s.Run), "state.json"), State{Rev: 3, State: StateExited, EndedAt: &now})
 	n.List("c1", []string{s.Run})
 	old := now.Add(-keepDone - time.Hour)
 	os.Chtimes(filepath.Join(n.runDir(s.Run), "acked"), old, old)
@@ -563,7 +564,7 @@ func TestASnapshotWhileARunIsBeingMadeLeavesItToStart(t *testing.T) {
 	if s, _ := n.Snapshot(id); s.State.State != StateStarting {
 		t.Fatalf("%+v", s)
 	}
-	writeJSON(filepath.Join(dir, "spec.json"), Spec{Run: id, Coordinator: "c1", Argv: []string{os.Args[0], "-test.run", "none"}, Dir: t.TempDir(), Runner: RunnerBackground, Created: time.Now()})
+	fileio.WriteJSON(filepath.Join(dir, "spec.json"), Spec{Run: id, Coordinator: "c1", Argv: []string{os.Args[0], "-test.run", "none"}, Dir: t.TempDir(), Runner: RunnerBackground, Created: time.Now()})
 	os.WriteFile(filepath.Join(dir, "prompt.md"), nil, 0o600)
 	if err := Supervise(dir); err != nil {
 		t.Fatal(err)
@@ -611,7 +612,7 @@ func TestAProbeOfTheLockDoesNotSendTheSupervisorAway(t *testing.T) {
 		os.MkdirAll(dir, 0o700)
 		lock := filepath.Join(dir, "lock")
 		os.WriteFile(lock, nil, 0o600)
-		writeJSON(filepath.Join(dir, "spec.json"), Spec{Argv: []string{os.Args[0], "-test.run", "none"}, Dir: root, Runner: RunnerBackground, Created: time.Now()})
+		fileio.WriteJSON(filepath.Join(dir, "spec.json"), Spec{Argv: []string{os.Args[0], "-test.run", "none"}, Dir: root, Runner: RunnerBackground, Created: time.Now()})
 		stop, done := make(chan struct{}), make(chan struct{})
 		go func() {
 			defer close(done)
@@ -637,7 +638,7 @@ func TestDecidingNeverOverwritesAState(t *testing.T) {
 	dir := t.TempDir()
 	claim(dir)
 	code := 0
-	writeJSON(filepath.Join(dir, "state.json"), State{Rev: 3, State: StateExited, ExitCode: &code})
+	fileio.WriteJSON(filepath.Join(dir, "state.json"), State{Rev: 3, State: StateExited, ExitCode: &code})
 	got, err := decide(dir, State{Rev: 1, State: StateFailed, Reason: "not_launched"})
 	if err != nil || got.State != StateExited || got.Rev != 3 {
 		t.Fatalf("%+v %v", got, err)

@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/oxsean/fav/internal/fileio"
 	"github.com/oxsean/fav/internal/proc"
 )
 
@@ -57,7 +58,7 @@ func TestAnAgentWhoseIdentityCannotBeProvedIsLeftAlone(t *testing.T) {
 	st := s.State
 	st.PidStart++ // another process now has its pid
 	st.Rev++
-	writeJSON(n.runDir(s.Run)+"/state.json", st)
+	fileio.WriteJSON(n.runDir(s.Run)+"/state.json", st)
 	if !proc.Alive(s.Pid) {
 		t.Skip("the agent ended with its supervisor here")
 	}
