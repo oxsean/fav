@@ -13,6 +13,7 @@ import (
 	"github.com/oxsean/fav/internal/agent"
 	"github.com/oxsean/fav/internal/capture"
 	"github.com/oxsean/fav/internal/coord"
+	"github.com/oxsean/fav/internal/envcheck"
 	"github.com/oxsean/fav/internal/herdr"
 	"github.com/oxsean/fav/internal/i18n"
 	"github.com/oxsean/fav/internal/index"
@@ -63,6 +64,9 @@ func handoffHost(s *tend.Store, ref string, o handoffTo) error {
 	}
 	if dir != "" && !pathmap.Abs(dir) {
 		return i18n.E("cli.handoff.dir_abs", dir)
+	}
+	if !x.From.Same(x.To) {
+		handoffEnv(ctx, x, dir, o.host)
 	}
 	text := x.Text(dir)
 	switch {
@@ -209,6 +213,26 @@ func handoffDir(ctx context.Context, x *remote.Handover, r *tend.Rec, host strin
 		b.WriteString("\n  " + strings.TrimSpace(d.Path+"  "+d.Branch))
 	}
 	return "", i18n.E(say.several, len(dirs), host, b.String())
+}
+
+// handoffEnv compares the session's environment with dir's on host for the pack, and says on stderr how they differ
+// and what blocks; a block stops nothing, the new session reads it in the pack.
+func handoffEnv(ctx context.Context, x *remote.Handover, dir, host string) {
+	rep, err := x.Diagnose(ctx, dir)
+	if err != nil {
+		who := host
+		if !x.From.Has(remote.MEnv) {
+			who = x.FromName()
+		}
+		fmt.Fprint(os.Stderr, i18n.F("cli.handoff.env_unread", envErr(who, err)))
+		return
+	}
+	fmt.Fprint(os.Stderr, i18n.F("cli.handoff.env", host, rep.Summary()))
+	for _, it := range rep.Items {
+		if it.Level == envcheck.LevelBlock {
+			fmt.Fprintln(os.Stderr, "  "+envcheck.LevelText(it.Level)+": "+it.What)
+		}
+	}
 }
 
 // indexedRemote is the origin Codex recorded for r, a session on this machine, as the index has it.

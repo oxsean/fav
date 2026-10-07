@@ -83,6 +83,7 @@ type Handover struct {
 	From, To Peer
 	Ref      Ref
 	Facts    capture.HandoffFacts
+	Env      *capture.HandoffEnv // how To's environment differs, once Diagnose compared them
 }
 
 // Handoff reads ref's facts on from for a new session on to.
@@ -99,7 +100,7 @@ func (x *Handover) Target(dir string) capture.HandoffTarget {
 	if x.From.Same(x.To) {
 		return capture.HandoffTarget{}
 	}
-	return capture.HandoffTarget{Source: x.FromName(), SourceHome: x.From.Hello.Home, Dir: dir, Home: x.To.Hello.Home}
+	return capture.HandoffTarget{Source: x.FromName(), SourceHome: x.From.Hello.Home, Dir: dir, Home: x.To.Hello.Home, Env: x.Env}
 }
 
 // FromName is the session's machine as the caller names it.

@@ -2,7 +2,7 @@
 
 把会话或记忆从一台机器搬到另一台：交接式迁移、Claude 完整迁移、记忆的管理与迁移、迁移前的环境诊断，以及这部分的已定决策和待核实项。远端合同和只读聚合见 [remote.md](remote.md)。
 
-实现：本机交接包在 `internal/capture`（`handoff.go`）和 `cmd/tend`（`tend handoff`）；交接到另一台机器在 `internal/remote`（`handoff.go`、`peer.go`）和 `cmd/tend`（`handoffhost.go`）；路径映射在 `internal/pathmap`；搬项目目录的文件枚举和改写在 `internal/index`（`move.go`）；记忆的查看、删除、孤儿扫描、对比和按条写入在 `internal/memory`，节点方法 `memory.ls` / `memory.read` / `memory.trash` / `memory.restore` / `memory.put` 和两台机器之间的对比、复制（`CompareMemories`、`CopyMemory`）在 `internal/remote`（`memory.go`），命令是 `tend memory`（含 `diff`、`cp`）和 `tend doctor` 的记忆一节；环境诊断的核心维度见「迁移前的环境诊断」。本文其余部分**未实现**：完整迁移（`import.*`）、交接包里的记忆条目和环境差异段、环境诊断的其余维度和界面，代码里都还没有。
+实现：本机交接包在 `internal/capture`（`handoff.go`）和 `cmd/tend`（`tend handoff`）；交接到另一台机器在 `internal/remote`（`handoff.go`、`peer.go`）和 `cmd/tend`（`handoffhost.go`）；路径映射在 `internal/pathmap`；搬项目目录的文件枚举和改写在 `internal/index`（`move.go`）；记忆的查看、删除、孤儿扫描、对比和按条写入在 `internal/memory`，节点方法 `memory.ls` / `memory.read` / `memory.trash` / `memory.restore` / `memory.put` 和两台机器之间的对比、复制（`CompareMemories`、`CopyMemory`）在 `internal/remote`（`memory.go`），命令是 `tend memory`（含 `diff`、`cp`）和 `tend doctor` 的记忆一节；环境诊断的核心维度见「迁移前的环境诊断」。本文其余部分**未实现**：完整迁移（`import.*`）、交接包里的记忆条目、环境诊断的其余维度和界面，代码里都还没有。
 
 ## 迁移
 
@@ -18,8 +18,8 @@
 ### 交接式迁移
 
 - 已有：本机交接 `tend handoff <id> [--to claude|codex]`，交接包的内容、弹窗和去向见 [resume.md](resume.md)「分叉与交接」。
-- 已有：交接到另一台机器 `tend handoff <id> --host <机器>`，定目录、成稿和开法见 [resume.md](resume.md)「交接到另一台机器」。
-- 未实现：交接包里再加两样：和这个项目有关的记忆条目（见「记忆的管理与迁移」）、迁移前的环境差异摘要（见「迁移前的环境诊断」，诊断做好之后加上）。
+- 已有：交接到另一台机器 `tend handoff <id> --host <机器>`，定目录、成稿和开法见 [resume.md](resume.md)「交接到另一台机器」；成稿里的「环境差异」段见「迁移前的环境诊断」的「展示」。
+- 未实现：交接包里和这个项目有关的记忆条目（见「记忆的管理与迁移」）。
 
 ### Claude 完整迁移
 
@@ -96,7 +96,7 @@
 
 只诊断，不对齐。目的：迁移之前知道「这个会话到了那台机器，AI 看到的上下文和原来差多少」。只报告差异；每项差异附一句手动处理的提示（纯文字，tend 不执行）。
 
-实现：`internal/envcheck`（`Collect` 采集、`SeenOf` 会话所见、`Compare` 比较、`GitOf`、`FileText`）、`internal/index`（`env.go`，会话当时看到的环境）、`internal/remote`（`env.go`，`env` 和 `env.file`）、`cmd/tend`（`env.go`，`tend env`、`tend env diff`）。做了的是核心维度：CLI、代码、指令文件、会话用过的 skill 和 MCP、按路径存放的项目配置、模型提供方。未实现：「对比什么」表里其余各行、目标机器同一项目最近一个会话的记录、TUI 的报告面板、交接包和迁移对话框里的诊断。
+实现：`internal/envcheck`（`Collect` 采集、`SeenOf` 会话所见、`Compare` 比较、`GitOf`、`FileText`）、`internal/index`（`env.go`，会话当时看到的环境）、`internal/remote`（`env.go`，`env`、`env.file` 和交接用的 `Handover.Diagnose`）、`cmd/tend`（`env.go`，`tend env`、`tend env diff`）。做了的是核心维度：CLI、代码、指令文件、会话用过的 skill 和 MCP、按路径存放的项目配置、模型提供方。未实现：「对比什么」表里其余各行、目标机器同一项目最近一个会话的记录、TUI 的报告面板、迁移对话框里的诊断。
 
 ### 数据来源
 
@@ -129,7 +129,7 @@
 
 ### 比较：`envcheck.Compare`
 
-`Compare(src, dst Print, from, to pathmap.End) Report` 是纯函数，CLI 用它，TUI、交接包和协调器以后也用它。
+`Compare(src, dst Print, from, to pathmap.End) Report` 是纯函数，CLI 和交接包用它，TUI 和协调器以后也用它。
 
 - 每一项是 `{dim, level: block | unequal | hint, name, here, there, evidence, at, what, fix}`，`fix` 是一句手动处理的提示（i18n 文本）。按级别、再按维度排，严重的在前；`Report` 带三个计数，第一行汇总「阻断 0 · 不对等 3 · 提示 5」。
 - 证据：「会话当时看到的」优先，会话没记的用源机器当前的配置。
@@ -162,7 +162,8 @@
 
 - 命令行：`tend env [--dir 目录] [--json]` 输出本机指纹，`--json` 就是 `env` 的回答；`tend env diff <机器> --session <id>`（针对一个会话）、`--dir 目录`（一个目录）、都不给（两台机器整体比较）；目标机器上的目录和交接到另一台机器一样找（`handoffDir`，见 [resume.md](resume.md)「交接到另一台机器」第 2 步，remote 先取源目录的 origin），找不到或找到几个时要 `--there` 给出；有阻断项时退出码非 0（[cli-and-config.md](cli-and-config.md)）。
 - 想看某个 CLAUDE.md 具体差在哪，点开时才去两边各取那一个文件（`env.file`）做文本对比，不预先传正文。
-- 未实现：迁移确认框和 TUI 报告面板里一行汇总、展开看明细；有阻断项时不能迁移；只有不对等项时照样可以迁，确认框里写明「到那边 AI 会缺什么」。交接包里的「环境差异」段由发起端用同一份 `Report` 写。
+- 交接包：`tend handoff <id> --host <机器>` 定下目录后，发起端用同一份 `Report` 写「环境差异」段（`Handover.Diagnose`：源机器经 `env` 回答会话当时看到的，目标机器回答那个目录的）：一行汇总，再列阻断和不对等的条目，只有名字和哈希，不列提示；stderr 也打汇总和阻断项。有阻断也照样交接，新会话从包里读到差异。有一边的 tend 没有 `env` 时，包里写明没有比较和原因。本机交接和同一台机器不加这一段。
+- 未实现：迁移确认框和 TUI 报告面板里一行汇总、展开看明细；完整迁移有阻断项时不能迁；只有不对等项时照样可以迁，确认框里写明「到那边 AI 会缺什么」。
 
 ## 推后
 

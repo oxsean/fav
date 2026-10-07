@@ -175,11 +175,19 @@ type HandoffTarget struct {
 	SourceHome string
 	Dir        string // where the new session starts
 	Home       string
+	Env        *HandoffEnv // how the environment there differs, as the sender compared it
+}
+
+// HandoffEnv is a pack's environment section, written by the sender from its comparison of the two machines.
+type HandoffEnv struct {
+	Summary string   // the comparison's one line
+	Items   []string // what blocks or changes what the AI finds, each led by its level
+	Unread  string   // why the two were not compared; set alone
 }
 
 // RenderHandoff is the handoff pack of f in Markdown: where it ran, its summary, the latest requests, the last reply,
 // the files it changed and what git has uncommitted. Read on another machine, it names the session's machine instead
-// of its transcript, and how the directories correspond.
+// of its transcript, how the directories correspond and how the environment differs.
 func RenderHandoff(f HandoffFacts, to HandoffTarget) string {
 	var b strings.Builder
 	line := func(s string) { b.WriteString(s + "\n") }
@@ -211,6 +219,18 @@ func RenderHandoff(f HandoffFacts, to HandoffTarget) string {
 		line(i18n.F("handoff.dirs.dir", orDash(f.Cwd), orDash(to.Dir)))
 		if to.SourceHome != "" && to.Home != "" {
 			line(i18n.F("handoff.dirs.home", to.SourceHome, to.Home))
+		}
+	}
+	if e := to.Env; to.Source != "" && e != nil {
+		section("handoff.env")
+		if e.Unread != "" {
+			line(i18n.F("handoff.env.unread", e.Unread))
+		} else {
+			line(i18n.F("handoff.env.lead", to.Source))
+			line(e.Summary)
+			for _, it := range e.Items {
+				line("- " + it)
+			}
 		}
 	}
 	if f.Summary != "" {

@@ -42,7 +42,8 @@ tend hosts install <机器> [--os --arch] [--src 目录] [--dry-run] [--server] 
 tend handoff <id> [--to claude|codex] [--dry-run] [--no-herdr] [--workspace 名字]
                                        写交接包（resume.md「分叉与交接」）；没有 --to 时把包打到 stdout
 tend handoff <id|机器:sid> --host <机器> [--dir <目录>] [--to claude|codex | --task [--agent <档案>] [--project <项目>] | --print]
-                                       交接到另一台机器（resume.md「交接到另一台机器」）；不带开法时写到那台，打出 tend handoff --open <id>
+                                       交接到另一台机器（resume.md「交接到另一台机器」）；不带开法时写到那台，打出 tend handoff --open <id>；
+                                       交接包带「环境差异」段，stderr 打汇总和阻断项，有阻断也照样交接
 tend handoff --open <id> [--dry-run] [--no-herdr] [--workspace 名字]
                                        在这台开交接包要的新会话
 tend memory [项目|目录] [host:<机器>] [--json]

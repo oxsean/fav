@@ -8,8 +8,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/oxsean/fav/internal/capture"
 	"github.com/oxsean/fav/internal/envcheck"
 	"github.com/oxsean/fav/internal/fixture"
+	"github.com/oxsean/fav/internal/i18n"
 	"github.com/oxsean/fav/internal/tend"
 	"github.com/oxsean/fav/internal/wire"
 )
@@ -67,5 +69,44 @@ func TestEnvAnswersThePrintAndWhatASessionSaw(t *testing.T) {
 		if err := c.Call(ctx, MEnvFile, p, &text); code(err) != wire.CodeNotFound {
 			t.Errorf("%+v: %v %q", p, err, text.Text)
 		}
+	}
+}
+
+// A handover compares the session's environment where it ran with the target directory's: the pack gets the summary
+// and what blocks or changes (no hint), a block refuses nothing; a target that cannot answer leaves the pack saying so.
+func TestAHandoverComparesBothEnvironmentsForThePack(t *testing.T) {
+	src := envcheck.Print{Dir: "/home/dev/shop", CLIs: []envcheck.CLI{{Name: "claude", Found: true, Version: "2.1.292"}},
+		Files: []envcheck.File{{Kind: envcheck.KindDir, Name: "CLAUDE.md", SHA: "s1", Norm: "n1"}}, Skills: []string{"review", "tend"},
+		Seen: &envcheck.Seen{CLI: tend.ProviderClaude, Version: "2.1.292", Used: []string{"review"}, Known: []string{"skills"}}}
+	dst := envcheck.Print{Dir: `D:\work\shop`, CLIs: []envcheck.CLI{{Name: "claude"}}, Files: []envcheck.File{{Kind: envcheck.KindDir, Name: "CLAUDE.md", SHA: "s1", Norm: "n1"}}}
+	sentFrom, sentTo := map[string]json.RawMessage{}, map[string]json.RawMessage{}
+	from := fakePeer("studio", "e1", "linux", "/home/dev", map[string]any{MEnv: src}, sentFrom)
+	to := fakePeer("pc", "e2", "windows", `C:\Users\dev`, map[string]any{MEnv: dst}, sentTo)
+	x := &Handover{From: from, To: to, Ref: Ref{tend.ProviderClaude, "s1"}, Facts: capture.HandoffFacts{Provider: tend.ProviderClaude, SessionID: "s1", Cwd: src.Dir}}
+	ctx := context.Background()
+	rep, err := x.Diagnose(ctx, dst.Dir)
+	if err != nil || rep.Block != 1 || rep.Unequal != 1 || rep.Hint != 1 {
+		t.Fatalf("a missing CLI blocks, a used skill missing is unequal, an unused one a hint: %+v %v", rep, err)
+	}
+	if string(sentFrom[MEnv]) != `{"dir":"","ref":{"provider":"claude","session_id":"s1"}}` || string(sentTo[MEnv]) != `{"dir":"D:\\work\\shop"}` {
+		t.Errorf("the session where it ran, the directory where it goes: %s %s", sentFrom[MEnv], sentTo[MEnv])
+	}
+	text := x.Text(dst.Dir)
+	for _, want := range []string{rep.Summary(), "- " + envcheck.LevelText(envcheck.LevelBlock) + ": " + i18n.F("envcheck.cli_missing", "claude"),
+		"- " + envcheck.LevelText(envcheck.LevelUnequal) + ": " + i18n.F("envcheck.skill_missing", "review")} {
+		if !strings.Contains(text, want) {
+			t.Errorf("pack lacks %q:\n%s", want, text)
+		}
+	}
+	if strings.Contains(text, i18n.F("envcheck.skill_missing", "tend")) {
+		t.Errorf("hints stay out of the pack:\n%s", text)
+	}
+
+	x.To = fakePeer("pc", "e2", "windows", `C:\Users\dev`, map[string]any{MHandoffPut: HandoffPut{}}, sentTo)
+	if _, err := x.Diagnose(ctx, dst.Dir); wire.Code(err) != wire.CodeUnknownMethod {
+		t.Fatalf("a target without env: %v", err)
+	}
+	if text := x.Text(dst.Dir); !strings.Contains(text, i18n.F("handoff.env.unread", Reason(&wire.Error{Code: wire.CodeUnknownMethod}))) {
+		t.Errorf("the pack says it was not compared:\n%s", text)
 	}
 }

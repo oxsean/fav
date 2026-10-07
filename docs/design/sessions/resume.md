@@ -57,7 +57,7 @@
 
 1. A 回答 `handoff.facts`。A 或 B 的 `share_sessions` 不是 `all` 时那台回 `unauthorized`，CLI 写明是这个设置。A 和 B 是同一台（`endpoint` 相同）时，成稿和本机交接一样。
 2. 定 B 上的目录：`--dir` 给了就用它（要是 B 写法的绝对路径）；会话归某个项目、项目在 A 和 B 上都有目录时，用 `pathmap.Rebase` 把会话目录从 A 的项目目录接到 B 的；否则拿会话的 remote（facts 里 `git.remote`，没有就是记录的 `GitRemote`，再没有就是本机索引里 Codex 记下的 origin）问 B 的 `node.repos`：只有一个检出就用它，几个就列出来让用户用 `--dir` 选，没有就要 `--dir`。
-3. 成稿按 B 写（`HandoffTarget`）：不写 A 的 transcript 路径，改成「原会话在 <A> 上，这台机器读不到；要细节就问用户」；多一段「目录对应」：A 的目录 → B 的目录，两边的 home。
+3. 成稿按 B 写（`HandoffTarget`）：不写 A 的 transcript 路径，改成「原会话在 <A> 上，这台机器读不到；要细节就问用户」；多一段「目录对应」：A 的目录 → B 的目录，两边的 home；再一段「环境差异」：会话在 A 上看到的环境和 B 上这个目录的比较（[migration.md](migration.md)「迁移前的环境诊断」的「展示」）。
 4. 开法：
    - 不带开法：`handoff.put` 写到 B 的 `~/.agent/tend/handoff/<id>.md`（0600，30 天后清掉），stdout 打 `tend handoff --open <id>`，在 B 上执行它。
    - `--to claude|codex`：写到 B，再开终端：B 是本机就直接开；模式一 `ssh -t <别名> <tend argv> handoff --open <id> --no-herdr`，在 Herdr 里开新 tab，否则用当前终端（同远端恢复）；模式二只在有同名 ssh 项、`node_id` 对得上时这样做，否则打出那条命令。命令行上只有 `id`（`[A-Za-z0-9._-]`），目录和交接包都不进远端 shell。

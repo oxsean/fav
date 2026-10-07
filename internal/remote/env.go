@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/oxsean/fav/internal/capture"
 	"github.com/oxsean/fav/internal/envcheck"
 	"github.com/oxsean/fav/internal/index"
 	"github.com/oxsean/fav/internal/wire"
@@ -67,4 +68,26 @@ func (h *localHandler) env(ctx context.Context, method string, params json.RawMe
 	pr := envcheck.Collect(ctx, dir)
 	pr.Seen = seen
 	return pr, nil
+}
+
+// Diagnose compares the session's environment where it ran with dir's on To, and keeps for the pack the summary and
+// what blocks or changes what the AI finds there; when either end does not answer, the pack says why.
+func (x *Handover) Diagnose(ctx context.Context, dir string) (envcheck.Report, error) {
+	var src, dst envcheck.Print
+	err := x.From.Call(ctx, MEnv, EnvParams{Ref: &x.Ref}, &src)
+	if err == nil {
+		err = x.To.Call(ctx, MEnv, EnvParams{Dir: dir}, &dst)
+	}
+	if err != nil {
+		x.Env = &capture.HandoffEnv{Unread: Reason(err)}
+		return envcheck.Report{}, err
+	}
+	rep := envcheck.Compare(src, dst, x.From.End(), x.To.End())
+	x.Env = &capture.HandoffEnv{Summary: rep.Summary()}
+	for _, it := range rep.Items {
+		if it.Level != envcheck.LevelHint {
+			x.Env.Items = append(x.Env.Items, envcheck.LevelText(it.Level)+": "+it.What)
+		}
+	}
+	return rep, nil
 }
