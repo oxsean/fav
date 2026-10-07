@@ -125,6 +125,23 @@ func Pairs(p *task.Project, from, to string) []remote.DirPair {
 	return out
 }
 
+// MemoryPairs are the directories whose memories machines from and to compare: p's repositories found on both; with
+// dir, dir on from and where it lies on to, under the same repository of p.
+func MemoryPairs(p *task.Project, dir, from, to string, fromEnd, toEnd pathmap.End) []remote.DirPair {
+	if p == nil {
+		return nil
+	}
+	if dir == "" {
+		return Pairs(p, from, to)
+	}
+	for _, r := range p.Repos {
+		if d, ok := pathmap.Rebase(dir, r.Dirs[from], r.Dirs[to], fromEnd, toEnd); ok && r.Dirs[from] != "" && r.Dirs[to] != "" {
+			return []remote.DirPair{{From: dir, To: d}}
+		}
+	}
+	return nil
+}
+
 // DirsOn are p's repositories' directories on machine.
 func DirsOn(p *task.Project, machine string) []string {
 	var out []string

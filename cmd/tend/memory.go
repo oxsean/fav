@@ -312,7 +312,7 @@ func memoryEndsOf(ctx context.Context, target, machine, from, there string) (mem
 	s := sessionProjects()
 	fromKey, toKey := cmp.Or(e.from.Name, s.Here), cmp.Or(e.to.Name, s.Here)
 	if p := projectNamed(target); p != nil && there == "" {
-		if e.pairs = projects.Pairs(p, fromKey, toKey); len(e.pairs) == 0 {
+		if e.pairs = projects.MemoryPairs(p, "", fromKey, toKey, e.from.End(), e.to.End()); len(e.pairs) == 0 {
 			return e, i18n.E("cli.memory.no_pair", p.Name, e.name(e.from), e.name(e.to))
 		}
 		return e, nil
@@ -332,13 +332,8 @@ func memoryEndsOf(ctx context.Context, target, machine, from, there string) (mem
 		e.pairs = []remote.DirPair{{From: src, To: there}}
 		return e, nil
 	}
-	if p := s.Holding(fromKey, src); p != nil {
-		for _, r := range p.Repos {
-			if d, ok := pathmap.Rebase(src, r.Dirs[fromKey], r.Dirs[toKey], e.from.End(), e.to.End()); ok && r.Dirs[toKey] != "" {
-				e.pairs = []remote.DirPair{{From: src, To: d}}
-				return e, nil
-			}
-		}
+	if e.pairs = projects.MemoryPairs(s.Holding(fromKey, src), src, fromKey, toKey, e.from.End(), e.to.End()); len(e.pairs) > 0 {
+		return e, nil
 	}
 	return e, i18n.E("cli.memory.no_dir_there", e.name(e.to), src)
 }

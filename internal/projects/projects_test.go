@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 
@@ -11,6 +12,7 @@ import (
 	"github.com/oxsean/fav/internal/coordtest"
 	"github.com/oxsean/fav/internal/journal"
 	"github.com/oxsean/fav/internal/node"
+	"github.com/oxsean/fav/internal/pathmap"
 	"github.com/oxsean/fav/internal/remote"
 	"github.com/oxsean/fav/internal/task"
 	"github.com/oxsean/fav/internal/tend"
@@ -201,5 +203,29 @@ func TestFetchFromATeamCoordinator(t *testing.T) {
 	}
 	if got := s.Attachable("mac"); len(got) != 1 {
 		t.Fatalf("the owner may attach on her machine: %v", got)
+	}
+}
+
+// TestMemoryPairs: a project's repositories found on both machines; a directory inside one of them on the first, moved
+// under the same repository's directory on the second; nothing for a directory outside, or no project.
+func TestMemoryPairs(t *testing.T) {
+	mac, linux := pathmap.End{OS: "darwin", Home: "/Users/a"}, pathmap.End{OS: "linux", Home: "/home/a"}
+	p := &task.Project{ID: "p1", Repos: []task.Repo{
+		{Name: "app", Dirs: map[string]string{"mac": "/Users/a/dev/app", "box": "/home/a/src/app"}},
+		{Name: "docs", Dirs: map[string]string{"mac": "/Users/a/dev/docs"}},
+	}}
+	if got, want := MemoryPairs(p, "", "mac", "box", mac, linux), []remote.DirPair{{From: "/Users/a/dev/app", To: "/home/a/src/app"}}; !slices.Equal(got, want) {
+		t.Errorf("the project's repositories on both: %v, want %v", got, want)
+	}
+	if got, want := MemoryPairs(p, "/Users/a/dev/app/web", "mac", "box", mac, linux), []remote.DirPair{{From: "/Users/a/dev/app/web", To: "/home/a/src/app/web"}}; !slices.Equal(got, want) {
+		t.Errorf("a directory inside a repository: %v, want %v", got, want)
+	}
+	for _, dir := range []string{"/Users/a/dev/docs", "/Users/a/elsewhere"} {
+		if got := MemoryPairs(p, dir, "mac", "box", mac, linux); got != nil {
+			t.Errorf("%s has no directory on box: %v", dir, got)
+		}
+	}
+	if got := MemoryPairs(nil, "/Users/a/dev/app", "mac", "box", mac, linux); got != nil {
+		t.Errorf("no project, no pair: %v", got)
 	}
 }
