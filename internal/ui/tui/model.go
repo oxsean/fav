@@ -74,7 +74,9 @@ type Model struct {
 	view       view
 	rows       []row
 	cursor     int
-	scroll     int // first visible screen line of the list, not the first record: cards span lines
+	scroll     int       // first visible screen line of the list, not the first record: cards span lines
+	top        *tend.Rec // the record refresh put at the top while the cursor has not moved since the start or a tab switch
+	untouched  bool
 	zones      []zone
 	clickX     int
 	pathOK     map[string]bool // stat cache, cleared on index change and storeTick
@@ -177,6 +179,7 @@ func New(s *tend.Store, idx *index.Index, cfg tend.Config, initialQuery string) 
 		store: s, idx: idx, cfg: cfg, search: ti, open: map[string]bool{}, attn: loadAttn(),
 		w: 80, h: 24, now: time.Now(), chipFocus: -1, chat: newChatSearch(),
 		view: view(indexOf(views, cfg.DefaultView)), sortBy: sortBy(indexOf(sorts, cfg.Sort)), wheelStep: max(1, cfg.WheelStep),
+		untouched: true,
 	}
 	setWheelTuning(m.wheelStep, cfg.WheelSpeed)
 	useSkin(cfg)
@@ -428,6 +431,11 @@ func (m *Model) refresh() {
 	if m.msg.toTop { // a new message search: its results start at the top
 		m.msg.toTop, m.cursor, m.scroll, cur, curGroup = false, 0, 0, nil, ""
 	}
+	// newer sessions arrive above the first one shown (the index rescans, other machines answer): an untouched cursor takes them
+	m.untouched = m.untouched && m.view != viewProjects && m.pane == paneList && !m.ov.active() && m.pin == nil && (cur == nil || cur == m.top)
+	if m.untouched {
+		m.cursor, m.scroll, cur, curGroup = 0, 0, nil, ""
+	}
 	// the cursor follows the record (or group), not the row index, and keeps its screen position so the list does not jump
 	for i, r := range m.rows {
 		if (cur != nil && r.rec == cur) || (cur == nil && curGroup != "" && r.group == curGroup) {
@@ -437,6 +445,9 @@ func (m *Model) refresh() {
 		}
 	}
 	m.clampCursor()
+	if m.untouched {
+		m.top = m.current()
+	}
 	m.autoOpenProject()
 }
 
@@ -773,7 +784,7 @@ func (m *Model) setView(v view) {
 	if m.view == v {
 		return
 	}
-	m.view, m.cursor, m.scroll, m.rows = v, 0, 0, nil
+	m.view, m.cursor, m.scroll, m.rows, m.untouched, m.top = v, 0, 0, nil, true, nil
 	m.refresh()
 	if v == viewTasks {
 		m.pending = tea.Batch(m.pending, m.tasksOpen())

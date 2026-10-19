@@ -768,3 +768,45 @@ func TestIndexHeldWhileScrolling(t *testing.T) {
 		t.Fatal("停下来后应换上")
 	}
 }
+
+func TestTheListStaysOnTheNewestUntilTheCursorMoves(t *testing.T) {
+	st := fixture(t)
+	m := newModel(t, st, 140, 40)
+	m.setView(viewFavorites)
+	newer := func(title string) *tend.Rec {
+		r := &tend.Rec{ID: tend.NewID(), Provider: tend.ProviderClaude, SessionID: tend.NewID(), Title: title, Status: tend.StatusDone, Cwd: t.TempDir(), FavoritedAt: new(time.Now())}
+		if err := st.Put(r); err != nil {
+			t.Fatal(err)
+		}
+		m.refresh()
+		return r
+	}
+	if r := newer("arrived after start"); m.current() != r {
+		t.Fatalf("a newer session arriving before any move takes the cursor: on %q", m.current().Title)
+	}
+	m.Update(press("down"))
+	held := m.current()
+	newer("arrived after a move")
+	if m.current() != held {
+		t.Fatalf("after a move the cursor follows its record: on %q", m.current().Title)
+	}
+	m.setView(viewSessions)
+	if r := newer("arrived after a tab switch"); m.current() != r {
+		t.Fatalf("a tab switch starts at the top again: on %q", m.current().Title)
+	}
+}
+
+func TestReadingTheTopSessionKeepsIt(t *testing.T) {
+	st := fixture(t)
+	m := newModel(t, st, 140, 40)
+	m.setView(viewSessions)
+	read := m.current()
+	m.pane = paneChat
+	if err := st.Put(&tend.Rec{ID: tend.NewID(), Provider: tend.ProviderClaude, SessionID: tend.NewID(), Title: "newer", Status: tend.StatusDone, Cwd: t.TempDir(), FavoritedAt: new(time.Now())}); err != nil {
+		t.Fatal(err)
+	}
+	m.refresh()
+	if m.current() != read {
+		t.Fatalf("the right pane keeps the session it shows: on %q", m.current().Title)
+	}
+}
